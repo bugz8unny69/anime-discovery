@@ -63,4 +63,5 @@ jobs:
             test_anime_legacy_schema_cli \
             test_anime_shoko_link_plan \
             test_anime_v10_queue_import \
-            test_anime_download_attempts_import
+            test_anime_download_attempts_import \
+            test_anime_legacy_archive_audit
