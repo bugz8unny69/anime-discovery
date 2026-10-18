@@ -97,6 +97,14 @@ def initialize(path):
                     attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0),
                     updated_at INTEGER NOT NULL DEFAULT 0
                 )""")
+                db.execute("""CREATE TABLE torrent_recovery_records (
+                    notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+                    infohash TEXT NOT NULL,
+                    magnet_uri TEXT NOT NULL,
+                    staged_path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    recorded_at INTEGER NOT NULL
+                )""")
                 ensure_actions(db)
                 ensure_cache(db)
                 ensure_schema(db)
