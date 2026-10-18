@@ -116,5 +116,18 @@ class EndToEndTests(unittest.TestCase):
         with self.connect() as db:
             self.assertEqual(db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"CLAIMED")
 
+    def test_interrupted_copy_preserves_source_and_cleans_temp(self):
+        # Inject an I/O failure before the staged video is published.
+        with patch("anime_trial_staging.os.link",side_effect=OSError("simulated crash")):
+            with self.assertRaisesRegex(OSError,"simulated crash"):
+                self.run_claim()
+        self.assertTrue(self.source.exists())
+        season=self.trial/"TVDB-123-S4"/"Season 01"
+        self.assertFalse((season/"S01E01.mkv").exists())
+        self.assertEqual(list(season.glob(".anime-stage-*")),[])
+        with self.connect() as db:
+            self.assertEqual(db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"CLAIMED")
+            self.assertEqual(db.execute("SELECT count(*) FROM sqlite_master WHERE name='torrent_recovery_records'").fetchone()[0],0)
+
 if __name__=="__main__":
     unittest.main()
