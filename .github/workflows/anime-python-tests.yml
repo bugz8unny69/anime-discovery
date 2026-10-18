@@ -34,4 +34,6 @@ jobs:
             test_anime_migration_preflight \
             test_anime_safe_handlers \
             test_anime_handler_routing \
-            test_anime_dispatch_audit
+            test_anime_dispatch_audit \
+            test_anime_qb_api \
+            test_anime_staging_rollback
