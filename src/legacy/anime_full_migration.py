@@ -12,14 +12,18 @@ from anime_unified_evidence_import import import_evidence
 from anime_v10_queue_import import import_identity_queue_v10
 from anime_download_attempts_import import import_download_attempts
 from anime_legacy_archive_audit import reconcile_archive
+from anime_legacy_jobs_archive import archive_tables
 
 
-def migrate(controller, inbox, verified, shadow, output, *, identity_queue=None):
+def migrate(controller, inbox, verified, shadow, output, *, identity_queue=None, series_jobs=None, trial_events=None):
     paths=[Path(p).resolve() for p in (controller,inbox,verified,shadow,output)]
     if identity_queue is not None:
         queue_path=Path(identity_queue).resolve()
         if queue_path in paths:
             raise ValueError("V10 queue source must be distinct")
+    extra=[Path(p).resolve() for p in (series_jobs,trial_events) if p is not None]
+    if len(set(paths+extra+([queue_path] if identity_queue is not None else [])))!=len(paths)+len(extra)+(identity_queue is not None):
+        raise ValueError("All migration snapshots must be distinct")
     if len(set(paths))!=len(paths):
         raise ValueError("All source and destination paths must be distinct")
     result=merge(paths[0],paths[1],paths[4])
@@ -30,6 +34,10 @@ def migrate(controller, inbox, verified, shadow, output, *, identity_queue=None)
             result["download_attempts"]=import_download_attempts(db,paths[0])
             if identity_queue is not None:
                 result["identity_queue_v10"]=import_identity_queue_v10(db,queue_path)
+            if series_jobs is not None:
+                result["series_jobs_archive"]=archive_tables(db,series_jobs,"jobs")
+            if trial_events is not None:
+                result["trial_events_archive"]=archive_tables(db,trial_events,"trial")
             audits={"download_attempts":reconcile_archive(paths[0],paths[4],"download_attempts","legacy_download_attempts")}
             if identity_queue is not None:
                 audits["identity_queue_v10"]=reconcile_archive(queue_path,paths[4],"identity_queue","legacy_identity_queue_v10")
@@ -51,11 +59,13 @@ def main(argv=None):
     for name in ("controller","inbox","verified","shadow","output"):
         parser.add_argument("--"+name,type=Path,required=True)
     parser.add_argument("--identity-queue",type=Path)
+    parser.add_argument("--series-jobs",type=Path)
+    parser.add_argument("--trial-events",type=Path)
     parser.add_argument("--confirm-offline",action="store_true")
     args=parser.parse_args(argv)
     if not args.confirm_offline:
         parser.error("Explicit --confirm-offline required; use stable source snapshots")
-    print(migrate(args.controller,args.inbox,args.verified,args.shadow,args.output,identity_queue=args.identity_queue))
+    print(migrate(args.controller,args.inbox,args.verified,args.shadow,args.output,identity_queue=args.identity_queue,series_jobs=args.series_jobs,trial_events=args.trial_events))
 
 
 if __name__=="__main__":
