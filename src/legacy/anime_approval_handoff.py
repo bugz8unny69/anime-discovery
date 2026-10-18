@@ -16,8 +16,8 @@ def ensure_schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS episode_approval_queue (
         notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
         series_id INTEGER NOT NULL REFERENCES series(id),
-        season INTEGER NOT NULL CHECK(season > 0),
-        episode INTEGER NOT NULL CHECK(episode > 0),
+        season INTEGER CHECK(season > 0),
+        episode INTEGER CHECK(episode > 0),
         decision TEXT NOT NULL CHECK(decision IN ('AUTO_APPROVED','NEEDS_REVIEW','BLOCKED')),
         reason TEXT NOT NULL,
         evidence_json TEXT NOT NULL,
@@ -49,7 +49,7 @@ def handoff(db: sqlite3.Connection, notification_id: int, shadow: dict, verifica
         season = mapping.get("tvdb_season")
         episode = mapping.get("tvdb_episode")
         if type(season) is not int or season < 1 or type(episode) is not int or episode < 1:
-            season = episode = 1  # placeholder only for review; never an approval
+            season = episode = None
             if result["decision"] == "AUTO_APPROVED":
                 raise ValueError("Approved episode mapping missing")
         existing = db.execute("SELECT series_id,season,episode,decision FROM episode_approval_queue WHERE notification_id=?", (notification_id,)).fetchone()
