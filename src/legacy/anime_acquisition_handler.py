@@ -21,6 +21,14 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
             if (not row or row[0] != 'LEASED' or row[1] != job['lease_token']
                     or row[2] < time.time()):
                 raise ValueError('Stale acquisition lease')
+            dispatch=db.execute("SELECT state FROM episode_dispatch WHERE notification_id=?",
+                                (payload['notification_id'],)).fetchone()
+            if dispatch and dispatch[0]=='DONE':
+                record=db.execute("SELECT 1 FROM torrent_recovery_records WHERE notification_id=?",
+                                  (payload['notification_id'],)).fetchone()
+                return {'state':'DONE' if record else 'NEEDS_REVIEW'}
+            if dispatch and dispatch[0]=='NEEDS_REVIEW':
+                return {'state':'NEEDS_REVIEW'}
             result=process_claimed(db, payload['notification_id'],
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
                 qb=qb_factory(), download_root=download_root,
