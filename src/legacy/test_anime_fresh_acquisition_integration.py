@@ -95,6 +95,15 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
             self.enqueue()
         self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0], 0)
 
+    def test_fresh_schema_has_no_migration_quarantine_table(self):
+        self.assertIsNone(self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='migration_quarantined_series'").fetchone())
+        self.assertIsNotNone(self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='series_quarantine'").fetchone())
+        self.assertTrue(self.enqueue())
+
     def test_canonical_quarantine_blocks_acquisition(self):
         self.db.execute(
             "INSERT INTO series_quarantine(series_id,reason,quarantined_at) "
