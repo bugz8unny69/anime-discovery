@@ -48,4 +48,5 @@ jobs:
             test_anime_claimed_pipeline \
             test_anime_acquisition_handler \
             test_anime_acquisition_finalize \
-            test_anime_acquisition_enqueue
+            test_anime_acquisition_enqueue \
+            test_anime_acquisition_runtime
