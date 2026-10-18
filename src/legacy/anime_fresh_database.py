@@ -7,8 +7,10 @@ SCHEMA_VERSION = 1
 
 def initialize(path):
     path = Path(path)
-    if path.is_symlink() or path.exists() or not path.parent.is_dir():
-        raise ValueError("Fresh database path must not exist; parent must exist")
+    if path.is_symlink() or path.exists():
+        raise FileExistsError("Fresh database path already exists: "+str(path))
+    if not path.parent.is_dir():
+        raise ValueError("Fresh database parent directory must exist")
     created = False
     try:
         with sqlite3.connect(path, isolation_level=None, timeout=10) as db:
