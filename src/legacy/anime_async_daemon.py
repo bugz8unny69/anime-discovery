@@ -90,7 +90,7 @@ def finish(db, job_id, token, outcome, *, reason="", now=None):
     now=time.time() if now is None else now
     db.execute("BEGIN IMMEDIATE")
     try:
-        row=db.execute("SELECT attempts FROM daemon_jobs WHERE id=? AND state='LEASED' AND lease_token=?",(job_id,token)).fetchone()
+        row=db.execute("SELECT attempts FROM daemon_jobs WHERE id=? AND state='LEASED' AND lease_token=? AND lease_until>=?",(job_id,token,now)).fetchone()
         if row is None:
             raise ValueError("Stale or missing lease")
         delay=min(3600, 5 * 2 ** min(row[0]-1,10)) if outcome=="DEFERRED" else 0
@@ -143,11 +143,14 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 try:
                     outcome=await handler(job)
                 finally:
+                    failed_heartbeat=heartbeat.done() and not heartbeat.cancelled() and heartbeat.exception() is not None
                     heartbeat.cancel()
                     try:
                         await heartbeat
                     except asyncio.CancelledError:
                         pass
+                    if failed_heartbeat:
+                        raise RuntimeError("Lease renewal failed")
                 if outcome not in ("DONE","DEFERRED","NEEDS_REVIEW","BLOCKED"):
                     raise ValueError("Invalid handler result")
                 reason=""
@@ -157,5 +160,9 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 outcome="DEFERRED"
                 reason=type(exc).__name__
             with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
-                finish(db,job["id"],job["lease_token"],outcome,reason=reason)
+                try:
+                    finish(db,job["id"],job["lease_token"],outcome,reason=reason)
+                except ValueError:
+                    # The lease was reclaimed; never overwrite its new owner.
+                    pass
     await asyncio.gather(*(worker() for _ in range(concurrency)))
