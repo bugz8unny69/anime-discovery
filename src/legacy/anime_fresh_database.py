@@ -52,6 +52,11 @@ def initialize(path):
                     status TEXT NOT NULL DEFAULT 'UNTRUSTED',
                     UNIQUE(source,source_guid)
                 )""")
+                db.execute("""CREATE TABLE series_quarantine (
+                    series_id INTEGER PRIMARY KEY REFERENCES series(id),
+                    reason TEXT NOT NULL,
+                    quarantined_at INTEGER NOT NULL
+                )""")
                 db.execute("""CREATE TABLE migration_quarantined_series (
                     series_id INTEGER PRIMARY KEY REFERENCES series(id),
                     reason TEXT NOT NULL,
