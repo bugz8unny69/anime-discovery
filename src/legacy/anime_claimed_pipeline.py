@@ -30,17 +30,22 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
         if str(exc)=="Expected exactly one matching torrent":
             return {"state":"DEFERRED","reason":"Torrent not visible for verification"}
         raise
-    if torrent.get("progress")!=1:
-        return {"state":"DEFERRED","reason":"Torrent incomplete"}
+    if torrent.get("progress")!=1 or torrent.get("state") not in ("uploading","stalledUP","pausedUP","queuedUP","forcedUP"):
+        return {"state":"DEFERRED","reason":"Torrent not in completed state"}
     source=verified_media(torrent,download_root)
     # Source-first checks are inside stage_claimed; no NFO failure deletes media.
     try:
         staged=stage_claimed(db,notification_id,torrent,download_root,trial_root,
                              title=title,tvdb_id=tvdb_id)
     except FileExistsError:
-        # A prior worker may have staged media before losing its lease.
-        # Never overwrite it; require explicit recovery reconciliation.
-        return {"state":"NEEDS_REVIEW","reason":"Staged media already exists"}
+        # A previous worker may have copied media before its lease expired.
+        # Reconcile only the exact expected destination; never overwrite it.
+        dest=(Path(trial_root)/("TVDB-"+str(int(tvdb_id))+"-S"+
+              str(approval["series_id"]))/("Season %02d"%approval["season"])/
+              ("S%02dE%02d"%(approval["season"],approval["episode"])+source.suffix.lower()))
+        if dest.is_symlink() or not dest.is_file():
+            return {"state":"NEEDS_REVIEW","reason":"Expected staged media missing or unsafe"}
+        staged=dest
     record=retain_recovery_record(db,infohash=infohash,magnet_uri=magnet_uri,
                                   source=source,staged=staged,
                                   notification_id=notification_id)
