@@ -20,13 +20,13 @@ class FreshDatabaseTests(unittest.TestCase):
                 db.execute("PRAGMA foreign_keys=ON")
                 with self.assertRaises(sqlite3.IntegrityError):
                     db.execute("INSERT INTO episodes(series_id,season,episode) VALUES (999,1,1)")
-            with self.assertRaises(ValueError):
+            with self.assertRaises(FileExistsError):
                 initialize(path)
     def test_does_not_overwrite_existing_database(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "existing.db"
             path.write_bytes(b"do not overwrite")
-            with self.assertRaises(ValueError):
+            with self.assertRaises(FileExistsError):
                 initialize(path)
             self.assertEqual(path.read_bytes(), b"do not overwrite")
     def test_rejects_missing_parent(self):
