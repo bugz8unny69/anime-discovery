@@ -39,20 +39,27 @@ def enqueue(db, kind, subject_key, payload_json):
         db.rollback()
         raise
 
-def claim(db, now=None, *, lease_seconds=LEASE_SECONDS):
+def claim(db, now=None, *, lease_seconds=LEASE_SECONDS, allowed_kinds=None):
     if type(lease_seconds) is not int or lease_seconds < 30:
         raise ValueError('Invalid lease duration')
     if db.in_transaction:
         raise ValueError("claim requires autocommit connection")
+    if allowed_kinds is not None:
+        if not allowed_kinds or any(not isinstance(k,str) or not k for k in allowed_kinds):
+            raise ValueError("Nonempty allowed job kinds required")
+        allowed_kinds=tuple(sorted(set(allowed_kinds)))
     now=time.time() if now is None else now
     token=uuid.uuid4().hex
     db.execute("BEGIN IMMEDIATE")
     try:
         ensure_schema(db)
+        filter_sql=(" AND kind IN ("+",".join("?" for _ in allowed_kinds)+")"
+                    if allowed_kinds is not None else "")
         row=db.execute("""SELECT id,kind,subject_key,payload_json,attempts FROM daemon_jobs
-            WHERE (state IN ('READY','DEFERRED') AND available_at<=?)
-               OR (state='LEASED' AND lease_until<?)
-            ORDER BY available_at,id LIMIT 1""",(now,now)).fetchone()
+            WHERE ((state IN ('READY','DEFERRED') AND available_at<=?)
+               OR (state='LEASED' AND lease_until<?))"""+filter_sql+
+            " ORDER BY available_at,id LIMIT 1",
+            (now,now)+(() if allowed_kinds is None else allowed_kinds)).fetchone()
         if row:
             db.execute("""UPDATE daemon_jobs SET state='LEASED',lease_token=?,lease_until=?,
                 attempts=attempts+1 WHERE id=?""",(token,now+lease_seconds,row[0]))
@@ -109,6 +116,8 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
     """
     if not 1<=concurrency<=32:
         raise ValueError("Invalid concurrency")
+    if not handlers or any(not isinstance(k,str) or not callable(v) for k,v in handlers.items()):
+        raise ValueError("At least one callable handler required")
     stop=stop or asyncio.Event()
     if config_manager is not None:
         await config_manager.reload_if_changed()
@@ -118,7 +127,7 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 db.execute("PRAGMA busy_timeout=10000")
                 lease_seconds=(config_manager.snapshot.settings['daemon']['lease_seconds']
                                if config_manager is not None else LEASE_SECONDS)
-                job=claim(db,lease_seconds=lease_seconds)
+                job=claim(db,lease_seconds=lease_seconds,allowed_kinds=handlers.keys())
             if job is None:
                 try:
                     await asyncio.wait_for(stop.wait(),timeout=poll_seconds)
