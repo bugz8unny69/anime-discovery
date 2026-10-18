@@ -83,3 +83,44 @@ def complete(db, notification_id, *, success, reason=""):
     except BaseException:
         db.rollback()
         raise
+
+def reclaim_expired_claims(db, *, now=None, older_than_seconds=3600, limit=100):
+    """Conservatively release abandoned claims only when no daemon job owns them.
+
+    An active or previously scheduled acquisition job remains authoritative;
+    it must be reconciled instead of creating a second dispatch.
+    """
+    if db.in_transaction:
+        raise ValueError("Requires autocommit connection")
+    if type(older_than_seconds) is not int or older_than_seconds<300:
+        raise ValueError("Invalid recovery interval")
+    if type(limit) is not int or not 1<=limit<=1000:
+        raise ValueError("Invalid recovery limit")
+    now=int(time.time()) if now is None else int(now)
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        ensure_schema(db)
+        # Fail closed if the daemon schema has not been migrated.
+        present=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_jobs'").fetchone()
+        if not present:
+            raise ValueError("Daemon job schema missing")
+        rows=db.execute("""SELECT d.notification_id FROM episode_dispatch d
+            JOIN series s ON s.id=d.series_id
+            JOIN episode_approval_queue q ON q.notification_id=d.notification_id
+            WHERE d.state='CLAIMED' AND d.updated_at<?
+              AND q.decision='AUTO_APPROVED' AND s.status!='REJECTED'
+              AND NOT EXISTS(SELECT 1 FROM series_rejection_blocks b WHERE b.series_id=d.series_id)
+              AND NOT EXISTS(SELECT 1 FROM migration_quarantined_series x WHERE x.series_id=d.series_id)
+              AND NOT EXISTS(SELECT 1 FROM daemon_jobs j
+                  WHERE j.kind='claimed_acquisition' AND j.subject_key=CAST(d.notification_id AS TEXT))
+            ORDER BY d.updated_at,d.notification_id LIMIT ?""",
+            (now-older_than_seconds,limit)).fetchall()
+        for (notification_id,) in rows:
+            db.execute("""UPDATE episode_dispatch SET state='READY',
+                last_error='Recovered abandoned claim',updated_at=?
+                WHERE notification_id=? AND state='CLAIMED'""",(now,notification_id))
+        db.commit()
+        return len(rows)
+    except BaseException:
+        db.rollback()
+        raise
