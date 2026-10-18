@@ -38,6 +38,15 @@ class QBApiTests(unittest.TestCase):
         qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40)
         self.assertEqual(len(opener.requests),2)
 
+    def test_login_does_not_enable_writes(self):
+        opener=Opener(b"Ok.")
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener)
+        qb.login("admin","test-password")
+        self.assertIn(b"username=admin",opener.requests[0].data)
+        with self.assertRaises(PermissionError):
+            qb.remove_torrent("a"*40)
+        self.assertEqual(len(opener.requests),1)
+
     def test_rejects_embedded_credentials(self):
         with self.assertRaises(ValueError):
             QBittorrentAPI("http://user:password@localhost:8080")
