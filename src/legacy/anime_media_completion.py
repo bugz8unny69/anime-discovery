@@ -10,7 +10,7 @@ VIDEO_SUFFIXES={".mkv",".mp4",".m4v",".avi"}
 def verified_media(torrent, download_root):
     if not isinstance(torrent,dict):
         raise ValueError("Missing torrent snapshot")
-    if torrent.get("progress")!=1 or torrent.get("state") not in ("uploading","stalledUP","pausedUP","queuedUP","forcedUP","checkingUP"):
+    if torrent.get("progress")!=1 or torrent.get("state") not in ("uploading","stalledUP","pausedUP","queuedUP","forcedUP"):
         raise ValueError("Torrent is not fully downloaded")
     root=Path(download_root).resolve(strict=True)
     if not root.is_dir():
@@ -25,6 +25,15 @@ def verified_media(torrent, download_root):
     if not isinstance(name,str) or not name or Path(name).is_absolute():
         raise ValueError("Unsafe relative file name")
     candidate=root/name
+    # Reject symlinked intermediate directories as well as the final file.
+    relative=Path(name)
+    if ".." in relative.parts or "." in relative.parts:
+        raise ValueError("Unsafe media path component")
+    current=root
+    for component in relative.parts:
+        current=current/component
+        if current.is_symlink():
+            raise ValueError("Symlinked media path component")
     if candidate.is_symlink() or not candidate.is_file():
         raise ValueError("Missing or symlink media")
     path=candidate.resolve(strict=True)
