@@ -11,6 +11,7 @@ from unified_migration import merge
 from anime_unified_evidence_import import import_evidence
 from anime_v10_queue_import import import_identity_queue_v10
 from anime_download_attempts_import import import_download_attempts
+from anime_legacy_archive_audit import reconcile_archive
 
 
 def migrate(controller, inbox, verified, shadow, output, *, identity_queue=None):
@@ -29,6 +30,12 @@ def migrate(controller, inbox, verified, shadow, output, *, identity_queue=None)
             result["download_attempts"]=import_download_attempts(db,paths[0])
             if identity_queue is not None:
                 result["identity_queue_v10"]=import_identity_queue_v10(db,queue_path)
+            audits={"download_attempts":reconcile_archive(paths[0],paths[4],"download_attempts","legacy_download_attempts")}
+            if identity_queue is not None:
+                audits["identity_queue_v10"]=reconcile_archive(queue_path,paths[4],"identity_queue","legacy_identity_queue_v10")
+            if not all(item["equal"] for item in audits.values()):
+                raise ValueError("Historical operational archive reconciliation failed")
+            result["archive_audit"]=audits
             if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                 raise ValueError("Output integrity check failed")
         return result
