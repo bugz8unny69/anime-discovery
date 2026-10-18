@@ -49,17 +49,15 @@ def archive_tables(db, source_path, group):
                                ','.join('?' for _ in columns)+')',records)
         if db.execute("PRAGMA foreign_key_check").fetchall():
             raise ValueError("Foreign key violation")
+        with sqlite3.connect(source_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
+            for name,_,_ in prepared:
+                original=Counter(tuple(r) for r in src.execute('SELECT * FROM "'+name+'"'))
+                copied=Counter(tuple(r) for r in db.execute('SELECT * FROM "legacy_'+name+'"'))
+                if original!=copied:
+                    raise ValueError("Archive reconciliation failed: "+name)
         db.commit()
     except BaseException:
         db.rollback()
         raise
-    # Exact row multisets, including duplicates, must match before success.
-    with sqlite3.connect(source_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
-        for name,_,_ in prepared:
-            archive="legacy_"+name
-            original=Counter(tuple(r) for r in src.execute('SELECT * FROM "'+name+'"'))
-            copied=Counter(tuple(r) for r in db.execute('SELECT * FROM "'+archive+'"'))
-            if original!=copied:
-                raise ValueError("Post-import archive reconciliation failed: "+name)
     return {"archived_rows":{name:len(rows) for name,_,rows in prepared},
             "jobs_activated":False,"source_modified":False}
