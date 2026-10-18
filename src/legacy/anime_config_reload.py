@@ -36,10 +36,15 @@ class ConfigManager:
             return candidate
 
     async def reload_if_changed(self):
-        # Admin can trigger this on every new claim; unchanged settings do not
-        # invalidate the snapshot or increment its version.
-        loaded=await asyncio.to_thread(load_config,self.directory)
-        current=self._snapshot
-        if current and current.settings==loaded["settings"] and current.secrets==loaded["secrets"]:
-            return current
-        return await self.reload()
+        # Serialize comparisons and publication so concurrent workers cannot
+        # race and publish multiple versions of the same edit.
+        async with self._lock:
+            loaded=await asyncio.to_thread(load_config,self.directory)
+            current=self._snapshot
+            if current and current.settings==loaded["settings"] and current.secrets==loaded["secrets"]:
+                return current
+            candidate=ConfigSnapshot(
+                version=1 if current is None else current.version+1,
+                settings=loaded["settings"],secrets=loaded["secrets"])
+            self._snapshot=candidate
+            return candidate
