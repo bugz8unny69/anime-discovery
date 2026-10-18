@@ -79,7 +79,7 @@ def finish(db, job_id, token, outcome, *, reason="", now=None):
         db.rollback()
         raise
 
-async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, stop=None):
+async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, stop=None, config_manager=None):
     """Run bounded concurrent handlers. Handlers must be async and idempotent.
 
     A handler returns DONE, DEFERRED, NEEDS_REVIEW, or BLOCKED. Exceptions
@@ -100,6 +100,9 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                     pass
                 continue
             try:
+                if config_manager is not None:
+                    snapshot=await config_manager.reload_if_changed()
+                    job["config_snapshot"]=snapshot
                 handler=handlers[job["kind"]]
                 outcome=await handler(job)
                 if outcome not in ("DONE","DEFERRED","NEEDS_REVIEW","BLOCKED"):
