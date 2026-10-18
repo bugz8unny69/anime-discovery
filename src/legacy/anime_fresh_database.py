@@ -50,6 +50,50 @@ def initialize(path):
                     status TEXT NOT NULL DEFAULT 'UNTRUSTED',
                     UNIQUE(source,source_guid)
                 )""")
+                db.execute("""CREATE TABLE migration_quarantined_series (
+                    series_id INTEGER PRIMARY KEY REFERENCES series(id),
+                    reason TEXT NOT NULL,
+                    quarantined_at INTEGER NOT NULL
+                )""")
+                db.execute("""CREATE TABLE series_rejection_blocks (
+                    series_id INTEGER PRIMARY KEY REFERENCES series(id),
+                    reason TEXT NOT NULL DEFAULT 'REJECTED'
+                )""")
+                db.execute("""CREATE TABLE verified_series_identity (
+                    notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+                    anidb_id TEXT NOT NULL,
+                    tvdb_id TEXT NOT NULL,
+                    mapping_source TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    episode_identity_verified INTEGER NOT NULL DEFAULT 0,
+                    eligible_for_acquisition INTEGER NOT NULL DEFAULT 0,
+                    evidence_json TEXT NOT NULL,
+                    evidence_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""")
+                db.execute("""CREATE TABLE episode_verification_v16 (
+                    notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+                    evaluated_at REAL NOT NULL,
+                    decision TEXT NOT NULL,
+                    verified INTEGER NOT NULL DEFAULT 0 CHECK(verified IN (0,1)),
+                    evidence_json TEXT NOT NULL
+                )""")
+                db.execute("""CREATE TABLE episode_approval_queue (
+                    notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+                    decision TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
+                    season INTEGER NOT NULL CHECK(season>=0),
+                    episode INTEGER NOT NULL CHECK(episode>0)
+                )""")
+                db.execute("""CREATE TABLE episode_dispatch (
+                    notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+                    series_id INTEGER NOT NULL REFERENCES series(id),
+                    season INTEGER NOT NULL CHECK(season>=0),
+                    episode INTEGER NOT NULL CHECK(episode>0),
+                    state TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
+                    last_error TEXT,
+                    updated_at INTEGER NOT NULL DEFAULT 0
+                )""")
                 ensure_schema(db)
                 if db.execute("PRAGMA foreign_key_check").fetchall():
                     raise ValueError("Foreign-key failure")
