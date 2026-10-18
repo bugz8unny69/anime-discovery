@@ -4,8 +4,6 @@ Source cleanup is a separate explicitly authorized operation. This module
 only creates an auditable recovery record after staged media verification.
 """
 import hashlib
-import json
-import sqlite3
 import time
 from pathlib import Path
 from anime_audio_verification import confirmed_jp_en
@@ -21,10 +19,16 @@ def retain_recovery_record(db, *, infohash, magnet_uri, source, staged, notifica
         raise ValueError("Staged media size differs from source")
     if not confirmed_jp_en(staged):
         raise ValueError("Japanese and English audio not confirmed")
-    digest=hashlib.sha256()
-    with staged.open("rb") as f:
-        for chunk in iter(lambda:f.read(1024*1024),b""):
-            digest.update(chunk)
+    def sha256(path):
+        digest=hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda:f.read(1024*1024),b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    source_hash=sha256(source)
+    staged_hash=sha256(staged)
+    if source_hash!=staged_hash:
+        raise ValueError("Source and staged media hashes differ")
     if db.in_transaction:
         raise ValueError("Autocommit connection required")
     db.execute("BEGIN IMMEDIATE")
