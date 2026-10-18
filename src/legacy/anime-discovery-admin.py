@@ -18,42 +18,38 @@ from anime_series_cache import ensure_schema as ensure_cache
 DEFAULT_DB=Path("/var/lib/anime-discovery/anime-discovery.db")
 DEFAULT_CONFIG=Path("/etc/anime-discovery")
 
-def new_database(path):
+def new_database(path, *, force=False):
+    """Initialize from scratch; forced reset retains an offline safety backup."""
+    from anime_fresh_database import initialize
     path=Path(path)
-    if not path.parent.is_dir():
-        raise FileNotFoundError(f"Database parent directory does not exist: {path.parent}")
-    fd=os.open(path,os.O_CREAT | os.O_EXCL | os.O_RDWR,0o600)
-    os.close(fd)
+    if not force or not path.exists():
+        return initialize(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("Force requires a regular database, not a symlink")
+    if any(Path(str(path)+suffix).exists() for suffix in ("-wal","-shm","-journal")):
+        raise ValueError("SQLite sidecar exists: stop services and checkpoint before --force")
+    with sqlite3.connect(path.resolve().as_uri()+"?mode=rw",uri=True,timeout=0,isolation_level=None) as db:
+        db.execute("PRAGMA locking_mode=EXCLUSIVE")
+        db.execute("BEGIN EXCLUSIVE")
+        db.execute("ROLLBACK")
+    backup=Path(str(path)+".pre-force-backup")
+    if backup.exists() or backup.is_symlink():
+        raise FileExistsError("Safety backup already exists: "+str(backup))
+    path.rename(backup)
     try:
-        with sqlite3.connect(path,isolation_level=None) as db:
-            db.execute("PRAGMA foreign_keys=ON")
-            db.execute("PRAGMA journal_mode=WAL")
-            # Only initialize schemas independent of legacy controller tables.
-            # A new DB is NOT marked production-ready until controller schema
-            # and migrations are applied.
-            ensure_jobs(db)
-            ensure_cache(db)
-            db.execute("""CREATE TABLE IF NOT EXISTS schema_bootstrap (
-                id INTEGER PRIMARY KEY CHECK(id=1),
-                status TEXT NOT NULL CHECK(status='PENDING_MIGRATIONS')
-            )""")
-            db.execute("INSERT INTO schema_bootstrap VALUES(1,'PENDING_MIGRATIONS')")
-            if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
-                raise RuntimeError("Database integrity check failed")
+        return initialize(path)
     except BaseException:
-        # Never erase a file created by another process after initialization.
-        # This path is ours, created with O_EXCL.
-        for suffix in ("-wal","-shm",""):
-            (Path(str(path)+suffix)).unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        backup.rename(path)
         raise
-    return path
 
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="anime-discovery-admin.py")
     parser.add_argument("--config-dir",type=Path,default=DEFAULT_CONFIG)
     parser.add_argument("--db",type=Path,default=DEFAULT_DB)
     commands=parser.add_subparsers(dest="command",required=True)
-    commands.add_parser("new-database")
+    new_db=commands.add_parser("new-database")
+    new_db.add_argument("--force",action="store_true")
     settings=commands.add_parser("settings")
     sub=settings.add_subparsers(dest="settings_command",required=True)
     sub.add_parser("show")
@@ -63,7 +59,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try:
         if args.command=="new-database":
-            print(f"Initialized database bootstrap at {new_database(args.db)}; migrations still required.")
+            result=new_database(args.db,force=args.force)
+            print(f"Initialized fresh database at {args.db}; schema version {result['schema_version']}; acquisition disabled.")
         elif args.settings_command=="show":
             print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
         else:
