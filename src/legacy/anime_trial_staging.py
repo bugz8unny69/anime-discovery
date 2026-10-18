@@ -46,8 +46,14 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         # Exclusive creation prevents accidental overwrite of existing media.
         os.link(tmp,dest)
         os.unlink(tmp)
-        write_series_nfo(folder,title=title,tvdb_id=tvdb_id)
-        write_episode_nfo(dest,title=title,season=season,episode=episode,tvdb_id=tvdb_id)
+        try:
+            write_series_nfo(folder,title=title,tvdb_id=tvdb_id)
+            write_episode_nfo(dest,title=title,season=season,episode=episode,tvdb_id=tvdb_id)
+        except BaseException:
+            # A media file without episode metadata is not a completed stage.
+            # Keep the source intact; remove only the destination created here.
+            dest.unlink(missing_ok=True)
+            raise
         return dest
     finally:
         if os.path.exists(tmp):
