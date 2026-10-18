@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from anime_acquisition_enqueue import enqueue_claimed_acquisition
+from anime_async_daemon import claim, finish, renew
+from anime_dispatch_recovery_audit import stale_claims
 
 spec = importlib.util.spec_from_file_location(
     "anime_admin_integration", Path(__file__).with_name("anime-discovery-admin.py"))
