@@ -4,6 +4,7 @@ Configuration is flat JSON. Database initialization is explicit and refuses
 to replace existing files. No service restart or deployment is performed.
 """
 import argparse
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -28,8 +29,7 @@ def new_database(path, *, force=False):
         raise ValueError("Force requires a regular database, not a symlink")
     if any(Path(str(path)+suffix).exists() for suffix in ("-wal","-shm","-journal")):
         raise ValueError("SQLite sidecar exists: stop services and checkpoint before --force")
-    with sqlite3.connect(path.resolve().as_uri()+"?mode=rw",uri=True,timeout=0,isolation_level=None) as db:
-        db.execute("PRAGMA locking_mode=EXCLUSIVE")
+    with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=rw",uri=True,timeout=0,isolation_level=None)) as db:
         db.execute("BEGIN EXCLUSIVE")
         db.execute("ROLLBACK")
     backup=Path(str(path)+".pre-force-backup")
