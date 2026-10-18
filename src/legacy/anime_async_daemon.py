@@ -39,7 +39,9 @@ def enqueue(db, kind, subject_key, payload_json):
         db.rollback()
         raise
 
-def claim(db, now=None):
+def claim(db, now=None, *, lease_seconds=LEASE_SECONDS):
+    if type(lease_seconds) is not int or lease_seconds < 30:
+        raise ValueError('Invalid lease duration')
     if db.in_transaction:
         raise ValueError("claim requires autocommit connection")
     now=time.time() if now is None else now
@@ -53,12 +55,32 @@ def claim(db, now=None):
             ORDER BY available_at,id LIMIT 1""",(now,now)).fetchone()
         if row:
             db.execute("""UPDATE daemon_jobs SET state='LEASED',lease_token=?,lease_until=?,
-                attempts=attempts+1 WHERE id=?""",(token,now+LEASE_SECONDS,row[0]))
+                attempts=attempts+1 WHERE id=?""",(token,now+lease_seconds,row[0]))
         db.commit()
         return dict(zip(("id","kind","subject_key","payload_json","attempts"),row)) | {"lease_token":token} if row else None
     except BaseException:
         db.rollback()
         raise
+
+def renew(db, job_id, token, *, lease_seconds=LEASE_SECONDS, now=None):
+    """Extend only the current unexpired lease; stale workers cannot renew."""
+    if type(lease_seconds) is not int or lease_seconds < 30:
+        raise ValueError("Invalid lease duration")
+    if db.in_transaction:
+        raise ValueError("renew requires autocommit connection")
+    now=time.time() if now is None else now
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        cursor=db.execute("""UPDATE daemon_jobs SET lease_until=?
+            WHERE id=? AND state='LEASED' AND lease_token=? AND lease_until>=?""",
+            (now+lease_seconds,job_id,token,now))
+        if cursor.rowcount!=1:
+            raise ValueError("Stale or expired lease")
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+
 
 def finish(db, job_id, token, outcome, *, reason="", now=None):
     if outcome not in ("DONE","DEFERRED","NEEDS_REVIEW","BLOCKED"):
@@ -88,11 +110,15 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
     if not 1<=concurrency<=32:
         raise ValueError("Invalid concurrency")
     stop=stop or asyncio.Event()
+    if config_manager is not None:
+        await config_manager.reload_if_changed()
     async def worker():
         while not stop.is_set():
             with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
                 db.execute("PRAGMA busy_timeout=10000")
-                job=claim(db)
+                lease_seconds=(config_manager.snapshot.settings['daemon']['lease_seconds']
+                               if config_manager is not None else LEASE_SECONDS)
+                job=claim(db,lease_seconds=lease_seconds)
             if job is None:
                 try:
                     await asyncio.wait_for(stop.wait(),timeout=poll_seconds)
@@ -108,7 +134,20 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                         snapshot=config_manager.snapshot
                     job["config_snapshot"]=snapshot
                 handler=handlers[job["kind"]]
-                outcome=await handler(job)
+                async def keep_alive():
+                    while True:
+                        await asyncio.sleep(max(1,lease_seconds/3))
+                        with sqlite3.connect(db_path,isolation_level=None,timeout=10) as heartbeat_db:
+                            renew(heartbeat_db,job['id'],job['lease_token'],lease_seconds=lease_seconds)
+                heartbeat=asyncio.create_task(keep_alive())
+                try:
+                    outcome=await handler(job)
+                finally:
+                    heartbeat.cancel()
+                    try:
+                        await heartbeat
+                    except asyncio.CancelledError:
+                        pass
                 if outcome not in ("DONE","DEFERRED","NEEDS_REVIEW","BLOCKED"):
                     raise ValueError("Invalid handler result")
                 reason=""
