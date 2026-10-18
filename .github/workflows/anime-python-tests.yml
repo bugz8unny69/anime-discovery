@@ -52,4 +52,5 @@ jobs:
             test_anime_acquisition_runtime \
             test_anime_reservation_recovery \
             test_anime_dispatch_claim_recovery \
-            test_anime_acquisition_restart_integration
+            test_anime_acquisition_restart_integration \
+            test_anime_acquisition_end_to_end
