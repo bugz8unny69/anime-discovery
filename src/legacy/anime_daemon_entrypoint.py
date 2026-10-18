@@ -20,7 +20,7 @@ def configured_daemon(config_dir, db_path, handlers):
         if not isinstance(name,str) or not callable(handler):
             raise ValueError("Invalid handler registration")
     if not Path(db_path).is_file():
-        raise FileNotFoundError("Unified database must exist before daemon startup")
+        raise FileNotFoundError(\n            f"Anime Discovery database not found: {db_path}\\n"\n            "Initialize it with: anime-discovery-admin.py new-database\\n"\n            "No database was created automatically.")
     with sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=rw",
                          uri=True,isolation_level=None,timeout=10) as db:
         db.execute("PRAGMA foreign_keys=ON")
