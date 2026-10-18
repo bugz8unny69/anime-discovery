@@ -8,7 +8,10 @@ import json
 from anime_migration_preflight import preflight
 
 async def migration_preflight_handler(job):
-    payload=json.loads(job["payload_json"])
+    try:
+        payload=json.loads(job["payload_json"])
+    except (KeyError,TypeError,ValueError):
+        return "NEEDS_REVIEW"
     if not isinstance(payload,dict) or set(payload)!={"database_path"}:
         return "NEEDS_REVIEW"
     path=payload["database_path"]
