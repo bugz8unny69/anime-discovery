@@ -3,6 +3,7 @@
 This does not enable the acquisition handler or contact qBittorrent.
 """
 import json
+from urllib.parse import urlsplit,parse_qs
 from anime_acquisition_gate import approved_dispatch
 from anime_async_daemon import ensure_schema
 
@@ -17,6 +18,12 @@ def enqueue_claimed_acquisition(db, notification_id, *, infohash, magnet_uri,
         raise ValueError("Invalid torrent hash")
     if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
         raise ValueError("Invalid magnet")
+    magnet=urlsplit(magnet_uri)
+    identifiers=parse_qs(magnet.query).get("xt",[])
+    if magnet.scheme!="magnet" or any(
+            value.lower()!="urn:btih:"+infohash.lower() for value in identifiers
+        ) or len(identifiers)!=1:
+        raise ValueError("Magnet does not match notification hash")
     if not isinstance(title,str) or not title.strip():
         raise ValueError("Missing title")
     if not str(tvdb_id).isdigit() or int(tvdb_id)<=0:
