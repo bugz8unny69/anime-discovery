@@ -5,7 +5,8 @@ connection, torrent submission or deletion is performed at import time.
 """
 import json
 from urllib.parse import urlencode
-from urllib.request import Request, build_opener
+from urllib.request import Request, build_opener, HTTPCookieProcessor
+from http.cookiejar import CookieJar
 
 class QBittorrentAPI:
     def __init__(self, base_url, *, opener=None, allow_writes=False, timeout=10):
@@ -14,7 +15,7 @@ class QBittorrentAPI:
         if parts.scheme not in ("http","https") or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
             raise ValueError("Invalid qBittorrent URL")
         self.base_url=base_url.rstrip("/")
-        self.opener=opener or build_opener()
+        self.opener=opener or build_opener(HTTPCookieProcessor(CookieJar()))
         self.allow_writes=allow_writes
         self.timeout=timeout
 
@@ -27,6 +28,16 @@ class QBittorrentAPI:
             if response.status!=200:
                 raise RuntimeError("qBittorrent HTTP failure")
             return response.read()
+
+    def login(self, username, password):
+        if not isinstance(username,str) or not username or not isinstance(password,str) or not password:
+            raise ValueError("Missing qBittorrent credentials")
+        # Authentication is a session mutation, separate from torrent writes.
+        request=Request(self.base_url+"/api/v2/auth/login",
+                        data=urlencode({"username":username,"password":password}).encode())
+        with self.opener.open(request,timeout=self.timeout) as response:
+            if response.status!=200 or response.read().strip()!=b"Ok.":
+                raise PermissionError("qBittorrent authentication failed")
 
     def contains_hash(self, infohash):
         infohash=_hash(infohash)
