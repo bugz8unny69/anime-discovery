@@ -62,6 +62,33 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT count(*) FROM torrent_recovery_records").fetchone()[0], 0)
 
+    def test_reclaimed_lease_rejects_stale_worker(self):
+        self.enqueue()
+        first = claim(self.db, now=100, lease_seconds=30,
+                      allowed_kinds=["claimed_acquisition"])
+        self.assertIsNotNone(first)
+        self.assertIsNone(claim(self.db, now=110, lease_seconds=30,
+                                allowed_kinds=["claimed_acquisition"]))
+        second = claim(self.db, now=131, lease_seconds=30,
+                       allowed_kinds=["claimed_acquisition"])
+        self.assertEqual(second["id"], first["id"])
+        self.assertNotEqual(second["lease_token"], first["lease_token"])
+        with self.assertRaises(ValueError):
+            finish(self.db, first["id"], first["lease_token"], "DONE", now=132)
+        with self.assertRaises(ValueError):
+            renew(self.db, first["id"], first["lease_token"], now=132)
+        finish(self.db, second["id"], second["lease_token"], "NEEDS_REVIEW", now=132)
+        self.assertEqual(self.db.execute(
+            "SELECT state,attempts FROM daemon_jobs").fetchone(), ("NEEDS_REVIEW", 2))
+
+    def test_recovery_audit_is_read_only(self):
+        self.db.execute("UPDATE episode_dispatch SET attempts=3,updated_at=10")
+        rows = stale_claims(self.db, now=4000, older_than_seconds=60)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["attempts"], 3)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM episode_dispatch").fetchone()[0], "CLAIMED")
+
     def test_unverified_episode_cannot_enqueue(self):
         self.db.execute("UPDATE episode_verification_v16 SET verified=0 WHERE notification_id=7")
         with self.assertRaises(ValueError):
