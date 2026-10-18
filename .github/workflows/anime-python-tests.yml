@@ -28,4 +28,5 @@ jobs:
           PYTHONPATH: src/legacy
         run: |
           python -m unittest -v             test_anime_acquisition_flow             test_anime_qb_submission             test_anime_action_reconcile             test_anime_acquisition_gate             test_anime_daemon_leases             test_anime_unified_evidence_import \
-            test_anime_media_pipeline
+            test_anime_media_pipeline \
+            test_anime_source_cleanup
