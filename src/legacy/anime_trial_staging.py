@@ -4,6 +4,7 @@ The caller must verify series and episode identity and the completed source.
 No Shoko VFS operations are performed.
 """
 import os
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -37,10 +38,19 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         raise FileExistsError("Existing staged media requires manual reconciliation")
     fd,tmp=tempfile.mkstemp(prefix=".anime-stage-",suffix=".tmp",dir=season_dir)
     try:
+        source_digest=hashlib.sha256()
         with os.fdopen(fd,"wb") as output, source.open("rb") as input_file:
-            shutil.copyfileobj(input_file,output)
+            for chunk in iter(lambda: input_file.read(1024*1024),b""):
+                source_digest.update(chunk)
+                output.write(chunk)
             output.flush()
             os.fsync(output.fileno())
+        staged_digest=hashlib.sha256()
+        with open(tmp,"rb") as staged_file:
+            for chunk in iter(lambda: staged_file.read(1024*1024),b""):
+                staged_digest.update(chunk)
+        if source_digest.digest()!=staged_digest.digest():
+            raise ValueError("Staged media checksum differs from source")
         if source.stat().st_size!=Path(tmp).stat().st_size:
             raise ValueError("Media changed while staging")
         # Exclusive creation prevents accidental overwrite of existing media.
