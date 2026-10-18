@@ -57,11 +57,6 @@ def initialize(path):
                     reason TEXT NOT NULL,
                     quarantined_at INTEGER NOT NULL
                 )""")
-                db.execute("""CREATE TABLE migration_quarantined_series (
-                    series_id INTEGER PRIMARY KEY REFERENCES series(id),
-                    reason TEXT NOT NULL,
-                    quarantined_at INTEGER NOT NULL
-                )""")
                 db.execute("""CREATE TABLE series_rejection_blocks (
                     series_id INTEGER PRIMARY KEY REFERENCES series(id),
                     reason TEXT NOT NULL DEFAULT 'REJECTED'
