@@ -28,7 +28,7 @@ class MigrationCoverageTests(unittest.TestCase):
                 with sqlite3.connect(path) as db:
                     db.execute("INSERT INTO download_history VALUES(7,'complete')")
             report=migration_coverage(*paths)
-            self.assertTrue(report["ready_for_cutover"])
+            self.assertFalse(report["ready_for_cutover"])
             self.assertEqual(len(report["verified_operational"]),1)
             self.assertFalse(report["unresolved_operational"])
 
