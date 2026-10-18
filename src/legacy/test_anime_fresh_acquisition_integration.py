@@ -1,9 +1,14 @@
 """Offline integration of fresh admin database, real approval gate and enqueue."""
+import asyncio
 import importlib.util
+import hashlib
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from anime_acquisition_handler import make_acquisition_handler
+from test_anime_acquisition_end_to_end import FakeQB
 
 from anime_acquisition_enqueue import enqueue_claimed_acquisition
 from anime_async_daemon import claim, finish, renew
@@ -61,6 +66,36 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
             "SELECT count(*) FROM external_actions").fetchone()[0], 0)
         self.assertEqual(self.db.execute(
             "SELECT count(*) FROM torrent_recovery_records").fetchone()[0], 0)
+
+    def test_offline_handler_completes_on_fresh_schema(self):
+        download = Path(self.tmp.name) / "downloads"
+        trial = Path(self.tmp.name) / "trial"
+        download.mkdir()
+        trial.mkdir()
+        source = download / "episode.mkv"
+        source.write_bytes(b"offline test media bytes" * 4096)
+        self.enqueue()
+        job = claim(self.db, allowed_kinds=["claimed_acquisition"])
+        self.assertIsNotNone(job)
+        qb = FakeQB()
+        handler = make_acquisition_handler(
+            self.path, lambda: qb, download_root=download, trial_root=trial)
+        with (patch("anime_media_flow.confirmed_jp_en", return_value=True),
+              patch("anime_source_retention.confirmed_jp_en", return_value=True)):
+            outcome = asyncio.run(handler(job))
+        self.assertEqual(outcome, "DONE")
+        finish(self.db, job["id"], job["lease_token"], outcome)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM episode_dispatch").fetchone()[0], "DONE")
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM daemon_jobs").fetchone()[0], "DONE")
+        staged = Path(self.db.execute(
+            "SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
+        self.assertTrue(staged.is_file())
+        self.assertEqual(hashlib.sha256(source.read_bytes()).digest(),
+                         hashlib.sha256(staged.read_bytes()).digest())
+        self.assertTrue(source.is_file())
+        self.assertEqual(qb.adds, 1)
 
     def test_reclaimed_lease_rejects_stale_worker(self):
         self.enqueue()
