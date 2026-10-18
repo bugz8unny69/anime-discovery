@@ -24,7 +24,12 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
     submitted=acquire_claimed(db,notification_id,infohash,magnet_uri,qb)
     if not submitted:
         return {"state":"DEFERRED","reason":"Torrent submission requires reconciliation"}
-    torrent=completed_torrent_snapshot(qb,infohash)
+    try:
+        torrent=completed_torrent_snapshot(qb,infohash)
+    except ValueError as exc:
+        if str(exc)=="Expected exactly one matching torrent":
+            return {"state":"DEFERRED","reason":"Torrent not visible for verification"}
+        raise
     if torrent.get("progress")!=1:
         return {"state":"DEFERRED","reason":"Torrent incomplete"}
     source=verified_media(torrent,download_root)
