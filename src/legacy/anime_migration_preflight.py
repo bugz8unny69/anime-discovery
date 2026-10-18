@@ -29,7 +29,7 @@ def preflight(path):
         missing=sorted(set(REQUIRED_TABLES)-present)
         bootstrap=(db.execute("SELECT status FROM schema_bootstrap WHERE id=1").fetchone()
                    if "schema_bootstrap" in present else None)
-        return {"ready":not missing and bootstrap is None,
+        return {"ready":not missing and 'schema_bootstrap' not in present,
                 "missing_tables":missing,
                 "bootstrap_status":bootstrap[0] if bootstrap else None,
                 "integrity":"ok","foreign_key_violations":0}
