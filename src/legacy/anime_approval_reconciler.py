@@ -8,13 +8,14 @@ import json
 import sqlite3
 from pathlib import Path
 
-from anime_approval_handoff import handoff
+from anime_approval_handoff import handoff, ensure_schema
 from anime_identity_rejection_gate import IdentityNotReady, SeriesBlocked
 
 
 def reconcile(db: sqlite3.Connection, limit: int = 100) -> dict:
     if not 1 <= limit <= 1000:
         raise ValueError("Invalid batch limit")
+    ensure_schema(db)
     # Never silently create missing evidence tables: a partial migration fails.
     rows = db.execute("""
         SELECT v.notification_id, s.evidence_json, v.evidence_json
