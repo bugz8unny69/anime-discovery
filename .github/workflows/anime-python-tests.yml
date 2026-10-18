@@ -40,4 +40,5 @@ jobs:
             test_anime_nfo_repair \
             test_anime_source_first \
             test_anime_media_safety \
-            test_anime_shoko_probe
+            test_anime_shoko_probe \
+            test_anime_dispatch_recovery_audit
