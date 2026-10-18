@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from anime_flat_config import load_config
+from anime_config_reload import ConfigManager
 from anime_async_daemon import ensure_schema, run_workers
 
 
@@ -26,8 +27,12 @@ def configured_daemon(config_dir, db_path, handlers):
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA busy_timeout=10000")
         ensure_schema(db)
+    manager=ConfigManager(config_dir)
+    # Initial settings are validated before the worker pool is started.
+    # Workers refresh snapshots at job boundaries, never during a handler.
     return run_workers(str(db_path),handlers,
-                       concurrency=config["settings"]["daemon"]["concurrency"])
+                       concurrency=config["settings"]["daemon"]["concurrency"],
+                       config_manager=manager)
 
 
 def main(argv=None):
