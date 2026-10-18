@@ -11,6 +11,8 @@ from pathlib import Path
 from anime_flat_config import load_config
 from anime_config_reload import ConfigManager
 from anime_async_daemon import ensure_schema, run_workers
+from anime_safe_handlers import SAFE_HANDLERS
+from anime_migration_preflight import preflight
 
 
 def configured_daemon(config_dir, db_path, handlers):
@@ -42,9 +44,16 @@ def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument("--config-dir",default="/etc/anime-discovery")
     parser.add_argument("--db",default="/var/lib/anime-discovery/anime-discovery.db")
+    parser.add_argument("--read-only-preflight",action="store_true",help="Only run non-mutating preflight jobs")
     args=parser.parse_args(argv)
-    # Do not start a worker that has no real integration handlers.
-    asyncio.run(configured_daemon(args.config_dir,args.db,{}))
+    if not args.read_only_preflight:
+        raise RuntimeError("Write-capable handlers are not validated; use --read-only-preflight")
+    # Preflight is intentionally read-only. Refuse incomplete migration
+    # before starting a scheduler that could create its own job schema.
+    result=preflight(args.db)
+    if not result["ready"]:
+        raise RuntimeError("Unified database migration incomplete: "+str(result))
+    asyncio.run(configured_daemon(args.config_dir,args.db,SAFE_HANDLERS))
 
 
 if __name__=="__main__":
