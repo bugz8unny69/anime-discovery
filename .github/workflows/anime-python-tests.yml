@@ -49,4 +49,6 @@ jobs:
             test_anime_acquisition_handler \
             test_anime_acquisition_finalize \
             test_anime_acquisition_enqueue \
-            test_anime_acquisition_runtime
+            test_anime_acquisition_runtime \
+            test_anime_reservation_recovery \
+            test_anime_dispatch_claim_recovery
