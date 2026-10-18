@@ -37,6 +37,23 @@ class FreshDatabaseTests(unittest.TestCase):
                         (notification_id,series_id,season,episode) VALUES (5,7,1,1)""")
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(),[])
 
+    def test_recovery_and_idempotency_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fresh.db"
+            initialize(path)
+            with sqlite3.connect(path) as db:
+                db.execute("PRAGMA foreign_keys=ON")
+                for table in ("external_actions", "verified_series_cache",
+                              "torrent_recovery_records"):
+                    self.assertEqual(db.execute("SELECT count(*) FROM "+table).fetchone()[0], 0)
+                columns = {row[1] for row in db.execute("PRAGMA table_info(episode_dispatch)")}
+                self.assertIn("attempts", columns)
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("""INSERT INTO torrent_recovery_records
+                        (notification_id,infohash,magnet_uri,staged_path,sha256,recorded_at)
+                        VALUES (999,'abc','magnet:?','/tmp/staged','abc',0)""")
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
     def test_does_not_overwrite_existing_database(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "existing.db"
