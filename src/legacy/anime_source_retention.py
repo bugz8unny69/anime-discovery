@@ -42,14 +42,14 @@ def retain_recovery_record(db, *, infohash, magnet_uri, source, staged, notifica
             recorded_at INTEGER NOT NULL)""")
         existing=db.execute("SELECT infohash,magnet_uri,staged_path,sha256 FROM torrent_recovery_records WHERE notification_id=?",
                             (notification_id,)).fetchone()
-        record=(infohash,magnet_uri,str(staged.resolve()),digest.hexdigest())
+        record=(infohash,magnet_uri,str(staged.resolve()),staged_hash)
         if existing and existing!=record:
             raise ValueError("Conflicting recovery record")
         if not existing:
             db.execute("INSERT INTO torrent_recovery_records VALUES (?,?,?,?,?,?)",
                        (notification_id,*record,int(time.time())))
         db.commit()
-        return {"eligible_for_cleanup_review":True,"sha256":digest.hexdigest()}
+        return {"eligible_for_cleanup_review":True,"sha256":staged_hash}
     except BaseException:
         db.rollback()
         raise
