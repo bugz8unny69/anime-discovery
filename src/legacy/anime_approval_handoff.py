@@ -46,6 +46,10 @@ def handoff(db: sqlite3.Connection, notification_id: int, shadow: dict, verifica
             raise
         result = decide_episode(shadow, verification)
         mapping = result.get("mapping") or verification.get("proposed_mapping") or {}
+        if result["decision"] == "AUTO_APPROVED":
+            verified_tvdb = db.execute("SELECT tvdb_id FROM verified_series_identity WHERE notification_id=?", (notification_id,)).fetchone()[0]
+            if str(int(mapping["tvdb_id"])) != str(int(verified_tvdb)):
+                raise ValueError("Episode mapping conflicts with verified series identity")
         season = mapping.get("tvdb_season")
         episode = mapping.get("tvdb_episode")
         if type(season) is not int or season < 1 or type(episode) is not int or episode < 1:
