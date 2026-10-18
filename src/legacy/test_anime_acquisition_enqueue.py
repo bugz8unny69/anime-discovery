@@ -20,6 +20,14 @@ class EnqueueTests(unittest.TestCase):
             self.assertTrue(enqueue_claimed_acquisition(self.db,7,**kw))
             self.assertFalse(enqueue_claimed_acquisition(self.db,7,**kw))
             self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0],1)
+    def test_mismatched_magnet_is_rejected_before_database_write(self):
+        with self.assertRaisesRegex(ValueError,"Magnet"):
+            enqueue_claimed_acquisition(self.db,7,infohash="a"*40,
+                magnet_uri="magnet:?xt=urn:btih:"+"b"*40,
+                title="Example",tvdb_id=123)
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name='daemon_jobs'").fetchone()[0],0)
+
     def test_mismatched_hash_is_rejected(self):
         with patch("anime_acquisition_enqueue.approved_dispatch",return_value={}):
             with self.assertRaisesRegex(ValueError,"identity"):
