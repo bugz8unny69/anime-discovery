@@ -33,4 +33,5 @@ jobs:
             test_anime_source_cleanup \
             test_anime_migration_preflight \
             test_anime_safe_handlers \
-            test_anime_handler_routing
+            test_anime_handler_routing \
+            test_anime_dispatch_audit
