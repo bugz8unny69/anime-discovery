@@ -53,6 +53,14 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
             raise ValueError("Staged media checksum differs from source")
         if source.stat().st_size!=Path(tmp).stat().st_size:
             raise ValueError("Media changed while staging")
+        # A source modified in place during copying can retain its size.
+        # Re-read it to ensure the source still matches the published bytes.
+        current_source_digest=hashlib.sha256()
+        with source.open("rb") as source_check:
+            for chunk in iter(lambda: source_check.read(1024*1024),b""):
+                current_source_digest.update(chunk)
+        if current_source_digest.digest()!=staged_digest.digest():
+            raise ValueError("Source changed during staging")
         # Exclusive creation prevents accidental overwrite of existing media.
         os.link(tmp,dest)
         os.unlink(tmp)
