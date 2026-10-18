@@ -23,10 +23,33 @@ class AdminCliTests(unittest.TestCase):
         path=self.dir/"unified.db"
         cli.new_database(path)
         with sqlite3.connect(path) as db:
-            self.assertEqual(db.execute("SELECT status FROM schema_bootstrap").fetchone()[0],"PENDING_MIGRATIONS")
+            self.assertEqual(db.execute("SELECT version FROM schema_version").fetchone()[0],1)
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0],"ok")
         with self.assertRaises(FileExistsError):
             cli.new_database(path)
+
+    def test_force_keeps_backup_and_replaces_database(self):
+        path=self.dir/"unified.db"
+        cli.new_database(path)
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb','123','old')")
+        cli.new_database(path,force=True)
+        with sqlite3.connect(path) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM series").fetchone()[0],0)
+        with sqlite3.connect(Path(str(path)+".pre-force-backup")) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM series").fetchone()[0],1)
+        with self.assertRaises(FileExistsError):
+            cli.new_database(path,force=True)
+
+    def test_force_refuses_sidecars(self):
+        path=self.dir/"unified.db"
+        cli.new_database(path)
+        sidecar=Path(str(path)+"-wal")
+        sidecar.write_bytes(b"active")
+        with self.assertRaises(ValueError):
+            cli.new_database(path,force=True)
+        self.assertTrue(path.exists())
+        self.assertFalse(Path(str(path)+".pre-force-backup").exists())
 
     def test_settings_cli(self):
         cli.main(["--config-dir",str(self.dir),"settings","set","daemon.concurrency","6"])
