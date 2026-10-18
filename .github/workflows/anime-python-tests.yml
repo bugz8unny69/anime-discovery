@@ -1,15 +1,10 @@
-"""Offline test workflow for the migrated Python modules.
-
-Does not connect to or deploy on the homelab.
-"""
+# Offline Python checks. No homelab connections or deployment.
 name: Anime Discovery Python tests
 on:
   push:
-    branches:
-      - feature/unified-db-foundation
+    branches: [feature/unified-db-foundation]
   pull_request:
-    branches:
-      - develop
+    branches: [develop]
   workflow_dispatch:
 jobs:
   unit-tests:
@@ -27,6 +22,12 @@ jobs:
         env:
           PYTHONPATH: src/legacy
         run: |
-          python -m unittest -v             test_anime_acquisition_flow             test_anime_qb_submission             test_anime_action_reconcile             test_anime_acquisition_gate             test_anime_daemon_leases             test_anime_unified_evidence_import \
+          python -m unittest -v \
+            test_anime_acquisition_flow \
+            test_anime_qb_submission \
+            test_anime_action_reconcile \
+            test_anime_acquisition_gate \
+            test_anime_daemon_leases \
+            test_anime_unified_evidence_import \
             test_anime_media_pipeline \
             test_anime_source_cleanup
