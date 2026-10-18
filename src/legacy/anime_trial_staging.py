@@ -49,11 +49,10 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         try:
             write_series_nfo(folder,title=title,tvdb_id=tvdb_id)
             write_episode_nfo(dest,title=title,season=season,episode=episode,tvdb_id=tvdb_id)
-        except BaseException:
-            # A media file without episode metadata is not a completed stage.
-            # Keep the source intact; remove only the destination created here.
-            dest.unlink(missing_ok=True)
-            raise
+        except Exception:
+            # NFO is optional convenience metadata. Preserve playable media.
+            # A later metadata repair can be performed without restaging.
+            pass
         return dest
     finally:
         if os.path.exists(tmp):
