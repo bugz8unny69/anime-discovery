@@ -25,7 +25,10 @@ def submit_once(db, infohash, magnet_uri, qb):
     action="qbittorrent_submit"
     token=reserve(db,action,infohash,fingerprint)
     if token is None:
-        # Read-only recovery; a missing torrent remains uncertain.
+        # Recover a crash after reservation without ever resubmitting blindly.
+        row=db.execute('SELECT state,token FROM external_actions WHERE action_type=? AND action_key=?',(action,infohash)).fetchone()
+        if row and row[0]=='RESERVED':
+            transition(db,action,infohash,row[1],'RESERVED','UNCERTAIN')
         return reconcile(db,action,infohash,fingerprint,
                          lambda _type,key: key if qb.contains_hash(key) else None)
     transition(db,action,infohash,token,"RESERVED","UNCERTAIN")
