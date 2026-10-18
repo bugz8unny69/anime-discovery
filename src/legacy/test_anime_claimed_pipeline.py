@@ -1,0 +1,39 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from anime_claimed_pipeline import process_claimed
+
+class FakeDB:
+    in_transaction=False
+
+class PipelineTests(unittest.TestCase):
+    def test_incomplete_torrent_does_not_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with patch("anime_claimed_pipeline.approved_dispatch",return_value={"series_id":4}), \
+                 patch("anime_claimed_pipeline.acquire_claimed",return_value="a"*40), \
+                 patch("anime_claimed_pipeline.completed_torrent_snapshot",return_value={"progress":0.5}), \
+                 patch("anime_claimed_pipeline.stage_claimed") as stage:
+                result=process_claimed(FakeDB(),1,infohash="a"*40,magnet_uri="magnet:?",
+                    qb=object(),download_root=root,trial_root=root,title="Anime",tvdb_id=2)
+                self.assertEqual(result["state"],"DEFERRED")
+                stage.assert_not_called()
+
+    def test_existing_staged_file_requires_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            torrent={"progress":1}
+            with patch("anime_claimed_pipeline.approved_dispatch",return_value={"series_id":4}), \
+                 patch("anime_claimed_pipeline.acquire_claimed",return_value="a"*40), \
+                 patch("anime_claimed_pipeline.completed_torrent_snapshot",return_value=torrent), \
+                 patch("anime_claimed_pipeline.verified_media",return_value=root/"original.mkv"), \
+                 patch("anime_claimed_pipeline.stage_claimed",side_effect=FileExistsError), \
+                 patch("anime_claimed_pipeline.retain_recovery_record") as retain:
+                result=process_claimed(FakeDB(),1,infohash="a"*40,magnet_uri="magnet:?",
+                    qb=object(),download_root=root,trial_root=root,title="Anime",tvdb_id=2)
+                self.assertEqual(result["state"],"NEEDS_REVIEW")
+                retain.assert_not_called()
+
+if __name__=="__main__":
+    unittest.main()
