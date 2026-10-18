@@ -24,8 +24,13 @@ def migration_coverage(controller, inbox, verified, shadow, output):
                     verified_operational.append(item)
                 else:
                     unresolved.append(item)
+    # Presence-only checks do not prove that core or evidence records survived.
+    # Keep cutover blocked until explicit row-level mapping audits cover them.
+    unverified_core_evidence=sorted((CORE | EVIDENCE) & names)
     return {"source_counts":sources,"target_counts":target,
+            "unverified_core_evidence":unverified_core_evidence,
             "missing_core":missing_core,"missing_evidence":missing_evidence,
             "unresolved_operational":unresolved,
             "verified_operational":verified_operational,
-            "ready_for_cutover":not (missing_core or missing_evidence or unresolved)}
+            "ready_for_cutover":False,
+            "cutover_blocker":"Core/evidence row-level reconciliation and all-table coverage not yet verified"}
