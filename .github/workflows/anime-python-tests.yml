@@ -56,4 +56,5 @@ jobs:
             test_anime_acquisition_end_to_end \
             test_anime_migration_coverage \
             test_anime_shoko_contract \
-            test_anime_migration_row_audit
+            test_anime_migration_row_audit \
+            test_anime_operational_import
