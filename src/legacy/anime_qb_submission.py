@@ -4,7 +4,7 @@ The caller must supply an approved, rechecked dispatch and a normalized
 infohash. Never modifies qBittorrent download limits or torrent priority.
 """
 import hashlib
-import sqlite3
+from urllib.parse import urlsplit, parse_qs
 from anime_external_actions import reserve, transition
 from anime_action_reconcile import reconcile
 
@@ -18,6 +18,9 @@ def submit_once(db, infohash, magnet_uri, qb):
     infohash=infohash.lower()
     if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
         raise ValueError("Expected magnet URI")
+    xt=parse_qs(urlsplit(magnet_uri).query).get("xt",[])
+    if not any(value.lower()=="urn:btih:"+infohash for value in xt):
+        raise ValueError("Magnet identity does not match verified infohash")
     fingerprint=hashlib.sha256(magnet_uri.encode()).hexdigest()
     action="qbittorrent_submit"
     token=reserve(db,action,infohash,fingerprint)
