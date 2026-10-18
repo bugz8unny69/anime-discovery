@@ -42,3 +42,12 @@ Fresh EP2 Autobrr webhook -> canonical series and episode -> verify or submit to
 
 ## Next development action
 Commit a reviewed, secret-sanitized source baseline; do not infer that a prototype archive is an integrated release. Work in feature branches and open pull requests for review.
+
+
+## 2026-10-18 source baseline preparation
+- Reviewed source snapshot prepared locally from original user archive: 198 top-level Python files, including development tests; 40 nested/historical/backup paths excluded from that snapshot.
+- Seven additional token/password-like literal assignment findings manually classified as symbolic names (e.g. `ANIME_QB_PASSWORD = 'ANIME_QB_PASSWORD'`), not embedded credentials.
+- No confirmed credential exposure in this scan; pattern-based checks do not guarantee absence of secrets.
+- A manifest with SHA-256 for each included file was generated locally.
+- **GitHub source import remains pending**: the GitHub integration can write individual files, but the local execution environment cannot directly reach GitHub. The prepared local archive has NOT been pushed to GitHub.
+- Do not consider the repository a full application checkout or deployable release until source import is verified.
