@@ -41,6 +41,8 @@ class HandlerTests(unittest.TestCase):
                 db.execute('CREATE TABLE daemon_jobs (id INTEGER,kind TEXT,state TEXT,lease_token TEXT,lease_until REAL)')
                 db.execute('INSERT INTO daemon_jobs VALUES (1,?,?,?,?)',
                     ('claimed_acquisition','LEASED','current',time.time()+300))
+                db.execute('CREATE TABLE episode_dispatch(notification_id INTEGER,state TEXT)')
+                db.execute("INSERT INTO episode_dispatch VALUES(4,'CLAIMED')")
             handler=make_acquisition_handler(path,lambda:object(),
                 download_root=directory,trial_root=directory)
             job={'id':1,'lease_token':'current','subject_key':'4',
