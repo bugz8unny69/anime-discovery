@@ -1,0 +1,30 @@
+"""Offline test workflow for the migrated Python modules.
+
+Does not connect to or deploy on the homelab.
+"""
+name: Anime Discovery Python tests
+on:
+  push:
+    branches:
+      - feature/unified-db-foundation
+  pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python modules
+        run: python -m compileall -q src/legacy
+      - name: Run focused offline integration tests
+        env:
+          PYTHONPATH: src/legacy
+        run: |
+          python -m unittest -v             test_anime_acquisition_flow             test_anime_qb_submission             test_anime_action_reconcile             test_anime_acquisition_gate             test_anime_daemon_leases             test_anime_unified_evidence_import
