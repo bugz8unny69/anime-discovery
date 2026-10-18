@@ -37,4 +37,5 @@ jobs:
             test_anime_dispatch_audit \
             test_anime_qb_api \
             test_anime_staging_rollback \
-            test_anime_nfo_repair
+            test_anime_nfo_repair \
+            test_anime_source_first
