@@ -18,6 +18,8 @@ def import_operational_tables(db, source_path, tables):
     target_path=db.execute("PRAGMA database_list").fetchone()[2]
     if not target_path or Path(target_path).resolve()==source_path.resolve():
         raise ValueError("Distinct on-disk destination required")
+    if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+        raise ValueError("Target integrity failure")
     prepared=[]
     with sqlite3.connect(source_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
         if src.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
