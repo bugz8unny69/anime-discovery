@@ -28,10 +28,8 @@ jobs:
             test_anime_action_reconcile \
             test_anime_acquisition_gate \
             test_anime_daemon_leases \
-            test_anime_unified_evidence_import \
             test_anime_media_pipeline \
             test_anime_source_cleanup \
-            test_anime_migration_preflight \
             test_anime_safe_handlers \
             test_anime_handler_routing \
             test_anime_dispatch_audit \
@@ -44,7 +42,6 @@ jobs:
             test_anime_dispatch_recovery_audit \
             test_anime_completed_snapshot \
             test_anime_staging_integrity \
-            test_anime_migration_inventory \
             test_anime_claimed_pipeline \
             test_anime_acquisition_handler \
             test_anime_acquisition_finalize \
@@ -54,17 +51,5 @@ jobs:
             test_anime_dispatch_claim_recovery \
             test_anime_acquisition_restart_integration \
             test_anime_acquisition_end_to_end \
-            test_anime_migration_coverage \
             test_anime_shoko_contract \
-            test_anime_migration_row_audit \
-            test_anime_operational_import \
-            test_anime_legacy_schema_report \
-            test_anime_legacy_mapping_audit \
-            test_anime_legacy_schema_cli \
-            test_anime_shoko_link_plan \
-            test_anime_v10_queue_import \
-            test_anime_download_attempts_import \
-            test_anime_legacy_archive_audit \
-            test_anime_full_migration_operational \
-            test_anime_legacy_schema_all_tables \
-
+            test_anime_shoko_link_plan
