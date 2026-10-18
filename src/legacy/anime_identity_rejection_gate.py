@@ -14,7 +14,7 @@ class SeriesBlocked(ValueError):
 def resolve_notification(db: sqlite3.Connection, notification_id: int) -> int:
     """Return eligible internal series ID; raise on uncertainty or rejection.
 
-    The caller must have applied the unified schema and imported verified
+    The caller must have initialized the unified schema and stored verified
     identity evidence. This function never creates series or approves episodes.
     """
     if type(notification_id) is not int or notification_id <= 0:
