@@ -47,4 +47,5 @@ jobs:
             test_anime_migration_inventory \
             test_anime_claimed_pipeline \
             test_anime_acquisition_handler \
-            test_anime_acquisition_finalize
+            test_anime_acquisition_finalize \
+            test_anime_acquisition_enqueue
