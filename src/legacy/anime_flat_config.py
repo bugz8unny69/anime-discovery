@@ -32,6 +32,9 @@ def load_config(directory=DEFAULT_CONFIG_DIR):
     directory=Path(directory)
     settings=_read_object(directory/"settings.json")
     secrets=_read_object(directory/"secrets.json")
+    return validate_config(settings,secrets,directory=directory)
+
+def validate_config(settings,secrets,*,directory=None):
     unknown=set(settings)-set(DEFAULT_SETTINGS)
     if unknown:
         raise ValueError("Unknown settings sections: "+", ".join(sorted(unknown)))
@@ -61,8 +64,8 @@ def load_config(directory=DEFAULT_CONFIG_DIR):
         raise ValueError("Unknown secrets keys")
     if any(not isinstance(v,str) for v in secrets.values()):
         raise ValueError("Secret values must be strings")
-    if secrets:
-        mode=(directory/"secrets.json").stat().st_mode & 0o777
+    if secrets and directory is not None:
+        mode=(Path(directory)/"secrets.json").stat().st_mode & 0o777
         if mode & 0o077:
             raise PermissionError("secrets.json must not be accessible by group/others")
     return {"settings":result,"secrets":secrets}
