@@ -24,7 +24,7 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             torrent={"progress":1,"state":"uploading"}
-            with patch("anime_claimed_pipeline.approved_dispatch",return_value={"series_id":4}), \
+            with patch("anime_claimed_pipeline.approved_dispatch",return_value={"series_id":4,"season":1,"episode":1}), \
                  patch("anime_claimed_pipeline.acquire_claimed",return_value="a"*40), \
                  patch("anime_claimed_pipeline.completed_torrent_snapshot",return_value=torrent), \
                  patch("anime_claimed_pipeline.verified_media",return_value=root/"original.mkv"), \
