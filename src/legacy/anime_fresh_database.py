@@ -2,6 +2,8 @@
 import sqlite3
 from pathlib import Path
 from anime_async_daemon import ensure_schema
+from anime_external_actions import ensure_schema as ensure_actions
+from anime_series_cache import ensure_schema as ensure_cache
 
 SCHEMA_VERSION = 1
 
@@ -92,8 +94,11 @@ def initialize(path):
                     episode INTEGER NOT NULL CHECK(episode>0),
                     state TEXT NOT NULL DEFAULT 'NEEDS_REVIEW',
                     last_error TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0),
                     updated_at INTEGER NOT NULL DEFAULT 0
                 )""")
+                ensure_actions(db)
+                ensure_cache(db)
                 ensure_schema(db)
                 if db.execute("PRAGMA foreign_key_check").fetchall():
                     raise ValueError("Foreign-key failure")
