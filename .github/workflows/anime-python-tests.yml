@@ -53,4 +53,5 @@ jobs:
             test_anime_acquisition_end_to_end \
             test_anime_shoko_contract \
             test_anime_shoko_link_plan \
-            test_anime_fresh_database
+            test_anime_fresh_database \
+            test_anime_admin_cli
