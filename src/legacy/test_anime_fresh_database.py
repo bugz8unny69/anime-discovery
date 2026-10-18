@@ -22,6 +22,21 @@ class FreshDatabaseTests(unittest.TestCase):
                     db.execute("INSERT INTO episodes(series_id,season,episode) VALUES (999,1,1)")
             with self.assertRaises(FileExistsError):
                 initialize(path)
+    def test_identity_and_dispatch_start_empty_and_reject_orphans(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "fresh.db"
+            initialize(path)
+            with sqlite3.connect(path) as db:
+                db.execute("PRAGMA foreign_keys=ON")
+                for table in ("verified_series_identity", "episode_verification_v16",
+                              "episode_approval_queue", "episode_dispatch",
+                              "series_rejection_blocks", "migration_quarantined_series"):
+                    self.assertEqual(db.execute("SELECT count(*) FROM "+table).fetchone()[0],0)
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("""INSERT INTO episode_dispatch
+                        (notification_id,series_id,season,episode) VALUES (5,7,1,1)""")
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(),[])
+
     def test_does_not_overwrite_existing_database(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "existing.db"
