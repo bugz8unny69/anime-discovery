@@ -30,6 +30,10 @@ def cleanup_source(db, notification_id, source, qb, *, approved=False):
     staged=Path(staged_path)
     if source.is_symlink() or staged.is_symlink() or not source.is_file() or not staged.is_file():
         raise ValueError("Missing or unsafe source or staged file")
+    source_stat=source.stat()
+    staged_stat=staged.stat()
+    if source_stat.st_nlink!=1 or staged_stat.st_nlink!=1:
+        raise ValueError("Hardlinked media requires manual cleanup")
     if source.resolve()==staged.resolve() or _hash(source)!=expected or _hash(staged)!=expected:
         raise ValueError("Media fingerprint mismatch")
     # No delete_files=True: the application alone owns the final unlink.
@@ -38,7 +42,12 @@ def cleanup_source(db, notification_id, source, qb, *, approved=False):
     if qb.contains_hash(infohash):
         raise RuntimeError("qBittorrent still owns the torrent")
     # Recheck source immediately before deletion.
-    if source.is_symlink() or _hash(source)!=expected:
+    current=source.lstat()
+    if (source.is_symlink() or current.st_ino!=source_stat.st_ino
+            or current.st_dev!=source_stat.st_dev or current.st_nlink!=1
+            or _hash(source)!=expected):
         raise ValueError("Source changed during cleanup")
+    # Explicit opt-in only. Path-race protection is not complete: do not
+    # wire this routine into unattended daemon handlers yet.
     source.unlink()
     return {"source_removed":True,"infohash":infohash,"staged_path":str(staged)}
