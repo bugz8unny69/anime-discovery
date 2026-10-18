@@ -5,6 +5,7 @@ This does not claim that a file is Shoko-recognized or mark a dispatch DONE.
 from anime_acquisition_gate import approved_dispatch
 from anime_media_completion import verified_media
 from anime_trial_staging import stage_verified
+from anime_audio_verification import confirmed_jp_en
 
 def stage_claimed(db, notification_id, torrent, download_root, trial_root,
                   *, title, tvdb_id):
@@ -24,6 +25,9 @@ def stage_claimed(db, notification_id, torrent, download_root, trial_root,
     if bound is None or str(bound[0])!=str(tvdb_id):
         raise ValueError("Staging series identity mismatch")
     source=verified_media(torrent,download_root)
+    # Reject before copying: inspect actual source audio, not release labels.
+    if not confirmed_jp_en(source):
+        raise ValueError("Source must contain Japanese and English audio")
     return stage_verified(source,trial_root,title=title,tvdb_id=tvdb_id,
                           series_id=approval["series_id"],
                           season=approval["season"],episode=approval["episode"])
