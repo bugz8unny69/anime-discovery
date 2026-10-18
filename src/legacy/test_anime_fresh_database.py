@@ -30,7 +30,7 @@ class FreshDatabaseTests(unittest.TestCase):
                 db.execute("PRAGMA foreign_keys=ON")
                 for table in ("verified_series_identity", "episode_verification_v16",
                               "episode_approval_queue", "episode_dispatch",
-                              "series_rejection_blocks", "migration_quarantined_series"):
+                              "series_rejection_blocks", "series_quarantine"):
                     self.assertEqual(db.execute("SELECT count(*) FROM "+table).fetchone()[0],0)
                 with self.assertRaises(sqlite3.IntegrityError):
                     db.execute("""INSERT INTO episode_dispatch
