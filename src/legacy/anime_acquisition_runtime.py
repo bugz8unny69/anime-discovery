@@ -1,0 +1,16 @@
+"""Explicit, non-default acquisition handler registry.
+
+The production daemon entrypoint continues to register SAFE_HANDLERS only.
+Creating this registry does not start workers or contact external services.
+"""
+from anime_safe_handlers import SAFE_HANDLERS
+from anime_acquisition_handler import make_acquisition_handler
+
+def acquisition_handlers(db_path, qb_factory, *, download_root, trial_root,
+                         enabled=False):
+    if enabled is not True:
+        raise PermissionError("Acquisition handlers require explicit opt-in")
+    handlers=dict(SAFE_HANDLERS)
+    handlers["claimed_acquisition"]=make_acquisition_handler(
+        db_path,qb_factory,download_root=download_root,trial_root=trial_root)
+    return handlers
