@@ -53,7 +53,12 @@ def resolve_notification(db: sqlite3.Connection, notification_id: int) -> int:
         "SELECT 1 FROM series_quarantine WHERE series_id=?", (series_id,)
     ).fetchone():
         raise SeriesBlocked("Series is quarantined")
-    if db.execute(
+    # Older databases may still carry migration quarantine records.
+    legacy_quarantine = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='migration_quarantined_series'"
+    ).fetchone()
+    if legacy_quarantine and db.execute(
         "SELECT 1 FROM migration_quarantined_series WHERE series_id=?",
         (series_id,)
     ).fetchone():
