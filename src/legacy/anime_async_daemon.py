@@ -101,7 +101,11 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 continue
             try:
                 if config_manager is not None:
-                    snapshot=await config_manager.reload_if_changed()
+                    try:
+                        snapshot=await config_manager.reload_if_changed()
+                    except (ValueError, OSError):
+                        # Invalid admin edit must not interrupt ongoing work.
+                        snapshot=config_manager.snapshot
                     job["config_snapshot"]=snapshot
                 handler=handlers[job["kind"]]
                 outcome=await handler(job)
