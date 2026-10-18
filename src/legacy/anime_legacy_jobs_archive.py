@@ -4,7 +4,7 @@ Archive tables are inert snapshots, not executable queues.
 """
 import sqlite3
 from pathlib import Path
-from anime_legacy_archive_audit import reconcile_archive
+from collections import Counter
 
 GROUPS={
  "jobs":("episode_jobs","historical_candidates","historical_search_attempts","job_events","series_jobs"),
@@ -42,14 +42,24 @@ def archive_tables(db, source_path, group):
             if actual!=[(r[1],r[2] or "BLOB") for r in columns]:
                 raise ValueError("Archive schema conflict: "+name)
             existing=db.execute('SELECT * FROM "'+archive+'"').fetchall()
-            if existing and sorted(existing,key=repr)!=sorted(records,key=repr):
+            if existing and Counter(tuple(row) for row in existing)!=Counter(tuple(row) for row in records):
                 raise ValueError("Archive record conflict: "+name)
             if not existing:
                 db.executemany('INSERT INTO "'+archive+'" VALUES ('+
                                ','.join('?' for _ in columns)+')',records)
+        if db.execute("PRAGMA foreign_key_check").fetchall():
+            raise ValueError("Foreign key violation")
         db.commit()
     except BaseException:
         db.rollback()
         raise
+    # Exact row multisets, including duplicates, must match before success.
+    with sqlite3.connect(source_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
+        for name,_,_ in prepared:
+            archive="legacy_"+name
+            original=Counter(tuple(r) for r in src.execute('SELECT * FROM "'+name+'"'))
+            copied=Counter(tuple(r) for r in db.execute('SELECT * FROM "'+archive+'"'))
+            if original!=copied:
+                raise ValueError("Post-import archive reconciliation failed: "+name)
     return {"archived_rows":{name:len(rows) for name,_,rows in prepared},
             "jobs_activated":False,"source_modified":False}
