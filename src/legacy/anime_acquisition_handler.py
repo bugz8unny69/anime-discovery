@@ -1,0 +1,49 @@
+"""Opt-in acquisition handler; never registered by default."""
+import asyncio
+import json
+import sqlite3
+import time
+from anime_claimed_pipeline import process_claimed
+
+
+def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
+    if not callable(qb_factory):
+        raise ValueError('qBittorrent client factory required')
+
+    def execute(job, payload):
+        with sqlite3.connect(db_path, isolation_level=None, timeout=10) as db:
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('PRAGMA busy_timeout=10000')
+            row = db.execute('''SELECT state,lease_token,lease_until
+                FROM daemon_jobs WHERE id=? AND kind='claimed_acquisition' ''',
+                (job['id'],)).fetchone()
+            if (not row or row[0] != 'LEASED' or row[1] != job['lease_token']
+                    or row[2] < time.time()):
+                raise ValueError('Stale acquisition lease')
+            return process_claimed(db, payload['notification_id'],
+                infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
+                qb=qb_factory(), download_root=download_root,
+                trial_root=trial_root, title=payload['title'],
+                tvdb_id=payload['tvdb_id'])
+
+    async def handler(job):
+        try:
+            payload = json.loads(job['payload_json'])
+            if not isinstance(payload, dict) or set(payload) != {
+                    'notification_id', 'infohash', 'magnet_uri', 'title', 'tvdb_id'}:
+                return 'NEEDS_REVIEW'
+            if (type(payload['notification_id']) is not int or
+                    payload['notification_id'] <= 0 or
+                    str(payload['notification_id']) != job['subject_key']):
+                return 'NEEDS_REVIEW'
+            if any(not isinstance(payload[k], str) or not payload[k]
+                   for k in ('infohash', 'magnet_uri', 'title')):
+                return 'NEEDS_REVIEW'
+            if not str(payload['tvdb_id']).isdigit() or int(payload['tvdb_id']) <= 0:
+                return 'NEEDS_REVIEW'
+        except (KeyError, TypeError, ValueError):
+            return 'NEEDS_REVIEW'
+        result = await asyncio.to_thread(execute, job, payload)
+        return result['state']
+
+    return handler
