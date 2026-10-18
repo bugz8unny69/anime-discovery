@@ -61,4 +61,5 @@ jobs:
             test_anime_legacy_schema_report \
             test_anime_legacy_mapping_audit \
             test_anime_legacy_schema_cli \
-            test_anime_shoko_link_plan
+            test_anime_shoko_link_plan \
+            test_anime_v10_queue_import
