@@ -1,0 +1,39 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*
+*secret*
+config.local.*
+# State, databases, backups, and torrent data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.torrent
+backups/
+downloads/
+data/
+# Python environments and generated files
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+# Archives and local scratch work
+*.tar
+*.tar.gz
+*.zip
+.DS_Store
