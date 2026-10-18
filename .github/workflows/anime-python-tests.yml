@@ -45,4 +45,6 @@ jobs:
             test_anime_completed_snapshot \
             test_anime_staging_integrity \
             test_anime_migration_inventory \
-            test_anime_claimed_pipeline
+            test_anime_claimed_pipeline \
+            test_anime_acquisition_handler \
+            test_anime_acquisition_finalize
