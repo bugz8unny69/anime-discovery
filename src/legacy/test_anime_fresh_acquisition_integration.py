@@ -95,6 +95,15 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
             self.enqueue()
         self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0], 0)
 
+    def test_canonical_quarantine_blocks_acquisition(self):
+        self.db.execute(
+            "INSERT INTO series_quarantine(series_id,reason,quarantined_at) "
+            "VALUES (4,'identity conflict',0)")
+        with self.assertRaises(ValueError):
+            self.enqueue()
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM daemon_jobs").fetchone()[0], 0)
+
     def test_rejected_series_cannot_enqueue(self):
         self.db.execute("UPDATE series SET status='REJECTED' WHERE id=4")
         with self.assertRaises(ValueError):
