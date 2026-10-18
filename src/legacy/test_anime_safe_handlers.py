@@ -9,9 +9,8 @@ from anime_safe_handlers import migration_preflight_handler,SAFE_HANDLERS
 class SafeHandlersTests(unittest.TestCase):
     def test_invalid_payload_fails_closed(self):
         for payload in ("not json","[]",'{"wrong": 1}','{"database_path": ""}'):
-            result=asyncio.run(migration_preflight_handler({"payload_json":payload})) if payload!="not json" else None
-            if payload!="not json":
-                self.assertEqual(result,"NEEDS_REVIEW")
+            result=asyncio.run(migration_preflight_handler({"payload_json":payload}))
+            self.assertEqual(result,"NEEDS_REVIEW")
         self.assertIn("migration_preflight",SAFE_HANDLERS)
 
     def test_bootstrap_is_not_approved(self):
