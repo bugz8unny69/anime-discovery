@@ -18,6 +18,34 @@ class MigrationCoverageTests(unittest.TestCase):
             report=migration_coverage(*paths)
             self.assertFalse(report["ready_for_cutover"])
             self.assertEqual(report["unresolved_operational"][0]["table"],"download_history")
+    def test_exact_matching_history_is_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths=[Path(directory)/f"{name}.db" for name in ("controller","inbox","verified","shadow","output")]
+            for path in paths:
+                with sqlite3.connect(path) as db:
+                    db.execute("CREATE TABLE download_history(id INTEGER, event TEXT)")
+            for path in (paths[0],paths[4]):
+                with sqlite3.connect(path) as db:
+                    db.execute("INSERT INTO download_history VALUES(7,'complete')")
+            report=migration_coverage(*paths)
+            self.assertTrue(report["ready_for_cutover"])
+            self.assertEqual(len(report["verified_operational"]),1)
+            self.assertFalse(report["unresolved_operational"])
+
+    def test_equal_count_different_history_blocks_cutover(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths=[Path(directory)/f"{name}.db" for name in ("controller","inbox","verified","shadow","output")]
+            for path in paths:
+                with sqlite3.connect(path) as db:
+                    db.execute("CREATE TABLE download_history(id INTEGER)")
+            with sqlite3.connect(paths[0]) as db:
+                db.execute("INSERT INTO download_history VALUES(7)")
+            with sqlite3.connect(paths[4]) as db:
+                db.execute("INSERT INTO download_history VALUES(8)")
+            report=migration_coverage(*paths)
+            self.assertFalse(report["ready_for_cutover"])
+            self.assertEqual(report["unresolved_operational"][0]["missing_rows"],1)
+
     def test_missing_evidence_blocks_cutover(self):
         with tempfile.TemporaryDirectory() as directory:
             paths=[Path(directory)/f"{name}.db" for name in ("controller","inbox","verified","shadow","output")]
