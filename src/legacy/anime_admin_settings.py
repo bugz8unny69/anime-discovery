@@ -19,20 +19,9 @@ def set_setting(directory, dotted_key, value):
     current=load_config(directory)
     settings={section:dict(values) for section,values in current["settings"].items()}
     settings[parts[0]][parts[1]]=value
-    # Validate the entire candidate using the same production loader, without
-    # exposing an invalid file to the daemon.
-    from anime_flat_config import _read_object
-    import anime_flat_config
-    original=anime_flat_config._read_object
-    def candidate_read(p):
-        if Path(p)==path:
-            return settings
-        return original(p)
-    try:
-        anime_flat_config._read_object=candidate_read
-        validated=load_config(directory)
-    finally:
-        anime_flat_config._read_object=original
+    # Validate without changing global loader functions or publishing bad JSON.
+    from anime_flat_config import validate_config
+    validated=validate_config(settings,current["secrets"])
     if validated["settings"][parts[0]][parts[1]]!=value:
         raise ValueError("Setting validation failed")
     fd,tmp=tempfile.mkstemp(prefix=".settings-",suffix=".json",dir=directory)
