@@ -3,6 +3,7 @@
 Never stores configuration in SQLite. Secrets are not echoed or edited here.
 """
 import json
+import fcntl
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,17 @@ from anime_flat_config import DEFAULT_SETTINGS, load_config
 
 
 def set_setting(directory, dotted_key, value):
+    directory=Path(directory)
+    # Stable lock file: never lock settings.json itself, which is replaced.
+    lock_path=directory/'.settings.lock'
+    with lock_path.open('a+b') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        try:
+            return _set_setting_locked(directory,dotted_key,value)
+        finally:
+            fcntl.flock(lock,fcntl.LOCK_UN)
+
+def _set_setting_locked(directory, dotted_key, value):
     directory=Path(directory)
     parts=dotted_key.split(".")
     if len(parts)!=2 or parts[0] not in DEFAULT_SETTINGS or parts[1] not in DEFAULT_SETTINGS[parts[0]]:
