@@ -11,6 +11,7 @@ class GateTests(unittest.TestCase):
         CREATE TABLE verified_series_identity(notification_id INTEGER PRIMARY KEY,tvdb_id TEXT,episode_identity_verified INTEGER,eligible_for_acquisition INTEGER);
         CREATE TABLE series(id INTEGER PRIMARY KEY,source TEXT,external_id TEXT,status TEXT);
         CREATE TABLE migration_quarantined_series(series_id INTEGER PRIMARY KEY);
+        CREATE TABLE series_quarantine(series_id INTEGER PRIMARY KEY);
         CREATE TABLE series_rejection_blocks(series_id INTEGER PRIMARY KEY);
         INSERT INTO notifications VALUES(7,'UNTRUSTED');
         INSERT INTO verified_series_identity VALUES(7,'123',0,0);
@@ -37,6 +38,11 @@ class GateTests(unittest.TestCase):
 
     def test_quarantine_fails_closed(self):
         self.db.execute("INSERT INTO migration_quarantined_series VALUES(4)")
+        with self.assertRaises(SeriesBlocked):
+            resolve_notification(self.db,7)
+
+    def test_canonical_quarantine_fails_closed(self):
+        self.db.execute("INSERT INTO series_quarantine VALUES(4)")
         with self.assertRaises(SeriesBlocked):
             resolve_notification(self.db,7)
 
