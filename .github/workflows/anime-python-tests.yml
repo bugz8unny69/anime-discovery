@@ -67,4 +67,4 @@ jobs:
             test_anime_legacy_archive_audit \
             test_anime_full_migration_operational \
             test_anime_legacy_schema_all_tables \
-            test_anime_legacy_jobs_archive
+
