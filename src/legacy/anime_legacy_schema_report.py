@@ -7,7 +7,7 @@ from pathlib import Path
 
 KEYWORDS=("queue","history","dispatch","rejection","action","torrent","download","claim")
 
-def operational_schema_report(path):
+def operational_schema_report(path, *, include_all=False):
     source=Path(path)
     if not source.is_file() or source.is_symlink():
         raise ValueError("A regular, non-symlink SQLite snapshot is required")
@@ -18,7 +18,7 @@ def operational_schema_report(path):
         for name,kind in db.execute("""SELECT name,type FROM sqlite_master
                 WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'
                 ORDER BY name"""):
-            if kind!="table" or not any(word in name.lower() for word in KEYWORDS):
+            if kind!="table" or (not include_all and not any(word in name.lower() for word in KEYWORDS)):
                 continue
             quoted='"'+name.replace('"','""')+'"'
             columns=[{"name":row[1],"type":row[2],"not_null":bool(row[3]),
@@ -35,7 +35,9 @@ def operational_schema_report(path):
                            "references_column":row[4],"on_update":row[5],
                            "on_delete":row[6]}
                           for row in db.execute("PRAGMA foreign_key_list("+quoted+")")]
-            report.append({"table":name,"rows":db.execute(
+            report.append({"table":name,"operational_candidate":any(word in name.lower() for word in KEYWORDS),
+                "rows":db.execute(
                 "SELECT count(*) FROM "+quoted).fetchone()[0],
                 "columns":columns,"indexes":indexes,"foreign_keys":foreign_keys})
-        return {"tables":report,"read_only":True,"mapping_verified":False}
+        return {"tables":report,"read_only":True,"mapping_verified":False,
+                "all_tables_included":bool(include_all)}
