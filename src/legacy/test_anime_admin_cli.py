@@ -36,7 +36,7 @@ class AdminCliTests(unittest.TestCase):
         cli.new_database(path,force=True)
         with sqlite3.connect(path) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM series").fetchone()[0],0)
-        with sqlite3.connect(Path(str(path)+".pre-force-backup")) as db:
+        with sqlite3.connect(Path(str(path)+".pre-force-backup"),timeout=0) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM series").fetchone()[0],1)
         with self.assertRaises(FileExistsError):
             cli.new_database(path,force=True)
