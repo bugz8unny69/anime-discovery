@@ -153,9 +153,19 @@ before correcting permissions, and does not overwrite credentials.
 The configured existing database must be archived or removed separately
 before installation.
 
-**Important:** the current admin upgrade is Git-only; archive installations
-cannot use it yet. For now, download a later release archive and perform a
-controlled application update rather than invoking Git-based upgrade.
+**Archive-based upgrades:** Download and verify the newer release
+`.tar.gz`, copy it onto the VM, then run:
+
+```bash
+sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py upgrade /path/to/new-release.tar.gz
+```
+
+The offline upgrade validates archive entries, makes an online SQLite
+backup, stops the service, swaps the application code, starts the service,
+and restores the old code if startup fails. The old code directory and
+database backup remain available. It does not overwrite
+`/etc/anime-discovery`, your NFS mounts, or the SQLite database.
+For Git checkouts, `admin upgrade` without a package path still uses Git.
 
 ## Built-in VM upgrade and administration
 
