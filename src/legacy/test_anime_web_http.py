@@ -25,7 +25,7 @@ class DashboardHTTPTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.db=Path(tmp.name)/"web.db"
         initialize(self.db)
-        self.server=ThreadingHTTPServer(("127.0.0.1",0),web.app(self.db,"secret-token"))
+        self.server=ThreadingHTTPServer(("127.0.0.1",0),web.app(self.db,"secret-token",admin_password="admin-pass"))
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
         self.addCleanup(self.server.server_close)
@@ -34,8 +34,8 @@ class DashboardHTTPTests(unittest.TestCase):
         self.port=self.server.server_port
 
     def request(self,method,path,body=None,*,basic=False):
-        headers={"Authorization":"Basic "+base64.b64encode(b"anime:secret-token").decode()
-                 if basic else "Bearer secret-token"}
+        headers={"Authorization":"Bearer secret-token" if path=="/webhook" and not basic
+                 else "Basic "+base64.b64encode(b"anime:admin-pass").decode()}
         if isinstance(body,dict):
             body=json.dumps(body)
             headers["Content-Type"]="application/json"
@@ -44,6 +44,23 @@ class DashboardHTTPTests(unittest.TestCase):
             client.request(method,path,body,headers)
             response=client.getresponse()
             return response.status,response.getheader("Location"),response.read().decode()
+        finally:
+            client.close()
+
+    def test_webhook_token_cannot_access_dashboard(self):
+        import http.client
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            client.request("GET","/",headers={"Authorization":"Bearer secret-token"})
+            response=client.getresponse()
+            self.assertEqual(response.status,401)
+            response.read()
+            client.request("POST","/webhook","{}",headers={
+                "Authorization":"Basic "+base64.b64encode(b"anime:admin-pass").decode(),
+                "Content-Type":"application/json"})
+            response=client.getresponse()
+            self.assertEqual(response.status,401)
+            response.read()
         finally:
             client.close()
 
@@ -162,14 +179,14 @@ class DashboardHTTPTests(unittest.TestCase):
             (directory/"secrets.json").write_text(json.dumps({"prowlarr_api_key":"test"}))
             os.chmod(directory/"secrets.json",0o600)
             server=ThreadingHTTPServer(("127.0.0.1",0),
-                web.app(self.db,"secret-token",config_dir=directory))
+                web.app(self.db,"secret-token",config_dir=directory,admin_password="admin-pass"))
             thread=threading.Thread(target=server.serve_forever,daemon=True)
             thread.start()
             try:
                 client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
                 client.request("POST","/request-anime",
                     json.dumps({"tvdb_id":123,"season":1}),
-                    {"Authorization":"Bearer secret-token","Content-Type":"application/json"})
+                    {"Authorization":"Basic "+base64.b64encode(b"anime:admin-pass").decode(),"Content-Type":"application/json"})
                 result=client.getresponse()
                 self.assertEqual(result.status,200)
                 self.assertEqual(json.loads(result.read())["source"],"manual")
