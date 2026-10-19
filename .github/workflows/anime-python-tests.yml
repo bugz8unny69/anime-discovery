@@ -71,4 +71,5 @@ jobs:
             test_anime_sonarr_import \
             test_anime_sonarr_finalize \
             test_anime_shoko_v3 \
-            test_anime_shoko_handoff
+            test_anime_shoko_handoff \
+            test_anime_shoko_handoff_state
