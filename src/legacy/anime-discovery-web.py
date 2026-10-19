@@ -216,6 +216,23 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 elif not self.check_csrf({}):
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/api/credentials":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                try:
+                    data=getattr(self,"_cached_form",None) or self.form()
+                    from anime_admin_secret_editor import set_secret
+                    key=data.get("key")
+                    if type(key) is not str:
+                        raise ValueError("Credential key required")
+                    clear=data.get("clear") is True
+                    value=data.get("value")
+                    if not clear and (type(value) is not str or not value):
+                        raise ValueError("Credential replacement cannot be empty")
+                    result=set_secret(config_dir,key,clear=clear,
+                        prompt=lambda _ : value,confirm=lambda _ : "CLEAR")
+                    return self.send(200,json.dumps(result),"application/json")
+                except (ValueError,TypeError,OSError) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/settings":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 try:
