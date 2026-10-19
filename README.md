@@ -10,6 +10,28 @@ The currently deployed application is separate from this repository. No GitHub c
 ## Scope
 Autobrr webhook ingestion, canonical anime identity, controller and episode tracking, qBittorrent verification and acquisition, dashboard and authentication, safe staging, rejection enforcement, and administrative CLI.
 
+## Run the acquisition worker
+
+The worker processes approved acquisition jobs from the unified database, logs
+in to qBittorrent, and stages verified completed media. It runs in the
+foreground and can be stopped with Ctrl+C.
+
+```bash
+export PYTHONPATH=src/legacy
+export ANIME_QB_USER='your-qb-username'
+export ANIME_QB_PASSWORD='your-qb-password'
+python src/legacy/anime-discovery-worker.py \\
+  --db /var/lib/anime-discovery/anime-discovery.db \\
+  --qb-url http://127.0.0.1:8080 \\
+  --download-root /path/to/qb-downloads \\
+  --trial-root /path/to/anime-trial
+```
+
+Replace the URL and paths with the actual homelab values. The worker
+actively submits approved magnets to qBittorrent; it does not create approvals,
+run the webhook/dashboard, or delete original downloads. The database must
+already exist. This command is not automatically installed or started by GitHub.
+
 ## Offline fresh-install smoke check
 
 From the repository root with Python 3.12:
