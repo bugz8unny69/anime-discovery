@@ -55,4 +55,5 @@ jobs:
             test_anime_shoko_link_plan \
             test_anime_fresh_database \
             test_anime_fresh_acquisition_integration \
-            test_anime_admin_cli
+            test_anime_admin_cli \
+            test_anime_webhook_lifecycle
