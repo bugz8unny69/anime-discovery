@@ -76,7 +76,7 @@ def all_jobs(db, *,page=1,size=20):
             status="WAITING FOR DOWNLOAD"
         elif job=="BLOCKED":
             status="BLOCKED"
-        elif job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
+        elif nstatus=="NEEDS_REVIEW" or job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
             status="NEEDS REVIEW"
         elif job=="DONE":
             status="COMPLETED"
@@ -86,7 +86,7 @@ def all_jobs(db, *,page=1,size=20):
             status="RECEIVED"
         # An unmatched intake record is not an acquisition job. Make that
         # distinction visible instead of suggesting an idle worker.
-        if status=="RECEIVED":
+        if status in ("RECEIVED","NEEDS REVIEW"):
             explanation=("Waiting for episode identity: no acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="QUEUED":
