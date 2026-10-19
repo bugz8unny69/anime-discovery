@@ -59,49 +59,49 @@ def app(db_path, token):
 
 
         def approve(self, db, values):
-                        nid = int(values["notification_id"])
-                        tvdb = str(int(values["tvdb_id"]))
-                        anidb = str(int(values["anidb_id"]))
-                        season, episode = int(values["season"]), int(values["episode"])
-                        magnet = str(values["magnet_uri"])
-                        if min(nid, int(tvdb), int(anidb), season, episode) <= 0:
-                            raise ValueError("Positive IDs and episode numbers required")
-                        db.execute("BEGIN IMMEDIATE")
-                        try:
-                            notification = db.execute(
-                                "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
-                            if not notification:
-                                raise ValueError("Notification not found")
-                            existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
-                            if existing:
-                                sid = existing[0]
-                            else:
-                                sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
-                                                 (tvdb, notification[0])).lastrowid
-                            evidence = json.dumps({"manual_approval": True, "tvdb_id": tvdb,
-                                                   "anidb_id": anidb, "season": season, "episode": episode}, sort_keys=True)
-                            db.execute("""INSERT INTO verified_series_identity
-                                (notification_id,anidb_id,tvdb_id,mapping_source,decision,
-                                episode_identity_verified,eligible_for_acquisition,evidence_json,evidence_sha256)
-                                VALUES (?,?,?,'manual','VERIFIED',1,1,?,?)""",
-                                (nid,anidb,tvdb,evidence,hashlib.sha256(evidence.encode()).hexdigest()))
-                            db.execute("""INSERT INTO episode_verification_v16
-                                (notification_id,evaluated_at,decision,verified,evidence_json)
-                                VALUES (?,?,'VERIFIED',1,?)""",(nid,time.time(),evidence))
-                            db.execute("""INSERT INTO episode_approval_queue
-                                (notification_id,decision,season,episode)
-                                VALUES (?,'AUTO_APPROVED',?,?)""",(nid,season,episode))
-                            db.execute("""INSERT INTO episode_dispatch
-                                (notification_id,series_id,season,episode,state)
-                                VALUES (?,?,?,?,'CLAIMED')""",(nid,sid,season,episode))
-                            db.commit()
-                        except BaseException:
-                            db.rollback()
-                            raise
-                        queued = enqueue_claimed_acquisition(
-                            db,nid,infohash=notification[1],magnet_uri=magnet,
-                            title=notification[0],tvdb_id=tvdb)
-                        return {"queued": queued, "notification_id": nid}
+            nid = int(values["notification_id"])
+            tvdb = str(int(values["tvdb_id"]))
+            anidb = str(int(values["anidb_id"]))
+            season, episode = int(values["season"]), int(values["episode"])
+            magnet = str(values["magnet_uri"])
+            if min(nid, int(tvdb), int(anidb), season, episode) <= 0:
+                raise ValueError("Positive IDs and episode numbers required")
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                notification = db.execute(
+                    "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
+                if not notification:
+                    raise ValueError("Notification not found")
+                existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
+                if existing:
+                    sid = existing[0]
+                else:
+                    sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
+                         (tvdb, notification[0])).lastrowid
+                evidence = json.dumps({"manual_approval": True, "tvdb_id": tvdb,
+                                       "anidb_id": anidb, "season": season, "episode": episode}, sort_keys=True)
+                db.execute("""INSERT INTO verified_series_identity
+                    (notification_id,anidb_id,tvdb_id,mapping_source,decision,
+                    episode_identity_verified,eligible_for_acquisition,evidence_json,evidence_sha256)
+                    VALUES (?,?,?,'manual','VERIFIED',1,1,?,?)""",
+                    (nid,anidb,tvdb,evidence,hashlib.sha256(evidence.encode()).hexdigest()))
+                db.execute("""INSERT INTO episode_verification_v16
+                    (notification_id,evaluated_at,decision,verified,evidence_json)
+                    VALUES (?,?,'VERIFIED',1,?)""",(nid,time.time(),evidence))
+                db.execute("""INSERT INTO episode_approval_queue
+                    (notification_id,decision,season,episode)
+                    VALUES (?,'AUTO_APPROVED',?,?)""",(nid,season,episode))
+                db.execute("""INSERT INTO episode_dispatch
+                    (notification_id,series_id,season,episode,state)
+                    VALUES (?,?,?,?,'CLAIMED')""",(nid,sid,season,episode))
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+            queued = enqueue_claimed_acquisition(
+                db,nid,infohash=notification[1],magnet_uri=magnet,
+                title=notification[0],tvdb_id=tvdb)
+            return {"queued": queued, "notification_id": nid}
 
         def do_GET(self):
             if not self.authorized():
