@@ -28,15 +28,15 @@ class QBApiTests(unittest.TestCase):
             qb.remove_torrent(infohash)
         self.assertEqual(len(opener.requests),1)
 
-    def test_explicit_write_and_no_file_deletion(self):
+    def test_explicit_write_and_file_deletion(self):
         opener=Opener(b"Ok.")
         qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
         qb.remove_torrent("b"*40,delete_files=False)
         self.assertIn(b"deleteFiles=false",opener.requests[0].data)
-        with self.assertRaises(ValueError):
-            qb.remove_torrent("b"*40,delete_files=True)
+        qb.remove_torrent("b"*40,delete_files=True)
+        self.assertIn(b"deleteFiles=true",opener.requests[1].data)
         qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40)
-        self.assertEqual(len(opener.requests),2)
+        self.assertEqual(len(opener.requests),3)
 
     def test_login_does_not_enable_writes(self):
         opener=Opener(b"Ok.")
