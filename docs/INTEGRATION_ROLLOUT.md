@@ -76,3 +76,12 @@ The feature branch now starts `anime_shoko_handoff_monitor.py` only when Shoko a
 Shoko VFS/Jellyfin visibility is **not** an end-to-end prerequisite. Completion instead requires that Shoko read back the exact verified AniDB episode association for each Sonarr-imported file. The Sonarr finalizer now retains trial files and qB source torrents while Shoko is enabled and that readback has not been recorded as `SHOKO_LINK_VERIFIED` or `SHOKO_ALREADY_LINKED_VERIFIED`. No code path currently promotes records to those states: they remain intentionally blocked until precise episode link verification is implemented. This avoids premature cleanup, but means Keep cannot complete automatically with Shoko enabled yet. Disabling Shoko retains legacy Sonarr-only cleanup logic.
 
 Both components consume central configuration from `load_config()`: Sonarr's `settings.sonarr.base_url` and `secrets.sonarr_api_key`, Shoko's `settings.shoko.base_url` and `secrets.shoko_api_key`. Never insert credentials in logs or repo files.
+
+
+### Installed-system upgrade and settings migration
+
+For an **existing** Anime Discovery installation, do not rerun `deploy/install-homelab.py`. Once a tested release is approved and published, run `anime-discovery-admin upgrade`, then `anime-discovery-admin settings migrate` to preview missing keys and `anime-discovery-admin settings migrate --apply` to back up `settings.json` and insert only missing defaults. `secrets.json` is deliberately **not** modified by migration; prior `web_token`, `ntfy_token`, `tvdb_api_key`, `sonarr_api_key` and `shoko_api_key` values remain intact.
+
+New integrations default **disabled**. To supply missing API credentials after migration, use `anime-discovery-admin settings configure-integration sonarr`, `... shoko`, `... tvdb`, or `... ntfy`; entering a blank credential preserves any existing key. No AniDB credential exists in this configuration schema: `identity.series_map[*].anidb_id` is a catalog identifier, not a secret. The installer inherits the same central defaults, so fresh installs include the settings sections without auto-generating credentials.
+
+Do not run these upgrade instructions until the feature branch has completed CI and live validation and a release is explicitly approved; `develop` triggers publication.
