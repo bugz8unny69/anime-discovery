@@ -162,5 +162,13 @@ def receive(db, values, *, series_map=None):
         raise
     result = {"received": True, "notification_id": nid, "duplicate": bool(old)}
     if auto:
-        result.update(approve(db,nid,values,source="autobrr"))
+        approved=approve(db,nid,values,source="autobrr")
+        result.update(approved)
+        if not result["duplicate"] and source=="autobrr":
+            from anime_shared_discovery import schedule
+            # New episode triggers a bounded catch-up search for earlier episodes.
+            # The worker only runs this when Prowlarr has been configured.
+            result["gap_search"]=schedule(db,title=name,tvdb_id=values["tvdb_id"],
+                anidb_id=values["anidb_id"],season=int(values["season"]),
+                up_to=int(values["episode"]),origin="autobrr")["queued"]
     return result
