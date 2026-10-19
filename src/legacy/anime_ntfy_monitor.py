@@ -26,11 +26,15 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
         return {"sent":0,"pending":0}
     now=int(time.time()) if now is None else int(now)
     ensure_schema(db)
+    # Upgrade older unmatched RECEIVED rows so they can be reviewed too.
+    db.execute("""UPDATE notifications SET status='NEEDS_REVIEW'
+        WHERE status='RECEIVED' AND NOT EXISTS
+        (SELECT 1 FROM episode_dispatch d WHERE d.notification_id=notifications.id)""")
     interval=max(3600,settings["ntfy"]["reminder_hours"]*3600)
     rows=db.execute("""SELECT n.id,n.release_name FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
         LEFT JOIN ntfy_delivery sent ON sent.notification_id=n.id
-        WHERE d.notification_id IS NULL
+        WHERE d.notification_id IS NULL AND n.status='NEEDS_REVIEW'
           AND (sent.sent_at IS NULL OR sent.sent_at<=?)
         ORDER BY n.id ASC LIMIT 50""",(now-interval,)).fetchall()
     sent=0
