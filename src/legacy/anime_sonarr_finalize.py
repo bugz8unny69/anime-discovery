@@ -15,8 +15,8 @@ def _digest(path):
             h.update(chunk)
     return h.hexdigest()
 
-def _inside(path, root):
-    resolved=Path(path).resolve(strict=True)
+def _inside(path, root, *, allow_missing=False):
+    resolved=Path(path).resolve(strict=not allow_missing)
     base=Path(root).resolve(strict=True)
     return resolved.is_relative_to(base) and resolved!=base
 
@@ -39,21 +39,26 @@ def confirm_sonarr_copies(settings,secrets,*,sonarr_id,plan,expected_digests,ope
     used=set()
     for item in plan:
         source=Path(item["path"])
-        if not _inside(source,settings["storage"]["trial_root"]):
+        if not _inside(source,settings["storage"]["trial_root"],allow_missing=True):
             raise RuntimeError("Trial source outside trusted root")
         ids=mapping.get((item["season"],item["episode"]),set())
         matches=[file_map[id] for id in ids if id in file_map]
         if len(matches)!=1 or not matches[0] or not _inside(matches[0],cfg["root_folder"]):
             raise RuntimeError("Expected Sonarr episode file not verified")
         dest=Path(matches[0]).resolve(strict=True)
-        if dest in used or dest==source.resolve(strict=True):
+        if dest in used or dest==source.resolve(strict=False):
             raise RuntimeError("Sonarr destination overlaps trial file")
         used.add(dest)
-        if not dest.is_file() or not source.is_file():
-            raise RuntimeError("Trial/source file missing")
-        if source.stat().st_size!=dest.stat().st_size or _digest(source)!=_digest(dest):
-            raise RuntimeError("Sonarr copy differs from staged source")
-        if expected_digests.get(item["notification_id"]) and _digest(dest)!=expected_digests[item["notification_id"]]:
+        if not dest.is_file():
+            raise RuntimeError("Sonarr copy missing")
+        destination_digest=_digest(dest)
+        expected=expected_digests.get(item["notification_id"])
+        if source.is_file():
+            if source.stat().st_size!=dest.stat().st_size or _digest(source)!=destination_digest:
+                raise RuntimeError("Sonarr copy differs from staged source")
+        elif expected is None:
+            raise RuntimeError("Missing original has no trusted recovery digest")
+        if expected and destination_digest!=expected:
             raise RuntimeError("Staged integrity digest mismatch")
         destinations.append(str(dest))
     return destinations
@@ -107,7 +112,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         if qb.torrent_details(infohash) is not None:
             qb.remove_torrent(infohash,delete_files=True)
     for item in plan:
-        Path(item["path"]).unlink()
+        Path(item["path"]).unlink(missing_ok=True)
     db.execute("BEGIN IMMEDIATE")
     try:
         db.execute("UPDATE series SET status='KEPT' WHERE id=?",(series_id,))
