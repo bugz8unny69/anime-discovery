@@ -42,16 +42,18 @@ def configure(directory, service, *, ask=input, secret_prompt=getpass.getpass):
     settings_path=directory/"settings.json"
     secrets_path=directory/"secrets.json"
     lock=directory/".settings.lock"
+    persisted=load_config(directory)
     changes={}
     for field,kind in SERVICES[service]:
-        raw=ask(service+"."+field+" (blank to preserve): ").strip()
+        old=persisted["settings"][service][field]
+        raw=ask(service+"."+field+" ["+str(old)+"] (Enter keeps): ").strip()
         if raw:
             try:
                 changes[field]=kind(raw)
             except ValueError:
                 raise ValueError("Invalid integration field "+field) from None
     key=SECRET_NAMES[service]
-    secret=secret_prompt(service+" API token (blank to preserve): ").strip()
+    secret=secret_prompt(service+" credential ["+("Set" if persisted["secrets"].get(key) else "Not set")+"] (Enter keeps): ")
     enabled_answer=ask("Enable "+service+" now? [yes/no/keep]: ").strip().lower()
     if enabled_answer not in ("yes","no","keep"):
         raise ValueError("Select yes, no or keep")
@@ -70,7 +72,7 @@ def configure(directory, service, *, ask=input, secret_prompt=getpass.getpass):
                 settings[service]["enabled"]=enabled_answer=="yes"
             if service=="shoko":
                 # Shoko linking remains fail-closed until a reviewed API contract is approved.
-                settings[service]["auto_link_verified"]=False
+                settings[service]["auto_link_verified"]=current["settings"]["shoko"]["auto_link_verified"]
             if secret:
                 secrets[key]=secret
             validate_config(settings,secrets)
@@ -78,6 +80,8 @@ def configure(directory, service, *, ask=input, secret_prompt=getpass.getpass):
                 _write(secrets_path,secrets,0o600)
             _write(settings_path,settings,settings_path.stat().st_mode & 0o777)
             return {"integration":service,"enabled":settings[service]["enabled"],
-                    "restart_required":True,"secrets_preserved":not bool(secret)}
+                    "changed_settings":sorted(k for k in settings[service] if settings[service][k]!=current["settings"][service][k]),
+                    "credential_updated":bool(secret),"restart_required":bool(secret or settings[service]!=current["settings"][service]),
+                    "secrets_preserved":not bool(secret)}
         finally:
             fcntl.flock(handle,fcntl.LOCK_UN)

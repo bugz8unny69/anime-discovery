@@ -93,7 +93,11 @@ def main(argv=None):
 
     settings=commands.add_parser("settings",help="Flat-file settings")
     settings_actions=settings.add_subparsers(dest="settings_command",required=True)
-    settings_actions.add_parser("show")
+    show_cmd=settings_actions.add_parser("show")
+    show_cmd.add_argument("--json",action="store_true")
+    secret_cmd=settings_actions.add_parser("set-secret")
+    secret_cmd.add_argument("key")
+    secret_cmd.add_argument("--clear",action="store_true")
     settings_actions.add_parser("configure-credentials",help="Set separate webhook token and dashboard password")
     settings_actions.add_parser("configure-jellyfin",help="Configure immediate Jellyfin library scan credentials")
     integration=settings_actions.add_parser("configure-integration",help="Configure Sonarr, NTFY, TVDB or Shoko")
@@ -169,12 +173,26 @@ def main(argv=None):
                 print(json.dumps({"reachable":result["reachable"],"writes_enabled":False},indent=2))
             elif args.settings_command=="configure-credentials":
                 from anime_admin_credentials import configure_credentials
-                print(json.dumps(configure_credentials(args.config_dir),indent=2))
+                report=configure_credentials(args.config_dir)
+                from anime_admin_secret_editor import set_secret
+                from anime_flat_config import ALLOWED_SECRET_KEYS
+                report["supported_credential_status"]={}
+                for name in sorted(ALLOWED_SECRET_KEYS-{"web_token","admin_password"}):
+                    outcome=set_secret(args.config_dir,name)
+                    report["supported_credential_status"][name]=outcome.get("status",
+                        "Set" if load_config(args.config_dir)["secrets"].get(name) else "Not set")
+                    if outcome.get("changed"):
+                        report["restart_required"]=True
+                print(json.dumps(report,indent=2))
             elif args.settings_command=="migrate":
                 from anime_admin_config_migration import migrate
                 print(json.dumps(migrate(args.config_dir,apply=args.apply),indent=2,sort_keys=True))
             elif args.settings_command=="show":
-                print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
+                from anime_admin_show import render
+                print(render(args.config_dir,as_json=args.json))
+            elif args.settings_command=="set-secret":
+                from anime_admin_secret_editor import set_secret
+                print(json.dumps(set_secret(args.config_dir,args.key,clear=args.clear),indent=2))
             else:
                 try:
                     value=json.loads(args.value)
