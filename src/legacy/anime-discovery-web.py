@@ -18,7 +18,7 @@ from anime_flat_config import load_config
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
 
-def app(db_path, token):
+def app(db_path, token, series_map=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, body, content_type="text/html; charset=utf-8"):
             data = body.encode()
@@ -158,7 +158,7 @@ def app(db_path, token):
                 values = self.form()
                 with self.database() as db:
                     if route == "/webhook":
-                        result = receive(db, values)
+                        result = receive(db, values, series_map=series_map)
                     elif route == "/series-action":
                         result = series_action(db, int(values["series_id"]), str(values["action"]))
                     else:
@@ -187,7 +187,7 @@ def main():
         raise RuntimeError("Database missing: " + str(db_path))
     host, port = settings["web"]["host"], settings["web"]["port"]
     print(f"Anime Discovery listening on {host}:{port}", flush=True)
-    ThreadingHTTPServer((host, port), app(db_path, token)).serve_forever()
+    ThreadingHTTPServer((host, port), app(db_path, token, settings["identity"]["series_map"])).serve_forever()
 
 
 if __name__ == "__main__":
