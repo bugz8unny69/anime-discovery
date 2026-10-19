@@ -107,6 +107,31 @@ Existing `doctor` and `new-database` spellings still work for older scripts.
 The application itself still reads its settings and secrets from flat files;
 no environment variables or worker flags are required.
 
+## Dashboard: Series and Jobs
+
+The dashboard has separate tabs for **Series**, **Jobs**, and
+**Recognized names**.
+
+**Series** is the Anime-Trial library: an anime appears there only after
+an acquisition has completed and at least one staged episode remains on disk.
+Simply receiving a webhook or recognizing the anime does not add it to this
+view. Series rows show staged episode count, last staged episode and
+management status. Select any visible rows with checkboxes, then apply
+Reject, Clear History or Reset as one database transaction. List pages
+support 20, 50 or 100 rows; selection is confined to the current page.
+
+**Jobs** shows all received Autobrr releases, including unmatched releases,
+queued acquisitions and completed episodes. States include Received,
+Queued, Running, Waiting for Download, Completed, Blocked and Needs Review.
+The open Jobs tab refreshes automatically every five seconds, showing
+new notifications and status changes without a manual page reload.
+Manual episode approval for unmatched jobs remains accessible here.
+
+**Recognized names** holds the configured TVDB/AniDB title aliases
+used to match incoming releases, whether or not they have reached
+Anime-Trial. This prevents the library from being confused with the
+inbox or the identity configuration.
+
 ## Offline fresh-install smoke check
 
 From the repository root with Python 3.12:
