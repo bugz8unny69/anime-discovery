@@ -25,6 +25,8 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
     row=db.execute("SELECT external_id,title,status FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
     if row is None or not str(row[0]).isdigit() or int(row[0])<=0:
         raise ValueError("Series lacks TVDB identity")
+    if row[2] in ("SONARR_IMPORT_PENDING","KEPT"):
+        raise ValueError("Keep already submitted or completed")
     if row[2]=="REJECTED" or db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(series_id,)).fetchone():
         raise ValueError("Rejected series requires reset")
     from pathlib import Path
