@@ -41,6 +41,31 @@ def find_file(base_url,api_key,absolute_path,*,opener=urlopen):
         raise RuntimeError("Ambiguous Shoko file match")
     return exact[0]
 
+def get_file(base_url,api_key,file_id,*,opener=urlopen):
+    """Fetch indexed Shoko file by exact ID, including location metadata."""
+    if type(file_id) is not int or file_id<=0:
+        raise ValueError("Valid Shoko file ID required")
+    record=_get(base_url,api_key,"File/"+str(file_id),opener=opener)
+    if not isinstance(record,dict) or record.get("ID")!=file_id:
+        raise RuntimeError("Shoko file ID mismatch")
+    return record
+
+def validate_location(file_record,*,relative_path,import_folder_id):
+    """Reconcile Shoko's relative location against a known import folder."""
+    if not isinstance(file_record,dict) or type(file_record.get("ID")) is not int:
+        raise ValueError("Invalid Shoko file record")
+    found=[location for location in file_record.get("Locations",[])
+           if isinstance(location,dict)
+           and location.get("FileID")==file_record["ID"]
+           and location.get("ImportFolderID")==import_folder_id
+           and location.get("RelativePath")==relative_path
+           and location.get("IsAccessible") is True]
+    if len(found)!=1 or type(found[0].get("ID")) is not int:
+        raise RuntimeError("Shoko file location not uniquely confirmed")
+    return {"file_id":file_record["ID"],"location_id":found[0]["ID"],
+            "accessible":True}
+
+
 def resolve_episode(base_url,api_key,anidb_episode_id,*,opener=urlopen):
     if type(anidb_episode_id) is not int or anidb_episode_id<=0:
         raise ValueError("Exact AniDB episode ID required")
