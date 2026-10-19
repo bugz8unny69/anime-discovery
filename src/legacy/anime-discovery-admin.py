@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import sys
+import subprocess
 from pathlib import Path
 
 from anime_admin_settings import set_setting
@@ -71,40 +72,82 @@ def doctor(path):
 
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(prog="anime-discovery-admin.py")
+    parser=argparse.ArgumentParser(prog="anime-discovery-admin.py",
+        description="Manage Anime Discovery releases, database and flat-file settings.")
     parser.add_argument("--config-dir",type=Path,default=DEFAULT_CONFIG)
-    parser.add_argument("--db",type=Path,default=DEFAULT_DB)
+    parser.add_argument("--db",type=Path,default=None,
+                        help="Override configured database path for local administration")
     commands=parser.add_subparsers(dest="command",required=True)
-    commands.add_parser("doctor")
-    new_db=commands.add_parser("new-database")
-    new_db.add_argument("--force",action="store_true")
-    settings=commands.add_parser("settings")
-    sub=settings.add_subparsers(dest="settings_command",required=True)
-    sub.add_parser("show")
-    set_cmd=sub.add_parser("set")
+
+    commands.add_parser("upgrade",help="Fast-forward develop and restart the installed service")
+    commands.add_parser("status",help="Show installed version, service and database readiness")
+
+    database=commands.add_parser("database",help="Database administration")
+    database_actions=database.add_subparsers(dest="database_command",required=True)
+    init=database_actions.add_parser("init",help="Create the application database")
+    init.add_argument("--force",action="store_true",help="Replace with backup (service must be stopped)")
+    database_actions.add_parser("doctor",help="Check SQLite schema and integrity")
+
+    settings=commands.add_parser("settings",help="Flat-file settings")
+    settings_actions=settings.add_subparsers(dest="settings_command",required=True)
+    settings_actions.add_parser("show")
+    set_cmd=settings_actions.add_parser("set")
     set_cmd.add_argument("key")
     set_cmd.add_argument("value",help="JSON value, e.g. 5, true, or quoted string")
+
+    # Preserve existing scripts while presenting one consistent grouped CLI.
+    commands.add_parser("doctor",help=argparse.SUPPRESS)
+    legacy_init=commands.add_parser("new-database",help=argparse.SUPPRESS)
+    legacy_init.add_argument("--force",action="store_true")
+
     args=parser.parse_args(argv)
     try:
-        if args.command=="new-database":
-            result=new_database(args.db,force=args.force)
-            print(f"Initialized fresh database at {args.db}; schema version {result['schema_version']}; acquisition disabled.")
-        elif args.command=="doctor":
-            report=doctor(args.db)
+        if args.command=="upgrade":
+            from anime_admin_upgrade import upgrade
+            config=load_config(args.config_dir)
+            configured_db=Path(config["settings"]["daemon"]["database_path"])
+            root=Path(__file__).resolve().parents[2]
+            result=upgrade(root,db_path=args.db or configured_db)
+            print(json.dumps(result,indent=2,sort_keys=True))
+        elif args.command=="status":
+            from anime_admin_upgrade import command
+            root=Path(__file__).resolve().parents[2]
+            config=load_config(args.config_dir)
+            path=args.db or Path(config["settings"]["daemon"]["database_path"])
+            report={"checkout":str(root),
+                    "version":command("git","rev-parse","--short","HEAD",cwd=root),
+                    "database":doctor(path)}
+            try:
+                report["service"]=command("systemctl","is-active","anime-discovery.service")
+            except subprocess.CalledProcessError:
+                report["service"]="inactive"
+            print(json.dumps(report,indent=2,sort_keys=True))
+        elif args.command in ("new-database","database") and (
+            args.command=="new-database" or args.database_command=="init"):
+            config=load_config(args.config_dir)
+            path=args.db or Path(config["settings"]["daemon"]["database_path"])
+            result=new_database(path,force=args.force)
+            print(f"Initialized database at {path}; schema version {result['schema_version']}.")
+        elif args.command=="doctor" or (args.command=="database" and args.database_command=="doctor"):
+            path=args.db
+            if path is None:
+                path=Path(load_config(args.config_dir)["settings"]["daemon"]["database_path"])
+            report=doctor(path)
             print(json.dumps(report,indent=2,sort_keys=True))
             if not report["ready"]:
                 parser.exit(1,"anime-discovery-admin: database readiness failed\\n")
-        elif args.settings_command=="show":
-            print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
-        else:
-            try:
-                value=json.loads(args.value)
-            except json.JSONDecodeError:
-                value=args.value
-            updated=set_setting(args.config_dir,args.key,value)
-            print(f"{args.key} = {json.dumps(updated)} (daemon reload pending)")
-    except (OSError,ValueError,sqlite3.Error,RuntimeError) as exc:
-        parser.exit(1,f"anime-discovery-admin: {exc}\n")
+        elif args.command=="settings":
+            if args.settings_command=="show":
+                print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
+            else:
+                try:
+                    value=json.loads(args.value)
+                except json.JSONDecodeError:
+                    value=args.value
+                updated=set_setting(args.config_dir,args.key,value)
+                print(f"{args.key} = {json.dumps(updated)} (restart service to apply)")
+    except (OSError,ValueError,sqlite3.Error,RuntimeError,subprocess.CalledProcessError) as exc:
+        parser.exit(1,f"anime-discovery-admin: {exc}\\n")
 
 if __name__=="__main__":
     main()
