@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from anime_fresh_database import initialize
-from anime_sonarr_import import plan_staged_imports
+from anime_sonarr_import import plan_staged_imports, request_import
 
 class StagedPlanTests(unittest.TestCase):
     def setUp(self):
@@ -36,5 +36,30 @@ class StagedPlanTests(unittest.TestCase):
         self.db.execute("UPDATE torrent_recovery_records SET staged_path=?",(str(outside),))
         with self.assertRaises(ValueError):
             plan_staged_imports(self.db,self.sid,trial_root=self.root)
+
+class RejectionTests(unittest.TestCase):
+    def test_existing_higher_quality_blocks_manual_import(self):
+        class Reply:
+            def __init__(self,data): self.data=data
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self):
+                import json
+                return json.dumps(self.data).encode()
+        calls=[]
+        def opener(req,timeout):
+            calls.append(req.get_method())
+            if "episode?seriesId" in req.full_url:
+                return Reply([{"id":2443,"seasonNumber":1,"episodeNumber":1}])
+            return Reply([{"path":"/mnt/media/Anime-Trial/Solo Leveling/Season 01/Solo Leveling - S01E01.mkv",
+                "series":{"id":124},"episodes":[{"id":2443}],
+                "quality":{"quality":{"id":9}},"languages":[{"id":8}],
+                "rejections":[{"type":"permanent","reason":"Not an upgrade"}]}])
+        with self.assertRaises(RuntimeError):
+            request_import({"sonarr":{"base_url":"https://sonarr.example"}},
+                {"sonarr_api_key":"test"},sonarr_id=124,
+                plan=[{"season":1,"episode":1,"path":"/mnt/media/Anime-Trial/Solo Leveling/Season 01/Solo Leveling - S01E01.mkv"}],
+                opener=opener)
+        self.assertEqual(calls,["GET","GET"])
 
 if __name__=="__main__":unittest.main()
