@@ -61,7 +61,7 @@ const csrf=document.querySelector('input[name="_csrf"]')?.value;
 const forms=document.querySelectorAll('form.integration');
 function fieldsOf(form){
   const fields={};
-  for(const input of form.querySelectorAll('input:not([name=credential])')){
+  for(const input of form.querySelectorAll('input:not([name=credential]):not([name=_csrf])')){
     fields[input.name]=input.type==='checkbox'?input.checked:
       input.type==='number'?Number(input.value):input.value;
   }
