@@ -93,7 +93,11 @@ def main(argv=None):
 
     settings=commands.add_parser("settings",help="Flat-file settings")
     settings_actions=settings.add_subparsers(dest="settings_command",required=True)
-    settings_actions.add_parser("show")
+    show_cmd=settings_actions.add_parser("show")
+    show_cmd.add_argument("--json",action="store_true")
+    secret_cmd=settings_actions.add_parser("set-secret")
+    secret_cmd.add_argument("key")
+    secret_cmd.add_argument("--clear",action="store_true")
     settings_actions.add_parser("configure-credentials",help="Set separate webhook token and dashboard password")
     settings_actions.add_parser("configure-jellyfin",help="Configure immediate Jellyfin library scan credentials")
     integration=settings_actions.add_parser("configure-integration",help="Configure Sonarr, NTFY, TVDB or Shoko")
