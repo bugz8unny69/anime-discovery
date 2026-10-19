@@ -6,9 +6,10 @@ import time
 from anime_claimed_pipeline import process_claimed
 from anime_acquisition_finalize import finalize_acquisition
 from anime_acquisition_gate import approved_dispatch
+from anime_jellyfin_refresh import refresh_best_effort
 
 
-def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False):
+def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -51,6 +52,9 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 tvdb_id=payload['tvdb_id'])
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],payload['notification_id'])
+                # Only scan once after durable finalization; never undo staging
+                # or retry acquisition because the Jellyfin service is down.
+                refresh_best_effort(jellyfin_refresh)
                 if cleanup_source:
                     qb_factory().remove_torrent(payload['infohash'], delete_files=True)
             return result
