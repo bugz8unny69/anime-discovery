@@ -84,6 +84,15 @@ def _existing_setup(account):
         for path,mode in fixes:
             os.chown(path,account.pw_uid,account.pw_gid)
             os.chmod(path,mode)
+    lock=CONFIG_DIR/".settings.lock"
+    if lock.exists():
+        if lock.is_symlink() or not lock.is_file():
+            raise ValueError("Unsafe settings lock file")
+        if (lock.stat().st_uid,lock.stat().st_gid)!=(account.pw_uid,account.pw_gid):
+            if ask("Fix settings lock ownership for the service user? (yes/no)","no").lower()!="yes":
+                raise ValueError("Settings lock ownership requires correction")
+            os.chown(lock,account.pw_uid,account.pw_gid)
+        os.chmod(lock,0o600)
     return config
 
 
