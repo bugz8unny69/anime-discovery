@@ -20,8 +20,8 @@ class DashboardSettingsTests(unittest.TestCase):
                 html=settings_page(folder)
             for name in ("jellyfin","sonarr","shoko","autobrr","ntfy"):
                 self.assertIn('data-name="'+name+'"',html)
-            self.assertIn("Webhook Token: Set",html)
-            self.assertIn("API Key: Set",html)
+            self.assertIn('data-key="web_token" data-stored="true"',html)
+            self.assertIn("API Key",html)
             self.assertIn("Save &amp; Apply",html)
             self.assertIn("Test Connection",html)
             self.assertIn('class="toggle-secret"',html)
