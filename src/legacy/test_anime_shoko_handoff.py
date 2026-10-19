@@ -26,10 +26,10 @@ class HandoffTests(unittest.TestCase):
                 anidb_episode_id=555,verified_episode_identity=True)
         kw.update(overrides)
         return inspect_imported_episode("https://shoko.arr.internal","test-key",opener=opener,**kw)
-    def test_unverified_episode_identity_does_not_call_api(self):
-        def fail(*args,**kwargs): raise AssertionError("Unexpected API call")
-        result=self.run_check(fail,verified_episode_identity=False)
-        self.assertEqual(result["status"],"NEEDS_EPISODE_IDENTITY")
+    def test_unverified_episode_identity_may_scan_but_does_not_link(self):
+        result=self.run_check(lambda req,timeout: Response([]),verified_episode_identity=False)
+        self.assertEqual(result["status"],"AWAITING_SHOKO_SCAN")
+        self.assertFalse(result["writes_enabled"])
     def test_file_not_seen_waits_for_scan(self):
         result=self.run_check(lambda req,timeout: Response([]))
         self.assertEqual(result["status"],"AWAITING_SHOKO_SCAN")
