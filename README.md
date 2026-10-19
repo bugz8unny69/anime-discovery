@@ -126,6 +126,37 @@ To enable the *optional* new Prowlarr integration after migrating, configure
 without removing any existing keys, and set `prowlarr.enabled` to true.
 Keep `secrets.json` readable only by its owner (mode 0600).
 
+## Release archive deployment (no Git clone)
+
+GitHub Actions builds versioned tar.gz and zip releases when changes are
+merged into develop. Each release includes SHA256SUMS.
+
+This is a **private repository**: release assets require authenticated
+download. Anonymous wget will not work. Download with your authenticated
+GitHub browser session or GitHub CLI, then transfer the archive to the VM
+using an available secure transport. No Git clone or SSH access is needed
+on the VM.
+
+Extract the archive into /opt (it contains an anime-discovery/ directory):
+
+```bash
+sudo tar -xzf anime-discovery-build-VERSION.tar.gz -C /opt
+cd /opt/anime-discovery
+sudo python3 deploy/install-homelab.py
+```
+
+Verify the package with the published SHA256SUMS before extraction. The
+installer asks for the existing Linux service account (default
+anime-discovery) and requires membership in the media group (GID 1002).
+It detects existing settings.json and secrets.json, requests confirmation
+before correcting permissions, and does not overwrite credentials.
+The configured existing database must be archived or removed separately
+before installation.
+
+**Important:** the current admin upgrade is Git-only; archive installations
+cannot use it yet. For now, download a later release archive and perform a
+controlled application update rather than invoking Git-based upgrade.
+
 ## Built-in VM upgrade and administration
 
 After the first installation, update the checked-out `develop` release and
