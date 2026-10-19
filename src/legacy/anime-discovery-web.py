@@ -115,7 +115,8 @@ def app(db_path, token, series_map=None, config_dir=None):
                 values = self.form()
                 with self.database() as db:
                     if route == "/webhook":
-                        result = receive(db, values, series_map=aliases())
+                        result = receive(db, values, series_map=aliases(),
+                            gap_search_enabled=(load_config(config_dir)["settings"]["prowlarr"]["enabled"] if config_dir else False))
                     elif route == "/request-anime":
                         config=load_config(config_dir) if config_dir else {"settings":{"prowlarr":{"enabled":False}}}
                         if not config["settings"]["prowlarr"]["enabled"]:
