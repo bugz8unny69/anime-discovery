@@ -7,6 +7,7 @@ restart. Existing /etc configuration and /var/lib database remain untouched.
 import os
 import shutil
 import sqlite3
+import stat
 import tarfile
 import tempfile
 import time
@@ -89,8 +90,13 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
     try:
         progress("Extracting release archive into staging directory")
         _extract(archive,staged)
-        # Preserve service-user ownership if the installed tree is user-owned.
+        # The staged root is created with mkdir's default mode, not the
+        # installed directory's mode. Preserve its actual accessibility before
+        # activating it: a service account must be able to chdir into it.
         old_stat=root.stat()
+        os.chmod(staged,stat.S_IMODE(old_stat.st_mode))
+        progress("Preserved application root directory permissions")
+        # Preserve service-user ownership if the installed tree is user-owned.
         if os.geteuid()==0 and old_stat.st_uid!=0:
             for path in [staged,*staged.rglob("*")]:
                 os.chown(path,old_stat.st_uid,old_stat.st_gid)
