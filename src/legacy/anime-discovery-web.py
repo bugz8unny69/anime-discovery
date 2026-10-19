@@ -216,6 +216,17 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 elif not self.check_csrf({}):
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/api/test-connection":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    service=values.get("service")
+                    from anime_integration_connection import test_connection
+                    current=load_config(config_dir)
+                    result=test_connection(current["settings"],current["secrets"],service)
+                    return self.send(200,json.dumps(result),"application/json")
+                except (ValueError,TypeError) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/credentials":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 try:
