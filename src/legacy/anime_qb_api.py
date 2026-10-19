@@ -55,10 +55,10 @@ class QBittorrentAPI:
             raise RuntimeError("Torrent add not acknowledged")
 
     def remove_torrent(self, infohash, *, delete_files=False):
-        if delete_files is not False:
-            raise ValueError("qBittorrent file deletion is forbidden")
+        if type(delete_files) is not bool:
+            raise ValueError("delete_files must be boolean")
         response=self._request("torrents/delete",
-                               {"hashes":_hash(infohash),"deleteFiles":"false"})
+                               {"hashes":_hash(infohash),"deleteFiles":"true" if delete_files else "false"})
         if response.strip()!=b"Ok.":
             raise RuntimeError("Torrent removal not acknowledged")
 
