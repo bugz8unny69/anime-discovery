@@ -10,6 +10,23 @@ The currently deployed application is separate from this repository. No GitHub c
 ## Scope
 Autobrr webhook ingestion, canonical anime identity, controller and episode tracking, qBittorrent verification and acquisition, dashboard and authentication, safe staging, rejection enforcement, and administrative CLI.
 
+## Offline fresh-install smoke check
+
+From the repository root with Python 3.12:
+
+```bash
+export PYTHONPATH=src/legacy
+python src/legacy/anime-discovery-admin.py --db /tmp/anime-discovery-smoke.db new-database
+python src/legacy/anime-discovery-admin.py --db /tmp/anime-discovery-smoke.db doctor
+python -m unittest -v test_anime_fresh_acquisition_integration test_anime_admin_cli
+```
+
+Choose a new database path; `new-database` intentionally refuses to overwrite an
+existing file. `doctor` is read-only and exits nonzero for an incomplete database.
+These commands do not start services, enable acquisition, or contact qBittorrent.
+They are a database smoke check, **not** proof that the complete dashboard,
+webhook server, installer, or deployment is ready.
+
 ## Deployment constraints
 Application: `/opt/anime-discovery`; configuration: `/etc/anime-discovery`; state: `/var/lib/anime-discovery`. No new systemd unit changes or writes outside these locations without approval. Back up the existing installation and SQLite state before a clean install; stage and verify replacement and preserve rollback.
 
