@@ -33,15 +33,17 @@ class HandoffTests(unittest.TestCase):
     def test_file_not_seen_waits_for_scan(self):
         result=self.run_check(lambda req,timeout: Response([]))
         self.assertEqual(result["status"],"AWAITING_SHOKO_SCAN")
-    def test_unrecognized_null_links_blocks_write(self):
+    def test_unrecognized_null_links_are_checked_against_episode_endpoint(self):
         def opener(req,timeout):
             url=req.full_url
             if "PathEndsWith" in url: return Response([{"ID":62}])
             if "/Location" in url: return Response([{"FileID":62,"AbsolutePath":str(self.path),"IsAccessible":True}])
+            if "/File/62/Episode" in url: return Response([])
             if "/File/62" in url: return Response({"ID":62,"SeriesIDs":None})
+            if "/Episode/AniDB/555/Episode" in url: return Response({"IDs":{"ID":876,"AniDB":555}})
             raise AssertionError(url)
         result=self.run_check(opener)
-        self.assertEqual(result["status"],"UNRECOGNIZED_NEEDS_REVIEW")
+        self.assertEqual(result["status"],"LINK_PLAN_READY")
         self.assertFalse(result["writes_enabled"])
     def test_exact_identity_can_prepare_but_not_send_link(self):
         methods=[]
@@ -50,6 +52,7 @@ class HandoffTests(unittest.TestCase):
             url=req.full_url
             if "PathEndsWith" in url: return Response([{"ID":62}])
             if "/Location" in url: return Response([{"FileID":62,"AbsolutePath":str(self.path),"IsAccessible":True}])
+            if "/File/62/Episode" in url: return Response([])
             if "/File/62" in url: return Response({"ID":62,"SeriesIDs":[]})
             if "/Episode/AniDB/555/Episode" in url: return Response({"IDs":{"ID":876,"AniDB":555}})
             raise AssertionError(url)
