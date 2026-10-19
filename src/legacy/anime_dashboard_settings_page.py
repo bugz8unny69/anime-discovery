@@ -38,6 +38,9 @@ def settings_page(directory):
         key=SECRETS[name]
         label="Set" if data["credential_status"].get(key) else "Not set"
         out+='<p>Credential: '+esc(label)+' (never shown in browser)</p>'
+        out+='<label>Replace credential <input type="password" name="credential" autocomplete="new-password"></label>'
+        out+='<button type="button" class="save-credential" data-key="'+key+'">Update credential</button>'
+        out+='<button type="button" class="clear-credential" data-key="'+key+'">Clear credential</button>'
         out+='<button type="submit">Save &amp; Apply</button></form>'
         out+='</details>'
     out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button>'
@@ -48,7 +51,7 @@ for(const form of document.querySelectorAll('form.integration')){
     ev.preventDefault();
     const target=document.getElementById('settings-result');
     const section=form.dataset.name, fields={};
-    for(const input of form.querySelectorAll('input')){
+    for(const input of form.querySelectorAll('input:not([type=password])')){
       fields[input.name]=input.type==='checkbox'?input.checked:
         input.type==='number'?Number(input.value):input.value;
     }
@@ -62,6 +65,26 @@ for(const form of document.querySelectorAll('form.integration')){
       if(!response.ok)throw new Error(data.error||'Save failed');
       target.textContent=data.restart_required?'Saved. Restart required.':'No changes.';
     }catch(e){target.textContent=e.message}
+  });
+}
+for(const button of document.querySelectorAll('.save-credential,.clear-credential')){
+  button.addEventListener('click',async()=>{
+    const clear=button.classList.contains('clear-credential');
+    const input=button.closest('form').querySelector('input[name=credential]');
+    if(clear&&!confirm('Clear this credential? Existing integration may stop working.'))return;
+    if(!clear&&!input.value)return;
+    const token=document.querySelector('input[name="_csrf"]')?.value;
+    const target=document.getElementById('settings-result');
+    try{
+      const res=await fetch('/api/credentials',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':token},
+        body:JSON.stringify({key:button.dataset.key,clear,value:clear?null:input.value})});
+      const body=await res.json();
+      if(!res.ok)throw new Error(body.error||'Credential update failed');
+      input.value='';
+      target.textContent=clear?'Credential cleared. Restart may be required.':
+        'Credential updated. Restart may be required.';
+    }catch(error){target.textContent=error.message}
   });
 }
 document.getElementById('refresh').addEventListener('click',()=>location.reload());
