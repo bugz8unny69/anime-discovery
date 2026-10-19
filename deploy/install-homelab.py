@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src" / "legacy"))
 from anime_flat_config import DEFAULT_SETTINGS, validate_config
 from anime_fresh_database import initialize
+from anime_admin_config_migration import migrate
+from anime_flat_config import load_config
 
 CONFIG_DIR = Path("/etc/anime-discovery")
 DATA_DIR = Path("/var/lib/anime-discovery")
@@ -42,49 +44,120 @@ def write_json(path, data, *, mode, uid, gid):
     os.chown(path, uid, gid)
 
 
-def main():
-    if os.geteuid() != 0:
-        raise SystemExit("Run with sudo: sudo python3 deploy/install-homelab.py")
-    if (CONFIG_DIR / "settings.json").exists() or (CONFIG_DIR / "secrets.json").exists():
-        raise SystemExit("Existing configuration detected; edit the existing settings instead of reinstalling")
-    if SERVICE.exists():
-        raise SystemExit("Existing service detected; use systemctl for updates")
-    if not shutil.which("systemctl"):
-        raise SystemExit("systemd is required for the automatic service")
-    username = pwd.getpwuid(ROOT.stat().st_uid).pw_name
-    if username == "root":
-        username = ask("Non-root account to run Anime Discovery")
-    account = pwd.getpwnam(username)
-    print("Installing Anime Discovery for account:", username)
-    download = Path(ask("Existing qBittorrent download directory", "/mnt/media/Torrents/anime")).expanduser().resolve()
-    trial = Path(ask("Existing Anime Discovery staging directory", "/mnt/media/Anime")).expanduser().resolve()
-    if not download.is_dir() or not trial.is_dir() or download == trial:
-        raise ValueError("Download and staging directories must exist and be different")
-    qb_url = ask("qBittorrent API URL", "https://torrents.int.lhprojects.net")
-    qb_user = ask("qBittorrent username")
-    qb_password = ask("qBittorrent password",secret=True)
-    web_token = ask("Private dashboard/webhook token",secret=True)
-    settings = copy.deepcopy(DEFAULT_SETTINGS)
-    settings["daemon"]["database_path"] = str(DATA_DIR / "anime-discovery.db")
-    settings["storage"].update(download_root=str(download), trial_root=str(trial))
-    settings["qbittorrent"].update(base_url=qb_url, username=qb_user, cleanup_source=True)
-    secrets = {"qbittorrent_password": qb_password, "web_token": web_token}
-    validate_config(settings,secrets)
+def _existing_setup(account):
+    """Adopt two existing configuration files without regenerating either."""
+    settings_file=CONFIG_DIR/"settings.json"
+    secrets_file=CONFIG_DIR/"secrets.json"
+    if not settings_file.is_file() or not secrets_file.is_file():
+        raise ValueError("Both existing settings.json and secrets.json are required; refusing partial configuration")
+    if settings_file.is_symlink() or secrets_file.is_symlink():
+        raise ValueError("Configuration symlinks are not accepted")
+    if secrets_file.stat().st_mode & 0o077:
+        raise ValueError("secrets.json must be mode 0600 before adopting configuration")
+    print("Found existing Anime Discovery configuration; keeping both files.")
+    preview=migrate(CONFIG_DIR,apply=False)
+    if not preview["ready"]:
+        raise ValueError("Existing configuration needs review: "+
+                         ", ".join(preview["unknown_settings"]+preview["unknown_secret_keys"]))
+    if preview["missing_settings"]:
+        print("Missing supported settings:",", ".join(preview["missing_settings"]))
+        if ask("Apply missing defaults and keep an original settings backup? (yes/no)","no").lower()!="yes":
+            raise ValueError("Migration declined; no changes to configuration")
+        migrated=migrate(CONFIG_DIR,apply=True)
+        print("Settings backup:",migrated["backup"])
+    config=load_config(CONFIG_DIR)
+    # A service account must read secrets. Never silently chmod/chown existing files.
+    if os.geteuid()==0 and account.pw_uid!=0:
+        st=secrets_file.stat()
+        if st.st_uid!=account.pw_uid:
+            raise ValueError("Existing secrets.json is not owned by service account "+
+                             account.pw_name+"; fix ownership explicitly before installation")
+        for path in (CONFIG_DIR,settings_file):
+            st=path.stat()
+            if st.st_uid!=account.pw_uid and not (st.st_mode & 0o004):
+                raise ValueError(str(path)+" cannot be read by service account "+account.pw_name)
+    return config
 
+
+def _new_setup(account):
+    download=Path(ask("Existing qBittorrent download directory",
+                      "/mnt/media/Torrents/anime")).expanduser().resolve()
+    trial=Path(ask("Existing Anime Discovery staging directory",
+                   "/mnt/media/Anime")).expanduser().resolve()
+    if not download.is_dir() or not trial.is_dir() or download==trial:
+        raise ValueError("Download and staging directories must exist and be different")
+    qb_url=ask("qBittorrent API URL","https://torrents.int.lhprojects.net")
+    qb_user=ask("qBittorrent username")
+    qb_password=ask("qBittorrent password",secret=True)
+    web_token=ask("Private dashboard/webhook token",secret=True)
+    settings=copy.deepcopy(DEFAULT_SETTINGS)
+    settings["storage"].update(download_root=str(download),trial_root=str(trial))
+    settings["qbittorrent"].update(base_url=qb_url,username=qb_user,cleanup_source=True)
+    secrets={"qbittorrent_password":qb_password,"web_token":web_token}
+    validate_config(settings,secrets)
     CONFIG_DIR.mkdir(mode=0o750,parents=True,exist_ok=True)
     os.chmod(CONFIG_DIR,0o750)
     os.chown(CONFIG_DIR,account.pw_uid,account.pw_gid)
-    DATA_DIR.mkdir(mode=0o750,parents=True,exist_ok=True)
-    os.chown(DATA_DIR,account.pw_uid,account.pw_gid)
     write_json(CONFIG_DIR/"settings.json",settings,mode=0o640,uid=account.pw_uid,gid=account.pw_gid)
     write_json(CONFIG_DIR/"secrets.json",secrets,mode=0o600,uid=account.pw_uid,gid=account.pw_gid)
-    db_path = DATA_DIR/"anime-discovery.db"
-    if not db_path.exists():
-        initialize(db_path)
-        os.chown(db_path,account.pw_uid,account.pw_gid)
+    return load_config(CONFIG_DIR)
 
-    media_group = "SupplementaryGroups=media\\n" if any(g.gr_name=="media" for g in grp.getgrall()) else ""
-    service = """[Unit]
+
+def _validate_install_settings(config):
+    settings,secrets=config["settings"],config["secrets"]
+    storage=settings["storage"]
+    download=Path(storage["download_root"]).expanduser()
+    trial=Path(storage["trial_root"]).expanduser()
+    if not download.is_dir() or not trial.is_dir() or download.resolve()==trial.resolve():
+        raise ValueError("Configured storage paths must exist and be separate directories")
+    if not settings["qbittorrent"]["username"] or not secrets.get("qbittorrent_password"):
+        raise ValueError("Existing qBittorrent username/password missing")
+    if not secrets.get("web_token"):
+        raise ValueError("Existing dashboard token missing")
+    db_path=Path(settings["daemon"]["database_path"])
+    if not db_path.is_absolute():
+        raise ValueError("Database path must be absolute")
+    if db_path.exists() or db_path.is_symlink():
+        raise FileExistsError("A database already exists at "+str(db_path)+
+                             "; remove/archive the abandoned database yourself before first install")
+    if any(Path(str(db_path)+suffix).exists() for suffix in ("-wal","-shm","-journal")):
+        raise ValueError("Old SQLite sidecars exist at "+str(db_path))
+    return db_path
+
+
+def main():
+    if os.geteuid()!=0:
+        raise SystemExit("Run with sudo: sudo python3 deploy/install-homelab.py")
+    if SERVICE.exists() or SERVICE.is_symlink():
+        raise SystemExit("Existing service detected; use the admin upgrade command")
+    if not shutil.which("systemctl"):
+        raise SystemExit("systemd is required for automatic service installation")
+    settings_file=CONFIG_DIR/"settings.json"
+    secrets_file=CONFIG_DIR/"secrets.json"
+    existing=settings_file.exists() or secrets_file.exists()
+    if existing and not (settings_file.is_file() and secrets_file.is_file()):
+        raise SystemExit("Partial existing configuration detected; both JSON files are required")
+    username=pwd.getpwuid(ROOT.stat().st_uid).pw_name
+    if username=="root":
+        username=ask("Non-root account to run Anime Discovery")
+    account=pwd.getpwnam(username)
+    if account.pw_uid==0:
+        raise ValueError("Service account must be non-root")
+    print("Installing Anime Discovery for account:",username)
+    config=_existing_setup(account) if existing else _new_setup(account)
+    db_path=_validate_install_settings(config)
+    db_path.parent.mkdir(mode=0o750,parents=True,exist_ok=True)
+    # Do not change ownership of existing directories; ensure the service
+    # account can use the intended storage and database locations.
+    if not os.access(db_path.parent,os.W_OK):
+        raise ValueError("Database parent directory is not writable")
+    if db_path.parent==DATA_DIR and db_path.parent.stat().st_uid!=account.pw_uid:
+        os.chown(db_path.parent,account.pw_uid,account.pw_gid)
+    initialize(db_path)
+    os.chown(db_path,account.pw_uid,account.pw_gid)
+
+    media_group="SupplementaryGroups=media\n" if any(g.gr_name=="media" for g in grp.getgrall()) else ""
+    service="""[Unit]
 Description=Anime Discovery dashboard, Autobrr intake and acquisition workers
 After=network-online.target
 Wants=network-online.target
@@ -106,7 +179,8 @@ WantedBy=multi-user.target
     SERVICE.write_text(service,encoding="utf-8")
     subprocess.run(["systemctl","daemon-reload"],check=True)
     subprocess.run(["systemctl","enable","--now","anime-discovery.service"],check=True)
-    print("Anime Discovery service started; open http://SERVER-IP:8765/")
+    print("Anime Discovery service started; open http://SERVER-IP:"+
+          str(config["settings"]["web"]["port"])+"/")
     print("Dashboard username: anime ; password: your private webhook token")
     print("Use: systemctl status anime-discovery.service")
 
