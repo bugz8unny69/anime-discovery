@@ -58,7 +58,7 @@ class ArchiveUpgradeTests(unittest.TestCase):
             self.calls.append(args)
             if args==("systemctl","is-active","--quiet","anime-discovery.service"):
                 raise RuntimeError("failed startup")
-        with self.assertRaisesRegex(RuntimeError,"failed startup"):
+        with self.assertRaisesRegex(RuntimeError,"Service not active after 3 readiness checks"):
             upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner,
                             readiness_attempts=3,sleep=lambda seconds: None)
         self.assertEqual((self.root/"src"/"legacy"/"anime-discovery-live.py").read_text(),"old runtime")
