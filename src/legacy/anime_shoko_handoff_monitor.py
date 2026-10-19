@@ -62,7 +62,7 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                     current=db.execute("""SELECT identity_verified FROM shoko_handoff
                         WHERE series_id=? AND notification_id=?""",
                         (series_id,nid)).fetchone()
-                    if current and current[0]!=1:
+                    if current and current[0]!=1 and settings.get("identity",{}).get("episode_map"):
                         tvdb=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",
                                         (series_id,)).fetchone()
                         if tvdb and str(tvdb[0]).isdigit():
