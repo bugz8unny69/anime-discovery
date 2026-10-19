@@ -178,7 +178,11 @@ def main(argv=None):
                 from anime_admin_config_migration import migrate
                 print(json.dumps(migrate(args.config_dir,apply=args.apply),indent=2,sort_keys=True))
             elif args.settings_command=="show":
-                print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
+                from anime_admin_show import render
+                print(render(args.config_dir,as_json=args.json))
+            elif args.settings_command=="set-secret":
+                from anime_admin_secret_editor import set_secret
+                print(json.dumps(set_secret(args.config_dir,args.key,clear=args.clear),indent=2))
             else:
                 try:
                     value=json.loads(args.value)
