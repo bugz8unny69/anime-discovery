@@ -171,7 +171,7 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
         if not auto:
             # Existing alias/identity matching failed to establish an exact
             # episode, so fail closed and require review.
-            db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status NOT IN ('NEEDS_REVIEW','APPROVED')",(nid,))
+            db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status NOT IN ('NEEDS_REVIEW','APPROVED') AND NOT EXISTS (SELECT 1 FROM episode_dispatch WHERE notification_id=?)",(nid,nid))
         db.commit()
     except BaseException:
         db.rollback()
