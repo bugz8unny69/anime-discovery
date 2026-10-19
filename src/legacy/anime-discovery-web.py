@@ -34,6 +34,14 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
 
     class Handler(BaseHTTPRequestHandler):
         login_attempts = {}
+        def log_request(self,code="-",size="-"):
+            # The Autobrr token may be part of the request URL. Never emit it
+            # into systemd journal through BaseHTTPRequestHandler's request log.
+            safe_path=urlsplit(self.path).path
+            self.log_message("%s %s HTTP/%s %s %s",
+                             self.command,safe_path,self.request_version.split("/")[-1],
+                             str(code),str(size))
+
         def send(self, status, body, content_type="text/html; charset=utf-8"):
             data = body.encode()
             self.send_response(status)
@@ -55,9 +63,15 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
 
         def authorized(self, *, webhook=False):
             if webhook:
-                # Webhook bearer token is not an administrator credential.
-                return hmac.compare_digest(
-                    self.headers.get("Authorization",""),"Bearer "+token)
+                # Autobrr's JSON webhook action can supply a credential in its URL.
+                # Retain the existing bearer-header mechanism for other senders.
+                header=self.headers.get("Authorization","")
+                if hmac.compare_digest(header,"Bearer "+token):
+                    return True
+                candidates=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                supplied=candidates.get("token",[])
+                return (len(supplied)==1 and
+                        hmac.compare_digest(supplied[0],token))
             return dashboard_auth.valid_session(self.cookie_session())
 
         def csrf_token(self):
