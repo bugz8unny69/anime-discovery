@@ -53,8 +53,10 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
               "info_hash":HASH,"tvdb_id":123,"anidb_id":456,
               "season":1,"episode":2}
         self.notification=receive(self.db,data)["notification_id"]
+        self.scans=[]
         self.handler=make_acquisition_handler(self.dbpath,lambda:self.qb,
-             download_root=self.download,trial_root=self.trial,cleanup_source=True)
+             download_root=self.download,trial_root=self.trial,cleanup_source=True,
+             jellyfin_refresh=lambda:self.scans.append("refresh"))
 
     def run_handler(self,job):
         with (patch("anime_media_flow.confirmed_jp_en",return_value=True),
@@ -67,11 +69,30 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
         finish(self.db,job["id"],job["lease_token"],outcome)
         self.assertEqual(outcome,"DONE")
         self.assertEqual(self.qb.removals,[(HASH,True)])
+        self.assertEqual(self.scans,["refresh"])
         self.assertFalse(self.source.exists())
         staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
         self.assertTrue(staged.is_file())
         self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs").fetchone()[0],"DONE")
         self.assertEqual(self.db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"DONE")
+
+    def test_failed_jellyfin_scan_does_not_roll_back_staging_or_retry_acquisition(self):
+        def unavailable():
+            self.scans.append("attempt")
+            raise ConnectionError("private server detail")
+        self.handler=make_acquisition_handler(self.dbpath,lambda:self.qb,
+             download_root=self.download,trial_root=self.trial,cleanup_source=True,
+             jellyfin_refresh=unavailable)
+        job=claim(self.db,allowed_kinds=["claimed_acquisition"])
+        with self.assertLogs("anime_jellyfin_refresh",level="WARNING") as logs:
+            outcome=self.run_handler(job)
+        self.assertEqual(outcome,"DONE")
+        self.assertEqual(self.scans,["attempt"])
+        self.assertNotIn("private server detail",str(logs.output))
+        self.assertEqual(self.db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"DONE")
+        self.assertEqual(self.qb.removals,[(HASH,True)])
+        staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
+        self.assertTrue(staged.exists())
 
     def test_cleanup_outage_retries_without_copying_media_twice(self):
         job=claim(self.db,allowed_kinds=["claimed_acquisition"])
@@ -92,6 +113,7 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.qb.removals,[(HASH,True)])
         self.assertFalse(self.source.exists())
         self.assertTrue(staged.is_file())
+        self.assertEqual(self.scans,["refresh"])
 
 
 if __name__=="__main__":
