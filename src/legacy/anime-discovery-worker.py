@@ -7,6 +7,7 @@ from anime_async_daemon import run_workers
 from anime_qb_api import QBittorrentAPI
 from anime_prowlarr_search import ProwlarrClient
 from anime_shared_discovery import handler_factory
+from anime_jellyfin_refresh import refresh_library
 
 
 def main():
@@ -27,9 +28,14 @@ def main():
         client.login(qb["username"], secrets["qbittorrent_password"])
         return client
 
+    jellyfin_refresh=None
+    if settings['jellyfin']['enabled']:
+        jellyfin_refresh=lambda: refresh_library(settings['jellyfin']['base_url'],
+                                                  secrets['jellyfin_api_key'])
     handlers = acquisition_handlers(
         db_path, qb_factory, download_root=download_root,
-        trial_root=trial_root, enabled=True, cleanup_source=qb["cleanup_source"])
+        trial_root=trial_root, enabled=True, cleanup_source=qb["cleanup_source"],
+        jellyfin_refresh=jellyfin_refresh)
     if settings["prowlarr"]["enabled"]:
         def prowlarr_factory():
             return ProwlarrClient(settings["prowlarr"]["base_url"],

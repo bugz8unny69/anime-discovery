@@ -93,6 +93,7 @@ def main(argv=None):
     settings_actions=settings.add_subparsers(dest="settings_command",required=True)
     settings_actions.add_parser("show")
     settings_actions.add_parser("configure-credentials",help="Set separate webhook token and dashboard password")
+    settings_actions.add_parser("configure-jellyfin",help="Configure immediate Jellyfin library scan credentials")
     migration=settings_actions.add_parser("migrate",help="Preview or apply missing settings to existing JSON files")
     migration.add_argument("--apply",action="store_true",help="Back up settings.json and add missing settings")
     set_cmd=settings_actions.add_parser("set")
@@ -152,7 +153,10 @@ def main(argv=None):
             if not report["ready"]:
                 parser.exit(1,"anime-discovery-admin: database readiness failed\\n")
         elif args.command=="settings":
-            if args.settings_command=="configure-credentials":
+            if args.settings_command=="configure-jellyfin":
+                from anime_admin_jellyfin import configure_jellyfin
+                print(json.dumps(configure_jellyfin(args.config_dir),indent=2))
+            elif args.settings_command=="configure-credentials":
                 from anime_admin_credentials import configure_credentials
                 print(json.dumps(configure_credentials(args.config_dir),indent=2))
             elif args.settings_command=="migrate":
