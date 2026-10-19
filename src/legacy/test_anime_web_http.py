@@ -116,7 +116,7 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status,200)
         nid=json.loads(body)["notification_id"]
         with sqlite3.connect(self.db,isolation_level=None) as db:
-            self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0],"NEEDS_REVIEW")
+            self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0],"IDENTIFYING")
             self.assertIsNone(db.execute("SELECT 1 FROM daemon_jobs WHERE subject_key=? AND kind='claimed_acquisition'",(str(nid),)).fetchone())
             self.assertEqual(all_jobs(db)["items"][0]["status"],"IDENTIFYING")
             sent=[]
@@ -135,7 +135,7 @@ class DashboardHTTPTests(unittest.TestCase):
         with sqlite3.connect(self.db) as db:
             result=all_jobs(db)
         self.assertEqual(result["items"][0]["status"],"IDENTIFYING")
-        self.assertIn("no acquisition job was created",result["items"][0]["activity_detail"])
+        self.assertIn("Checking public AniDB",result["items"][0]["activity_detail"])
         self.assertIn("Activity details",self.request("GET","/jobs")[2])
 
     def test_webhook_token_cannot_access_dashboard(self):
