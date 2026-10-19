@@ -1,0 +1,25 @@
+# Integration rollout checkpoint (development only)
+
+This branch is **not approved for VM deployment**. It retains the current `develop` runtime and adds a draft Keep → Sonarr handoff for isolated testing. No installed database or source files are altered by the GitHub commits.
+
+## Configuration
+
+Use `settings migrate` to preview newly supported JSON sections before explicitly applying. Never paste production secrets into GitHub.
+
+- `sonarr.enabled` (default false), `base_url`, `root_folder`, `quality_profile_id`; place `sonarr_api_key` in mode-0600 `secrets.json`.
+- `tvdb.enabled` (default false), `base_url` (defaults to the TVDB v4 endpoint); place `tvdb_api_key` in `secrets.json`. When enabled, Keep verifies its TVDB ID read-only before Sonarr admission.
+- `ntfy.enabled` (default false), HTTPS `server`, `topic`, HTTPS `dashboard_url`, `reminder_hours`; optional `ntfy_token` in `secrets.json`. Newly received unmatched webhooks produce best-effort notifications; recurring reminders are not yet connected to the unified database.
+- `shoko.enabled` (default false), `base_url`, `auto_link_verified`, `poll_seconds`; optional `shoko_api_key` is supported by existing settings. No Shoko episode link writes should be enabled until a pinned API contract and exact file/episode identity are verified.
+- `jellyfin.enabled` (default false), `base_url`; `jellyfin_api_key` remains in `secrets.json`.
+
+## Keep semantics in this branch
+
+A Keep click requires a trial media file present on disk and a positive TVDB ID associated with a series. It does not move trial media or trigger Sonarr episode searches. Sonarr is queried for an existing series first, otherwise the TVDB ID is looked up and the series is created with the configured root folder, quality profile, and anime type. The local series becomes `KEPT` only after a Sonarr ID is confirmed. On failure, retry manually; the trial files remain untouched. Importing staged episodes into Sonarr's root folder and reviewing monitoring/search policy is pending separate acceptance testing.
+
+## Acceptance gates
+
+1. Mock-client and API tests pass on the feature branch, then review/merge the PR into `develop`.
+2. Confirm the deployed configuration and API permissions on each host without printing secret values.
+3. Simulate duplicate, unmatched, rejected, and approved webhooks; verify notification behavior.
+4. Verify NFS trial file visibility, Jellyfin refresh, Sonarr creation on Keep, and Shoko's passive metadata behavior.
+5. Only after integrated results are accepted, produce a new archive from `develop`. Do not merge into `main` or deploy as part of this draft.
