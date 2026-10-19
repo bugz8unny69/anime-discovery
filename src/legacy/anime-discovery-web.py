@@ -254,7 +254,8 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                             secrets[key]=credential
                     # Draft validation is scoped to this integration. A disabled
                     # service may still be probed with unsaved inputs.
-                    trial[service]["enabled"]=True if service!="autobrr" else trial.get(service,{}).get("enabled",True)
+                    if service!="autobrr":
+                        trial[service]["enabled"]=True
                     result=test_connection(trial,secrets,service)
                     return self.send(200,json.dumps(result),"application/json")
                 except (ValueError,TypeError) as exc:
