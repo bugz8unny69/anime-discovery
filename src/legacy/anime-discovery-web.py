@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from anime_acquisition_enqueue import enqueue_claimed_acquisition
+from anime_webhook_processing import approve, receive
 from anime_flat_config import load_config
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
@@ -57,62 +57,6 @@ def app(db_path, token):
                 return obj
             return {k: v[-1] for k, v in parse_qs(raw).items()}
 
-
-        def approve(self, db, values):
-            nid = int(values["notification_id"])
-            tvdb = str(int(values["tvdb_id"]))
-            anidb = str(int(values["anidb_id"]))
-            season, episode = int(values["season"]), int(values["episode"])
-            magnet = str(values["magnet_uri"])
-            if min(nid, int(tvdb), int(anidb), season, episode) <= 0:
-                raise ValueError("Positive IDs and episode numbers required")
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                prior = db.execute("SELECT notification_id FROM episode_dispatch WHERE notification_id=?", (nid,)).fetchone()
-                if prior:
-                    db.commit()
-                    return {"queued": False, "notification_id": nid, "duplicate": True}
-                notification = db.execute(
-                    "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
-                if not notification:
-                    raise ValueError("Notification not found")
-                existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
-                if existing:
-                    sid = existing[0]
-                    if db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?", (sid,)).fetchone():
-                        raise ValueError("Series is rejected; reset before acquisition")
-                    if db.execute("SELECT 1 FROM series_quarantine WHERE series_id=?", (sid,)).fetchone():
-                        raise ValueError("Series is quarantined")
-                    state = db.execute("SELECT status FROM series WHERE id=?", (sid,)).fetchone()[0]
-                    if state == "REJECTED":
-                        raise ValueError("Series is rejected")
-                else:
-                    sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
-                         (tvdb, notification[0])).lastrowid
-                evidence = json.dumps({"manual_approval": True, "tvdb_id": tvdb,
-                                       "anidb_id": anidb, "season": season, "episode": episode}, sort_keys=True)
-                db.execute("""INSERT INTO verified_series_identity
-                    (notification_id,anidb_id,tvdb_id,mapping_source,decision,
-                    episode_identity_verified,eligible_for_acquisition,evidence_json,evidence_sha256)
-                    VALUES (?,?,?,'manual','VERIFIED',1,1,?,?)""",
-                    (nid,anidb,tvdb,evidence,hashlib.sha256(evidence.encode()).hexdigest()))
-                db.execute("""INSERT INTO episode_verification_v16
-                    (notification_id,evaluated_at,decision,verified,evidence_json)
-                    VALUES (?,?,'VERIFIED',1,?)""",(nid,time.time(),evidence))
-                db.execute("""INSERT INTO episode_approval_queue
-                    (notification_id,decision,season,episode)
-                    VALUES (?,'AUTO_APPROVED',?,?)""",(nid,season,episode))
-                db.execute("""INSERT INTO episode_dispatch
-                    (notification_id,series_id,season,episode,state)
-                    VALUES (?,?,?,?,'CLAIMED')""",(nid,sid,season,episode))
-                db.commit()
-            except BaseException:
-                db.rollback()
-                raise
-            queued = enqueue_claimed_acquisition(
-                db,nid,infohash=notification[1],magnet_uri=magnet,
-                title=notification[0],tvdb_id=tvdb)
-            return {"queued": queued, "notification_id": nid}
 
         def do_GET(self):
             if not self.authorized():
@@ -171,22 +115,7 @@ def app(db_path, token):
                 values = self.form()
                 with self.database() as db:
                     if route == "/webhook":
-                        source = str(values.get("source", "autobrr"))[:100]
-                        title = str(values.get("release_name") or values.get("name") or "").strip()
-                        guid = str(values.get("source_guid") or values.get("guid") or "").strip()
-                        infohash = str(values.get("info_hash") or values.get("hash") or "").lower()
-                        if not title or not guid or not HASH_RE.fullmatch(infohash):
-                            raise ValueError("release_name, source_guid, info_hash required")
-                        db.execute("""INSERT OR IGNORE INTO notifications
-                            (source,release_name,source_guid,info_hash,received_at)
-                            VALUES (?,?,?,?,?)""", (source,title,guid,infohash,int(time.time())))
-                        result = {"received": True}
-                        required = ("tvdb_id", "anidb_id", "season", "episode", "magnet_uri")
-                        if all(values.get(k) for k in required):
-                            nid_row = db.execute("SELECT id FROM notifications WHERE source=? AND source_guid=?", (source,guid)).fetchone()
-                            if nid_row:
-                                values["notification_id"] = nid_row[0]
-                                result.update(self.approve(db, values))
+                        result = receive(db, values)
                     elif route == "/series-action":
                         sid = int(values["series_id"])
                         action = str(values["action"])
@@ -211,7 +140,7 @@ def app(db_path, token):
                             raise
                         result = {"action": action, "series_id": sid, "ok": True}
                     else:
-                        result = self.approve(db, values)
+                        result = approve(db, values["notification_id"], values)
                 self.send(200,json.dumps(result),"application/json")
             except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
                 self.send(400,json.dumps({"error":str(exc)}),"application/json")
