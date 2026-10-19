@@ -1,51 +1,28 @@
-"""Launch the homelab dashboard and acquisition daemon together."""
-import argparse
-import os
+"""Run the configured Anime Discovery web and acquisition processes together."""
 import subprocess
 import sys
+import time
 from pathlib import Path
+from anime_flat_config import load_config
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run Anime Discovery web and worker")
-    parser.add_argument("--db", type=Path, default=Path("/var/lib/anime-discovery/anime-discovery.db"))
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--token", default=os.environ.get("ANIME_WEB_TOKEN"))
-    parser.add_argument("--qb-url", required=True)
-    parser.add_argument("--download-root", type=Path, required=True)
-    parser.add_argument("--trial-root", type=Path, required=True)
-    parser.add_argument("--concurrency", type=int, default=2)
-    parser.add_argument('--cleanup-source', action='store_true', help='Remove completed qBittorrent source after staging')
-    args = parser.parse_args()
-    if not args.token:
-        parser.error("Set ANIME_WEB_TOKEN or pass --token")
-    if not os.environ.get("ANIME_QB_USER") or not os.environ.get("ANIME_QB_PASSWORD"):
-        parser.error("Set ANIME_QB_USER and ANIME_QB_PASSWORD")
-    if not args.db.is_file():
-        parser.error("Database missing; initialize with anime-discovery-admin.py new-database")
+    config = load_config()
+    db_path = Path(config["settings"]["daemon"]["database_path"])
+    if not db_path.is_file():
+        raise RuntimeError("Database missing: " + str(db_path))
     base = Path(__file__).resolve().parent
-    web = [sys.executable, str(base / "anime-discovery-web.py"),
-           "--db", str(args.db), "--host", args.host, "--port", str(args.port),
-           "--token", args.token]
-    worker = [sys.executable, str(base / "anime-discovery-worker.py"),
-              "--db", str(args.db), "--qb-url", args.qb_url,
-              "--download-root", str(args.download_root),
-              "--trial-root", str(args.trial_root),
-              "--concurrency", str(args.concurrency)]
-    if args.cleanup_source:
-        worker.append("--cleanup-source")
     processes = []
     try:
-        for command in (web, worker):
-            processes.append(subprocess.Popen(command))
-        print(f"Anime Discovery running at http://{args.host}:{args.port}/", flush=True)
+        for script in ("anime-discovery-web.py", "anime-discovery-worker.py"):
+            processes.append(subprocess.Popen([sys.executable, str(base / script)]))
+        web = config["settings"]["web"]
+        print(f"Anime Discovery running at http://{web['host']}:{web['port']}/", flush=True)
         while True:
             for proc in processes:
                 code = proc.poll()
                 if code is not None:
                     raise RuntimeError(f"Anime Discovery component exited with status {code}")
-            import time
             time.sleep(1)
     except KeyboardInterrupt:
         pass
