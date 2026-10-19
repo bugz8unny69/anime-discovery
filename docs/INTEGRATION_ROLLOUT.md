@@ -92,3 +92,28 @@ Do not run these upgrade instructions until the feature branch has completed CI 
 This section supersedes earlier notes about gating cleanup on Shoko. **Only successful Sonarr ManualImport, exact independent destination verification, and qB ownership/source checks** determine whether original Anime Discovery trial media and torrent data can be cleaned up. When Shoko is enabled, the finalizer attempts to persist post-import provenance, but failures in Shoko status collection do not change the successful Sonarr outcome. It never deletes any permanent Sonarr file.
 
 Shoko reconciliation is a separate best-effort retry workflow after Keep. Issues requiring manual action (`NEEDS_EPISODE_IDENTITY`, `UNRECOGNIZED_NEEDS_REVIEW`, `AMBIGUOUS_SHOKO_FILE`) trigger a deduplicated, best-effort NTFY warning using the existing configured server/topic/token. Delivery failure never blocks Keep. No Shoko VFS/Jellyfin verification is required. An exact verified AniDB *episode* identity remains mandatory before any future link write; identifying the AniDB series alone is not sufficient. Automatic Shoko link execution is not enabled yet.
+
+
+### Shoko post-Keep integration: implemented API flow (supersedes earlier read-only notes)
+
+The feature branch now implements all four code paths:
+
+1. **Episode identity:** fetches the unique TVDB episode ID through TVDB v4 and correlates it to the unique `IDs.TvDB` cross-reference in the Shoko episode catalog of the independently verified AniDB series. A trusted explicit `identity.episode_map` may be used if cross-references are incomplete. No TVDB season/episode-to-AniDB arithmetic.
+2. **Scan:** when a Sonarr-imported permanent file is not in Shoko yet, invokes `GET /api/v3/ImportFolder/{folderID}/Scan` at most once per hour per notification. Before scanning, it confirms the configured folder's Shoko `Path` equals the Sonarr permanent root. It never scans torrent staging intentionally.
+3. **Link:** if there is a unique Shoko file at the exact accessible absolute Sonarr destination, no existing episode association, an exact verified AniDB episode mapping, and `shoko.auto_link_verified=true`, it calls `POST /api/v3/File/{fileID}/Link` with the Shoko internal episode ID.
+4. **Readback:** `GET /api/v3/File/{fileID}/Episode` must return precisely the expected Shoko + AniDB episode identity. Existing or conflicting links are never silently replaced.
+
+When unavailable or ambiguous, the process records the issue and sends a deduplicated NTFY manual-attention alert. **Shoko never blocks Sonarr Keep or safe cleanup; there is no VFS/Jellyfin check.**
+
+Configure using the existing admin interface after approval and upgrade:
+
+```bash
+anime-discovery-admin settings configure-integration shoko
+anime-discovery-admin settings set shoko.import_folder_id 1
+# Only after reviewing the verified episode mapping and testing with Shoko:
+anime-discovery-admin settings set shoko.auto_link_verified true
+```
+
+The example folder ID `1` must be independently confirmed as the Shoko destination import folder for `/mnt/media/Anime`, never a torrent folder. The feature defaults `auto_link_verified` to false; the interactive integration wizard also resets it to false as a safe default. Existing installation settings migrate add missing `identity.episode_map` and `shoko.import_folder_id` defaults without touching credentials. A per-episode fallback map entry has the exact form `"TVDB_SERIES_ID:SEASON:EPISODE": {"anidb_episode_id": 12345, "verified": true}`; supply only independently verified values.
+
+**Validation limitation:** CI tests are mocked. A controlled live integration test against the user's actual TVDB, Sonarr and Shoko services is still needed before any release, automatic linking, or production cleanup is enabled. Nothing in the feature branch has been deployed.
