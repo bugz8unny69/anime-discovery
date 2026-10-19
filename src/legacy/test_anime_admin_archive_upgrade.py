@@ -59,9 +59,28 @@ class ArchiveUpgradeTests(unittest.TestCase):
             if args==("systemctl","is-active","--quiet","anime-discovery.service"):
                 raise RuntimeError("failed startup")
         with self.assertRaisesRegex(RuntimeError,"failed startup"):
-            upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner)
+            upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner,
+                            readiness_attempts=3,sleep=lambda seconds: None)
         self.assertEqual((self.root/"src"/"legacy"/"anime-discovery-live.py").read_text(),"old runtime")
         self.assertEqual(self.calls.count(("systemctl","start","anime-discovery.service")),2)
+
+    def test_transient_service_startup_passes_and_verbose_reports_steps(self):
+        attempts=[0]
+        progress=[]
+        def runner(*args,cwd=None):
+            self.calls.append(args)
+            if args==("systemctl","is-active","--quiet","anime-discovery.service"):
+                attempts[0]+=1
+                if attempts[0]<3:
+                    raise RuntimeError("activating")
+            return ""
+        result=upgrade_archive(self.root,self.archive,db_path=self.database,
+            runner=runner,verbose=True,log=progress.append,sleep=lambda _:None)
+        self.assertTrue(result["updated"])
+        self.assertEqual(attempts[0],3)
+        self.assertTrue(any("Extracting release" in m for m in progress))
+        self.assertTrue(any("Service active" in m for m in progress))
+        self.assertTrue((self.root/"src"/"legacy"/"anime-discovery-live.py").is_file())
 
     def test_unsafe_archive_never_stops_service(self):
         create_archive(self.archive,bad=True)
