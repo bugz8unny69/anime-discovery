@@ -185,7 +185,7 @@ function update(data){
 tbody.replaceChildren();blank.classList.toggle("hidden",data.items.length!==0);
 for(const job of data.items){
 const tr=document.createElement("tr");
-td(tr,new Date(job.received_at*1000).toLocaleString());
+td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
 let title=td(tr,job.release);if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
 td(tr,job.source).classList.add("hide-mobile");
