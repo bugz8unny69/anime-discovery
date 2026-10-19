@@ -1,5 +1,9 @@
 """Offline HTTP tests for the actual browser and Autobrr routes."""
 import base64
+import hashlib
+import urllib.parse
+from unittest.mock import patch
+import anime_dashboard_auth
 import http.client
 import importlib.util
 import json
@@ -25,6 +29,12 @@ class DashboardHTTPTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.db=Path(tmp.name)/"web.db"
         initialize(self.db)
+        self.auth_patch=patch.object(anime_dashboard_auth,"AUTH_FILE",Path(tmp.name)/"dashboard-auth.json")
+        self.auth_patch.start()
+        self.addCleanup(self.auth_patch.stop)
+        anime_dashboard_auth.set_password("admin-pass-long")
+        self.session=anime_dashboard_auth.session_token()
+        self.csrf=hashlib.sha256(self.session.encode()).hexdigest()
         self.server=ThreadingHTTPServer(("127.0.0.1",0),web.app(self.db,"secret-token",admin_password="admin-pass"))
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
         self.thread.start()
@@ -34,8 +44,8 @@ class DashboardHTTPTests(unittest.TestCase):
         self.port=self.server.server_port
 
     def request(self,method,path,body=None,*,basic=False):
-        headers={"Authorization":"Bearer secret-token" if path=="/webhook" and not basic
-                 else "Basic "+base64.b64encode(b"anime:admin-pass").decode()}
+        headers=({"Authorization":"Bearer secret-token"} if path=="/webhook" and not basic
+            else {"Cookie":"ad_session="+self.session,"X-CSRF-Token":self.csrf})
         if isinstance(body,dict):
             body=json.dumps(body)
             headers["Content-Type"]="application/json"
@@ -53,7 +63,8 @@ class DashboardHTTPTests(unittest.TestCase):
         try:
             client.request("GET","/",headers={"Authorization":"Bearer secret-token"})
             response=client.getresponse()
-            self.assertEqual(response.status,401)
+            self.assertEqual(response.status,303)
+            self.assertEqual(response.getheader("Location"),"/login")
             response.read()
             client.request("POST","/webhook","{}",headers={
                 "Authorization":"Basic "+base64.b64encode(b"anime:admin-pass").decode(),
@@ -61,6 +72,50 @@ class DashboardHTTPTests(unittest.TestCase):
             response=client.getresponse()
             self.assertEqual(response.status,401)
             response.read()
+        finally:
+            client.close()
+
+    def test_login_cookie_invalid_credentials_and_logout(self):
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            client.request("GET","/login")
+            r=client.getresponse()
+            self.assertEqual(r.status,200)
+            page=r.read().decode()
+            self.assertIn('<form method="post" action="/login">',page)
+            self.assertNotIn('WWW-Authenticate',str(r.getheaders()))
+            for password,expected in (("wrong",401),("admin-pass-long",303)):
+                values=urllib.parse.urlencode({"username":"admin","password":password})
+                client.request("POST","/login",values,{"Content-Type":"application/x-www-form-urlencoded"})
+                r=client.getresponse()
+                self.assertEqual(r.status,expected)
+                cookie=r.getheader("Set-Cookie")
+                r.read()
+            self.assertIn("HttpOnly",cookie)
+            self.assertIn("SameSite=Lax",cookie)
+            token=cookie.split(";",1)[0].split("=",1)[1]
+            csrf=hashlib.sha256(token.encode()).hexdigest()
+            client.request("POST","/logout","x=1",{"Cookie":"ad_session="+token,
+                           "X-CSRF-Token":csrf,"Content-Type":"application/x-www-form-urlencoded"})
+            r=client.getresponse()
+            self.assertEqual(r.status,303)
+            r.read()
+            client.request("GET","/",headers={"Cookie":"ad_session="+token})
+            r=client.getresponse()
+            self.assertEqual(r.status,303)
+            r.read()
+        finally:
+            client.close()
+
+    def test_session_mutations_require_csrf(self):
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            client.request("POST","/series-bulk",json.dumps({"series_ids":[1],"action":"reset"}),
+                           {"Cookie":"ad_session="+self.session,
+                            "Content-Type":"application/json"})
+            r=client.getresponse()
+            self.assertEqual(r.status,403)
+            r.read()
         finally:
             client.close()
 
@@ -186,7 +241,7 @@ class DashboardHTTPTests(unittest.TestCase):
                 client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
                 client.request("POST","/request-anime",
                     json.dumps({"tvdb_id":123,"season":1}),
-                    {"Authorization":"Basic "+base64.b64encode(b"anime:admin-pass").decode(),"Content-Type":"application/json"})
+                    {"Cookie":"ad_session="+self.session,"X-CSRF-Token":self.csrf,"Content-Type":"application/json"})
                 result=client.getresponse()
                 self.assertEqual(result.status,200)
                 self.assertEqual(json.loads(result.read())["source"],"manual")

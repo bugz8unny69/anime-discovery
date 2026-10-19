@@ -58,6 +58,7 @@ jobs:
             test_anime_admin_cli \
             test_anime_webhook_lifecycle \
             test_anime_web_http \
+            test_anime_dashboard_auth \
             test_anime_live_acquisition \
             test_anime_admin_upgrade \
             test_anime_shared_discovery \

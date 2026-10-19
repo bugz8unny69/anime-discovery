@@ -1,0 +1,11 @@
+# Dashboard authentication migration (P0)
+
+The legacy web handler sent `WWW-Authenticate: Basic` for every unauthenticated route and checked `anime:<admin_password>` from `secrets.json` against the HTTP Basic header. The separate `anime_dashboard_auth.py` salted-password store was not consulted. This caused the browser popup and a second competing password authority.
+
+The P0 branch uses a styled HTML `/login` form, an HttpOnly SameSite=Lax signed session cookie, a dedicated `/logout` POST that invalidates all sessions (single administrator), session expiry, and CSRF tokens for administrative mutation endpoints. JSON API routes continue returning 401 without a Basic challenge; the Autobrr webhook remains Bearer-token-only. Sessions become invalid after admin password rotation.
+
+**Password precedence:** existing hashed dashboard auth state is authoritative. When absent, the pre-existing legacy `secrets.json.admin_password` is imported once as a salted PBKDF2 hash, preserving an existing installation's credentials. The Autobrr webhook token must never act as a dashboard password. The CLI credential wizard changes the same hashed store and removes legacy plaintext after a successful conversion. Password changes in a manually edited `secrets.json.admin_password` are not authoritative after the hashed store exists; use the supported CLI flow. A local password reset uses `anime_dashboard_auth.py passwd` on the VM. Do not delete `dashboard-auth.json` as a reset shortcut.
+
+**Reverse proxy:** normal browser requests should pass through to the app; avoid injecting Basic Auth or a `WWW-Authenticate` challenge in a fronting proxy. Under HTTPS termination, forward a sanitized `X-Forwarded-Proto: https` to set the cookie's Secure attribute. Direct HTTP testing on the trusted internal network uses the non-Secure cookie; production public access requires HTTPS with secure cookies.
+
+**Status:** offline tests are necessary but do not verify a live reverse proxy configuration, filesystem ACLs, or successful web-based login on the user's VM. Do not merge into `develop` or deploy the P0 branch without reviewing the migration path against the actual service account and settings permissions.

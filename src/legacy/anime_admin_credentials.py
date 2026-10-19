@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
+import anime_dashboard_auth as auth
 
 def configure_credentials(directory, *, prompt=getpass.getpass):
     directory=Path(directory)
@@ -23,11 +24,19 @@ def configure_credentials(directory, *, prompt=getpass.getpass):
         if webhook:
             data["web_token"]=webhook
         if admin:
-            data["admin_password"]=admin
-        if not data.get("web_token") or not data.get("admin_password"):
+            if len(admin)<12:
+                raise ValueError("New administrator password must be at least 12 characters")
+        if not data.get("web_token") or not (admin or data.get("admin_password") or auth.read()):
             raise ValueError("Both webhook token and admin password are required")
-        if data["web_token"]==data["admin_password"]:
+        if data["web_token"]==data.get("admin_password") or (admin and admin==data["web_token"]):
             raise ValueError("Admin password must differ from webhook token")
+        # Make the salted auth store authoritative before removing legacy
+        # plaintext; if hashing fails, the existing secret file is unchanged.
+        if admin:
+            auth.set_password(admin)
+        elif auth.read() is None and data.get("admin_password"):
+            auth.initialize_legacy(data["admin_password"])
+        data.pop("admin_password",None)
         meta=path.stat()
         fd,tmp=tempfile.mkstemp(prefix=".secrets-",dir=directory)
         try:
@@ -44,4 +53,4 @@ def configure_credentials(directory, *, prompt=getpass.getpass):
             if os.path.exists(tmp):
                 os.unlink(tmp)
         fcntl.flock(handle,fcntl.LOCK_UN)
-    return {"credentials_updated":True,"restart_required":True}
+    return {"credentials_updated":True,"restart_required":bool(webhook)}
