@@ -72,7 +72,9 @@ def reconcile_one(db,settings,secrets,*,series_id,notification_id,inspector=None
         raise RuntimeError("Unsafe Shoko observation")
     valid={'NEEDS_EPISODE_IDENTITY','AWAITING_SHOKO_SCAN',
            'AMBIGUOUS_SHOKO_FILE','UNRECOGNIZED_NEEDS_REVIEW',
-           'SHOKO_ALREADY_LINKED','LINK_PLAN_READY'}
+           'SHOKO_ALREADY_LINKED','LINK_PLAN_READY',
+           'SHOKO_ALREADY_LINKED_VERIFIED','SHOKO_LINK_VERIFIED',
+           'CONFLICTING_SHOKO_LINK','AMBIGUOUS_SHOKO_LINK'}
     status=result.get("status")
     if status not in valid:
         raise RuntimeError("Unexpected Shoko observation status")
