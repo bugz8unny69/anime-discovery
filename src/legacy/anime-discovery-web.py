@@ -212,7 +212,23 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(401,self.login_page("Invalid username or password"))
                 except (ValueError,TypeError):
                     return self.send(400,self.login_page("Invalid sign-in request"))
-            if not self.authorized(webhook=route=="/webhook"):
+            if route=="/webhook":
+                # Autobrr JSON webhook actions historically put the shared
+                # secret in the body, not an Authorization header.
+                try:
+                    values=self.form()
+                except (ValueError,TypeError,UnicodeDecodeError,json.JSONDecodeError):
+                    return self.send(400,json.dumps({"error":"Invalid webhook payload"}),"application/json")
+                supplied=values.get("token")
+                body_ok=(type(supplied) is str and bool(supplied) and
+                         hmac.compare_digest(supplied,token))
+                if not body_ok and not self.authorized(webhook=True):
+                    SECURITY_LOG.warning("Webhook authentication rejected route=/webhook")
+                    return self.send(401,json.dumps({"error":"Authentication required"}),"application/json")
+                # Never forward shared credentials into release processing.
+                values.pop("token",None)
+                self._cached_form=values
+            if route!="/webhook" and not self.authorized():
                 SECURITY_LOG.warning("Authentication rejected route=%s",route)
                 return self.send(401,json.dumps({"error":"Authentication required"}),"application/json")
             if route=="/logout":
