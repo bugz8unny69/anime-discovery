@@ -62,6 +62,14 @@ class QBittorrentAPI:
         return any(isinstance(item,dict) and str(item.get("hash","")).lower()==infohash
                    for item in records)
 
+    def torrent_files(self, infohash):
+        """Read exact per-torrent file inventory; no torrent state change."""
+        records=json.loads(self._request("torrents/files?"+urlencode({"hash":_hash(infohash)})))
+        if not isinstance(records,list) or any(not isinstance(item,dict) or
+                 not isinstance(item.get("name"),str) for item in records):
+            raise ValueError("Invalid qBittorrent torrent file inventory")
+        return records
+
     def add_magnet(self, magnet_uri):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
             raise ValueError("Invalid magnet")
