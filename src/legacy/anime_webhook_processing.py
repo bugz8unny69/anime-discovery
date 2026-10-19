@@ -168,11 +168,16 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
             nid = db.execute("""INSERT INTO notifications
                 (source,release_name,source_guid,info_hash,received_at)
                 VALUES (?,?,?,?,?)""", (source,name,guid,infohash,int(time.time()))).lastrowid
+        if not auto:
+            # Existing alias/identity matching failed to establish an exact
+            # episode, so fail closed and require review.
+            db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status NOT IN ('NEEDS_REVIEW','APPROVED') AND NOT EXISTS (SELECT 1 FROM episode_dispatch WHERE notification_id=?)",(nid,nid))
         db.commit()
     except BaseException:
         db.rollback()
         raise
-    result = {"received": True, "notification_id": nid, "duplicate": bool(old)}
+    result = {"received": True, "notification_id": nid, "duplicate": bool(old),
+              "needs_review": not auto}
     if auto:
         approved=approve(db,nid,values,source="autobrr")
         result.update(approved)

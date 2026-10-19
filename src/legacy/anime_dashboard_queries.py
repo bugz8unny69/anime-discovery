@@ -82,11 +82,13 @@ def all_jobs(db, *,page=1,size=20):
             status="COMPLETED"
         elif dispatch=="CLAIMED":
             status="QUEUED"
+        elif nstatus=="NEEDS_REVIEW" and not dispatch:
+            status="NEEDS REVIEW"
         else:
             status="RECEIVED"
         # An unmatched intake record is not an acquisition job. Make that
         # distinction visible instead of suggesting an idle worker.
-        if status=="RECEIVED":
+        if status in ("RECEIVED","NEEDS REVIEW"):
             explanation=("Waiting for episode identity: no acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="QUEUED":

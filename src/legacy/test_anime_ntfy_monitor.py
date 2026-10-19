@@ -15,6 +15,7 @@ class MonitorTests(unittest.TestCase):
                 db.execute("PRAGMA foreign_keys=ON")
                 nid=db.execute("""INSERT INTO notifications(source,release_name,source_guid,info_hash,received_at)
                     VALUES ('autobrr','Example S01E01','guid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1)""").lastrowid
+                db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",(nid,))
                 settings={"ntfy":{"enabled":True,"reminder_hours":2}}
                 calls=[]
                 def send(*args):
@@ -26,6 +27,24 @@ class MonitorTests(unittest.TestCase):
                 sid=db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb','123','Example')").lastrowid
                 db.execute("INSERT INTO episode_dispatch(notification_id,series_id,season,episode,state) VALUES (?,?,1,1,'CLAIMED')",(nid,sid))
                 self.assertEqual(check_once(db,settings,{},now=25000,sender=send)["sent"],0)
+    def test_legacy_untrusted_row_is_backfilled_for_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"db.sqlite"
+            initialize(path)
+            with sqlite3.connect(path,isolation_level=None) as db:
+                nid=db.execute("""INSERT INTO notifications
+                    (source,release_name,source_guid,info_hash,received_at)
+                    VALUES ('nyaa','Old unmatched','old-guid',?,1)""",
+                    ("b"*40,)).lastrowid
+                calls=[]
+                settings={"ntfy":{"enabled":True,"reminder_hours":24}}
+                result=check_once(db,settings,{},now=1000,
+                    sender=lambda *_: calls.append(nid) or True)
+                self.assertEqual(result["sent"],1)
+                self.assertEqual(calls,[nid])
+                self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",
+                    (nid,)).fetchone()[0],"NEEDS_REVIEW")
+
     def test_disabled_no_schema_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/"db.sqlite"
