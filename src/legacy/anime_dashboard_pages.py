@@ -9,7 +9,7 @@ def escape(value):
 
 
 def shell(title,active):
-    tabs=[("/","Series"),("/jobs","Jobs"),("/recognized","Recognized names")]
+    tabs=[("/","Series"),("/jobs","Jobs"),("/recognized","Recognized names"),("/settings","Settings")]
     navigation="".join('<a class="tab'+(" selected" if name==active else "")+
                        '" href="'+route+'">'+name+'</a>' for route,name in tabs)
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
