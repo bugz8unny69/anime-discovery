@@ -68,6 +68,10 @@ def app(db_path, token):
                 raise ValueError("Positive IDs and episode numbers required")
             db.execute("BEGIN IMMEDIATE")
             try:
+                prior = db.execute("SELECT notification_id FROM episode_dispatch WHERE notification_id=?", (nid,)).fetchone()
+                if prior:
+                    db.commit()
+                    return {"queued": False, "notification_id": nid, "duplicate": True}
                 notification = db.execute(
                     "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
                 if not notification:
@@ -75,6 +79,13 @@ def app(db_path, token):
                 existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
                 if existing:
                     sid = existing[0]
+                    if db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?", (sid,)).fetchone():
+                        raise ValueError("Series is rejected; reset before acquisition")
+                    if db.execute("SELECT 1 FROM series_quarantine WHERE series_id=?", (sid,)).fetchone():
+                        raise ValueError("Series is quarantined")
+                    state = db.execute("SELECT status FROM series WHERE id=?", (sid,)).fetchone()[0]
+                    if state == "REJECTED":
+                        raise ValueError("Series is rejected")
                 else:
                     sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
                          (tvdb, notification[0])).lastrowid
