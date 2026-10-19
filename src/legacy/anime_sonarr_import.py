@@ -53,6 +53,8 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
         if len(matches_file)!=1:
             raise RuntimeError("Sonarr did not identify exact staged file and episode")
         candidate=matches_file[0]
+        if candidate.get("rejections"):
+            raise RuntimeError("Sonarr rejected manual import candidate; review required")
         if not candidate.get("quality") or not candidate.get("languages"):
             raise RuntimeError("Sonarr import quality/language mapping incomplete")
         selected.append({"path":item["path"],"seriesId":sonarr_id,
