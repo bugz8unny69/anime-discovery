@@ -45,7 +45,7 @@ class ArchiveUpgradeTests(unittest.TestCase):
         return ""
 
     def test_archive_upgrade_replaces_only_code_and_backs_up_database(self):
-        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=self.runner)
+        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=self.runner,backup=True)
         self.assertTrue(result["updated"])
         self.assertEqual((self.root/"src"/"legacy"/"anime-discovery-live.py").read_text(),"new runtime")
         self.assertEqual((Path(result["backup_code"])/"src"/"legacy"/"anime-discovery-live.py").read_text(),"old runtime")
@@ -63,10 +63,31 @@ class ArchiveUpgradeTests(unittest.TestCase):
             if args==("systemctl","start","anime-discovery.service"):
                 self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
             return ""
-        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner)
+        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner,backup=True)
         self.assertTrue(result["updated"])
         self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
         self.assertEqual(stat.S_IMODE(Path(result["backup_code"]).stat().st_mode),0o751)
+
+    def test_default_has_no_persistent_backups_and_nested_paths_are_accessible(self):
+        import os
+        old_umask=os.umask(0o077)
+        try:
+            def runner(*args,cwd=None):
+                if args==("systemctl","start","anime-discovery.service"):
+                    target=self.root/"src"/"legacy"/"anime-discovery-live.py"
+                    self.assertTrue(target.is_file())
+                    self.assertTrue(all(p.stat().st_mode & 0o005 == 0o005
+                        for p in (self.root/"src",self.root/"src"/"legacy")))
+                    self.assertTrue(target.stat().st_mode & 0o004)
+                self.calls.append(args)
+            result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner)
+        finally:
+            os.umask(old_umask)
+        self.assertTrue(result["updated"])
+        self.assertIsNone(result["backup_code"])
+        self.assertIsNone(result["backup_database"])
+        self.assertFalse(list(self.base.glob("anime-discovery.before-*")))
+        self.assertFalse(list(self.base.glob("anime.sqlite.before-archive-*")))
 
     def test_restart_failure_restores_old_code(self):
         def runner(*args,cwd=None):

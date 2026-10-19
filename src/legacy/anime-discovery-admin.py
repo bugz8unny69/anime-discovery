@@ -82,6 +82,7 @@ def main(argv=None):
     upgrade_cmd=commands.add_parser("upgrade",help="Upgrade Git checkout or extracted release archive")
     upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
     upgrade_cmd.add_argument("--verbose",action="store_true",help="Show upgrade milestones and service readiness checks")
+    upgrade_cmd.add_argument("--backup",action="store_true",help="Keep code and database backups after successful archive upgrade")
     commands.add_parser("status",help="Show installed version, service and database readiness")
 
     database=commands.add_parser("database",help="Database administration")
@@ -119,7 +120,7 @@ def main(argv=None):
             if args.archive is not None:
                 from anime_admin_archive_upgrade import upgrade_archive
                 result=upgrade_archive(root,args.archive,db_path=args.db or configured_db,
-                    verbose=args.verbose,log=lambda message: print(message,file=sys.stderr,flush=True))
+                    verbose=args.verbose,backup=args.backup,log=lambda message: print(message,file=sys.stderr,flush=True))
             else:
                 if not (root/".git").exists():
                     raise ValueError("Archive installation: download the new release tar.gz and pass its local path to upgrade")

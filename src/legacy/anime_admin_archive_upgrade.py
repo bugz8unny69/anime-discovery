@@ -51,13 +51,18 @@ def _extract(archive, destination):
                 with payload, target.open("xb") as output:
                     shutil.copyfileobj(payload,output)
                 target.chmod(0o755 if member.mode & 0o111 else 0o644)
+    # Directories created under root's umask can become 0700.
+    # Normalize each extracted directory so the service can traverse src/legacy.
+    for directory in [destination,*destination.rglob("*")]:
+        if directory.is_dir():
+            directory.chmod(0o755)
     if not (destination/"deploy"/"install-homelab.py").is_file() or not (
             destination/"src"/"legacy"/"anime-discovery-live.py").is_file():
         raise ValueError("Archive is not an Anime Discovery release")
 
 
 def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",runner=command,
-                    verbose=False,log=None,readiness_attempts=15,sleep=time.sleep):
+                    verbose=False,log=None,readiness_attempts=15,sleep=time.sleep,backup=False):
     report=log if log is not None else (lambda message: None)
     def progress(message):
         if verbose:
@@ -82,7 +87,7 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
     timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     old=root.with_name(root.name+".before-"+timestamp)
     db_backup=Path(str(db_path)+".before-archive-"+timestamp+".bak")
-    if old.exists() or db_backup.exists():
+    if old.exists() or (backup and db_backup.exists()):
         shutil.rmtree(temp)
         raise FileExistsError("Versioned upgrade backup already exists")
     stopped=False
@@ -100,13 +105,16 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
         if os.geteuid()==0 and old_stat.st_uid!=0:
             for path in [staged,*staged.rglob("*")]:
                 os.chown(path,old_stat.st_uid,old_stat.st_gid)
-        progress("Backing up SQLite database safely")
-        with sqlite3.connect(db_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
-            with sqlite3.connect(db_backup) as dest:
-                src.backup(dest)
-                if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
-                    raise ValueError("Database backup integrity failure")
-        db_backup.chmod(0o600)
+        if backup:
+            progress("Backing up SQLite database (explicit --backup)")
+            with sqlite3.connect(db_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
+                with sqlite3.connect(db_backup) as dest:
+                    src.backup(dest)
+                    if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+                        raise ValueError("Database backup integrity failure")
+            db_backup.chmod(0o600)
+        else:
+            progress("No database backup requested; schema unchanged")
         progress("Stopping "+service)
         runner("systemctl","stop",service)
         stopped=True
@@ -133,15 +141,21 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
                     raise RuntimeError("Service not active after "+str(readiness_attempts)+" readiness checks") from None
                 progress("Service not yet active (check "+str(attempt+1)+"/"+str(readiness_attempts)+")")
                 sleep(1)
-        return {"updated":True,"backup_code":str(old),
-                "backup_database":str(db_backup),"source_archive":str(archive)}
+        if not backup:
+            shutil.rmtree(old)
+            progress("Removed temporary rollback code after successful startup")
+        return {"updated":True,"backup_code":str(old) if backup else None,
+                "backup_database":str(db_backup) if backup else None,
+                "source_archive":str(archive)}
     except BaseException:
         progress("Upgrade failed; restoring original application code and service")
         if swapped:
-            # Roll back code; leave DB backup for deliberate recovery.
+            # Roll back code without leaving failed code trees by default.
             failed=root.with_name(root.name+".failed-"+timestamp)
             root.rename(failed)
             old.rename(root)
+            if not backup:
+                shutil.rmtree(failed,ignore_errors=True)
         if stopped:
             try:
                 runner("systemctl","start",service)
