@@ -32,8 +32,13 @@ def ensure_series(settings, secrets, *, tvdb_id, title, opener=urlopen):
     key=secrets.get("sonarr_api_key")
     url=sonarr["base_url"]
     profiles=_request(url,key,"GET","qualityprofile",opener=opener)
-    if not isinstance(profiles,list) or not any(p.get("id")==sonarr["quality_profile_id"] and p.get("name")=="Anime" for p in profiles):
-        raise RuntimeError("Configured Sonarr profile must be named Anime")
+    profile_name=sonarr.get("quality_profile_name","Anime")
+    named=[p for p in profiles if isinstance(p,dict) and p.get("name")==profile_name] if isinstance(profiles,list) else []
+    if len(named)!=1 or type(named[0].get("id")) is not int:
+        raise RuntimeError("Configured Sonarr quality profile name is missing or ambiguous")
+    profile_id=named[0]["id"]
+    if sonarr["quality_profile_id"] and sonarr["quality_profile_id"]!=profile_id:
+        raise RuntimeError("Sonarr profile ID does not match configured name")
     roots=_request(url,key,"GET","rootfolder",opener=opener)
     if not isinstance(roots,list) or not any(p.get("path")==sonarr["root_folder"] for p in roots):
         raise RuntimeError("Configured Sonarr root folder is not registered")
@@ -52,7 +57,7 @@ def ensure_series(settings, secrets, *, tvdb_id, title, opener=urlopen):
     series=dict(matches[0])
     if series.get("id"):
         series.pop("id")
-    series.update({"tvdbId":tvdb,"qualityProfileId":sonarr["quality_profile_id"],
+    series.update({"tvdbId":tvdb,"qualityProfileId":profile_id,
                    "rootFolderPath":sonarr["root_folder"],
                    "seasonFolder":True,"monitored":True,"seriesType":"anime",
                    "addOptions":{"searchForMissingEpisodes":False}})
