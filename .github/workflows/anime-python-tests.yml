@@ -74,4 +74,5 @@ jobs:
             test_anime_shoko_handoff \
             test_anime_shoko_handoff_state \
             test_anime_shoko_handoff_monitor \
-            test_anime_shoko_write
+            test_anime_shoko_write \
+            test_anime_episode_crossref
