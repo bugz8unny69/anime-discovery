@@ -100,7 +100,9 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Invalid Shoko URL")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
         raise ValueError("Invalid Shoko polling interval")
-    if "admin_password" in secrets and secrets.get("admin_password")==secrets.get("web_token"):\n        raise ValueError("Dashboard admin password must differ from webhook token")\n    if set(secrets)-ALLOWED_SECRET_KEYS:
+    if "admin_password" in secrets and secrets.get("admin_password")==secrets.get("web_token"):
+        raise ValueError("Dashboard admin password must differ from webhook token")
+    if set(secrets)-ALLOWED_SECRET_KEYS:
         raise ValueError("Unknown secrets keys")
     if any(not isinstance(v,str) for v in secrets.values()):
         raise ValueError("Secret values must be strings")
