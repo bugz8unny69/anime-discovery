@@ -49,6 +49,30 @@ Open `http://HOMELAB-IP:8765/` with username `anime` and password
 and queue its acquisition. `qbittorrent.cleanup_source=true` enables
 removing the torrent and downloaded files after staging succeeds.
 
+### Autobrr automatic handoff
+
+POST `/webhook` with the shared bearer token. Required fields are
+`release_name`, `source_guid`, and `info_hash`. If the payload **also**
+includes `tvdb_id`, `anidb_id`, `season`, `episode`, and
+`magnet_uri`, the webhook immediately binds that supplied episode identity,
+records approval, and queues the acquisition. Otherwise the notification
+appears in the inbox for browser approval. Repeated notifications with the same
+source and GUID are deduplicated. Repeated episode approvals do not create
+additional jobs. Rejected series cannot be approved until reset.
+
+These IDs must be trustworthy metadata supplied by your integration;
+the webhook does not independently resolve release names through AniDB/TVDB.
+
+The dashboard includes Reject, Reset, and Clear History controls. Reject
+blocks acquisition; Reset makes a series eligible again; Clear History
+currently clears the initial-search completion marker, not all historical
+notification or acquisition records.
+
+To install the optional system service, copy `deploy/anime-discovery.service`
+to `/etc/systemd/system/`, adapt its account and repository paths to your VM,
+then run `systemctl daemon-reload` and
+`systemctl enable --now anime-discovery`.
+
 ## Offline fresh-install smoke check
 
 From the repository root with Python 3.12:
