@@ -151,6 +151,47 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 worker.join(2)
 
+    def test_credential_reveal_requires_admin_password_and_never_caches(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            (folder/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (folder/"secrets.json").write_text(json.dumps({
+                "web_token":"hidden-webhook","sonarr_api_key":"sample-secret"}))
+            os.chmod(folder/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=folder))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            try:
+                headers={"Cookie":"ad_session="+self.session,
+                         "X-CSRF-Token":self.csrf,
+                         "Content-Type":"application/json"}
+                for password,expected in (("wrong",403),("admin-pass-long",200)):
+                    client.request("POST","/api/credential-reveal",
+                        json.dumps({"key":"sonarr_api_key","password":password}),headers)
+                    response=client.getresponse()
+                    self.assertEqual(response.status,expected)
+                    self.assertEqual(response.getheader("Cache-Control"),"no-store" if expected==200 else None)
+                    body=json.loads(response.read())
+                    if expected==200:
+                        self.assertEqual(body["value"],"sample-secret")
+                    else:
+                        self.assertNotIn("sample-secret",json.dumps(body))
+                client.request("POST","/api/credential-reveal",
+                    json.dumps({"key":"sonarr_api_key","password":"admin-pass-long"}),
+                    {"Cookie":"ad_session="+self.session,"Content-Type":"application/json"})
+                response=client.getresponse()
+                self.assertEqual(response.status,403)
+                response.read()
+            finally:
+                client.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_session_mutations_require_csrf(self):
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
         try:

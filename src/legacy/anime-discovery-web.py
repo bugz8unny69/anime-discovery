@@ -233,6 +233,33 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(result),"application/json")
                 except (ValueError,TypeError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
+            if route=="/api/credential-reveal":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                try:
+                    from anime_flat_config import ALLOWED_SECRET_KEYS
+                    data=getattr(self,"_cached_form",None) or self.form()
+                    key=data.get("key")
+                    password=data.get("password")
+                    if type(key) is not str or key not in ALLOWED_SECRET_KEYS or key=="admin_password":
+                        raise ValueError("Unsupported credential")
+                    if type(password) is not str or not dashboard_auth.verify("admin",password):
+                        SECURITY_LOG.warning("Credential reveal denied: administrator verification failed")
+                        return self.send(403,json.dumps({"error":"Administrator password required"}),"application/json")
+                    stored=load_config(config_dir)["secrets"].get(key)
+                    if not stored:
+                        return self.send(404,json.dumps({"error":"API key not configured"}),"application/json")
+                    body=json.dumps({"key":key,"value":stored})
+                    encoded=body.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type","application/json")
+                    self.send_header("Cache-Control","no-store")
+                    self.send_header("Pragma","no-cache")
+                    self.send_header("Content-Length",str(len(encoded)))
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                    return
+                except (ValueError,TypeError,OSError) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/credentials":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 try:
