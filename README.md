@@ -10,6 +10,32 @@ The currently deployed application is separate from this repository. No GitHub c
 ## Scope
 Autobrr webhook ingestion, canonical anime identity, controller and episode tracking, qBittorrent verification and acquisition, dashboard and authentication, safe staging, rejection enforcement, and administrative CLI.
 
+## One-command live homelab launch
+
+Run this from the repository root on the machine with access to qBittorrent
+and your mounted download/trial folders. Use Python 3.12. The first command
+is needed **once** for a fresh database; do not rerun it on an existing DB.
+
+```bash
+export PYTHONPATH=src/legacy
+mkdir -p /var/lib/anime-discovery
+python src/legacy/anime-discovery-admin.py new-database
+export ANIME_WEB_TOKEN='choose-a-private-token'
+export ANIME_QB_USER='your-qb-user'
+export ANIME_QB_PASSWORD='your-qb-password'
+python src/legacy/anime-discovery-live.py \\
+  --qb-url http://127.0.0.1:8080 \\
+  --download-root /path/to/qb-downloads \\
+  --trial-root /path/to/anime-trial
+```
+
+If `/var/lib/anime-discovery/anime-discovery.db` already exists, skip
+`new-database`. Replace the qBittorrent URL and both paths. Open
+`http://HOMELAB-IP:8765/`; browser username is `anime`, password is
+`ANIME_WEB_TOKEN`. Autobrr should POST JSON to `/webhook` with
+`Authorization: Bearer YOUR_TOKEN`. This launches both processes and
+stops them together on Ctrl+C. No systemd installation is required.
+
 ## Run the homelab dashboard and Autobrr inbox
 
 Start with an existing unified database (use `new-database` for a fresh install).
