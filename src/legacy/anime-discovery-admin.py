@@ -198,7 +198,9 @@ def main(argv=None):
                     value=json.loads(args.value)
                 except json.JSONDecodeError:
                     value=args.value
-                updated=set_setting(args.config_dir,args.key,value)
+                from anime_shared_settings import apply_settings
+                section,field=args.key.split(".",1)
+                updated=apply_settings(args.config_dir,{section:{field:value}})
                 print(f"{args.key} = {json.dumps(updated)} (restart service to apply)")
     except (OSError,ValueError,sqlite3.Error,RuntimeError,subprocess.CalledProcessError) as exc:
         parser.exit(1,f"anime-discovery-admin: {exc}\\n")
