@@ -17,8 +17,6 @@ def inspect_imported_episode(base_url, api_key, *, destination, sonarr_root,
     root=Path(sonarr_root).resolve(strict=True)
     if not path.is_file() or path==root or not path.is_relative_to(root):
         raise ValueError("Destination not inside permanent Sonarr library")
-    if type(anidb_episode_id) is not int or anidb_episode_id<=0 or verified_episode_identity is not True:
-        return {"status":"NEEDS_EPISODE_IDENTITY","writes_enabled":False}
     # Shoko path search is suffix-based. A result must be independently
     # verified with its absolute location, not inferred from a basename.
     candidates=_get(base_url,api_key,"File/PathEndsWith",
@@ -44,6 +42,11 @@ def inspect_imported_episode(base_url, api_key, *, destination, sonarr_root,
         return {"status":"AMBIGUOUS_SHOKO_FILE","writes_enabled":False}
     file_id=verified[0]
     record=get_file(base_url,api_key,file_id,**opts)
+    # Indexing is independent of episode mapping: scan even when the
+    # AniDB episode identity is still awaiting independent confirmation.
+    if type(anidb_episode_id) is not int or anidb_episode_id<=0 or verified_episode_identity is not True:
+        return {"status":"NEEDS_EPISODE_IDENTITY","file_id":file_id,
+                "writes_enabled":False}
     # SeriesIDs=null is normal for unrecognized files. Confirm through
     # the dedicated file episode endpoint instead of guessing from metadata.
     associations=linked_episode_ids(base_url,api_key,file_id,**opts)
