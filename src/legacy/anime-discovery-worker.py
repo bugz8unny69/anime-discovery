@@ -1,50 +1,38 @@
-"""Runnable Anime Discovery acquisition worker.
-
-Run only when ready to process queued, approved acquisitions. This is an
-application entrypoint, not an installer or a systemd service.
-"""
-import argparse
+"""Anime Discovery worker; all runtime options come from flat configuration."""
 import asyncio
-import os
 from pathlib import Path
-
+from anime_flat_config import load_config
 from anime_acquisition_runtime import acquisition_handlers
 from anime_async_daemon import run_workers
 from anime_qb_api import QBittorrentAPI
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Anime Discovery acquisition worker")
-    parser.add_argument("--db", type=Path, default=Path("/var/lib/anime-discovery/anime-discovery.db"))
-    parser.add_argument("--download-root", type=Path, required=True)
-    parser.add_argument("--trial-root", type=Path, required=True)
-    parser.add_argument("--qb-url", required=True)
-    parser.add_argument("--qb-user", default=os.environ.get("ANIME_QB_USER"))
-    parser.add_argument("--qb-password", default=os.environ.get("ANIME_QB_PASSWORD"))
-    parser.add_argument("--concurrency", type=int, default=2)
-    parser.add_argument("--cleanup-source", action="store_true", help="Remove completed torrent and downloaded files after staging")
-    args = parser.parse_args(argv)
-
-    if not args.db.is_file():
-        parser.error("Database does not exist; run admin new-database first")
-    if not args.download_root.is_dir() or not args.trial_root.is_dir():
-        parser.error("Download and trial directories must already exist")
-    if not args.qb_user or not args.qb_password:
-        parser.error("Supply qBittorrent credentials via arguments or environment")
+def main():
+    config = load_config()
+    settings, secrets = config["settings"], config["secrets"]
+    daemon, qb, storage = settings["daemon"], settings["qbittorrent"], settings["storage"]
+    db_path = Path(daemon["database_path"])
+    download_root, trial_root = Path(storage["download_root"]), Path(storage["trial_root"])
+    if not db_path.is_file():
+        raise RuntimeError("Database missing: " + str(db_path))
+    if not storage["download_root"] or not storage["trial_root"] or not download_root.is_dir() or not trial_root.is_dir():
+        raise RuntimeError("Configure existing storage.download_root and storage.trial_root")
+    if not qb["username"] or not secrets.get("qbittorrent_password"):
+        raise RuntimeError("Configure qbittorrent.username and secrets.json qbittorrent_password")
 
     def qb_factory():
-        client = QBittorrentAPI(args.qb_url, allow_writes=True)
-        client.login(args.qb_user, args.qb_password)
+        client = QBittorrentAPI(qb["base_url"], allow_writes=True)
+        client.login(qb["username"], secrets["qbittorrent_password"])
         return client
 
     handlers = acquisition_handlers(
-        args.db, qb_factory, download_root=args.download_root,
-        trial_root=args.trial_root, enabled=True, cleanup_source=args.cleanup_source)
-    print("Anime Discovery worker running; Ctrl+C to stop", flush=True)
+        db_path, qb_factory, download_root=download_root,
+        trial_root=trial_root, enabled=True, cleanup_source=qb["cleanup_source"])
+    print("Anime Discovery worker running", flush=True)
     try:
-        asyncio.run(run_workers(args.db, handlers, concurrency=args.concurrency))
+        asyncio.run(run_workers(db_path, handlers, concurrency=daemon["concurrency"]))
     except KeyboardInterrupt:
-        print("Anime Discovery worker stopped", flush=True)
+        pass
 
 
 if __name__ == "__main__":
