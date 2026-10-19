@@ -20,14 +20,24 @@ def test_connection(settings,secrets,service,*,opener=None):
     if service=="autobrr":
         return {"service":service,"tested":False,
                 "message":"Incoming webhook: use Autobrr's own test event."}
-    if service not in ("jellyfin","sonarr","shoko","ntfy"):
+    if service not in ("jellyfin","sonarr","shoko","ntfy","tvdb"):
         raise ValueError("Unknown integration")
     cfg=settings[service]
     if not cfg.get("enabled"):
         return {"service":service,"tested":False,"message":"Integration disabled"}
     if opener is None:
         opener=build_opener(NoRedirect()).open
-    if service=="ntfy":
+    if service=="tvdb":
+        parsed=urlsplit(cfg["base_url"])
+        if parsed.scheme!="https" or parsed.path not in ("","/","/v4","/v4/") or parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
+            raise ValueError("TVDB v4 HTTPS API URL required")
+        key=secrets.get("tvdb_api_key")
+        if not key:
+            return {"service":service,"tested":False,"message":"API key not configured"}
+        request=Request(cfg["base_url"].rstrip("/")+"/login",
+            data=json.dumps({"apikey":key}).encode(),
+            headers={"Content-Type":"application/json","Accept":"application/json"},method="POST")
+    elif service=="ntfy":
         url=origin(cfg["server"],https_only=True)+"/"+quote(cfg["topic"],safe="")
         headers={"Title":"Anime Discovery connection test","Content-Type":"text/plain"}
         if secrets.get("ntfy_token"):
@@ -55,6 +65,8 @@ def test_connection(settings,secrets,service,*,opener=None):
                 payload=json.loads(response.read(65536))
                 if not isinstance(payload,dict):
                     raise ValueError("Invalid service response")
+                if service=="tvdb" and not (isinstance(payload.get("data"),dict) and payload["data"].get("token")):
+                    raise ValueError("TVDB login did not return a token")
                 if service=="sonarr" and not payload.get("version"):
                     raise ValueError("Sonarr system status missing version")
             return {"service":service,"tested":True,"connected":True,
