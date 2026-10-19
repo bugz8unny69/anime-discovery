@@ -107,6 +107,50 @@ class DashboardHTTPTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_settings_page_provides_working_csrf_for_integration_actions(self):
+        import os
+        import re
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            (folder/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (folder/"secrets.json").write_text(json.dumps({"web_token":"hidden-token"}))
+            os.chmod(folder/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=folder))
+            worker=threading.Thread(target=server.serve_forever,daemon=True)
+            worker.start()
+            client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            try:
+                client.request("GET","/settings",headers={"Cookie":"ad_session="+self.session})
+                response=client.getresponse()
+                self.assertEqual(response.status,200)
+                page=response.read().decode()
+                fields=re.findall(r'<input type="hidden" name="_csrf" value="([^"]+)">',page)
+                self.assertGreaterEqual(len(fields),5)
+                self.assertTrue(all(item==self.csrf for item in fields))
+                client.request("POST","/api/test-connection",
+                    json.dumps({"service":"autobrr"}),
+                    {"Cookie":"ad_session="+self.session,"Content-Type":"application/json",
+                     "X-CSRF-Token":fields[0]})
+                result=client.getresponse()
+                self.assertEqual(result.status,200)
+                self.assertFalse(json.loads(result.read())["tested"])
+                client.request("POST","/api/credentials",
+                    json.dumps({"key":"ntfy_token","clear":False,"value":"replacement"}),
+                    {"Cookie":"ad_session="+self.session,"Content-Type":"application/json",
+                     "X-CSRF-Token":fields[0]})
+                result=client.getresponse()
+                self.assertEqual(result.status,200)
+                result.read()
+                self.assertEqual(json.loads((folder/"secrets.json").read_text())["ntfy_token"],
+                                 "replacement")
+            finally:
+                client.close()
+                server.shutdown()
+                server.server_close()
+                worker.join(2)
+
     def test_session_mutations_require_csrf(self):
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
         try:

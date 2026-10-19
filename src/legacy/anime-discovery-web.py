@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import re
 import sqlite3
 import time
@@ -19,6 +20,8 @@ from anime_series_aliases import add_alias, remove_alias
 from anime_shared_discovery import identity_for_request, schedule
 import anime_dashboard_auth as dashboard_auth
 from http.cookies import SimpleCookie
+
+SECURITY_LOG = logging.getLogger("anime_discovery.dashboard_security")
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
@@ -106,7 +109,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
 
         def with_csrf(self, page):
             hidden='<input type="hidden" name="_csrf" value="'+self.csrf_token()+'">'
-            return re.sub(r"(<form\\b[^>]*>)",lambda match:match.group(1)+hidden,page,
+            return re.sub(r"(<form\b[^>]*>)",lambda match:match.group(1)+hidden,page,
                           flags=re.IGNORECASE)
 
         def database(self):
@@ -196,6 +199,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 except (ValueError,TypeError):
                     return self.send(400,self.login_page("Invalid sign-in request"))
             if not self.authorized(webhook=route=="/webhook"):
+                SECURITY_LOG.warning("Authentication rejected route=%s",route)
                 return self.send(401,json.dumps({"error":"Authentication required"}),"application/json")
             if route=="/logout":
                 values=self.form()
@@ -211,9 +215,11 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     # HTML forms carry the token in a hidden field.
                     values=self.form()
                     if not self.check_csrf(values):
+                        SECURITY_LOG.warning("CSRF rejected route=%s reason=%s",route,"missing" if not values.get("_csrf") else "mismatch")
                         return self.send(403,"Invalid CSRF token","text/plain")
                     self._cached_form=values
                 elif not self.check_csrf({}):
+                    SECURITY_LOG.warning("CSRF rejected route=%s reason=mismatch",route)
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
             if route=="/api/test-connection":

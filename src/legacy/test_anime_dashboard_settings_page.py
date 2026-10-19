@@ -20,7 +20,10 @@ class DashboardSettingsTests(unittest.TestCase):
                 html=settings_page(folder)
             for name in ("jellyfin","sonarr","shoko","autobrr","ntfy"):
                 self.assertIn('data-name="'+name+'"',html)
-            self.assertIn("Credential: Set",html)
+            self.assertIn("Token: Set",html)
+            self.assertIn("Update Token",html)
+            self.assertIn('class="toggle-token"',html)
+            self.assertIn('type="password" name="credential"',html)
             self.assertNotIn("private-value-here",html)
             self.assertNotIn("other-private-value",html)
             self.assertIn("Refresh",html)
