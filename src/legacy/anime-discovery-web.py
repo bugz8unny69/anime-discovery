@@ -146,6 +146,10 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 from anime_shared_settings import snapshot
                 return self.send(200,json.dumps(snapshot(config_dir)),"application/json")
+            if path=="/settings":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                from anime_dashboard_settings_page import settings_page
+                return self.send(200,self.with_csrf(settings_page(config_dir)))
             if path not in ("/","/jobs","/api/jobs","/recognized","/series"):
                 return self.send(404,"Not found","text/plain")
             try:
