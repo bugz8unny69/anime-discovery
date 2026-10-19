@@ -18,10 +18,12 @@ class DashboardSettingsTests(unittest.TestCase):
             os.chmod(folder/"secrets.json",0o600)
             with patch.object(auth,"AUTH_FILE",folder/"auth.json"):
                 html=settings_page(folder)
-            for name in ("jellyfin","sonarr","shoko","autobrr","ntfy"):
+            for name in ("jellyfin","sonarr","shoko","autobrr","ntfy","tvdb"):
                 self.assertIn('data-name="'+name+'"',html)
             self.assertIn('data-key="web_token" data-stored="true"',html)
             self.assertIn("API Key",html)
+            self.assertIn("AniDB",html)
+            self.assertIn("no AniDB API key",html)
             self.assertIn("Save &amp; Apply",html)
             self.assertIn("Test Connection",html)
             self.assertIn('class="toggle-secret"',html)
