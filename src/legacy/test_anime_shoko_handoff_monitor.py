@@ -44,6 +44,33 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(counts,{"verified":2,"inspected":2})
         with sqlite3.connect(self.path) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM shoko_handoff").fetchone()[0],1)
+    def test_shoko_attention_alert_is_deduplicated(self):
+        self.settings["ntfy"]={"enabled":True}
+        alerts=[]
+        def sender(settings,secrets,sid,nid,reason):
+            alerts.append((sid,nid,reason))
+            return True
+        def verifier(*args,**kwargs):
+            return ["/mnt/media/Anime/ep.mkv"]
+        def inspect(*args,**kwargs):
+            return {"status":"NEEDS_EPISODE_IDENTITY","writes_enabled":False}
+        for _ in range(2):
+            result=check_once(self.settings,self.secrets,inspector=inspect,
+                copy_verifier=verifier,alert_sender=sender)
+            self.assertEqual(result["errors"],0)
+        self.assertEqual(alerts,[(3,9,"NEEDS_EPISODE_IDENTITY")])
+
+    def test_alert_delivery_failure_never_blocks_handoff(self):
+        self.settings["ntfy"]={"enabled":True}
+        def fail(*args,**kwargs):
+            raise RuntimeError("ntfy unavailable")
+        result=check_once(self.settings,self.secrets,
+            inspector=lambda *a,**kw: {"status":"UNRECOGNIZED_NEEDS_REVIEW",
+                "writes_enabled":False},
+            copy_verifier=lambda *a,**kw: ["/mnt/media/Anime/ep.mkv"],
+            alert_sender=fail)
+        self.assertEqual(result,{"processed":1,"errors":0})
+
     def test_digest_missing_fails_before_enqueue(self):
         with sqlite3.connect(self.path) as db:
             db.execute("UPDATE torrent_recovery_records SET sha256='bad'")
