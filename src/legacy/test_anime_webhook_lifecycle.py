@@ -51,7 +51,7 @@ class WebhookLifecycleTests(unittest.TestCase):
     def test_guid_conflicting_hash_rejected(self):
         receive(self.db, self.event())
         with self.assertRaisesRegex(ValueError,"different torrent"):
-            receive(self.db, self.event(info_hash="b"*40))
+            receive(self.db, self.event(info_hash="b"*40,magnet_uri="magnet:?xt=urn:btih:"+"b"*40))
         self.assertEqual(self.db.execute("SELECT count(*) FROM notifications").fetchone()[0], 1)
 
     def test_missing_identity_stays_in_inbox(self):
