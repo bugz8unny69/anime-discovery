@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from anime_webhook_processing import approve, receive
+from anime_series_lifecycle import action as series_action, notifications as inbox, inspect as inspect_series
 from anime_flat_config import load_config
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
@@ -64,43 +65,85 @@ def app(db_path, token):
                 self.send_header("WWW-Authenticate", 'Basic realm="Anime Discovery"')
                 self.end_headers()
                 return
-            if urlsplit(self.path).path != "/":
+            route = urlsplit(self.path)
+            if route.path not in ("/", "/series", "/health"):
                 return self.send(404, "Not found", "text/plain")
-            with self.database() as db:
-                notifications = db.execute(
-                    "SELECT id,source,release_name,info_hash,status FROM notifications ORDER BY id DESC LIMIT 100").fetchall()
-                series = db.execute(
-                    "SELECT id,title,external_id,status FROM series ORDER BY id DESC LIMIT 100").fetchall()
-                jobs = db.execute(
-                    "SELECT state,count(*) FROM daemon_jobs GROUP BY state").fetchall()
+            if route.path == "/health":
+                return self.send(200, '{"status":"running"}', "application/json")
             esc = lambda x: html.escape(str(x), quote=True)
-            rows = "".join("<tr>" + "".join("<td>" + esc(v) + "</td>" for v in row) + "</tr>" for row in notifications)
-            shows = "".join("<tr>" + "".join("<td>" + esc(v) + "</td>" for v in row) + "</tr>" for row in series)
-            body = """<!doctype html><meta charset="utf-8"><title>Anime Discovery</title>
-            <style>body{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:1rem;background:#141722;color:#eee}
-            table{border-collapse:collapse;width:100%}td,th{padding:.6rem;border-bottom:1px solid #555;text-align:left}
-            input{padding:.5rem;margin:.3rem}button{padding:.6rem}</style>
-            <h1>Anime Discovery</h1><p>Jobs: """ + esc(dict(jobs)) + """</p>
-            <h2>Series</h2><table><tr><th>ID</th><th>Title</th><th>TVDB</th><th>Status</th></tr>""" + shows + """</table>
-            <h2>Series actions</h2>
-            <form method="post" action="/series-action">
-            <input name="series_id" type="number" min="1" placeholder="Series ID" required>
-            <select name="action"><option value="reject">Reject</option>
-            <option value="reset">Reset</option><option value="clear-history">Clear History</option></select>
-            <button>Apply</button></form>
-            <h2>Autobrr inbox</h2><table><tr><th>ID</th><th>Source</th><th>Release</th><th>Hash</th><th>Status</th></tr>""" + rows + """</table>
-            <h2>Approve notification and queue acquisition</h2>
-            <p>Use verified TVDB/AniDB IDs and episode numbering. Existing series are reused.</p>
-            <form method="post" action="/approve">
-            <input name="notification_id" type="number" placeholder="Notification ID" required>
-            <input name="tvdb_id" type="number" placeholder="TVDB ID" required>
-            <input name="anidb_id" type="number" placeholder="AniDB ID" required>
-            <input name="season" type="number" min="1" placeholder="Season" required>
-            <input name="episode" type="number" min="1" placeholder="Episode" required>
-            <input name="magnet_uri" placeholder="Magnet URI" size="55" required>
-            <button>Approve and queue</button></form>
-            <p>Use an API client with Authorization: Bearer TOKEN for requests; browser login uses username anime and password TOKEN.</p>"""
-            self.send(200, body)
+            def table(headers, records):
+                head = "".join("<th>"+esc(v)+"</th>" for v in headers)
+                rows = "".join("<tr>"+"".join("<td>"+esc(v)+"</td>" for v in record)+"</tr>"
+                               for record in records)
+                return "<table><thead><tr>"+head+"</tr></thead><tbody>"+rows+"</tbody></table>"
+            style = """<!doctype html><html lang="en"><meta charset="utf-8">
+                <meta name="viewport" content="width=device-width,initial-scale=1">
+                <title>Anime Discovery</title>
+                <style>
+                body{font:16px system-ui;margin:0 auto;max-width:1150px;padding:2rem;
+                  color:#e7edf9;background:#101725;line-height:1.5}
+                h1,h2{color:#fff}a{color:#96c7ff}
+                section{background:#1c2739;border:1px solid #344459;border-radius:12px;
+                  padding:1.2rem;margin:1.1rem 0;overflow:auto}
+                table{border-collapse:collapse;width:100%;font-size:.93rem}
+                th,td{text-align:left;padding:.55rem;border-bottom:1px solid #38475a}
+                input,select,button{padding:.6rem;margin:.25rem;background:#25364a;
+                  border:1px solid #526881;border-radius:6px;color:white}
+                button{cursor:pointer;background:#20568c}
+                form{display:flex;gap:.25rem;flex-wrap:wrap;align-items:center}
+                .muted{color:#a6b5c9}
+                </style><body><header><h1>Anime Discovery</h1>
+                <a href="/">Dashboard</a></header>"""
+            with self.database() as db:
+                if route.path == "/series":
+                    ids = parse_qs(route.query).get("id", [])
+                    if len(ids)!=1:
+                        raise ValueError("Specify series id")
+                    try:
+                        detail = inspect_series(db, int(ids[0]))
+                    except ValueError as exc:
+                        return self.send(404, str(exc), "text/plain")
+                    series = detail["series"]
+                    body = style + "<section><h2>"+esc(series[1])+"</h2><p>TVDB "+esc(series[2])+" | "+esc(series[3])+"</p>"
+                    body += "<p>Rejection block: "+esc(detail["rejected"])+"</p>"
+                    body += table(("Season","Episode","State"),detail["episodes"])
+                    body += "</section><section><h2>Release history</h2>"
+                    body += table(("Notification","Release","Season","Episode","Dispatch","Job","Staged media"),detail["releases"])
+                    body += "</section></body></html>"
+                    return self.send(200,body)
+                events = inbox(db)
+                series = db.execute("SELECT id,title,external_id,status FROM series ORDER BY id DESC LIMIT 100").fetchall()
+                jobs = dict(db.execute("SELECT state,count(*) FROM daemon_jobs GROUP BY state").fetchall())
+            shows = []
+            for sid,title,tvdb,status in series:
+                shows.append((str(sid),title,tvdb,status))
+            linked = "".join("<tr><td><a href='/series?id="+str(row[0])+"'>"+str(row[0])+"</a></td>"+
+                "".join("<td>"+esc(v)+"</td>" for v in row[1:])+"</tr>" for row in shows)
+            body = style + "<p>Daemon jobs: "+esc(jobs)+"</p>"
+            body += "<section><h2>Series</h2><table><tr><th>ID</th><th>Title</th><th>TVDB</th><th>Status</th></tr>"+linked+"</table>"
+            body += """<h3>Manage series</h3>
+                <form method="post" action="/series-action">
+                <input name="series_id" type="number" min="1" placeholder="Series ID" required>
+                <select name="action"><option value="reject">Reject</option>
+                <option value="clear-history">Clear History</option>
+                <option value="reset">Reset</option></select>
+                <button>Apply</button></form>
+                <p class="muted">Reject blocks queued work; Clear History hides earlier
+                notifications without lifting the block; Reset allows future acquisitions.</p></section>"""
+            body += "<section><h2>Autobrr inbox</h2>"
+            body += table(("ID","Source","Release","Hash","Notification","Dispatch","Job"),events)
+            body += """</section><section><h2>Approve an inbox release</h2>
+                <p class="muted">Only needed if Autobrr didn't send verified TVDB/AniDB
+                and episode identifiers.</p>
+                <form method="post" action="/approve">
+                <input name="notification_id" type="number" min="1" placeholder="Notification ID" required>
+                <input name="tvdb_id" type="number" min="1" placeholder="TVDB ID" required>
+                <input name="anidb_id" type="number" min="1" placeholder="AniDB ID" required>
+                <input name="season" type="number" min="1" placeholder="Season" required>
+                <input name="episode" type="number" min="1" placeholder="Episode" required>
+                <input name="magnet_uri" placeholder="Optional magnet URI" size="45">
+                <button>Approve and queue</button></form></section></body></html>"""
+            return self.send(200,body)
 
         def do_POST(self):
             if not self.authorized():
@@ -117,31 +160,17 @@ def app(db_path, token):
                     if route == "/webhook":
                         result = receive(db, values)
                     elif route == "/series-action":
-                        sid = int(values["series_id"])
-                        action = str(values["action"])
-                        if sid <= 0 or action not in ("reject", "reset", "clear-history"):
-                            raise ValueError("Invalid series action")
-                        db.execute("BEGIN IMMEDIATE")
-                        try:
-                            if not db.execute("SELECT id FROM series WHERE id=?", (sid,)).fetchone():
-                                raise ValueError("Series not found")
-                            if action == "reject":
-                                db.execute("UPDATE series SET status='REJECTED' WHERE id=?", (sid,))
-                                db.execute("INSERT OR REPLACE INTO series_rejection_blocks(series_id,reason) VALUES (?,'USER_REJECTED')", (sid,))
-                            elif action == "reset":
-                                db.execute("UPDATE series SET status='DISCOVERED',initial_search_complete=0 WHERE id=?", (sid,))
-                                db.execute("DELETE FROM series_rejection_blocks WHERE series_id=?", (sid,))
-                                db.execute("DELETE FROM series_quarantine WHERE series_id=?", (sid,))
-                            else:
-                                db.execute("UPDATE series SET initial_search_complete=0 WHERE id=?", (sid,))
-                            db.commit()
-                        except BaseException:
-                            db.rollback()
-                            raise
-                        result = {"action": action, "series_id": sid, "ok": True}
+                        result = series_action(db, int(values["series_id"]), str(values["action"]))
                     else:
                         result = approve(db, values["notification_id"], values)
-                self.send(200,json.dumps(result),"application/json")
+                if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
+                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else "/"
+                    self.send_response(303)
+                    self.send_header("Location", destination)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    self.send(200,json.dumps(result),"application/json")
             except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
                 self.send(400,json.dumps({"error":str(exc)}),"application/json")
     return Handler
