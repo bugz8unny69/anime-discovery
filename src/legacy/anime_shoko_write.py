@@ -14,9 +14,13 @@ def _origin(base_url):
         raise ValueError("Shoko origin invalid")
     return base_url.rstrip("/")
 
-def request_scan(base_url,key,folder_id,*,opener=urlopen):
+def request_scan(base_url,key,folder_id,*,expected_root=None,opener=urlopen):
     if type(folder_id) is not int or folder_id<=0:
         raise ValueError("Configured import folder ID required")
+    if expected_root is not None:
+        folder=_get(base_url,key,"ImportFolder/"+str(folder_id),opener=opener)
+        if not isinstance(folder,dict) or folder.get("ID")!=folder_id or not isinstance(folder.get("Path"),str) or folder["Path"].rstrip("/")!=str(expected_root).rstrip("/"):
+            raise RuntimeError("Shoko import folder is not Sonarr permanent library")
     # Swagger specifies GET, but this endpoint has side effects.
     url=_origin(base_url)+"/api/v3/ImportFolder/"+str(folder_id)+"/Scan"
     with opener(Request(url,headers={"apikey":key,"Accept":"application/json"}),timeout=15) as resp:
