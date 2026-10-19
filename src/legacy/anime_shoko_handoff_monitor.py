@@ -1,7 +1,8 @@
-"""Read-only Shoko handoff monitor for Anime Discovery Kept imports.
+"""Best-effort Shoko handoff monitor for Anime Discovery Kept imports.
 
-Does not mutate Sonarr, Shoko, qBittorrent or media. Restarts are safe:
-backfill provenance only after re-verifying Sonarr copies against recovery hashes.
+Never mutates Sonarr, qBittorrent or media. Shoko folder scanning and episode
+linking are separate, explicitly configured side effects; cleanup does not
+wait for Shoko. Restarts safely reconstruct verified Sonarr provenance.
 """
 import json
 import logging
