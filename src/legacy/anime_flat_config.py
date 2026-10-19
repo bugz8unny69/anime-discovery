@@ -9,14 +9,16 @@ from pathlib import Path
 
 DEFAULT_CONFIG_DIR = Path("/etc/anime-discovery")
 DEFAULT_SETTINGS = {
-    "daemon": {"concurrency": 4, "lease_seconds": 300},
+    "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
+    "web": {"host": "0.0.0.0", "port": 8765},
+    "storage": {"download_root": "", "trial_root": ""},
     "identity": {"reuse_verified_cache": True},
-    "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False},
+    "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "jellyfin": {"write_trial_nfo": True},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60}
 }
-ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key"}
+ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token"}
 
 def _read_object(path):
     path=Path(path)
@@ -48,6 +50,16 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("daemon.concurrency must be 1..32")
     if not isinstance(result["daemon"]["lease_seconds"],int) or result["daemon"]["lease_seconds"]<30:
         raise ValueError("Invalid daemon lease_seconds")
+    if not isinstance(result["daemon"]["database_path"],str) or not result["daemon"]["database_path"]:
+        raise ValueError("Invalid database path")
+    if not isinstance(result["web"]["host"],str) or not result["web"]["host"] or type(result["web"]["port"]) is not int or not 1<=result["web"]["port"]<=65535:
+        raise ValueError("Invalid web listener")
+    if any(not isinstance(result["storage"][key],str) for key in ("download_root","trial_root")):
+        raise ValueError("Invalid storage paths")
+    if not isinstance(result["qbittorrent"]["base_url"],str) or not isinstance(result["qbittorrent"]["username"],str):
+        raise ValueError("Invalid qBittorrent connection")
+    if type(result["qbittorrent"]["cleanup_source"]) is not bool:
+        raise ValueError("Invalid cleanup_source")
     if result["qbittorrent"]["priority_mode"]!="normal":
         raise ValueError("Unsupported torrent priority mode")
     if result["qbittorrent"]["manage_download_limit"] is not False:
