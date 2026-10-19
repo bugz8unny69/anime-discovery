@@ -74,6 +74,39 @@ without lifting rejection, and Reset lifts the block for new webhooks.
 If configured, successful staging/finalization removes both the torrent and
 its downloaded source files from qBittorrent.
 
+## Migrating existing VM configuration
+
+If `/etc/anime-discovery/settings.json` and `secrets.json` already exist,
+**do not run the fresh-install wizard or replace these files**.
+The new admin command merges missing supported defaults into the existing
+`settings.json`, preserving the current database path, download/trial paths,
+qBittorrent URL, user preferences, and credentials.
+
+Review the proposed additions first:
+
+```bash
+sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py settings migrate
+```
+
+Then explicitly apply the changes:
+
+```bash
+sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py settings migrate --apply
+```
+
+The command creates a dated `settings.json.before-migrate-*.bak` backup
+containing the **exact original bytes** before replacing `settings.json`.
+It never rewrites `secrets.json`; Prowlarr remains disabled by default.
+Existing values always win over defaults. Unknown legacy keys or incompatible
+values stop the migration and require review rather than being erased.
+No SQLite records, torrent data, or service configuration are changed by
+`settings migrate`.
+
+To enable the *optional* new Prowlarr integration after migrating, configure
+`prowlarr.base_url`, add `prowlarr_api_key` to the existing secrets file
+without removing any existing keys, and set `prowlarr.enabled` to true.
+Keep `secrets.json` readable only by its owner (mode 0600).
+
 ## Built-in VM upgrade and administration
 
 After the first installation, update the checked-out `develop` release and
