@@ -41,6 +41,12 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
     result=(sonarr_client or ensure_series)(settings,secrets,tvdb_id=row[0],title=row[1])
     if not isinstance(result,dict) or type(result.get("sonarr_id")) is not int or result["sonarr_id"]<=0:
         raise RuntimeError("Sonarr admission unconfirmed")
+    from anime_sonarr_import import plan_staged_imports
+    # Capture import manifest; a separate explicit action submits to Sonarr.
+    trial_root=settings.get("storage",{}).get("trial_root")
+    if not trial_root:
+        raise ValueError("Trial root must be configured")
+    manifest=plan_staged_imports(db,series_id,trial_root=trial_root)
     db.execute("BEGIN IMMEDIATE")
     try:
         db.execute("""CREATE TABLE IF NOT EXISTS sonarr_keep (
@@ -50,6 +56,15 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
         db.execute("""INSERT INTO sonarr_keep(series_id,sonarr_id,tvdb_id)
             VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET sonarr_id=excluded.sonarr_id""",
             (series_id,result["sonarr_id"],str(row[0])))
+        db.execute("""CREATE TABLE IF NOT EXISTS sonarr_import_manifest (
+            series_id INTEGER PRIMARY KEY REFERENCES series(id),
+            manifest_json TEXT NOT NULL,
+            submitted_command_id INTEGER
+        )""")
+        import json
+        db.execute("""INSERT INTO sonarr_import_manifest(series_id,manifest_json)
+            VALUES (?,?) ON CONFLICT(series_id) DO UPDATE SET
+            manifest_json=excluded.manifest_json""",(series_id,json.dumps(manifest)))
         db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
         db.commit()
     except BaseException:
