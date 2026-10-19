@@ -11,6 +11,9 @@ def _write(data):
     temp=AUTH_FILE.with_name(AUTH_FILE.name+'.'+secrets.token_hex(8)+'.tmp')
     fd=os.open(temp,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
     try:
+        if os.geteuid()==0:
+            owner=(AUTH_FILE if AUTH_FILE.exists() else AUTH_FILE.parent).stat()
+            os.fchown(fd,owner.st_uid,owner.st_gid)
         with os.fdopen(fd,'w') as out:
             json.dump(data,out);out.flush();os.fsync(out.fileno())
         os.replace(temp,AUTH_FILE)
