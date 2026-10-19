@@ -41,6 +41,7 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
         processed=0
         errors=0
         for series_id,sonarr_id,raw in series:
+            ids=[]
             try:
                 manifest=json.loads(raw)
                 if not isinstance(manifest,list) or not manifest:
@@ -156,6 +157,17 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                 errors+=1
                 LOG.warning("Shoko handoff deferred for series %d (%s)",
                             series_id,type(exc).__name__)
+                if settings.get("ntfy",{}).get("enabled"):
+                    for nid in ids[:20]:
+                        try:
+                            sent=db.execute("""SELECT 1 FROM shoko_alert_delivery
+                                WHERE series_id=? AND notification_id=? AND reason=?""",
+                                (series_id,nid,"SHOKO_API_ERROR")).fetchone()
+                            if not sent and alert_sender(settings,secrets,series_id,nid,"SHOKO_API_ERROR"):
+                                db.execute("""INSERT OR IGNORE INTO shoko_alert_delivery
+                                    VALUES (?,?,?)""",(series_id,nid,"SHOKO_API_ERROR"))
+                        except Exception:
+                            LOG.warning("Shoko error notification deferred for series %d",series_id)
         return {"processed":processed,"errors":errors}
 
 def main():
