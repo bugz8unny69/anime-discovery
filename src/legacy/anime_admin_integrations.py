@@ -11,7 +11,7 @@ SERVICES={
     "sonarr":(("base_url",str),("root_folder",str),("quality_profile_name",str),("quality_profile_id",int)),
     "ntfy":(("server",str),("topic",str),("dashboard_url",str),("reminder_hours",int)),
     "tvdb":(("base_url",str),),
-    "shoko":(("base_url",str),("poll_seconds",int)),
+    "shoko":(("base_url",str),("poll_seconds",int),("import_folder_id",int)),
 }
 SECRET_NAMES={"sonarr":"sonarr_api_key","ntfy":"ntfy_token",
               "tvdb":"tvdb_api_key","shoko":"shoko_api_key"}
