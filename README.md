@@ -10,6 +10,35 @@ The currently deployed application is separate from this repository. No GitHub c
 ## Scope
 Autobrr webhook ingestion, canonical anime identity, controller and episode tracking, qBittorrent verification and acquisition, dashboard and authentication, safe staging, rejection enforcement, and administrative CLI.
 
+## Run the homelab dashboard and Autobrr inbox
+
+Start with an existing unified database (use `new-database` for a fresh install).
+From the repository root:
+
+```bash
+export PYTHONPATH=src/legacy
+python src/legacy/anime-discovery-web.py \\
+  --db /var/lib/anime-discovery/anime-discovery.db \\
+  --host 0.0.0.0 --port 8765 --token 'replace-with-your-own-token'
+```
+
+Open `http://YOUR-HOMELAB-IP:8765/` and log in with username `anime`
+and the configured token as password. The dashboard lists series and recent
+notifications, and its approval form binds a notification to TVDB/AniDB IDs,
+season/episode, and a magnet link, then queues the acquisition job.
+
+Configure Autobrr's webhook POST URL as
+`http://YOUR-HOMELAB-IP:8765/webhook` and send
+`Authorization: Bearer YOUR_TOKEN`. Send JSON or form fields:
+`release_name`, `source_guid`, `info_hash` (40- or 64-character hex);
+`source` is optional. Incoming releases are saved to the inbox. Approval
+is a separate action on the dashboard.
+
+Run `anime-discovery-worker.py` (below) in a separate terminal to
+process approved jobs and submit to qBittorrent. Both processes use the
+same database. Keep this service on a trusted homelab network or behind
+your existing HTTPS reverse proxy; its browser login uses HTTP Basic auth.
+
 ## Run the acquisition worker
 
 The worker processes approved acquisition jobs from the unified database, logs
