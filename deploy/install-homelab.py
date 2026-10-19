@@ -66,18 +66,22 @@ def _existing_setup(account):
         migrated=migrate(CONFIG_DIR,apply=True)
         print("Settings backup:",migrated["backup"])
     config=load_config(CONFIG_DIR)
-    # A service account must read secrets. Never silently chmod/chown existing files.
-    if os.geteuid()==0 and account.pw_uid!=0:
-        st=secrets_file.stat()
-        if st.st_uid!=account.pw_uid:
-            raise ValueError("Existing secrets.json is not owned by service account "+
-                             account.pw_name+"; fix ownership explicitly before installation")
-        directory=CONFIG_DIR.stat()
-        if directory.st_uid!=account.pw_uid and not (directory.st_mode & 0o001):
-            raise ValueError("Configuration directory must be traversable by the service account")
-        st=settings_file.stat()
-        if st.st_uid!=account.pw_uid and not (st.st_mode & 0o004):
-            raise ValueError("settings.json cannot be read by the service account")
+    # Correct only known application configuration paths, with confirmation.
+    # Never rewrite secrets or recursively chown unrelated directories.
+    fixes=[]
+    for path,mode in ((CONFIG_DIR,0o750),(settings_file,0o640),(secrets_file,0o600)):
+        meta=path.stat()
+        if (meta.st_uid,meta.st_gid,meta.st_mode & 0o777)!=(account.pw_uid,account.pw_gid,mode):
+            fixes.append((path,mode))
+    if fixes:
+        print('Service account needs these ownership/mode corrections:')
+        for path,mode in fixes:
+            print('  ',path,'=>',account.pw_name,oct(mode))
+        if ask('Apply the displayed permission corrections? (yes/no)','no').lower()!='yes':
+            raise ValueError('Configuration permission corrections declined')
+        for path,mode in fixes:
+            os.chown(path,account.pw_uid,account.pw_gid)
+            os.chmod(path,mode)
     return config
 
 
@@ -149,8 +153,6 @@ def main():
     if username not in media.gr_mem and account.pw_gid!=media.gr_gid:
         raise ValueError("Service account must belong to media (GID 1002) before installation")
     print("Installing Anime Discovery for account:",username,"and media GID:",media.gr_gid)
-    if ROOT.stat().st_uid==0:
-        os.chown(ROOT,account.pw_uid,account.pw_gid)
     if not os.access(ROOT,os.X_OK):
         raise ValueError("Application directory not accessible")
     config=_existing_setup(account) if existing else _new_setup(account)
