@@ -144,8 +144,11 @@ sudo systemctl restart anime-discovery.service
 
 Leave the webhook prompt blank to keep your Autobrr token. Enter a distinct
 dashboard password when prompted. The command rewrites only `secrets.json`,
-preserving existing keys and file ownership. The service refuses to start
-without a separate admin password. To configure Prowlarr on an existing
+preserving existing keys and file ownership. An archive upgrade from the earlier build can temporarily start with the old
+shared token so the service does not fail the upgrade health check. This is
+a transitional security exception: immediately run configure-credentials
+and restart to eliminate shared credentials. New installations always prompt
+for separate credentials. To configure Prowlarr on an existing
 installation, use `settings set prowlarr.base_url` and
 `settings set prowlarr.enabled true`, and provision `prowlarr_api_key`
 securely in `secrets.json` (0600), then restart the service.
