@@ -160,7 +160,10 @@ def main():
     token = secrets.get("web_token")
     if not token:
         raise RuntimeError("Set web_token in /etc/anime-discovery/secrets.json")
-    admin_password = secrets.get("admin_password")\n    if not admin_password or admin_password == token:\n        raise RuntimeError("Set a separate admin_password in /etc/anime-discovery/secrets.json")\n    db_path = Path(settings["daemon"]["database_path"])
+    admin_password = secrets.get("admin_password")
+    if not admin_password or admin_password == token:
+        raise RuntimeError("Set a separate admin_password in /etc/anime-discovery/secrets.json")
+    db_path = Path(settings["daemon"]["database_path"])
     if not db_path.is_file():
         raise RuntimeError("Database missing: " + str(db_path))
     host, port = settings["web"]["host"], settings["web"]["port"]
