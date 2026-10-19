@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from anime_webhook_processing import approve, receive
-from anime_series_lifecycle import action as series_action, bulk_action, inspect as inspect_series
+from anime_series_lifecycle import action as series_action, bulk_action, keep as keep_series, inspect as inspect_series
 from anime_dashboard_queries import staged_series, all_jobs
 from anime_dashboard_pages import series_page, jobs_page, recognized_page, detail_page
 from anime_flat_config import load_config, DEFAULT_CONFIG_DIR
@@ -136,11 +136,20 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
                         else:
                             result = remove_alias(config_dir, values["alias"])
                     elif route == "/series-action":
-                        result = series_action(db, int(values["series_id"]), str(values["action"]))
+                        result = (keep_series(db, int(values["series_id"]), load_config(config_dir)["settings"], load_config(config_dir)["secrets"]) if values["action"]=="keep" and config_dir is not None else series_action(db, int(values["series_id"]), str(values["action"])))
                     elif route == "/series-bulk":
                         result = bulk_action(db, values.get("series_ids", []), str(values["action"]))
                     else:
                         result = approve(db, values["notification_id"], values)
+                if route == "/webhook" and not result.get("duplicate") and not result.get("queued") and config_dir is not None:
+                    from anime_ntfy import notify_best_effort
+                    cfg=load_config(config_dir)
+                    notified=notify_best_effort(cfg["settings"],cfg["secrets"],result["notification_id"],
+                                       values.get("release_name") or values.get("torrentName") or "Unknown release")
+                    if notified:
+                        from anime_ntfy_monitor import mark_sent
+                        with self.database() as notify_db:
+                            mark_sent(notify_db,result["notification_id"])
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
                     destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
                     self.send_response(303)
@@ -149,7 +158,7 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
                     self.end_headers()
                 else:
                     self.send(200,json.dumps(result),"application/json")
-            except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
+            except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError,RuntimeError) as exc:
                 self.send(400,json.dumps({"error":str(exc)}),"application/json")
     return Handler
 

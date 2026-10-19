@@ -126,6 +126,9 @@ def _new_setup(account):
     os.chown(CONFIG_DIR,account.pw_uid,account.pw_gid)
     write_json(CONFIG_DIR/"settings.json",settings,mode=0o640,uid=account.pw_uid,gid=account.pw_gid)
     write_json(CONFIG_DIR/"secrets.json",secrets,mode=0o600,uid=account.pw_uid,gid=account.pw_gid)
+    print("Optional integrations (Sonarr, Shoko, TVDB, NTFY) default to disabled.")
+    print("Configure each with: anime-discovery-admin settings configure-integration SERVICE")
+    print("The installer stores all supported settings but does not invent API keys.")
     return load_config(CONFIG_DIR)
 
 

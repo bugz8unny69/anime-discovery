@@ -55,6 +55,42 @@ class ExistingSettingsMigrationTests(unittest.TestCase):
         self.assertFalse(second["changed"])
         self.assertIsNone(second["backup"])
 
+    def test_upgrade_migration_adds_integrations_without_replacing_credentials(self):
+        """Rehearse existing-install upgrade -> settings migrate --apply."""
+        original=json.loads(self.settings.read_text())
+        original["sonarr"]={"enabled":True,"base_url":"https://sonarr.local",
+                            "root_folder":"/mnt/media/Anime",
+                            "quality_profile_name":"Anime","quality_profile_id":8}
+        original["shoko"]={"enabled":True,"base_url":"https://shoko.local"}
+        original["tvdb"]={"enabled":True}
+        original["ntfy"]={"enabled":True,"server":"https://ntfy.local",
+                           "topic":"anime","dashboard_url":"https://dashboard.local"}
+        self.settings.write_text(json.dumps(original))
+        credentials=json.loads(self.secrets.read_text())
+        credentials.update({"sonarr_api_key":"SONARR-KEEP","shoko_api_key":"SHOKO-KEEP",
+                            "tvdb_api_key":"TVDB-KEEP","ntfy_token":"NTFY-KEEP",
+                            "admin_password":"ADMIN-KEEP"})
+        self.secrets.write_text(json.dumps(credentials))
+        before=self.secrets.read_bytes()
+        preview=migrate(self.directory)
+        self.assertTrue(preview["ready"])
+        self.assertIn("shoko.poll_seconds",preview["missing_settings"])
+        self.assertEqual(self.secrets.read_bytes(),before)
+        migrated=migrate(self.directory,apply=True)
+        self.assertTrue(migrated["changed"])
+        result=load_config(self.directory)
+        self.assertEqual(result["settings"]["sonarr"]["quality_profile_id"],8)
+        self.assertEqual(result["settings"]["shoko"]["base_url"],"https://shoko.local")
+        self.assertEqual(result["settings"]["ntfy"]["server"],"https://ntfy.local")
+        self.assertEqual(result["settings"]["tvdb"]["enabled"],True)
+        self.assertEqual(result["secrets"]["sonarr_api_key"],"SONARR-KEEP")
+        self.assertEqual(result["secrets"]["shoko_api_key"],"SHOKO-KEEP")
+        self.assertEqual(result["secrets"]["tvdb_api_key"],"TVDB-KEEP")
+        self.assertEqual(result["secrets"]["ntfy_token"],"NTFY-KEEP")
+        self.assertEqual(result["secrets"]["web_token"],"DO-NOT-REPLACE")
+        self.assertEqual(self.secrets.read_bytes(),before)
+        self.assertFalse(migrate(self.directory,apply=True)["changed"])
+
     def test_unknown_keys_are_reported_and_block_apply_without_data_loss(self):
         value=json.loads(self.settings.read_text())
         value["legacy_section"]={"special_path":"/keep/me"}

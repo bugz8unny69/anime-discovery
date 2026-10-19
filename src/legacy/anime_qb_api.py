@@ -39,6 +39,21 @@ class QBittorrentAPI:
             if response.status!=200 or response.read().strip()!=b"Ok.":
                 raise PermissionError("qBittorrent authentication failed")
 
+    def torrent_details(self, infohash):
+        """Read the exact torrent's save path before authorizing any cleanup."""
+        infohash=_hash(infohash)
+        records=json.loads(self._request("torrents/info?"+urlencode({"hashes":infohash})))
+        if not isinstance(records,list):
+            raise ValueError("Invalid torrent inventory")
+        matched=[item for item in records
+                 if isinstance(item,dict) and str(item.get("hash","")).lower()==infohash]
+        if len(matched)>1:
+            raise ValueError("Duplicate qBittorrent torrent record")
+        if matched and (not isinstance(matched[0].get("save_path"),str)
+                        or not matched[0]["save_path"].startswith("/")):
+            raise ValueError("Torrent save path unavailable")
+        return matched[0] if matched else None
+
     def contains_hash(self, infohash):
         infohash=_hash(infohash)
         records=json.loads(self._request("torrents/info?"+urlencode({"hashes":infohash})))
@@ -46,6 +61,14 @@ class QBittorrentAPI:
             raise ValueError("Invalid torrent list")
         return any(isinstance(item,dict) and str(item.get("hash","")).lower()==infohash
                    for item in records)
+
+    def torrent_files(self, infohash):
+        """Read exact per-torrent file inventory; no torrent state change."""
+        records=json.loads(self._request("torrents/files?"+urlencode({"hash":_hash(infohash)})))
+        if not isinstance(records,list) or any(not isinstance(item,dict) or
+                 not isinstance(item.get("name"),str) for item in records):
+            raise ValueError("Invalid qBittorrent torrent file inventory")
+        return records
 
     def add_magnet(self, magnet_uri):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):

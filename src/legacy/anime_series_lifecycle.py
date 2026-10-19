@@ -17,6 +17,75 @@ def action(db, series_id, operation):
     return {"series_id":series_id,"action":operation,"ok":True}
 
 
+def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=None):
+    """Admit series to Sonarr, then track pending episode import. No deletion."""
+    from anime_sonarr import ensure_series
+    if type(series_id) is not int or series_id<=0 or db.in_transaction:
+        raise ValueError("Invalid Keep request")
+    row=db.execute("SELECT external_id,title,status FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
+    if row is None or not str(row[0]).isdigit() or int(row[0])<=0:
+        raise ValueError("Series lacks TVDB identity")
+    if row[2] in ("SONARR_IMPORT_PENDING","KEPT"):
+        raise ValueError("Keep already submitted or completed")
+    if row[2]=="REJECTED" or db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(series_id,)).fetchone():
+        raise ValueError("Rejected series requires reset")
+    from pathlib import Path
+    paths=db.execute("""SELECT r.staged_path FROM episode_dispatch d
+        JOIN torrent_recovery_records r ON r.notification_id=d.notification_id
+        WHERE d.series_id=? AND d.state='DONE'""",(series_id,)).fetchall()
+    if not any(path and Path(path).is_file() for (path,) in paths):
+        raise ValueError("Keep requires an existing staged episode")
+    if settings.get("tvdb",{}).get("enabled") is True:
+        from anime_tvdb import lookup_tvdb
+        resolved=lookup_tvdb(settings,secrets,row[0])
+        if resolved["tvdb_id"]!=int(row[0]):
+            raise RuntimeError("TVDB identity verification failed")
+    result=(sonarr_client or ensure_series)(settings,secrets,tvdb_id=row[0],title=row[1])
+    if not isinstance(result,dict) or type(result.get("sonarr_id")) is not int or result["sonarr_id"]<=0:
+        raise RuntimeError("Sonarr admission unconfirmed")
+    from anime_sonarr_import import plan_staged_imports
+    # Capture import manifest; a separate explicit action submits to Sonarr.
+    trial_root=settings.get("storage",{}).get("trial_root")
+    if not trial_root:
+        raise ValueError("Trial root must be configured")
+    manifest=plan_staged_imports(db,series_id,trial_root=trial_root)
+    command_id=None
+    if sonarr_client is None or import_client is not None:
+        from anime_sonarr_import import request_import
+        submitted=(import_client or request_import)(settings,secrets,
+            sonarr_id=result["sonarr_id"],plan=manifest)
+        command_id=submitted.get("command_id")
+        if type(command_id) is not int or command_id<=0:
+            raise RuntimeError("Sonarr did not confirm import submission")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute("""CREATE TABLE IF NOT EXISTS sonarr_keep (
+            series_id INTEGER PRIMARY KEY REFERENCES series(id),
+            sonarr_id INTEGER NOT NULL, tvdb_id TEXT NOT NULL,
+            kept_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        db.execute("""INSERT INTO sonarr_keep(series_id,sonarr_id,tvdb_id)
+            VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET sonarr_id=excluded.sonarr_id""",
+            (series_id,result["sonarr_id"],str(row[0])))
+        db.execute("""CREATE TABLE IF NOT EXISTS sonarr_import_manifest (
+            series_id INTEGER PRIMARY KEY REFERENCES series(id),
+            manifest_json TEXT NOT NULL,
+            submitted_command_id INTEGER
+        )""")
+        import json
+        db.execute("""INSERT INTO sonarr_import_manifest(series_id,manifest_json,submitted_command_id)
+            VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET
+            manifest_json=excluded.manifest_json,
+            submitted_command_id=excluded.submitted_command_id""",
+            (series_id,json.dumps(manifest),command_id))
+        db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
+            "trial_media_preserved":True,"import_pending":True,"command_id":command_id,"torrent_cleanup_authorized":False}
+
+
 def bulk_action(db, series_ids, operation):
     """Apply one operation to selected rows in a single database transaction."""
     if operation not in ("reject","clear-history","reset"):

@@ -63,4 +63,17 @@ jobs:
             test_anime_shared_discovery \
             test_anime_admin_config_migration \
             test_anime_install_existing_config \
-            test_anime_admin_archive_upgrade
+            test_anime_admin_archive_upgrade \
+            test_anime_sonarr_keep \
+            test_anime_notification_tvdb \
+            test_anime_admin_integrations \
+            test_anime_ntfy_monitor \
+            test_anime_sonarr_import \
+            test_anime_sonarr_finalize \
+            test_anime_shoko_v3 \
+            test_anime_shoko_handoff \
+            test_anime_shoko_handoff_state \
+            test_anime_shoko_handoff_monitor \
+            test_anime_shoko_write \
+            test_anime_episode_crossref \
+            test_anime_shoko_integration_pipeline

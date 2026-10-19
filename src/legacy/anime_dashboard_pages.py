@@ -248,5 +248,5 @@ def detail_page(detail):
         out+='<tr>'+''.join('<td>'+escape(v)+'</td>' for v in (release,season,episode,state,job,path))+'</tr>'
     out+='</table></section>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    out+='<button name="action" value="reject">Reject</button><button name="action" value="clear-history">Clear history</button><button name="action" value="reset">Reset</button></form>'
+    out+='<button name="action" value="keep">Keep in Sonarr</button><button name="action" value="reject">Reject</button><button name="action" value="clear-history">Clear history</button><button name="action" value="reset">Reset</button></form>'
     return out+tail()

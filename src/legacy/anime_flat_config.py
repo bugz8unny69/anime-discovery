@@ -12,14 +12,17 @@ DEFAULT_SETTINGS = {
     "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
     "web": {"host": "0.0.0.0", "port": 8765},
     "storage": {"download_root": "", "trial_root": ""},
-    "identity": {"reuse_verified_cache": True, "series_map": {}},
+    "identity": {"reuse_verified_cache": True, "series_map": {}, "episode_map": {}},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "prowlarr": {"enabled": False, "base_url": ""},
     "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
+    "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
+    "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
+    "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
-              "poll_seconds": 60}
+              "poll_seconds": 60, "import_folder_id": 0}
 }
-ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
+ALLOWED_SECRET_KEYS = {"shoko_api_key", "sonarr_api_key", "ntfy_token", "tvdb_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
 
 def _read_object(path):
     path=Path(path)
@@ -88,6 +91,28 @@ def validate_config(settings,secrets,*,directory=None):
         season = mapping.get("season",1)
         if type(season) is not int or season<=0:
             raise ValueError("Invalid season for "+alias)
+    episode_map=result["identity"]["episode_map"]
+    if not isinstance(episode_map,dict) or len(episode_map)>5000:
+        raise ValueError("identity.episode_map must be a mapping of at most 5000 entries")
+    import re
+    for key,item in episode_map.items():
+        if not isinstance(key,str) or not re.fullmatch(r"[1-9][0-9]*:[0-9]+:[1-9][0-9]*",key):
+            raise ValueError("Invalid TVDB episode identity key")
+        if not isinstance(item,dict) or set(item)!={"anidb_episode_id","verified"} or type(item["anidb_episode_id"]) is not int or item["anidb_episode_id"]<=0 or item["verified"] is not True:
+            raise ValueError("Exact AniDB episode mapping requires verified=true")
+    sonarr=result["sonarr"]
+    if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int or not isinstance(sonarr["quality_profile_name"],str):
+        raise ValueError("Invalid Sonarr settings")
+    if sonarr["enabled"] and (not sonarr["base_url"].startswith(("http://","https://")) or not sonarr["root_folder"].startswith("/") or (sonarr["quality_profile_id"]<=0 and not sonarr["quality_profile_name"].strip()) or not secrets.get("sonarr_api_key")):
+        raise ValueError("Enabled Sonarr requires URL, API key, root folder and quality profile")
+    ntfy=result["ntfy"]
+    if type(ntfy["enabled"]) is not bool or type(ntfy["reminder_hours"]) is not int or ntfy["reminder_hours"]<1 or any(not isinstance(ntfy[k],str) for k in ("server","topic","dashboard_url")):
+        raise ValueError("Invalid NTFY settings")
+    if ntfy["enabled"] and (not ntfy["server"].startswith("https://") or not ntfy["topic"] or not ntfy["dashboard_url"].startswith("https://")):
+        raise ValueError("Enabled NTFY requires HTTPS server, topic and dashboard URL")
+    tvdb=result["tvdb"]
+    if type(tvdb["enabled"]) is not bool or not isinstance(tvdb["base_url"],str) or (tvdb["enabled"] and (not tvdb["base_url"].startswith("https://") or not secrets.get("tvdb_api_key"))):
+        raise ValueError("Invalid TVDB settings")
     jellyfin=result["jellyfin"]
     if not isinstance(jellyfin["base_url"],str):
         raise ValueError("Invalid Jellyfin URL")
@@ -106,6 +131,12 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Enabled Prowlarr requires prowlarr_api_key in secrets.json")
     if not isinstance(result["shoko"]["base_url"],str):
         raise ValueError("Invalid Shoko URL")
+    if result["shoko"]["enabled"] and (not result["shoko"]["base_url"].startswith(("http://","https://")) or not secrets.get("shoko_api_key")):
+        raise ValueError("Enabled Shoko requires a base URL and API key")
+    if result["shoko"]["auto_link_verified"] and not result["shoko"]["enabled"]:
+        raise ValueError("Shoko auto-link requires enabled Shoko")
+    if type(result["shoko"]["import_folder_id"]) is not int or result["shoko"]["import_folder_id"]<0:
+        raise ValueError("Invalid Shoko import folder ID")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
         raise ValueError("Invalid Shoko polling interval")
     if "admin_password" in secrets and secrets.get("admin_password")==secrets.get("web_token"):
