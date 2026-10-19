@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from anime_acquisition_gate import approved_dispatch
 from anime_async_daemon import ensure_schema
+from anime_release_matching import resolve_release
 
 HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
@@ -122,7 +123,7 @@ def approve(db, notification_id, values, *, source="manual"):
         raise
 
 
-def receive(db, values):
+def receive(db, values, *, series_map=None):
     """Accept Autobrr metadata. Repeat GUID+hash is idempotent."""
     if not isinstance(values,dict):
         raise ValueError("Expected webhook object")
@@ -132,6 +133,10 @@ def receive(db, values):
     guid = str(values.get("source_guid") or values.get("guid") or infohash).strip()[:500]
     if not source or not name or not HASH.fullmatch(infohash) or not guid:
         raise ValueError("Release name and 40/64 character torrent hash required")
+    if series_map and not any(key in values for key in ("tvdb_id","anidb_id","season","episode")):
+        mapped = resolve_release(name,series_map)
+        if mapped:
+            values = {**values,**mapped}
     auto_fields = ("tvdb_id","anidb_id","season","episode")
     auto = all(values.get(field) is not None and str(values[field]).strip() for field in auto_fields)
     if auto:
