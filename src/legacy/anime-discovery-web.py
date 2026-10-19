@@ -13,12 +13,18 @@ from urllib.parse import parse_qs, urlsplit
 
 from anime_webhook_processing import approve, receive
 from anime_series_lifecycle import action as series_action, notifications as inbox, inspect as inspect_series
-from anime_flat_config import load_config
+from anime_flat_config import load_config, DEFAULT_CONFIG_DIR
+from anime_series_aliases import add_alias, remove_alias
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
 
-def app(db_path, token, series_map=None):
+def app(db_path, token, series_map=None, config_dir=None):
+    def aliases():
+        if config_dir is not None:
+            return load_config(config_dir)["settings"]["identity"]["series_map"]
+        return series_map or {}
+
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, body, content_type="text/html; charset=utf-8"):
             data = body.encode()
@@ -130,6 +136,23 @@ def app(db_path, token, series_map=None):
                 <button>Apply</button></form>
                 <p class="muted">Reject blocks queued work; Clear History hides earlier
                 notifications without lifting the block; Reset allows future acquisitions.</p></section>"""
+            mappings = aliases()
+            body += "<section><h2>Recognized anime names</h2>"
+            body += table(("Alias","TVDB","AniDB","Default season"), [
+                (alias, entry["tvdb_id"], entry["anidb_id"], entry.get("season",1))
+                for alias,entry in sorted(mappings.items())])
+            if config_dir is not None:
+                body += """<h3>Add or update an alias</h3>
+                <form method="post" action="/alias">
+                <input name="alias" placeholder="Anime title / release alias" required>
+                <input name="tvdb_id" type="number" min="1" placeholder="TVDB ID" required>
+                <input name="anidb_id" type="number" min="1" placeholder="AniDB ID" required>
+                <input name="season" type="number" min="1" value="1" required>
+                <button>Save name mapping</button></form>
+                <form method="post" action="/alias-remove">
+                <input name="alias" placeholder="Existing alias to remove" required>
+                <button>Remove name mapping</button></form>"""
+            body += "<p class='muted'>Configured aliases let Autobrr release names enqueue episodes automatically.</p></section>"
             body += "<section><h2>Autobrr inbox</h2>"
             body += table(("ID","Source","Release","Hash","Notification","Dispatch","Job"),events)
             body += """</section><section><h2>Approve an inbox release</h2>
@@ -152,13 +175,21 @@ def app(db_path, token, series_map=None):
                 self.end_headers()
                 return
             route = urlsplit(self.path).path
-            if route not in ("/webhook", "/approve", "/series-action"):
+            if route not in ("/webhook", "/approve", "/series-action", "/alias", "/alias-remove"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = self.form()
                 with self.database() as db:
                     if route == "/webhook":
-                        result = receive(db, values, series_map=series_map)
+                        result = receive(db, values, series_map=aliases())
+                    elif route in ("/alias", "/alias-remove"):
+                        if config_dir is None:
+                            raise ValueError("Alias editor requires settings directory")
+                        if route == "/alias":
+                            result = add_alias(config_dir, values["alias"], values["tvdb_id"],
+                                               values["anidb_id"], values.get("season",1))
+                        else:
+                            result = remove_alias(config_dir, values["alias"])
                     elif route == "/series-action":
                         result = series_action(db, int(values["series_id"]), str(values["action"]))
                     else:
@@ -187,7 +218,7 @@ def main():
         raise RuntimeError("Database missing: " + str(db_path))
     host, port = settings["web"]["host"], settings["web"]["port"]
     print(f"Anime Discovery listening on {host}:{port}", flush=True)
-    ThreadingHTTPServer((host, port), app(db_path, token, settings["identity"]["series_map"])).serve_forever()
+    ThreadingHTTPServer((host, port), app(db_path, token, settings["identity"]["series_map"], config_dir=DEFAULT_CONFIG_DIR)).serve_forever()
 
 
 if __name__ == "__main__":
