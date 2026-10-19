@@ -59,7 +59,8 @@ for(const form of document.querySelectorAll('form.integration')){
     ev.preventDefault();
     const target=document.getElementById('settings-result');
     const section=form.dataset.name, fields={};
-    for(const input of form.querySelectorAll('input:not([type=password])')){
+    for(const input of form.querySelectorAll('input')){
+      if(['credential','reveal_password','stored_value'].includes(input.name))continue;
       fields[input.name]=input.type==='checkbox'?input.checked:
         input.type==='number'?Number(input.value):input.value;
     }
