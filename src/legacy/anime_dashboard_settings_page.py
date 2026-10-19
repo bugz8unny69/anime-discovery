@@ -37,10 +37,11 @@ def settings_page(directory):
                       '" value="'+esc(value)+'"></label>')
         key=SECRETS[name]
         label="Set" if data["credential_status"].get(key) else "Not set"
-        out+='<p>Credential: '+esc(label)+' (never shown in browser)</p>'
-        out+='<label>Replace credential <input type="password" name="credential" autocomplete="new-password"></label>'
-        out+='<button type="button" class="save-credential" data-key="'+key+'">Update credential</button>'
-        out+='<button type="button" class="clear-credential" data-key="'+key+'">Clear credential</button>'
+        out+='<p>Token: '+esc(label)+' (stored token never sent to browser)</p>'
+        out+='<label>New token <input type="password" name="credential" autocomplete="new-password" spellcheck="false"></label>'
+        out+='<button type="button" class="toggle-token">Show</button>'
+        out+='<button type="button" class="save-credential" data-key="'+key+'">Update Token</button>'
+        out+='<button type="button" class="clear-credential" data-key="'+key+'">Clear Token</button>'
         out+='<button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection" data-service="'+name+'">'+('Test Notification' if name=="ntfy" else "Test Connection")+'</button></form>'
         out+='</details>'
@@ -84,8 +85,8 @@ for(const button of document.querySelectorAll('.save-credential,.clear-credentia
       const body=await res.json();
       if(!res.ok)throw new Error(body.error||'Credential update failed');
       input.value='';
-      target.textContent=clear?'Credential cleared. Restart may be required.':
-        'Credential updated. Restart may be required.';
+      target.textContent=clear?'Token cleared. Restart may be required.':
+        'Token updated. Restart may be required.';
     }catch(error){target.textContent=error.message}
   });
 }
@@ -108,6 +109,13 @@ for(const button of document.querySelectorAll('.test-connection')){
       if(!res.ok)throw new Error(data.error||'Test failed');
       target.textContent=data.message;
     }catch(error){target.textContent=error.message}
+  });
+}
+for(const button of document.querySelectorAll('.toggle-token')){
+  button.addEventListener('click',()=>{
+    const input=button.closest('form').querySelector('input[name=credential]');
+    input.type=input.type==='password'?'text':'password';
+    button.textContent=input.type==='password'?'Show':'Hide';
   });
 }
 document.getElementById('refresh').addEventListener('click',()=>{dirty=false;location.reload()});
