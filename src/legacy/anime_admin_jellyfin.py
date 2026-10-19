@@ -11,8 +11,8 @@ from anime_admin_settings import set_setting
 def configure_jellyfin(directory, *, ask=input, secret_prompt=getpass.getpass):
     directory=Path(directory)
     current=load_config(directory)
-    url=ask("Jellyfin base URL (http/https): ").strip()
-    key=secret_prompt("Jellyfin API key (blank to keep existing): ")
+    url=ask("Jellyfin base URL ["+str(current["settings"]["jellyfin"]["base_url"])+"] (Enter keeps): ").strip() or current["settings"]["jellyfin"]["base_url"]
+    key=secret_prompt("Jellyfin API key ["+("Set" if current["secrets"].get("jellyfin_api_key") else "Not set")+"] (Enter keeps): ")
     settings=current["settings"]
     secrets=dict(current["secrets"])
     if key:
