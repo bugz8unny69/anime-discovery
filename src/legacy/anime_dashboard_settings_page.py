@@ -56,7 +56,7 @@ def settings_page(directory):
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
         out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
-    out+='<section class="panel"><h2>AniDB</h2><p class="muted">AniDB is currently used through public title and Anime-Lists identity data. This installation has no AniDB API key or independent enable/disable setting. Identity lookups are not yet connected to the unified intake worker.</p></section>'
+    out+='<section class="panel"><h2>AniDB</h2><p class="muted">AniDB public title data: no API key required. Keep AniDB credentials blank; this version does not use an AniDB API key. Public title matches alone do not verify a TVDB-to-AniDB episode mapping. Automatic provider lookups are not yet connected to unified intake.</p></section>'
     out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Save &amp; Apply reports when a restart is required. Refresh discards unsaved edits.</p></section>'
     out+="""<script>
 let dirty=false;
