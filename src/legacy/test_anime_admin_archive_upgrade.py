@@ -63,7 +63,7 @@ class ArchiveUpgradeTests(unittest.TestCase):
             if args==("systemctl","start","anime-discovery.service"):
                 self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
             return ""
-        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner)
+        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner,backup=True)
         self.assertTrue(result["updated"])
         self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
         self.assertEqual(stat.S_IMODE(Path(result["backup_code"]).stat().st_mode),0o751)
