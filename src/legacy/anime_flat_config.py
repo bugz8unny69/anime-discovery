@@ -131,6 +131,10 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Enabled Prowlarr requires prowlarr_api_key in secrets.json")
     if not isinstance(result["shoko"]["base_url"],str):
         raise ValueError("Invalid Shoko URL")
+    if result["shoko"]["enabled"] and (not result["shoko"]["base_url"].startswith(("http://","https://")) or not secrets.get("shoko_api_key")):
+        raise ValueError("Enabled Shoko requires a base URL and API key")
+    if result["shoko"]["auto_link_verified"] and not result["shoko"]["enabled"]:
+        raise ValueError("Shoko auto-link requires enabled Shoko")
     if type(result["shoko"]["import_folder_id"]) is not int or result["shoko"]["import_folder_id"]<0:
         raise ValueError("Invalid Shoko import folder ID")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
