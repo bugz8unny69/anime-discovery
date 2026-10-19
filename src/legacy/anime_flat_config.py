@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60}
 }
-ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "prowlarr_api_key"}
+ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
 
 def _read_object(path):
     path=Path(path)
@@ -100,7 +100,7 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Invalid Shoko URL")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
         raise ValueError("Invalid Shoko polling interval")
-    if set(secrets)-ALLOWED_SECRET_KEYS:
+    if "admin_password" in secrets and secrets.get("admin_password")==secrets.get("web_token"):\n        raise ValueError("Dashboard admin password must differ from webhook token")\n    if set(secrets)-ALLOWED_SECRET_KEYS:
         raise ValueError("Unknown secrets keys")
     if any(not isinstance(v,str) for v in secrets.values()):
         raise ValueError("Secret values must be strings")
