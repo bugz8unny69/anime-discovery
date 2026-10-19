@@ -93,7 +93,8 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                             if last is None or now-last[0]>=3600:
                                 try:
                                     request_scan(settings["shoko"]["base_url"],
-                                                 secrets["shoko_api_key"],folder)
+                                                 secrets["shoko_api_key"],folder,
+                                                 expected_root=settings["sonarr"]["root_folder"])
                                     db.execute("""INSERT INTO shoko_scan_attempts VALUES (?,?,?)
                                         ON CONFLICT(series_id,notification_id)
                                         DO UPDATE SET last_attempt=excluded.last_attempt""",
