@@ -8,7 +8,7 @@ from anime_acquisition_finalize import finalize_acquisition
 from anime_acquisition_gate import approved_dispatch
 
 
-def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
+def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -40,6 +40,8 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
                 tvdb_id=payload['tvdb_id'])
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],payload['notification_id'])
+                if cleanup_source:
+                    qb_factory().remove_torrent(payload['infohash'], delete_files=True)
             return result
 
     async def handler(job):
