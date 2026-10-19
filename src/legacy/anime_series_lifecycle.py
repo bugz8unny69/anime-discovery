@@ -13,47 +13,59 @@ def ensure_schema(db):
 
 
 def action(db, series_id, operation):
-    if type(series_id) is not int or series_id <= 0:
-        raise ValueError("Invalid series ID")
-    if operation not in ("reject", "clear-history", "reset"):
+    result=bulk_action(db,[series_id],operation)
+    return {"series_id":series_id,"action":operation,"ok":True}
+
+
+def bulk_action(db, series_ids, operation):
+    """Apply one operation to selected rows in a single database transaction."""
+    if operation not in ("reject","clear-history","reset"):
         raise ValueError("Invalid series action")
+    if not isinstance(series_ids,(list,tuple)) or not 1<=len(series_ids)<=100:
+        raise ValueError("Select between one and 100 series")
+    ids=[]
+    for raw in series_ids:
+        if type(raw) not in (int,str) or not str(raw).isdigit() or int(raw)<=0:
+            raise ValueError("Invalid series ID")
+        ids.append(int(raw))
+    if len(set(ids))!=len(ids):
+        raise ValueError("Duplicate series ID")
     if db.in_transaction:
-        raise ValueError("Series action needs autocommit connection")
+        raise ValueError("Series actions need autocommit connection")
     db.execute("BEGIN IMMEDIATE")
     try:
         ensure_schema(db)
-        row = db.execute("SELECT status FROM series WHERE id=?", (series_id,)).fetchone()
-        if row is None:
-            raise ValueError("Series not found")
-        if operation == "reject":
-            db.execute("UPDATE series SET status='REJECTED' WHERE id=?", (series_id,))
-            db.execute("""INSERT OR REPLACE INTO series_rejection_blocks
-                (series_id,reason) VALUES (?,'USER_REJECTED')""", (series_id,))
-            # Prevent queued work from trying a rejected series on its next claim.
-            db.execute("""UPDATE daemon_jobs SET state='BLOCKED',last_error='Series rejected'
-                WHERE kind='claimed_acquisition' AND state IN ('READY','DEFERRED')
-                AND subject_key IN (SELECT CAST(d.notification_id AS TEXT)
-                    FROM episode_dispatch d WHERE d.series_id=?)""", (series_id,))
-        elif operation == "clear-history":
-            cutoff = db.execute("""SELECT COALESCE(MAX(v.notification_id),0)
-                FROM verified_series_identity v WHERE v.tvdb_id=(
-                    SELECT external_id FROM series WHERE id=? AND source='tvdb')""",
-                (series_id,)).fetchone()[0]
-            db.execute("""INSERT INTO series_history_visibility
-                (series_id,clear_before_notification_id) VALUES (?,?)
-                ON CONFLICT(series_id) DO UPDATE SET
-                clear_before_notification_id=MAX(clear_before_notification_id,excluded.clear_before_notification_id)""",
-                (series_id,cutoff))
-        else:
-            db.execute("DELETE FROM series_rejection_blocks WHERE series_id=?", (series_id,))
-            db.execute("DELETE FROM series_quarantine WHERE series_id=?", (series_id,))
-            db.execute("""UPDATE series SET status='DISCOVERED',
-                initial_search_complete=0 WHERE id=?""", (series_id,))
+        for sid in ids:
+            row=db.execute("SELECT status FROM series WHERE id=?",(sid,)).fetchone()
+            if row is None:
+                raise ValueError("Series not found: "+str(sid))
+            if operation=="reject":
+                db.execute("UPDATE series SET status='REJECTED' WHERE id=?",(sid,))
+                db.execute("""INSERT OR REPLACE INTO series_rejection_blocks
+                    (series_id,reason) VALUES (?,'USER_REJECTED')""",(sid,))
+                db.execute("""UPDATE daemon_jobs SET state='BLOCKED',last_error='Series rejected'
+                    WHERE kind='claimed_acquisition' AND state IN ('READY','DEFERRED')
+                    AND subject_key IN (SELECT CAST(d.notification_id AS TEXT)
+                        FROM episode_dispatch d WHERE d.series_id=?)""",(sid,))
+            elif operation=="clear-history":
+                cutoff=db.execute("""SELECT COALESCE(MAX(v.notification_id),0)
+                    FROM verified_series_identity v WHERE v.tvdb_id=(
+                    SELECT external_id FROM series WHERE id=? AND source='tvdb')""",(sid,)).fetchone()[0]
+                db.execute("""INSERT INTO series_history_visibility
+                    (series_id,clear_before_notification_id) VALUES (?,?)
+                    ON CONFLICT(series_id) DO UPDATE SET
+                    clear_before_notification_id=MAX(clear_before_notification_id,excluded.clear_before_notification_id)""",
+                    (sid,cutoff))
+            else:
+                db.execute("DELETE FROM series_rejection_blocks WHERE series_id=?",(sid,))
+                db.execute("DELETE FROM series_quarantine WHERE series_id=?",(sid,))
+                db.execute("""UPDATE series SET status='DISCOVERED',
+                    initial_search_complete=0 WHERE id=?""",(sid,))
         db.commit()
     except BaseException:
         db.rollback()
         raise
-    return {"series_id": series_id, "action": operation, "ok": True}
+    return {"series_ids":ids,"action":operation,"updated":len(ids),"ok":True}
 
 
 def notifications(db, limit=100):
