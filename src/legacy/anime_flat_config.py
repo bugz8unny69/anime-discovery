@@ -15,7 +15,7 @@ DEFAULT_SETTINGS = {
     "identity": {"reuse_verified_cache": True, "series_map": {}},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "prowlarr": {"enabled": False, "base_url": ""},
-    "jellyfin": {"write_trial_nfo": True},
+    "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60}
 }
@@ -65,7 +65,7 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Unsupported torrent priority mode")
     if result["qbittorrent"]["manage_download_limit"] is not False:
         raise ValueError("qBittorrent owns its download limit")
-    for section, key in (("identity","reuse_verified_cache"),("jellyfin","write_trial_nfo"),
+    for section, key in (("identity","reuse_verified_cache"),("jellyfin","write_trial_nfo"),("jellyfin","enabled"),
                          ("shoko","enabled"),("shoko","auto_link_verified")):
         if type(result[section][key]) is not bool:
             raise ValueError("Invalid boolean setting: "+section+"."+key)
@@ -88,6 +88,14 @@ def validate_config(settings,secrets,*,directory=None):
         season = mapping.get("season",1)
         if type(season) is not int or season<=0:
             raise ValueError("Invalid season for "+alias)
+    jellyfin=result["jellyfin"]
+    if not isinstance(jellyfin["base_url"],str):
+        raise ValueError("Invalid Jellyfin URL")
+    if jellyfin["enabled"]:
+        if not jellyfin["base_url"].startswith(("http://","https://")):
+            raise ValueError("Enabled Jellyfin scan requires its URL")
+        if not secrets.get("jellyfin_api_key"):
+            raise ValueError("Enabled Jellyfin scan requires jellyfin_api_key in secrets.json")
     if type(result["prowlarr"]["enabled"]) is not bool:
         raise ValueError("Invalid prowlarr.enabled")
     if not isinstance(result["prowlarr"]["base_url"],str):
