@@ -14,11 +14,12 @@ DEFAULT_SETTINGS = {
     "storage": {"download_root": "", "trial_root": ""},
     "identity": {"reuse_verified_cache": True, "series_map": {}},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
+    "prowlarr": {"enabled": False, "base_url": ""},
     "jellyfin": {"write_trial_nfo": True},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60}
 }
-ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token"}
+ALLOWED_SECRET_KEYS = {"shoko_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "prowlarr_api_key"}
 
 def _read_object(path):
     path=Path(path)
@@ -87,6 +88,14 @@ def validate_config(settings,secrets,*,directory=None):
         season = mapping.get("season",1)
         if type(season) is not int or season<=0:
             raise ValueError("Invalid season for "+alias)
+    if type(result["prowlarr"]["enabled"]) is not bool:
+        raise ValueError("Invalid prowlarr.enabled")
+    if not isinstance(result["prowlarr"]["base_url"],str):
+        raise ValueError("Invalid prowlarr.base_url")
+    if result["prowlarr"]["enabled"] and not result["prowlarr"]["base_url"].startswith(("http://","https://")):
+        raise ValueError("Enabled Prowlarr requires a configured URL")
+    if result["prowlarr"]["enabled"] and not secrets.get("prowlarr_api_key"):
+        raise ValueError("Enabled Prowlarr requires prowlarr_api_key in secrets.json")
     if not isinstance(result["shoko"]["base_url"],str):
         raise ValueError("Invalid Shoko URL")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
