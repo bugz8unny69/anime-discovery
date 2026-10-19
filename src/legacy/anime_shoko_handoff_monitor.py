@@ -10,10 +10,11 @@ import time
 from anime_flat_config import load_config
 from anime_sonarr_finalize import confirm_sonarr_copies
 from anime_shoko_handoff_state import ensure_schema, enqueue_verified_copies, reconcile_one
+from anime_ntfy import notify_shoko_issue
 
 LOG=logging.getLogger(__name__)
 
-def check_once(settings,secrets,*,inspector=None,copy_verifier=None):
+def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender=notify_shoko_issue):
     if not settings["sonarr"]["enabled"] or not settings["shoko"]["enabled"]:
         return {"processed":0,"disabled":True}
     copy_verifier=copy_verifier or confirm_sonarr_copies
@@ -21,6 +22,10 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None):
                          timeout=10) as db:
         db.execute("PRAGMA busy_timeout=10000")
         ensure_schema(db)
+        db.execute("""CREATE TABLE IF NOT EXISTS shoko_alert_delivery (
+            series_id INTEGER NOT NULL, notification_id INTEGER NOT NULL,
+            reason TEXT NOT NULL, PRIMARY KEY(series_id,notification_id,reason)
+        )""")
         series=db.execute("""SELECT s.id,k.sonarr_id,m.manifest_json
             FROM series s JOIN sonarr_keep k ON k.series_id=s.id
             JOIN sonarr_import_manifest m ON m.series_id=s.id
@@ -54,8 +59,24 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None):
                         (series_id,nid)).fetchone()[0]
                     if status in ("SHOKO_ALREADY_LINKED","LINK_PLAN_READY"):
                         continue
-                    reconcile_one(db,settings,secrets,series_id=series_id,
+                    observation=reconcile_one(db,settings,secrets,series_id=series_id,
                                   notification_id=nid,inspector=inspector)
+                    # Only send one alert per issue state; a failed send is retried
+                    # on a later poll. Shoko is never permitted to block Keep.
+                    reason=observation["status"]
+                    if settings.get("ntfy",{}).get("enabled") and reason in (
+                            "NEEDS_EPISODE_IDENTITY","UNRECOGNIZED_NEEDS_REVIEW",
+                            "AMBIGUOUS_SHOKO_FILE"):
+                        sent=db.execute("""SELECT 1 FROM shoko_alert_delivery
+                            WHERE series_id=? AND notification_id=? AND reason=?""",
+                            (series_id,nid,reason)).fetchone()
+                        if not sent:
+                            try:
+                                if alert_sender(settings,secrets,series_id,nid,reason):
+                                    db.execute("""INSERT OR IGNORE INTO shoko_alert_delivery
+                                        VALUES (?,?,?)""",(series_id,nid,reason))
+                            except Exception:
+                                LOG.warning("Shoko alert deferred for series %d",series_id)
                     processed+=1
             except Exception as exc:
                 errors+=1
