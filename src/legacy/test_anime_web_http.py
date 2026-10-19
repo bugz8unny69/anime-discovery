@@ -57,6 +57,21 @@ class DashboardHTTPTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_autobrr_json_body_authentication(self):
+        payload={"source":"nyaa","release_name":"Example","source_guid":"g-body",
+                 "info_hash":HASH,"token":"secret-token"}
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            for value,expected in (("secret-token",200),("wrong",401),("",401)):
+                payload["token"]=value
+                client.request("POST","/webhook",json.dumps(payload),
+                    {"Content-Type":"application/json"})
+                response=client.getresponse()
+                self.assertEqual(response.status,expected)
+                response.read()
+        finally:
+            client.close()
+
     def test_autobrr_url_token_with_json_body(self):
         import io
         from unittest.mock import patch
