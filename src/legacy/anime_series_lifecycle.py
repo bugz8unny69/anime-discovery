@@ -17,7 +17,7 @@ def action(db, series_id, operation):
     return {"series_id":series_id,"action":operation,"ok":True}
 
 
-def keep(db, series_id, settings, secrets, *, sonarr_client=None):
+def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=None):
     """Admit series to Sonarr, then track pending episode import. No deletion."""
     from anime_sonarr import ensure_series
     if type(series_id) is not int or series_id<=0 or db.in_transaction:
@@ -47,6 +47,14 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
     if not trial_root:
         raise ValueError("Trial root must be configured")
     manifest=plan_staged_imports(db,series_id,trial_root=trial_root)
+    command_id=None
+    if sonarr_client is None or import_client is not None:
+        from anime_sonarr_import import request_import
+        submitted=(import_client or request_import)(settings,secrets,
+            sonarr_id=result["sonarr_id"],plan=manifest)
+        command_id=submitted.get("command_id")
+        if type(command_id) is not int or command_id<=0:
+            raise RuntimeError("Sonarr did not confirm import submission")
     db.execute("BEGIN IMMEDIATE")
     try:
         db.execute("""CREATE TABLE IF NOT EXISTS sonarr_keep (
@@ -62,16 +70,18 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
             submitted_command_id INTEGER
         )""")
         import json
-        db.execute("""INSERT INTO sonarr_import_manifest(series_id,manifest_json)
-            VALUES (?,?) ON CONFLICT(series_id) DO UPDATE SET
-            manifest_json=excluded.manifest_json""",(series_id,json.dumps(manifest)))
+        db.execute("""INSERT INTO sonarr_import_manifest(series_id,manifest_json,submitted_command_id)
+            VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET
+            manifest_json=excluded.manifest_json,
+            submitted_command_id=excluded.submitted_command_id""",
+            (series_id,json.dumps(manifest),command_id))
         db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
         db.commit()
     except BaseException:
         db.rollback()
         raise
     return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
-            "trial_media_preserved":True,"import_pending":True,"torrent_cleanup_authorized":False}
+            "trial_media_preserved":True,"import_pending":True,"command_id":command_id,"torrent_cleanup_authorized":False}
 
 
 def bulk_action(db, series_ids, operation):
