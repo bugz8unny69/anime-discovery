@@ -40,3 +40,21 @@ Shoko file/episode linkage remains read-only and fail-closed until the 5.3.3.0 A
 **Requested KEEP policy:** Import existing staged trial episodes into Sonarr's permanent root. User also wants original trial files and the original Anime Discovery torrent payload removed. **This is now implemented behind the confirmation monitor, but has not been tested against the real VM.** The monitor deletes original data only after Sonarr file and torrent payload verification. Before cleanup, independently verify actual Sonarr episode-file records, on-disk destination files, and torrent ownership. Adding a series in Sonarr does not automatically transfer management of an existing qBittorrent torrent. Never delete that torrent on the assumption Sonarr adopted it; coordinate the torrent client and ownership handoff explicitly. Leave NFS data unchanged on timeout, unclear ownership, ambiguous episode mapping, or partial import.
 
 **Important:** Sonarr's root folder and trial folder must be distinct. Confirm the exact trial root and ensure both services resolve the same staged file path for Manual Import. This is a deployment prerequisite, not an assumed path mapping.
+
+
+## Shoko 5.3.3.0 Swagger contract obtained
+
+User-supplied live exported OpenAPI document: 1,029,653 bytes; SHA256 `62c01fb090c77e8ec9340f1768da1fa0f100dbe1fdf24aa0a1c5e0ea9726be80`. Document declares `Shoko API 3.0`, base server path `/api/v3/`, and `apikey` HTTP header authentication; API schema version is not itself the Shoko server version.
+
+Exact documented read contracts:
+- `GET /api/v3/File/PathEndsWith?path=...`: file candidates; matching a suffix is **not** a reliable identity match until the returned accessible `Locations[].AbsolutePath` exactly matches.
+- `GET /api/v3/Episode/AniDB/{anidbEpisodeID}/Episode`: exact AniDB episode lookup returning `IDs.ID` (Shoko internal episode ID).
+- `GET /api/v3/File/{fileID}/Location?includeAbsolutePaths=true`: file-location verification when needed.
+
+Exact documented link write, **not enabled**:
+- `POST /api/v3/File/{fileID}/Link` with JSON object `{"EpisodeIDs":[<Shoko internal episode ID>]}`, not the AniDB episode ID.
+- `POST /api/v3/File/{fileID}/LinkFromSeries` requires `SeriesID`, `RangeStart`, and `RangeEnd`; prefer exact ID-based linking to avoid fuzzy episode ranges.
+
+Shoko also exposes destructive endpoints including `DELETE /File/{fileID}`, `DELETE /File/Location`, and `GET /Action/SyncMyList` (documented as irreversible AniDB synchronization). Anime Discovery must never invoke these in any automatic workflow.
+
+The feature-branch `anime_shoko_v3.py` client performs only authenticated GETs and prepares a `writes_enabled:false` link plan. API calls and source paths still require VM validation and NFS path mapping. Do not enable automatic Shoko writes until episode IDs and file references have been verified against read-only live responses.
