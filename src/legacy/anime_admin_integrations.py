@@ -8,7 +8,7 @@ from pathlib import Path
 from anime_flat_config import load_config, validate_config
 
 SERVICES={
-    "sonarr":(("base_url",str),("root_folder",str),("quality_profile_id",int)),
+    "sonarr":(("base_url",str),("root_folder",str),("quality_profile_name",str),("quality_profile_id",int)),
     "ntfy":(("server",str),("topic",str),("dashboard_url",str),("reminder_hours",int)),
     "tvdb":(("base_url",str),),
     "shoko":(("base_url",str),("poll_seconds",int)),
