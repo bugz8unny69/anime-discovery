@@ -23,3 +23,14 @@ A Keep click requires a trial media file present on disk and a positive TVDB ID 
 3. Simulate duplicate, unmatched, rejected, and approved webhooks; verify notification behavior.
 4. Verify NFS trial file visibility, Jellyfin refresh, Sonarr creation on Keep, and Shoko's passive metadata behavior.
 5. Only after integrated results are accepted, produce a new archive from `develop`. Do not merge into `main` or deploy as part of this draft.
+
+## Confirmed homelab integration targets (2026-10-19)
+
+- Sonarr hostname `sonarr.arr.internal`; configure an explicit HTTP(S) URL with an appropriate, verifiable certificate.
+- Sonarr root folder as seen by Sonarr: `/mnt/media/Anime`.
+- Sonarr quality profile display name: `Anime`; numeric profile ID must be discovered from the server before enabling.
+- Shoko Server: 5.3.3.0; internal Swagger UI at `https://shoko.arr.internal/swagger/`. API schema inaccessible from this execution environment; no Shoko write action approved.
+
+**Requested KEEP policy:** Import existing staged trial episodes into Sonarr's permanent root. User also wants original trial files and the original Anime Discovery torrent payload removed. **This is not yet implemented as a destructive action.** Current code records `SONARR_IMPORT_PENDING`, and the new manual-import helper only requests `copy`; it never calls qBittorrent removal or deletes media. Before cleanup, independently verify actual Sonarr episode-file records, on-disk destination files, and torrent ownership. Adding a series in Sonarr does not automatically transfer management of an existing qBittorrent torrent. Never delete that torrent on the assumption Sonarr adopted it; coordinate the torrent client and ownership handoff explicitly. Leave NFS data unchanged on timeout, unclear ownership, ambiguous episode mapping, or partial import.
+
+**Important:** Sonarr's root folder and trial folder must be distinct. Confirm the exact trial root and ensure both services resolve the same staged file path for Manual Import. This is a deployment prerequisite, not an assumed path mapping.
