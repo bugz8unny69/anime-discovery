@@ -1,5 +1,6 @@
 """Offline archive-upgrade tests with fake systemd and fresh SQLite."""
 import io
+import stat
 import tarfile
 import tempfile
 import unittest
@@ -52,6 +53,20 @@ class ArchiveUpgradeTests(unittest.TestCase):
         self.assertTrue(self.database.is_file())
         self.assertIn(("systemctl","stop","anime-discovery.service"),self.calls)
         self.assertIn(("systemctl","start","anime-discovery.service"),self.calls)
+
+    def test_swapped_app_root_preserves_mode_for_service_chdir(self):
+        # The old application can be traversed by its service account.
+        # Replacing it must never inherit an inaccessible staging mode.
+        self.root.chmod(0o751)
+        def runner(*args,cwd=None):
+            self.calls.append(args)
+            if args==("systemctl","start","anime-discovery.service"):
+                self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
+            return ""
+        result=upgrade_archive(self.root,self.archive,db_path=self.database,runner=runner)
+        self.assertTrue(result["updated"])
+        self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o751)
+        self.assertEqual(stat.S_IMODE(Path(result["backup_code"]).stat().st_mode),0o751)
 
     def test_restart_failure_restores_old_code(self):
         def runner(*args,cwd=None):
