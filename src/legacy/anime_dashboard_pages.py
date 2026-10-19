@@ -155,13 +155,13 @@ if(!checks.some(x=>x.checked))e.preventDefault()});
 def jobs_page(result):
     out=shell("Jobs","Jobs")
     out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
-from receipt through download and completion. Status updates automatically every
-five seconds. No page reload required.</p><section class="panel">
+from receipt through download and completion. Status and activity details refresh every
+five seconds. Items waiting for episode identity have not entered the worker queue.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
     out+='''<table><thead><tr><th>Received</th><th>Release / Anime</th>
-<th class="hide-mobile">Source</th><th>Episode</th><th>Status</th></tr>
+<th class="hide-mobile">Source</th><th>Episode</th><th>Status</th><th>Activity details</th></tr>
 </thead><tbody id="job-rows"></tbody></table>
 <div id="no-jobs" class="empty hidden">No release notifications yet.</div>
 </section>'''
@@ -197,7 +197,10 @@ job.status==="BLOCKED"?"blocked":"");
 status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}
-tr.appendChild(cell);tbody.appendChild(tr)}}
+tr.appendChild(cell);
+const detail=td(tr,job.activity_detail||"No further activity recorded");
+detail.classList.add("muted");
+tbody.appendChild(tr)}}
 update(initial);
 async function refresh(){if(document.hidden)return;
 try{let response=await fetch("/api/jobs"+location.search,{cache:"no-store"});

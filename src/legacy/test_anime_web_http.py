@@ -106,6 +106,18 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertIn("POST /webhook HTTP/1.1",captured[0])
         self.assertNotIn("sensitive-secret",captured[0])
 
+    def test_unmatched_webhook_explains_no_worker_job(self):
+        from anime_dashboard_queries import all_jobs
+        payload={"source":"nyaa","release_name":"Unmatched release 02",
+                 "source_guid":"unmatched-identity","info_hash":HASH}
+        status,_,body=self.request("POST","/webhook",{**payload,"token":"secret-token"})
+        self.assertEqual(status,200)
+        with sqlite3.connect(self.db) as db:
+            result=all_jobs(db)
+        self.assertEqual(result["items"][0]["status"],"RECEIVED")
+        self.assertIn("no acquisition job was created",result["items"][0]["activity_detail"])
+        self.assertIn("Activity details",self.request("GET","/jobs")[2])
+
     def test_webhook_token_cannot_access_dashboard(self):
         import http.client
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)

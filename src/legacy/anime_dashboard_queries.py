@@ -84,10 +84,23 @@ def all_jobs(db, *,page=1,size=20):
             status="QUEUED"
         else:
             status="RECEIVED"
+        # An unmatched intake record is not an acquisition job. Make that
+        # distinction visible instead of suggesting an idle worker.
+        if status=="RECEIVED":
+            explanation=("Waiting for episode identity: no acquisition job was created. "
+                         "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
+        elif status=="QUEUED":
+            explanation="Acquisition job queued; waiting for a worker."
+        elif status=="RUNNING":
+            explanation="Acquisition worker has leased this job."
+        elif status=="COMPLETED":
+            explanation="Acquisition job completed."
+        else:
+            explanation=error or ("Current job state: "+status.lower())
         result.append({"id":nid,"source":source,"release":release,
                        "received_at":received,"status":status,
                        "season":season,"episode":episode,
-                       "series_title":title,"message":error or "",
+                       "series_title":title,"message":error or "", "activity_detail":explanation,
                        "staged":bool(stage and Path(stage).is_file())})
     searches=db.execute("""SELECT id,subject_key,payload_json,state,last_error
         FROM daemon_jobs WHERE kind='series_gap_search' ORDER BY id DESC""").fetchall()
