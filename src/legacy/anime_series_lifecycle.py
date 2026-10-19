@@ -18,7 +18,7 @@ def action(db, series_id, operation):
 
 
 def keep(db, series_id, settings, secrets, *, sonarr_client=None):
-    """Sonarr-first KEEP; no trial files are moved or removed."""
+    """Admit series to Sonarr, then track pending episode import. No deletion."""
     from anime_sonarr import ensure_series
     if type(series_id) is not int or series_id<=0 or db.in_transaction:
         raise ValueError("Invalid Keep request")
@@ -50,13 +50,13 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
         db.execute("""INSERT INTO sonarr_keep(series_id,sonarr_id,tvdb_id)
             VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET sonarr_id=excluded.sonarr_id""",
             (series_id,result["sonarr_id"],str(row[0])))
-        db.execute("UPDATE series SET status='KEPT' WHERE id=?",(series_id,))
+        db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
         db.commit()
     except BaseException:
         db.rollback()
         raise
     return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
-            "trial_media_preserved":True}
+            "trial_media_preserved":True,"import_pending":True,"torrent_cleanup_authorized":False}
 
 
 def bulk_action(db, series_ids, operation):
