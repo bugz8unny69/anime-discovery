@@ -67,4 +67,5 @@ jobs:
             test_anime_sonarr_keep \
             test_anime_notification_tvdb \
             test_anime_admin_integrations \
-            test_anime_ntfy_monitor
+            test_anime_ntfy_monitor \
+            test_anime_sonarr_import
