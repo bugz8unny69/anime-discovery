@@ -14,6 +14,7 @@ def _write(data):
         with os.fdopen(fd,'w') as out:
             json.dump(data,out);out.flush();os.fsync(out.fileno())
         os.replace(temp,AUTH_FILE)
+        AUTH_FILE.chmod(0o600)
     finally:
         if temp.exists():temp.unlink()
 
@@ -29,6 +30,19 @@ def set_password(password):
     salt=secrets.token_hex(16)
     _write({'version':1,'username':'admin','salt':salt,'iterations':ITERATIONS,
             'password_hash':hash_password(password,salt),'session_secret':secrets.token_hex(32)})
+
+def initialize_legacy(password):
+    """One-time migration: preserve an existing admin password without weakening
+    password requirements for newly configured passwords."""
+    if read() is not None:
+        return False
+    if not isinstance(password,str) or not password:
+        raise ValueError("A configured administrator password is required")
+    salt=secrets.token_hex(16)
+    _write({'version':1,'username':'admin','salt':salt,'iterations':ITERATIONS,
+            'password_hash':hash_password(password,salt),
+            'session_secret':secrets.token_hex(32)})
+    return True
 
 def verify(username,password):
     data=read()
