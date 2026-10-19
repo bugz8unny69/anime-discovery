@@ -17,6 +17,37 @@ def action(db, series_id, operation):
     return {"series_id":series_id,"action":operation,"ok":True}
 
 
+def keep(db, series_id, settings, secrets, *, sonarr_client=None):
+    """Sonarr-first KEEP; no trial files are moved or removed."""
+    from anime_sonarr import ensure_series
+    if type(series_id) is not int or series_id<=0 or db.in_transaction:
+        raise ValueError("Invalid Keep request")
+    row=db.execute("SELECT external_id,title,status FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
+    if row is None or not str(row[0]).isdigit() or int(row[0])<=0:
+        raise ValueError("Series lacks TVDB identity")
+    if row[2]=="REJECTED" or db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(series_id,)).fetchone():
+        raise ValueError("Rejected series requires reset")
+    result=(sonarr_client or ensure_series)(settings,secrets,tvdb_id=row[0],title=row[1])
+    if not isinstance(result,dict) or type(result.get("sonarr_id")) is not int or result["sonarr_id"]<=0:
+        raise RuntimeError("Sonarr admission unconfirmed")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute("""CREATE TABLE IF NOT EXISTS sonarr_keep (
+            series_id INTEGER PRIMARY KEY REFERENCES series(id),
+            sonarr_id INTEGER NOT NULL, tvdb_id TEXT NOT NULL,
+            kept_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        db.execute("""INSERT INTO sonarr_keep(series_id,sonarr_id,tvdb_id)
+            VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET sonarr_id=excluded.sonarr_id""",
+            (series_id,result["sonarr_id"],str(row[0])))
+        db.execute("UPDATE series SET status='KEPT' WHERE id=?",(series_id,))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
+            "trial_media_preserved":True}
+
+
 def bulk_action(db, series_ids, operation):
     """Apply one operation to selected rows in a single database transaction."""
     if operation not in ("reject","clear-history","reset"):
