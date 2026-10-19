@@ -57,6 +57,40 @@ class DashboardHTTPTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_autobrr_url_token_with_json_body(self):
+        import io
+        from unittest.mock import patch
+        payload={"release_name":"URL Auth Example","source_guid":"autobrr-url",
+                 "info_hash":HASH}
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            client.request("POST","/webhook?token=secret-token",
+                json.dumps(payload),{"Content-Type":"application/json"})
+            response=client.getresponse()
+            self.assertEqual(response.status,200)
+            response.read()
+            for url in ("/webhook","/webhook?token=wrong"):
+                client.request("POST",url,json.dumps(payload),
+                               {"Content-Type":"application/json"})
+                response=client.getresponse()
+                self.assertEqual(response.status,401)
+                response.read()
+        finally:
+            client.close()
+
+    def test_webhook_logging_redacts_query_token(self):
+        import io
+        handler=object.__new__(web.app(self.db,"secret-token"))
+        handler.path="/webhook?token=sensitive-secret"
+        handler.command="POST"
+        handler.request_version="HTTP/1.1"
+        captured=[]
+        handler.log_message=lambda fmt,*args: captured.append(fmt%args)
+        handler.log_request(401,"-")
+        self.assertEqual(len(captured),1)
+        self.assertIn("POST /webhook HTTP/1.1",captured[0])
+        self.assertNotIn("sensitive-secret",captured[0])
+
     def test_webhook_token_cannot_access_dashboard(self):
         import http.client
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
