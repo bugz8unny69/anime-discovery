@@ -6,6 +6,7 @@ variables or worker command-line switches.
 """
 import copy
 import getpass
+import grp
 import json
 import os
 import pwd
@@ -55,11 +56,11 @@ def main():
         username = ask("Non-root account to run Anime Discovery")
     account = pwd.getpwnam(username)
     print("Installing Anime Discovery for account:", username)
-    download = Path(ask("Existing qBittorrent download directory")).expanduser().resolve()
-    trial = Path(ask("Existing Anime Discovery staging directory")).expanduser().resolve()
+    download = Path(ask("Existing qBittorrent download directory", "/mnt/media/Torrents/anime")).expanduser().resolve()
+    trial = Path(ask("Existing Anime Discovery staging directory", "/mnt/media/Anime")).expanduser().resolve()
     if not download.is_dir() or not trial.is_dir() or download == trial:
         raise ValueError("Download and staging directories must exist and be different")
-    qb_url = ask("qBittorrent API URL", "http://127.0.0.1:8080")
+    qb_url = ask("qBittorrent API URL", "https://torrents.int.lhprojects.net")
     qb_user = ask("qBittorrent username")
     qb_password = ask("qBittorrent password",secret=True)
     web_token = ask("Private dashboard/webhook token",secret=True)
@@ -82,6 +83,7 @@ def main():
         initialize(db_path)
         os.chown(db_path,account.pw_uid,account.pw_gid)
 
+    media_group = "SupplementaryGroups=media\\n" if any(g.gr_name=="media" for g in grp.getgrall()) else ""
     service = """[Unit]
 Description=Anime Discovery dashboard, Autobrr intake and acquisition workers
 After=network-online.target
@@ -91,7 +93,7 @@ Wants=network-online.target
 Type=simple
 User={user}
 Group={group}
-WorkingDirectory={root}
+{media_group}WorkingDirectory={root}
 ExecStart={python} {root}/src/legacy/anime-discovery-live.py
 Restart=on-failure
 RestartSec=5
@@ -99,8 +101,8 @@ TimeoutStopSec=20
 
 [Install]
 WantedBy=multi-user.target
-""".format(user=username,group=__import__("grp").getgrgid(account.pw_gid).gr_name,
-           root=ROOT,python=sys.executable)
+""".format(user=username,group=grp.getgrgid(account.pw_gid).gr_name,
+           root=ROOT,python=sys.executable,media_group=media_group)
     SERVICE.write_text(service,encoding="utf-8")
     subprocess.run(["systemctl","daemon-reload"],check=True)
     subprocess.run(["systemctl","enable","--now","anime-discovery.service"],check=True)
