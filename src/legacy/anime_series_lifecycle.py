@@ -27,6 +27,12 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
         raise ValueError("Series lacks TVDB identity")
     if row[2]=="REJECTED" or db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(series_id,)).fetchone():
         raise ValueError("Rejected series requires reset")
+    from pathlib import Path
+    paths=db.execute("""SELECT r.staged_path FROM episode_dispatch d
+        JOIN torrent_recovery_records r ON r.notification_id=d.notification_id
+        WHERE d.series_id=? AND d.state='DONE'""",(series_id,)).fetchall()
+    if not any(path and Path(path).is_file() for (path,) in paths):
+        raise ValueError("Keep requires an existing staged episode")
     result=(sonarr_client or ensure_series)(settings,secrets,tvdb_id=row[0],title=row[1])
     if not isinstance(result,dict) or type(result.get("sonarr_id")) is not int or result["sonarr_id"]<=0:
         raise RuntimeError("Sonarr admission unconfirmed")
