@@ -61,7 +61,7 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .panel{padding:13px}.hide-mobile{display:none}}
 </style></head><body><main class="container"><header>
 <span class="brand">◈ Anime Discovery</span>
-<span class="muted">Homelab</span></header><nav aria-label="Main navigation">"""+navigation+"</nav>"
+<form method="post" action="/logout"><button class="secondary" type="submit">Sign out</button></form></header><nav aria-label="Main navigation">"""+navigation+"</nav>"
 
 
 def request_panel(mappings):
