@@ -97,6 +97,30 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
         self.assertTrue(source.is_file())
         self.assertEqual(qb.adds, 1)
 
+    def test_quarantine_after_enqueue_blocks_external_submission(self):
+        self.enqueue()
+        job = claim(self.db, allowed_kinds=["claimed_acquisition"])
+        self.db.execute(
+            "INSERT INTO series_quarantine(series_id,reason,quarantined_at) "
+            "VALUES (4,'operator hold',0)")
+        calls = []
+        def forbidden_qb():
+            calls.append("created")
+            raise AssertionError("External client must not be constructed")
+        download = Path(self.tmp.name) / "downloads"
+        trial = Path(self.tmp.name) / "trial"
+        download.mkdir()
+        trial.mkdir()
+        handler = make_acquisition_handler(
+            self.path, forbidden_qb, download_root=download, trial_root=trial)
+        with self.assertRaises(ValueError):
+            asyncio.run(handler(job))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM external_actions").fetchone()[0], 0)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM episode_dispatch").fetchone()[0], "CLAIMED")
+
     def test_reclaimed_lease_rejects_stale_worker(self):
         self.enqueue()
         first = claim(self.db, now=100, lease_seconds=30,
