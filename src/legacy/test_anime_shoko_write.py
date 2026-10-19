@@ -20,6 +20,16 @@ class ShokoWriteTests(unittest.TestCase):
         self.assertEqual(seen,[("https://shoko.local/api/v3/ImportFolder/1/Scan","GET")])
         with self.assertRaises(ValueError):
             request_scan("https://shoko.local","key",0,opener=opener)
+    def test_scan_rejects_unrelated_import_folder(self):
+        requests=[]
+        def opener(req,timeout):
+            requests.append(req.full_url)
+            return Reply({"ID":1,"Path":"/mnt/media/Torrents/anime/"})
+        with self.assertRaises(RuntimeError):
+            request_scan("https://shoko.local","key",1,
+                expected_root="/mnt/media/Anime",opener=opener)
+        self.assertEqual(requests,["https://shoko.local/api/v3/ImportFolder/1"])
+
     def test_link_requires_optin_and_readback(self):
         state={"linked":False}
         def opener(req,timeout):
