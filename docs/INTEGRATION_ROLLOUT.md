@@ -58,3 +58,14 @@ Exact documented link write, **not enabled**:
 Shoko also exposes destructive endpoints including `DELETE /File/{fileID}`, `DELETE /File/Location`, and `GET /Action/SyncMyList` (documented as irreversible AniDB synchronization). Anime Discovery must never invoke these in any automatic workflow.
 
 The feature-branch `anime_shoko_v3.py` client performs only authenticated GETs and prepares a `writes_enabled:false` link plan. API calls and source paths still require VM validation and NFS path mapping. Do not enable automatic Shoko writes until episode IDs and file references have been verified against read-only live responses.
+
+
+## Post-Keep Shoko reconciliation implementation status (2026-10-19)
+
+The feature branch now starts `anime_shoko_handoff_monitor.py` only when Shoko and Sonarr are enabled. After a series reaches `KEPT`, the monitor reconstructs its Anime Discovery provenance, **revalidates the exact Sonarr episode destination and recovery hash**, persists one Shoko handoff record per notification and polls Shoko with GET requests only. These records survive restarts and do not resubmit Sonarr imports.
+
+**Explicit blocking gap:** The existing verified identity cache and `identity.series_map` prove TVDB and **AniDB anime/series** identity, not an exact AniDB episode identifier. Season/episode ordering differs between TVDB and AniDB (including specials). The monitor therefore reports `NEEDS_EPISODE_IDENTITY` rather than inventing a mapping. `record_verified_episode` requires explicit, separately verified provenance-bound AniDB *episode* ID.
+
+**Shoko API contract:** the supplied Shoko 5.3.3.0 OpenAPI specifies `GET /api/v3/ImportFolder/{folderID}/Scan` as a whole-folder scan; despite its HTTP GET method it has side effects, so it is deliberately NOT called by the read-only monitor. It also specifies `POST /api/v3/File/{fileID}/Link` with `{"EpisodeIDs":[<internal Shoko episode ID>]}`. Automatic linking is still disabled. Shoko's observed `SeriesIDs:null` cannot be treated as a proved empty list of existing episode links.
+
+**Not production-ready yet:** Sonarr ManualImport command payload awaits a non-destructive VM simulation; the Shoko scan side-effect policy, exact AniDB-episode mapping, final link writes and readback/VFS verification remain blocked pending trustworthy live contract data. The current Sonarr finalizer marks `KEPT` and may perform source cleanup before Shoko completion; this is not yet the desired final end-to-end state. Do not deploy, release, merge or enable destructive actions.
