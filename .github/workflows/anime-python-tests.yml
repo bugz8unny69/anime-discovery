@@ -73,4 +73,5 @@ jobs:
             test_anime_shoko_v3 \
             test_anime_shoko_handoff \
             test_anime_shoko_handoff_state \
-            test_anime_shoko_handoff_monitor
+            test_anime_shoko_handoff_monitor \
+            test_anime_shoko_write
