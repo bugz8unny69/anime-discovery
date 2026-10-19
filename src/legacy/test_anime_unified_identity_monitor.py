@@ -1,0 +1,54 @@
+"""Unified intake identity triage and delayed NTFY review tests."""
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from anime_fresh_database import initialize
+from anime_unified_identity_monitor import check_once
+from anime_ntfy_monitor import check_once as alerts
+
+class TriageTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path=Path(self.tmp.name)/"db.sqlite"
+        initialize(self.path)
+        self.db=sqlite3.connect(self.path,isolation_level=None)
+        self.addCleanup(self.db.close)
+        self.nid=self.db.execute("""INSERT INTO notifications
+          (source,release_name,source_guid,info_hash,received_at,status)
+          VALUES ('nyaa','[Group] Test - 02','triage','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,'IDENTIFYING')""").lastrowid
+        self.settings={"ntfy":{"enabled":True,"reminder_hours":1}}
+        self.notified=[]
+        self.sender=lambda s,k,n,t:self.notified.append(n) or True
+
+    def test_review_only_after_lookup_and_one_alert(self):
+        self.assertEqual(alerts(self.db,self.settings,{},now=1000,sender=self.sender)["sent"],0)
+        self.assertEqual(check_once(self.db,{}, {},now=1001,
+            probe=lambda *args:{"decision":"NEEDS_REVIEW","issues":["UNVERIFIED"]})["processed"],1)
+        self.assertEqual(self.db.execute("SELECT status FROM notifications WHERE id=?",
+            (self.nid,)).fetchone()[0],"NEEDS_REVIEW")
+        self.assertEqual(alerts(self.db,self.settings,{},now=1002,sender=self.sender)["sent"],1)
+        self.assertEqual(alerts(self.db,self.settings,{},now=1003,sender=self.sender)["sent"],0)
+        self.assertEqual(self.notified,[self.nid])
+        self.assertIsNone(self.db.execute("SELECT 1 FROM daemon_jobs WHERE subject_key=?",
+            (str(self.nid),)).fetchone())
+
+    def test_transient_provider_failure_retries_before_alert(self):
+        def broken(*args):raise TimeoutError("Do not log details")
+        for attempt,now in enumerate((1000,1200,1600),1):
+            self.assertEqual(check_once(self.db,{}, {},now=now,probe=broken)["processed"],1)
+            status=self.db.execute("SELECT status FROM notifications WHERE id=?",
+                (self.nid,)).fetchone()[0]
+            self.assertEqual(status,"IDENTIFYING" if attempt<3 else "NEEDS_REVIEW")
+        self.assertEqual(alerts(self.db,self.settings,{},now=2000,sender=self.sender)["sent"],1)
+        self.assertEqual(self.db.execute("SELECT attempts FROM unified_identity_checks").fetchone()[0],3)
+
+    def test_unique_verified_series_still_requires_episode_mapping(self):
+        self.assertEqual(check_once(self.db,{}, {},now=2000,probe=lambda *_:{
+            "decision":"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED",
+            "matching_pairs":[{"tvdb_id":"123","anidb_id":"456"}],
+            "issues":[]})["processed"],1)
+        self.assertEqual(self.db.execute("SELECT status FROM notifications").fetchone()[0],"NEEDS_REVIEW")
+
+if __name__=="__main__":unittest.main()
