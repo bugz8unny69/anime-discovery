@@ -103,7 +103,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         if record is None:
             continue  # Already cleaned after staging; idempotent.
         save_path=record["save_path"]
-        if (not _inside(save_path,download_root)
+        if (not (Path(save_path).resolve(strict=True)==Path(download_root).resolve(strict=True) or _inside(save_path,download_root))
             or Path(save_path).resolve().is_relative_to(Path(settings["sonarr"]["root_folder"]).resolve())
             or Path(save_path).resolve().is_relative_to(Path(settings["storage"]["trial_root"]).resolve())):
             raise RuntimeError("Torrent files not isolated in download root")
