@@ -49,7 +49,7 @@ def resolve_episode(base_url,api_key,anidb_episode_id,*,opener=urlopen):
     if not isinstance(result,dict):
         raise RuntimeError("Shoko episode not found")
     ids=result.get("IDs")
-    if not isinstance(ids,dict) or type(ids.get("ID")) is not int or ids["ID"]<=0:
+    if not isinstance(ids,dict) or ids.get("AniDB")!=anidb_episode_id or type(ids.get("ID")) is not int or ids["ID"]<=0:
         raise RuntimeError("Shoko episode identity missing")
     return {"shoko_episode_id":ids["ID"],"episode":result}
 
