@@ -25,13 +25,15 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
             dispatch=db.execute("SELECT state FROM episode_dispatch WHERE notification_id=?",
                                 (payload['notification_id'],)).fetchone()
             if dispatch and dispatch[0]=='DONE':
-                record=db.execute("SELECT staged_path FROM torrent_recovery_records WHERE notification_id=?",
+                record=db.execute("SELECT 1 FROM torrent_recovery_records WHERE notification_id=?",
                                   (payload['notification_id'],)).fetchone()
                 if not record:
                     return {'state':'NEEDS_REVIEW'}
                 if cleanup_source:
                     from pathlib import Path
-                    if not Path(record[0]).is_file():
+                    path=db.execute("SELECT staged_path FROM torrent_recovery_records WHERE notification_id=?",
+                                    (payload['notification_id'],)).fetchone()[0]
+                    if not Path(path).is_file():
                         return {'state':'NEEDS_REVIEW'}
                     client = qb_factory()
                     if client.contains_hash(payload['infohash']):
