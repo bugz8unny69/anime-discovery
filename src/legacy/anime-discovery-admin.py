@@ -83,6 +83,8 @@ def main(argv=None):
     upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
     upgrade_cmd.add_argument("--verbose",action="store_true",help="Show upgrade milestones and service readiness checks")
     upgrade_cmd.add_argument("--backup",action="store_true",help="Keep code and database backups after successful archive upgrade")
+    setup_cmd=commands.add_parser("setup",help="Run local first-run configuration")
+    setup_cmd.add_argument("--reconfigure",action="store_true",help="Revisit current configuration")
     commands.add_parser("status",help="Show installed version, service and database readiness")
 
     database=commands.add_parser("database",help="Database administration")
@@ -116,7 +118,10 @@ def main(argv=None):
 
     args=parser.parse_args(argv)
     try:
-        if args.command=="upgrade":
+        if args.command=="setup":
+            from anime_admin_setup import setup
+            print(json.dumps(setup(args.config_dir,reconfigure=args.reconfigure),indent=2))
+        elif args.command=="upgrade":
             from anime_admin_upgrade import upgrade
             config=load_config(args.config_dir)
             configured_db=Path(config["settings"]["daemon"]["database_path"])
