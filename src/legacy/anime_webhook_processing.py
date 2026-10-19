@@ -133,10 +133,22 @@ def receive(db, values, *, series_map=None):
     guid = str(values.get("source_guid") or values.get("guid") or infohash).strip()[:500]
     if not source or not name or not HASH.fullmatch(infohash) or not guid:
         raise ValueError("Release name and 40/64 character torrent hash required")
+    gap_title = None
+    if series_map:
+        matching_aliases=[alias for alias,entry in series_map.items()
+            if str(entry["tvdb_id"])==str(values.get("tvdb_id",""))
+            and str(entry["anidb_id"])==str(values.get("anidb_id",""))]
+        if len(matching_aliases)==1:
+            gap_title=matching_aliases[0]
     if series_map and not any(key in values for key in ("tvdb_id","anidb_id","season","episode")):
         mapped = resolve_release(name,series_map)
         if mapped:
             values = {**values,**mapped}
+            matching_aliases=[alias for alias,entry in series_map.items()
+                if str(entry["tvdb_id"])==str(mapped["tvdb_id"])
+                and str(entry["anidb_id"])==str(mapped["anidb_id"])]
+            if len(matching_aliases)==1:
+                gap_title=matching_aliases[0]
     auto_fields = ("tvdb_id","anidb_id","season","episode")
     auto = all(values.get(field) is not None and str(values[field]).strip() for field in auto_fields)
     if auto:
@@ -168,7 +180,7 @@ def receive(db, values, *, series_map=None):
             from anime_shared_discovery import schedule
             # New episode triggers a bounded catch-up search for earlier episodes.
             # The worker only runs this when Prowlarr has been configured.
-            result["gap_search"]=schedule(db,title=name,tvdb_id=values["tvdb_id"],
+            result["gap_search"]=schedule(db,title=gap_title or name,tvdb_id=values["tvdb_id"],
                 anidb_id=values["anidb_id"],season=int(values["season"]),
                 up_to=int(values["episode"]),origin="autobrr")["queued"]
     return result
