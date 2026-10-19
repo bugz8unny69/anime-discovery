@@ -85,3 +85,10 @@ For an **existing** Anime Discovery installation, do not rerun `deploy/install-h
 New integrations default **disabled**. To supply missing API credentials after migration, use `anime-discovery-admin settings configure-integration sonarr`, `... shoko`, `... tvdb`, or `... ntfy`; entering a blank credential preserves any existing key. No AniDB credential exists in this configuration schema: `identity.series_map[*].anidb_id` is a catalog identifier, not a secret. The installer inherits the same central defaults, so fresh installs include the settings sections without auto-generating credentials.
 
 Do not run these upgrade instructions until the feature branch has completed CI and live validation and a release is explicitly approved; `develop` triggers publication.
+
+
+### Final lifecycle decision: Shoko is never a Keep or cleanup blocker
+
+This section supersedes earlier notes about gating cleanup on Shoko. **Only successful Sonarr ManualImport, exact independent destination verification, and qB ownership/source checks** determine whether original Anime Discovery trial media and torrent data can be cleaned up. When Shoko is enabled, the finalizer attempts to persist post-import provenance, but failures in Shoko status collection do not change the successful Sonarr outcome. It never deletes any permanent Sonarr file.
+
+Shoko reconciliation is a separate best-effort retry workflow after Keep. Issues requiring manual action (`NEEDS_EPISODE_IDENTITY`, `UNRECOGNIZED_NEEDS_REVIEW`, `AMBIGUOUS_SHOKO_FILE`) trigger a deduplicated, best-effort NTFY warning using the existing configured server/topic/token. Delivery failure never blocks Keep. No Shoko VFS/Jellyfin verification is required. An exact verified AniDB *episode* identity remains mandatory before any future link write; identifying the AniDB series alone is not sufficient. Automatic Shoko link execution is not enabled yet.
