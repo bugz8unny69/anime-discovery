@@ -123,7 +123,7 @@ def approve(db, notification_id, values, *, source="manual"):
         raise
 
 
-def receive(db, values, *, series_map=None):
+def receive(db, values, *, series_map=None, gap_search_enabled=True):
     """Accept Autobrr metadata. Repeat GUID+hash is idempotent."""
     if not isinstance(values,dict):
         raise ValueError("Expected webhook object")
@@ -176,7 +176,7 @@ def receive(db, values, *, series_map=None):
     if auto:
         approved=approve(db,nid,values,source="autobrr")
         result.update(approved)
-        if not result["duplicate"] and source=="autobrr":
+        if gap_search_enabled and not result["duplicate"] and source=="autobrr":
             from anime_shared_discovery import schedule
             # New episode triggers a bounded catch-up search for earlier episodes.
             # The worker only runs this when Prowlarr has been configured.
