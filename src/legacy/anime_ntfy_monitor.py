@@ -28,7 +28,7 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
     ensure_schema(db)
     # Upgrade older unmatched RECEIVED rows so they can be reviewed too.
     db.execute("""UPDATE notifications SET status='NEEDS_REVIEW'
-        WHERE status='RECEIVED' AND NOT EXISTS
+        WHERE status IN ('RECEIVED','UNTRUSTED') AND NOT EXISTS
         (SELECT 1 FROM episode_dispatch d WHERE d.notification_id=notifications.id)""")
     interval=max(3600,settings["ntfy"]["reminder_hours"]*3600)
     rows=db.execute("""SELECT n.id,n.release_name FROM notifications n
