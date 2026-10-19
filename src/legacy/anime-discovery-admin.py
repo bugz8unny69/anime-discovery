@@ -103,6 +103,10 @@ def main(argv=None):
     legacy_init.add_argument("--force",action="store_true")
 
     args=parser.parse_args(argv)
+    if os.geteuid()==0 and args.command in ("settings","upgrade","database"):
+        print("anime-discovery-admin: running as root; settings writes preserve existing"
+              " file ownership. Verify the anime-discovery service account can"
+              " access /etc/anime-discovery.", file=sys.stderr)
     try:
         if args.command=="upgrade":
             from anime_admin_upgrade import upgrade
