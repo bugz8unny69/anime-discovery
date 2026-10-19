@@ -82,6 +82,8 @@ def all_jobs(db, *,page=1,size=20):
             status="COMPLETED"
         elif dispatch=="CLAIMED":
             status="QUEUED"
+        elif nstatus=="IDENTIFYING":
+            status="IDENTIFYING"
         elif nstatus=="NEEDS_REVIEW" and not dispatch:
             status="NEEDS REVIEW"
         else:
@@ -91,6 +93,8 @@ def all_jobs(db, *,page=1,size=20):
         if status in ("RECEIVED","NEEDS REVIEW"):
             explanation=("Waiting for episode identity: no acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
+        elif status=="IDENTIFYING":
+            explanation="Checking public AniDB titles and TVDB links; review notification follows if not verified."
         elif status=="QUEUED":
             explanation="Acquisition job queued; waiting for a worker."
         elif status=="RUNNING":
