@@ -51,6 +51,32 @@ class AdminCliTests(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertFalse(Path(str(path)+".pre-force-backup").exists())
 
+    def test_doctor_reports_fresh_database_ready(self):
+        path=self.dir/"unified.db"
+        cli.new_database(path)
+        report=cli.doctor(path)
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["schema_version"],1)
+        self.assertEqual(report["integrity"],"ok")
+        self.assertEqual(report["foreign_key_violations"],0)
+        self.assertEqual(report["missing_tables"],[])
+        self.assertEqual(report["jobs"],{})
+
+    def test_doctor_detects_missing_runtime_table(self):
+        path=self.dir/"unified.db"
+        cli.new_database(path)
+        with sqlite3.connect(path) as db:
+            db.execute("DROP TABLE verified_series_cache")
+        report=cli.doctor(path)
+        self.assertFalse(report["ready"])
+        self.assertIn("verified_series_cache",report["missing_tables"])
+
+    def test_doctor_does_not_create_missing_database(self):
+        path=self.dir/"missing.db"
+        with self.assertRaises(FileNotFoundError):
+            cli.doctor(path)
+        self.assertFalse(path.exists())
+
     def test_settings_cli(self):
         cli.main(["--config-dir",str(self.dir),"settings","set","daemon.concurrency","6"])
         self.assertEqual(json.loads((self.dir/"settings.json").read_text())["daemon"]["concurrency"],6)
