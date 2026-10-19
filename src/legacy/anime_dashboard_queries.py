@@ -76,12 +76,14 @@ def all_jobs(db, *,page=1,size=20):
             status="WAITING FOR DOWNLOAD"
         elif job=="BLOCKED":
             status="BLOCKED"
-        elif nstatus=="NEEDS_REVIEW" or job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
+        elif job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
             status="NEEDS REVIEW"
         elif job=="DONE":
             status="COMPLETED"
         elif dispatch=="CLAIMED":
             status="QUEUED"
+        elif nstatus=="NEEDS_REVIEW" and not dispatch:
+            status="NEEDS REVIEW"
         else:
             status="RECEIVED"
         # An unmatched intake record is not an acquisition job. Make that
