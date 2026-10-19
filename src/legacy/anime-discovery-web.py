@@ -161,8 +161,13 @@ def main():
     if not token:
         raise RuntimeError("Set web_token in /etc/anime-discovery/secrets.json")
     admin_password = secrets.get("admin_password")
-    if not admin_password or admin_password == token:
-        raise RuntimeError("Set a separate admin_password in /etc/anime-discovery/secrets.json")
+    if not admin_password:
+        # Transitional upgrade support: allow old installs to restart until
+        # the administrator runs settings configure-credentials.
+        admin_password=token
+        print("WARNING: dashboard still shares webhook token; run admin settings configure-credentials immediately.",flush=True)
+    elif admin_password == token:
+        raise RuntimeError("Dashboard admin password must differ from webhook token")
     db_path = Path(settings["daemon"]["database_path"])
     if not db_path.is_file():
         raise RuntimeError("Database missing: " + str(db_path))
