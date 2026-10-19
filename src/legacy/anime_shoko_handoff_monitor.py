@@ -11,6 +11,8 @@ from anime_flat_config import load_config
 from anime_sonarr_finalize import confirm_sonarr_copies
 from anime_shoko_handoff_state import ensure_schema, enqueue_verified_copies, reconcile_one
 from anime_ntfy import notify_shoko_issue
+from anime_episode_identity import resolve_exact_episode
+from anime_shoko_handoff_state import record_verified_episode
 
 LOG=logging.getLogger(__name__)
 
@@ -57,6 +59,18 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                     status=db.execute("""SELECT status FROM shoko_handoff
                         WHERE series_id=? AND notification_id=?""",
                         (series_id,nid)).fetchone()[0]
+                    current=db.execute("""SELECT identity_verified FROM shoko_handoff
+                        WHERE series_id=? AND notification_id=?""",
+                        (series_id,nid)).fetchone()
+                    if current and current[0]!=1:
+                        tvdb=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",
+                                        (series_id,)).fetchone()
+                        if tvdb and str(tvdb[0]).isdigit():
+                            episode_id=resolve_exact_episode(settings,tvdb_id=int(tvdb[0]),
+                                season=entry["season"],episode=entry["episode"])
+                            if episode_id:
+                                record_verified_episode(db,series_id=series_id,
+                                    notification_id=nid,anidb_episode_id=episode_id)
                     if status in ("SHOKO_ALREADY_LINKED","LINK_PLAN_READY"):
                         continue
                     observation=reconcile_one(db,settings,secrets,series_id=series_id,
