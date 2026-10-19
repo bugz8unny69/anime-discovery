@@ -106,11 +106,17 @@ def _new_setup(account):
     qb_url=ask("qBittorrent API URL","https://torrents.int.lhprojects.net")
     qb_user=ask("qBittorrent username")
     qb_password=ask("qBittorrent password",secret=True)
-    web_token=ask("Private dashboard/webhook token",secret=True)
+    web_token=ask("Autobrr webhook token",secret=True)
+    admin_password=ask("Dashboard admin password",secret=True)
+    if web_token==admin_password:
+        raise ValueError("Use different credentials for dashboard and webhooks")
     settings=copy.deepcopy(DEFAULT_SETTINGS)
     settings["storage"].update(download_root=str(download),trial_root=str(trial))
     settings["qbittorrent"].update(base_url=qb_url,username=qb_user,cleanup_source=True)
-    secrets={"qbittorrent_password":qb_password,"web_token":web_token}
+    secrets={"qbittorrent_password":qb_password,"web_token":web_token,"admin_password":admin_password}
+    if ask("Enable Prowlarr? (yes/no)","no").lower()=="yes":
+        settings["prowlarr"].update(enabled=True,base_url=ask("Prowlarr URL"))
+        secrets["prowlarr_api_key"]=ask("Prowlarr API key",secret=True)
     validate_config(settings,secrets)
     CONFIG_DIR.mkdir(mode=0o750,parents=True,exist_ok=True)
     os.chmod(CONFIG_DIR,0o750)
@@ -130,7 +136,9 @@ def _validate_install_settings(config):
     if not settings["qbittorrent"]["username"] or not secrets.get("qbittorrent_password"):
         raise ValueError("Existing qBittorrent username/password missing")
     if not secrets.get("web_token"):
-        raise ValueError("Existing dashboard token missing")
+        raise ValueError("Webhook token missing")
+    if not secrets.get("admin_password"):
+        raise ValueError("Dashboard password missing; configure credentials before retrying")
     db_path=Path(settings["daemon"]["database_path"])
     if not db_path.is_absolute():
         raise ValueError("Database path must be absolute")
@@ -205,7 +213,7 @@ WantedBy=multi-user.target
     subprocess.run(["systemctl","enable","--now","anime-discovery.service"],check=True)
     print("Anime Discovery service started; open http://SERVER-IP:"+
           str(config["settings"]["web"]["port"])+"/")
-    print("Dashboard username: anime ; password: your private webhook token")
+    print("Dashboard username: anime ; use your separate admin password")
     print("Use: systemctl status anime-discovery.service")
 
 

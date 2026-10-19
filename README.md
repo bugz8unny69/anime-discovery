@@ -31,7 +31,7 @@ Example `settings.json`:
 Example `secrets.json`:
 
 ```json
-{"web_token": "choose-a-private-token", "qbittorrent_password": "your-qb-password"}
+{"web_token": "choose-a-webhook-token", "admin_password": "choose-a-different-dashboard-password", "qbittorrent_password": "your-qb-password"}
 ```
 
 **First deployment (new VM code, existing JSON configuration is supported):**
@@ -68,8 +68,8 @@ deployment. After first installation, use
 
 
 The launcher starts the dashboard/webhook and acquisition worker together.
-Open `http://HOMELAB-IP:8765/` with username `anime` and password
-`web_token`. Autobrr POSTs to `/webhook` using
+Open `http://HOMELAB-IP:8765/` with username `anime` and the separate
+`admin_password`. Autobrr POSTs to `/webhook` using
 `Authorization: Bearer YOUR_WEB_TOKEN` and fields `release_name`,
 `source_guid`, `info_hash`. The dashboard can approve a notification
 and queue its acquisition. `qbittorrent.cleanup_source=true` enables
@@ -125,6 +125,36 @@ To enable the *optional* new Prowlarr integration after migrating, configure
 `prowlarr.base_url`, add `prowlarr_api_key` to the existing secrets file
 without removing any existing keys, and set `prowlarr.enabled` to true.
 Keep `secrets.json` readable only by its owner (mode 0600).
+
+## Fresh-build configuration and credential repair
+
+The fresh installer asks for separate dashboard and webhook credentials and
+can configure the working optional Prowlarr one-time discovery integration.
+Dashboard Basic authentication (user `anime`) uses `admin_password` only.
+Autobrr `POST /webhook` uses `web_token` as its Bearer token only;
+neither credential authorizes the other route type.
+
+If you already installed the fresh build, **do not delete your new SQLite database**.
+After deploying a release containing this change, run:
+
+```bash
+sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py settings configure-credentials
+sudo systemctl restart anime-discovery.service
+```
+
+Leave the webhook prompt blank to keep your Autobrr token. Enter a distinct
+dashboard password when prompted. The command rewrites only `secrets.json`,
+preserving existing keys and file ownership. The service refuses to start
+without a separate admin password. To configure Prowlarr on an existing
+installation, use `settings set prowlarr.base_url` and
+`settings set prowlarr.enabled true`, and provision `prowlarr_api_key`
+securely in `secrets.json` (0600), then restart the service.
+
+**Integration status:** Prowlarr search is implemented. Jellyfin currently
+supports writing trial NFO files, not API-based Jellyfin synchronization.
+ntfy notifications and TVDB API lookups are not implemented in this fresh
+runtime; entering their URLs or keys would not enable those services.
+The installer intentionally does not solicit unused credentials.
 
 ## Release archive deployment (no Git clone)
 

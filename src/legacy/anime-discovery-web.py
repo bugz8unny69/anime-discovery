@@ -22,7 +22,7 @@ from anime_shared_discovery import identity_for_request, schedule
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
 
-def app(db_path, token, series_map=None, config_dir=None):
+def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None):
     def aliases():
         if config_dir is not None:
             return load_config(config_dir)["settings"]["identity"]["series_map"]
@@ -37,17 +37,18 @@ def app(db_path, token, series_map=None, config_dir=None):
             self.end_headers()
             self.wfile.write(data)
 
-        def authorized(self):
+        def authorized(self, *, webhook=False):
             auth = self.headers.get("Authorization", "")
-            if hmac.compare_digest(auth, "Bearer " + token):
-                return True
-            if auth.startswith("Basic "):
-                try:
-                    credentials = base64.b64decode(auth[6:], validate=True).decode("utf-8")
-                    return hmac.compare_digest(credentials, "anime:" + token)
-                except (ValueError, UnicodeDecodeError):
-                    return False
-            return False
+            if webhook:
+                # Webhook bearer credentials must never authorize administrative routes.
+                return hmac.compare_digest(auth, "Bearer " + token)
+            if not admin_password or not auth.startswith("Basic "):
+                return False
+            try:
+                credentials = base64.b64decode(auth[6:], validate=True).decode("utf-8")
+                return hmac.compare_digest(credentials, "anime:" + admin_password)
+            except (ValueError, UnicodeDecodeError):
+                return False
 
         def database(self):
             db = sqlite3.connect(db_path, isolation_level=None, timeout=10)
@@ -103,7 +104,7 @@ def app(db_path, token, series_map=None, config_dir=None):
                 return self.send(400,str(exc),"text/plain")
 
         def do_POST(self):
-            if not self.authorized():
+            if not self.authorized(webhook=urlsplit(self.path).path == "/webhook"):
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="Anime Discovery"')
                 self.end_headers()
@@ -159,12 +160,15 @@ def main():
     token = secrets.get("web_token")
     if not token:
         raise RuntimeError("Set web_token in /etc/anime-discovery/secrets.json")
+    admin_password = secrets.get("admin_password")
+    if not admin_password or admin_password == token:
+        raise RuntimeError("Set a separate admin_password in /etc/anime-discovery/secrets.json")
     db_path = Path(settings["daemon"]["database_path"])
     if not db_path.is_file():
         raise RuntimeError("Database missing: " + str(db_path))
     host, port = settings["web"]["host"], settings["web"]["port"]
     print(f"Anime Discovery listening on {host}:{port}", flush=True)
-    ThreadingHTTPServer((host, port), app(db_path, token, settings["identity"]["series_map"], config_dir=DEFAULT_CONFIG_DIR)).serve_forever()
+    ThreadingHTTPServer((host, port), app(db_path, token, settings["identity"]["series_map"], config_dir=DEFAULT_CONFIG_DIR, admin_password=admin_password)).serve_forever()
 
 
 if __name__ == "__main__":
