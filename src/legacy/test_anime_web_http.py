@@ -123,7 +123,7 @@ class DashboardHTTPTests(unittest.TestCase):
             cfg={"ntfy":{"enabled":True,"reminder_hours":24}}
             sender=lambda settings,secrets,notification_id,title: sent.append(notification_id) or True
             self.assertEqual(check_once(db,cfg,{},now=1000,sender=sender)["sent"],0)
-            self.assertEqual(sent,[nid])
+            self.assertEqual(sent,[])
             self.assertEqual(check_once(db,cfg,{},now=1001,sender=sender)["sent"],0)
 
     def test_unmatched_webhook_explains_no_worker_job(self):
