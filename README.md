@@ -74,6 +74,39 @@ without lifting rejection, and Reset lifts the block for new webhooks.
 If configured, successful staging/finalization removes both the torrent and
 its downloaded source files from qBittorrent.
 
+## Built-in VM upgrade and administration
+
+After the first installation, update the checked-out `develop` release and
+restart Anime Discovery directly on the VM:
+
+```bash
+cd /opt/anime-discovery
+sudo python3 src/legacy/anime-discovery-admin.py upgrade
+```
+
+The upgrade fetches `origin/develop`, requires a clean checkout and a
+fast-forward release, creates an online-safe dated SQLite backup,
+stops the service, updates the Git checkout, verifies the database,
+and restarts the service. If the service restart fails, the previous Git
+revision is restored; the SQLite backup remains available. Git fetches run
+as the checkout's owner so the existing private-repository credentials work
+when the admin command is launched with sudo.
+
+The admin interface now follows a consistent, discoverable hierarchy:
+
+```text
+anime-discovery-admin.py status
+anime-discovery-admin.py upgrade
+anime-discovery-admin.py database init
+anime-discovery-admin.py database doctor
+anime-discovery-admin.py settings show
+anime-discovery-admin.py settings set KEY VALUE
+```
+
+Existing `doctor` and `new-database` spellings still work for older scripts.
+The application itself still reads its settings and secrets from flat files;
+no environment variables or worker flags are required.
+
 ## Offline fresh-install smoke check
 
 From the repository root with Python 3.12:
