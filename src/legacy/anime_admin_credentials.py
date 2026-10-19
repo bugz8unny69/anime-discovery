@@ -30,6 +30,13 @@ def configure_credentials(directory, *, prompt=getpass.getpass):
             raise ValueError("Both webhook token and admin password are required")
         if data["web_token"]==data.get("admin_password") or (admin and admin==data["web_token"]):
             raise ValueError("Admin password must differ from webhook token")
+        # Make the salted auth store authoritative before removing legacy
+        # plaintext; if hashing fails, the existing secret file is unchanged.
+        if admin:
+            auth.set_password(admin)
+        elif auth.read() is None and data.get("admin_password"):
+            auth.initialize_legacy(data["admin_password"])
+        data.pop("admin_password",None)
         meta=path.stat()
         fd,tmp=tempfile.mkstemp(prefix=".secrets-",dir=directory)
         try:
@@ -45,11 +52,5 @@ def configure_credentials(directory, *, prompt=getpass.getpass):
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
-        # Hash is authoritative for dashboard login; no new plaintext password
-        # is persisted. Keep legacy password solely until first migration.
-        if admin:
-            auth.set_password(admin)
-        elif auth.read() is None and data.get("admin_password"):
-            auth.initialize_legacy(data["admin_password"])
         fcntl.flock(handle,fcntl.LOCK_UN)
     return {"credentials_updated":True,"restart_required":bool(webhook)}
