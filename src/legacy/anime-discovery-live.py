@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--download-root", type=Path, required=True)
     parser.add_argument("--trial-root", type=Path, required=True)
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument('--cleanup-source', action='store_true', help='Remove completed qBittorrent source after staging')
     args = parser.parse_args()
     if not args.token:
         parser.error("Set ANIME_WEB_TOKEN or pass --token")
@@ -32,6 +33,8 @@ def main():
               "--download-root", str(args.download_root),
               "--trial-root", str(args.trial_root),
               "--concurrency", str(args.concurrency)]
+    if args.cleanup_source:
+        worker.append("--cleanup-source")
     processes = []
     try:
         for command in (web, worker):
