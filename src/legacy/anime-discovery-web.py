@@ -57,6 +57,52 @@ def app(db_path, token):
                 return obj
             return {k: v[-1] for k, v in parse_qs(raw).items()}
 
+
+        def approve(self, db, values):
+                        nid = int(values["notification_id"])
+                        tvdb = str(int(values["tvdb_id"]))
+                        anidb = str(int(values["anidb_id"]))
+                        season, episode = int(values["season"]), int(values["episode"])
+                        magnet = str(values["magnet_uri"])
+                        if min(nid, int(tvdb), int(anidb), season, episode) <= 0:
+                            raise ValueError("Positive IDs and episode numbers required")
+                        db.execute("BEGIN IMMEDIATE")
+                        try:
+                            notification = db.execute(
+                                "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
+                            if not notification:
+                                raise ValueError("Notification not found")
+                            existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
+                            if existing:
+                                sid = existing[0]
+                            else:
+                                sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
+                                                 (tvdb, notification[0])).lastrowid
+                            evidence = json.dumps({"manual_approval": True, "tvdb_id": tvdb,
+                                                   "anidb_id": anidb, "season": season, "episode": episode}, sort_keys=True)
+                            db.execute("""INSERT INTO verified_series_identity
+                                (notification_id,anidb_id,tvdb_id,mapping_source,decision,
+                                episode_identity_verified,eligible_for_acquisition,evidence_json,evidence_sha256)
+                                VALUES (?,?,?,'manual','VERIFIED',1,1,?,?)""",
+                                (nid,anidb,tvdb,evidence,hashlib.sha256(evidence.encode()).hexdigest()))
+                            db.execute("""INSERT INTO episode_verification_v16
+                                (notification_id,evaluated_at,decision,verified,evidence_json)
+                                VALUES (?,?,'VERIFIED',1,?)""",(nid,time.time(),evidence))
+                            db.execute("""INSERT INTO episode_approval_queue
+                                (notification_id,decision,season,episode)
+                                VALUES (?,'AUTO_APPROVED',?,?)""",(nid,season,episode))
+                            db.execute("""INSERT INTO episode_dispatch
+                                (notification_id,series_id,season,episode,state)
+                                VALUES (?,?,?,?,'CLAIMED')""",(nid,sid,season,episode))
+                            db.commit()
+                        except BaseException:
+                            db.rollback()
+                            raise
+                        queued = enqueue_claimed_acquisition(
+                            db,nid,infohash=notification[1],magnet_uri=magnet,
+                            title=notification[0],tvdb_id=tvdb)
+                        return {"queued": queued, "notification_id": nid}
+
         def do_GET(self):
             if not self.authorized():
                 self.send_response(401)
@@ -124,6 +170,12 @@ def app(db_path, token):
                             (source,release_name,source_guid,info_hash,received_at)
                             VALUES (?,?,?,?,?)""", (source,title,guid,infohash,int(time.time())))
                         result = {"received": True}
+                        required = ("tvdb_id", "anidb_id", "season", "episode", "magnet_uri")
+                        if all(values.get(k) for k in required):
+                            nid_row = db.execute("SELECT id FROM notifications WHERE source=? AND source_guid=?", (source,guid)).fetchone()
+                            if nid_row:
+                                values["notification_id"] = nid_row[0]
+                                result.update(self.approve(db, values))
                     elif route == "/series-action":
                         sid = int(values["series_id"])
                         action = str(values["action"])
@@ -148,49 +200,7 @@ def app(db_path, token):
                             raise
                         result = {"action": action, "series_id": sid, "ok": True}
                     else:
-                        nid = int(values["notification_id"])
-                        tvdb = str(int(values["tvdb_id"]))
-                        anidb = str(int(values["anidb_id"]))
-                        season, episode = int(values["season"]), int(values["episode"])
-                        magnet = str(values["magnet_uri"])
-                        if min(nid, int(tvdb), int(anidb), season, episode) <= 0:
-                            raise ValueError("Positive IDs and episode numbers required")
-                        db.execute("BEGIN IMMEDIATE")
-                        try:
-                            notification = db.execute(
-                                "SELECT release_name,info_hash FROM notifications WHERE id=?", (nid,)).fetchone()
-                            if not notification:
-                                raise ValueError("Notification not found")
-                            existing = db.execute("SELECT id FROM series WHERE source='tvdb' AND external_id=?", (tvdb,)).fetchone()
-                            if existing:
-                                sid = existing[0]
-                            else:
-                                sid = db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
-                                                 (tvdb, notification[0])).lastrowid
-                            evidence = json.dumps({"manual_approval": True, "tvdb_id": tvdb,
-                                                   "anidb_id": anidb, "season": season, "episode": episode}, sort_keys=True)
-                            db.execute("""INSERT INTO verified_series_identity
-                                (notification_id,anidb_id,tvdb_id,mapping_source,decision,
-                                episode_identity_verified,eligible_for_acquisition,evidence_json,evidence_sha256)
-                                VALUES (?,?,?,'manual','VERIFIED',1,1,?,?)""",
-                                (nid,anidb,tvdb,evidence,hashlib.sha256(evidence.encode()).hexdigest()))
-                            db.execute("""INSERT INTO episode_verification_v16
-                                (notification_id,evaluated_at,decision,verified,evidence_json)
-                                VALUES (?,?,'VERIFIED',1,?)""",(nid,time.time(),evidence))
-                            db.execute("""INSERT INTO episode_approval_queue
-                                (notification_id,decision,season,episode)
-                                VALUES (?,'AUTO_APPROVED',?,?)""",(nid,season,episode))
-                            db.execute("""INSERT INTO episode_dispatch
-                                (notification_id,series_id,season,episode,state)
-                                VALUES (?,?,?,?,'CLAIMED')""",(nid,sid,season,episode))
-                            db.commit()
-                        except BaseException:
-                            db.rollback()
-                            raise
-                        queued = enqueue_claimed_acquisition(
-                            db,nid,infohash=notification[1],magnet_uri=magnet,
-                            title=notification[0],tvdb_id=tvdb)
-                        result = {"queued": queued, "notification_id": nid}
+                        result = self.approve(db, values)
                 self.send(200,json.dumps(result),"application/json")
             except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
                 self.send(400,json.dumps({"error":str(exc)}),"application/json")
