@@ -20,7 +20,7 @@ DEFAULT_SETTINGS = {
     "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
     "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
-              "poll_seconds": 60}
+              "poll_seconds": 60, "import_folder_id": 0}
 }
 ALLOWED_SECRET_KEYS = {"shoko_api_key", "sonarr_api_key", "ntfy_token", "tvdb_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
 
@@ -131,6 +131,8 @@ def validate_config(settings,secrets,*,directory=None):
         raise ValueError("Enabled Prowlarr requires prowlarr_api_key in secrets.json")
     if not isinstance(result["shoko"]["base_url"],str):
         raise ValueError("Invalid Shoko URL")
+    if type(result["shoko"]["import_folder_id"]) is not int or result["shoko"]["import_folder_id"]<0:
+        raise ValueError("Invalid Shoko import folder ID")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
         raise ValueError("Invalid Shoko polling interval")
     if "admin_password" in secrets and secrets.get("admin_password")==secrets.get("web_token"):
