@@ -9,6 +9,8 @@ from pathlib import Path
 from anime_fresh_database import initialize
 from anime_webhook_processing import approve, receive
 from anime_series_lifecycle import action, inspect, notifications
+from anime_release_matching import resolve_release
+from anime_flat_config import validate_config
 
 HASH = "a" * 40
 MAGNET = "magnet:?xt=urn:btih:" + HASH
@@ -97,6 +99,32 @@ class WebhookLifecycleTests(unittest.TestCase):
     def test_approval_missing_magnet_generates_bounded_magnet(self):
         receive(self.db,self.event(guid="omitted-magnet",magnet_uri=""))
         self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0],1)
+
+    def test_alias_mapping_handles_standard_and_fansub_episode(self):
+        mappings = {"Example Show": {"tvdb_id": 123, "anidb_id": 456, "season": 1}}
+        self.assertEqual(resolve_release("Example.Show.S01E02.1080p", mappings)["episode"], 2)
+        self.assertEqual(resolve_release("[SubsPlease] Example Show - 03 (1080p)", mappings)["episode"], 3)
+        self.assertIsNone(resolve_release("Unrelated Show S01E03", mappings))
+        raw = dict(release_name="[SubsPlease] Example Show - 02 (1080p)",
+                   torrentHash=HASH, guid="mapped-episode")
+        result = receive(self.db, raw, series_map=mappings)
+        self.assertTrue(result["queued"])
+        self.assertEqual(self.db.execute("SELECT season,episode FROM episode_dispatch").fetchone(), (1,2))
+
+    def test_ambiguous_alias_does_not_queue(self):
+        mappings = {"Example Show": {"tvdb_id":123,"anidb_id":456},
+                    "Example.Show":{"tvdb_id":321,"anidb_id":654}}
+        result = receive(self.db, dict(release_name="Example Show S01E02",info_hash=HASH),
+                         series_map=mappings)
+        self.assertTrue(result["received"])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0],0)
+
+    def test_config_accepts_series_mappings(self):
+        c=validate_config({"identity":{"series_map":{"Example Show":{
+            "tvdb_id":123,"anidb_id":456,"season":1}}}}, {})
+        self.assertEqual(c["settings"]["identity"]["series_map"]["Example Show"]["tvdb_id"],123)
+        with self.assertRaises(ValueError):
+            validate_config({"identity":{"series_map":{"Invalid":{"tvdb_id":123}}}}, {})
 
 
 if __name__ == "__main__":
