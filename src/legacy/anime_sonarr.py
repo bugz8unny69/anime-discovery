@@ -31,6 +31,12 @@ def ensure_series(settings, secrets, *, tvdb_id, title, opener=urlopen):
         raise ValueError("Verified TVDB ID required")
     key=secrets.get("sonarr_api_key")
     url=sonarr["base_url"]
+    profiles=_request(url,key,"GET","qualityprofile",opener=opener)
+    if not isinstance(profiles,list) or not any(p.get("id")==sonarr["quality_profile_id"] and p.get("name")=="Anime" for p in profiles):
+        raise RuntimeError("Configured Sonarr profile must be named Anime")
+    roots=_request(url,key,"GET","rootfolder",opener=opener)
+    if not isinstance(roots,list) or not any(p.get("path")==sonarr["root_folder"] for p in roots):
+        raise RuntimeError("Configured Sonarr root folder is not registered")
     existing=_request(url,key,"GET","series",opener=opener)
     if not isinstance(existing,list):
         raise RuntimeError("Unexpected Sonarr series response")
