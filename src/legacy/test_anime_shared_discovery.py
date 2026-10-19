@@ -61,7 +61,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_autobrr_catches_only_earlier_missing_episodes(self):
         receive(self.db,{"source":"autobrr","source_guid":"incoming",
             "release_name":"Example Show S01E03","info_hash":HASH_C,
-            "tvdb_id":123,"anidb_id":456,"season":1,"episode":3},series_map=MAPPING)
+            "tvdb_id":123,"anidb_id":456,"season":1,"episode":3},series_map=MAPPING,gap_search_enabled=True)
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM daemon_jobs WHERE kind='series_gap_search'").fetchone()[0],1)
         client=FakeProwlarr([release(1,HASH_A),release(2,HASH_B),release(3,HASH_C),
