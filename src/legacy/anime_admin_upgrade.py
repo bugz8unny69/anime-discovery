@@ -11,6 +11,8 @@ import subprocess
 
 
 def command(*args, cwd=None):
+    if args and args[0]=="git" and cwd is not None:
+        args=("git","-c","safe.directory="+str(Path(cwd).resolve()),*args[1:])
     return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
 
 
