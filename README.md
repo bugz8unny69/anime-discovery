@@ -3,16 +3,97 @@
 Private development repository for the Anime Discovery homelab application.
 
 ## Status
-**Development / migration in progress. Not production-ready.**
+**Homelab dashboard, installer, Autobrr intake and acquisition daemon; VM installation not yet verified.**
 
-The currently deployed application is separate from this repository. No GitHub change automatically modifies the Anime Discovery VM.
+GitHub commits do not automatically deploy to the Anime Discovery VM.
 
 ## Scope
 Autobrr webhook ingestion, canonical anime identity, controller and episode tracking, qBittorrent verification and acquisition, dashboard and authentication, safe staging, rejection enforcement, and administrative CLI.
 
-## Deployment constraints
-Application: `/opt/anime-discovery`; configuration: `/etc/anime-discovery`; state: `/var/lib/anime-discovery`. No new systemd unit changes or writes outside these locations without approval. Back up the existing installation and SQLite state before a clean install; stage and verify replacement and preserve rollback.
+## Live homelab runtime (configuration only)
+
+All three entrypoints read `/etc/anime-discovery/settings.json` and
+`/etc/anime-discovery/secrets.json`. There are no runtime flags or
+environment-variable credentials.
+
+Example `settings.json`:
+
+```json
+{
+  "daemon": {"database_path": "/var/lib/anime-discovery/anime-discovery.db", "concurrency": 4, "lease_seconds": 300},
+  "web": {"host": "0.0.0.0", "port": 8765},
+  "storage": {"download_root": "/path/to/qb-downloads", "trial_root": "/path/to/anime-trial"},
+  "qbittorrent": {"base_url": "http://127.0.0.1:8080", "username": "admin", "cleanup_source": true},
+  "identity": {"series_map": {"Example Show": {"tvdb_id": 123, "anidb_id": 456, "season": 1}}}
+}
+```
+
+Example `secrets.json`:
+
+```json
+{"web_token": "choose-a-private-token", "qbittorrent_password": "your-qb-password"}
+```
+
+**First installation:** check out the repository under /opt/anime-discovery,
+then run `sudo python3 deploy/install-homelab.py`. The zero-flag installer
+prompts for existing directories and qBittorrent credentials, writes settings
+and secrets with restricted permissions, creates a fresh database if missing,
+and enables the systemd service. It does not replace existing configuration.
+
+Create the configuration directory and keep `secrets.json` readable only
+by its owner (`chmod 600 /etc/anime-discovery/secrets.json`).
+Initialize a fresh database once using the admin CLI, then start:
+
+```bash
+python src/legacy/anime-discovery-live.py
+```
+
+The launcher starts the dashboard/webhook and acquisition worker together.
+Open `http://HOMELAB-IP:8765/` with username `anime` and password
+`web_token`. Autobrr POSTs to `/webhook` using
+`Authorization: Bearer YOUR_WEB_TOKEN` and fields `release_name`,
+`source_guid`, `info_hash`. The dashboard can approve a notification
+and queue its acquisition. `qbittorrent.cleanup_source=true` enables
+removing the torrent and downloaded files after staging succeeds.
+
+### Autobrr automatic handoff
+
+POST to `/webhook` with the bearer token. The service accepts
+`release_name` or `torrentName`, plus `info_hash` or `torrentHash`.
+The source GUID and magnet URI are optional; the torrent hash is used
+as the GUID fallback and a magnet is generated from it.
+
+Episodes enqueue automatically with explicit TVDB/AniDB and season/episode
+values **or** via the dashboard's **Recognized anime names** mappings.
+Configured aliases recognize `S01E02` and `[Group] Example Show - 02`.
+Unmatched releases remain in the inbox for manual approval.
+
+Series inspection displays dispatch, job and staged media records.
+Reject blocks work, Clear History hides earlier recognized inbox events
+without lifting rejection, and Reset lifts the block for new webhooks.
+If configured, successful staging/finalization removes both the torrent and
+its downloaded source files from qBittorrent.
+
+## Offline fresh-install smoke check
+
+From the repository root with Python 3.12:
+
+```bash
+cd src/legacy
+python3 anime-discovery-admin.py --db /tmp/anime-discovery-smoke.db new-database
+python3 anime-discovery-admin.py --db /tmp/anime-discovery-smoke.db doctor
+python3 -m unittest -v test_anime_fresh_acquisition_integration test_anime_webhook_lifecycle test_anime_web_http test_anime_live_acquisition
+```
+
+Choose a new database path; `new-database` intentionally refuses to overwrite an
+existing file. `doctor` is read-only and exits nonzero for an incomplete database.
+These commands do not start services, enable acquisition, or contact qBittorrent.
+They are a database smoke check, **not** proof that the complete dashboard,
+webhook server, installer, or deployment is ready.
+
+## Filesystem layout
+Application: `/opt/anime-discovery`; configuration: `/etc/anime-discovery`; state: `/var/lib/anime-discovery`. The installer installs the systemd unit on the homelab host.
 
 See [PROJECT_STATUS.md](PROJECT_STATUS.md) for progress and [SECURITY.md](SECURITY.md) for repository hygiene.
 
-**Source import pending:** the original uploaded application archive has been located for review but has not yet been imported into this repository. Do not treat this documentation checkpoint as the full application source.
+The web service and acquisition daemon are in `src/legacy`; migration-era components may still contain functionality not connected to this live application.
