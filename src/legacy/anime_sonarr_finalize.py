@@ -107,7 +107,30 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
             or Path(save_path).resolve().is_relative_to(Path(settings["sonarr"]["root_folder"]).resolve())
             or Path(save_path).resolve().is_relative_to(Path(settings["storage"]["trial_root"]).resolve())):
             raise RuntimeError("Torrent files not isolated in download root")
-    # Reaching this point proves the imported copies remain available.
+    # Require exact media payload equivalence. A torrent may contain more
+    # episodes than were staged, even if only one was approved.
+    from collections import Counter
+    supported={".mkv",".mp4",".m4v",".avi"}
+    for infohash in hashes:
+        record=qb.torrent_details(infohash)
+        if record is None:
+            continue
+        originals=[]
+        for entry in qb.torrent_files(infohash):
+            relative=Path(entry["name"])
+            if relative.is_absolute() or ".." in relative.parts or relative.name in ("",".",".."):
+                raise RuntimeError("Unsafe qB file name")
+            if relative.suffix.lower() not in supported:
+                continue
+            original=Path(record["save_path"])/relative
+            if original.is_symlink() or not original.is_file() or not _inside(original,download_root):
+                raise RuntimeError("qB source outside isolated download root")
+            originals.append(_digest(original))
+        expected=Counter(digests[nid] for nid,h,digest in rows
+                         if str(h).lower()==infohash and nid in ids and nid in digests)
+        if not originals or Counter(originals)!=expected:
+            raise RuntimeError("Original torrent media payload not fully imported")
+    # Reaching this point proves the imported copies and torrent payload.
     for infohash in hashes:
         if qb.torrent_details(infohash) is not None:
             qb.remove_torrent(infohash,delete_files=True)
