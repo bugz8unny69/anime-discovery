@@ -100,7 +100,9 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
             FROM shoko_handoff WHERE series_id=? AND
             status NOT IN ('SHOKO_LINK_VERIFIED','SHOKO_ALREADY_LINKED_VERIFIED')""",
             (series_id,)).fetchall()
-        if len(outstanding)!=len(plan):
+        count=db.execute("SELECT COUNT(*) FROM shoko_handoff WHERE series_id=?",
+                         (series_id,)).fetchone()[0]
+        if count!=len(plan):
             raise RuntimeError("Shoko provenance mismatch")
         if outstanding:
             return {"complete":False,"reason":"Awaiting verified Shoko association",
