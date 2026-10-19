@@ -43,11 +43,39 @@ def new_database(path, *, force=False):
         backup.rename(path)
         raise
 
+def doctor(path):
+    """Read-only fresh-install database readiness report; never starts workers."""
+    path=Path(path)
+    if not path.is_file() or path.is_symlink():
+        raise FileNotFoundError("Database not found or not a regular file: "+str(path))
+    with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",
+                                 uri=True,isolation_level=None,timeout=5)) as db:
+        version=db.execute("SELECT version FROM schema_version").fetchone()
+        if version is None or version[0]!=1:
+            raise ValueError("Unsupported fresh database schema")
+        integrity=db.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_keys=db.execute("PRAGMA foreign_key_check").fetchall()
+        required=("series","episodes","notifications","verified_series_identity",
+                  "episode_approval_queue","episode_dispatch","daemon_jobs",
+                  "torrent_recovery_records","external_actions","verified_series_cache",
+                  "series_quarantine","series_rejection_blocks")
+        present={row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        missing=sorted(set(required)-present)
+        jobs=db.execute("SELECT state,count(*) FROM daemon_jobs GROUP BY state").fetchall() if "daemon_jobs" in present else []
+        result={"schema_version":version[0],"integrity":integrity,
+                "foreign_key_violations":len(foreign_keys),
+                "missing_tables":missing,"jobs":dict(jobs)}
+        result["ready"]=(integrity=="ok" and not foreign_keys and not missing)
+        return result
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="anime-discovery-admin.py")
     parser.add_argument("--config-dir",type=Path,default=DEFAULT_CONFIG)
     parser.add_argument("--db",type=Path,default=DEFAULT_DB)
     commands=parser.add_subparsers(dest="command",required=True)
+    commands.add_parser("doctor")
     new_db=commands.add_parser("new-database")
     new_db.add_argument("--force",action="store_true")
     settings=commands.add_parser("settings")
@@ -61,6 +89,11 @@ def main(argv=None):
         if args.command=="new-database":
             result=new_database(args.db,force=args.force)
             print(f"Initialized fresh database at {args.db}; schema version {result['schema_version']}; acquisition disabled.")
+        elif args.command=="doctor":
+            report=doctor(args.db)
+            print(json.dumps(report,indent=2,sort_keys=True))
+            if not report["ready"]:
+                parser.exit(1,"anime-discovery-admin: database readiness failed\\n")
         elif args.settings_command=="show":
             print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
         else:
