@@ -91,22 +91,19 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
              if isinstance(digest,str) and len(digest)==64 and all(c in "0123456789abcdef" for c in digest.lower())}
     destinations=confirm_sonarr_copies(settings,secrets,sonarr_id=sonarr_id,
         plan=plan,expected_digests=digests,opener=opener)
-    # When Shoko is enabled, preserve all original media until every episode's
-    # association is independently confirmed. No VFS/Jellyfin check required.
+    # Shoko is best-effort and must NEVER gate safe Sonarr source cleanup.
+    # Persist its provenance after verified Sonarr import, retaining a retry
+    # record even after the trial and torrent sources have been removed.
     if settings.get("shoko",{}).get("enabled") is True:
-        from anime_shoko_handoff_state import enqueue_verified_copies
-        enqueue_verified_copies(db,series_id,plan,destinations)
-        outstanding=db.execute("""SELECT notification_id,status
-            FROM shoko_handoff WHERE series_id=? AND
-            status NOT IN ('SHOKO_LINK_VERIFIED','SHOKO_ALREADY_LINKED_VERIFIED')""",
-            (series_id,)).fetchall()
-        count=db.execute("SELECT COUNT(*) FROM shoko_handoff WHERE series_id=?",
-                         (series_id,)).fetchone()[0]
-        if count!=len(plan):
-            raise RuntimeError("Shoko provenance mismatch")
-        if outstanding:
-            return {"complete":False,"reason":"Awaiting verified Shoko association",
-                    "pending_shoko":len(outstanding)}
+        try:
+            from anime_shoko_handoff_state import enqueue_verified_copies
+            enqueue_verified_copies(db,series_id,plan,destinations)
+        except Exception:
+            # Keep an operator-visible failure rather than deleting known-good
+            # permanent Sonarr files or retaining duplicate media indefinitely.
+            import logging
+            logging.getLogger(__name__).exception(
+                "Shoko handoff queue failed for series %d",series_id)
     # Never delete a torrent referenced by another series or an unimported release.
     for infohash in hashes:
         referenced=db.execute("""SELECT r.notification_id FROM torrent_recovery_records r
