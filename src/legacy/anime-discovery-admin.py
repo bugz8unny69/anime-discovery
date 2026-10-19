@@ -173,7 +173,17 @@ def main(argv=None):
                 print(json.dumps({"reachable":result["reachable"],"writes_enabled":False},indent=2))
             elif args.settings_command=="configure-credentials":
                 from anime_admin_credentials import configure_credentials
-                print(json.dumps(configure_credentials(args.config_dir),indent=2))
+                report=configure_credentials(args.config_dir)
+                from anime_admin_secret_editor import set_secret
+                from anime_flat_config import ALLOWED_SECRET_KEYS
+                report["supported_credential_status"]={}
+                for name in sorted(ALLOWED_SECRET_KEYS-{"web_token","admin_password"}):
+                    outcome=set_secret(args.config_dir,name)
+                    report["supported_credential_status"][name]=outcome.get("status",
+                        "Set" if load_config(args.config_dir)["secrets"].get(name) else "Not set")
+                    if outcome.get("changed"):
+                        report["restart_required"]=True
+                print(json.dumps(report,indent=2))
             elif args.settings_command=="migrate":
                 from anime_admin_config_migration import migrate
                 print(json.dumps(migrate(args.config_dir,apply=args.apply),indent=2,sort_keys=True))
