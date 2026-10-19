@@ -142,6 +142,10 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
             path=route.path
             if path=="/health":
                 return self.send(200,'{"status":"running"}',"application/json")
+            if path=="/api/settings":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                from anime_shared_settings import snapshot
+                return self.send(200,json.dumps(snapshot(config_dir)),"application/json")
             if path not in ("/","/jobs","/api/jobs","/recognized","/series"):
                 return self.send(404,"Not found","text/plain")
             try:
@@ -208,6 +212,15 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 elif not self.check_csrf({}):
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/api/settings":
+                if config_dir is None: return self.send(404,"Not found","text/plain")
+                try:
+                    from anime_shared_settings import apply_settings
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    outcome=apply_settings(config_dir,values.get("settings"))
+                    return self.send(200,json.dumps(outcome),"application/json")
+                except (ValueError,TypeError,OSError) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime"):
                 return self.send(404, "Not found", "text/plain")
             try:
