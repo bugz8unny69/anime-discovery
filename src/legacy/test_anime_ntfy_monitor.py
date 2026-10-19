@@ -15,6 +15,7 @@ class MonitorTests(unittest.TestCase):
                 db.execute("PRAGMA foreign_keys=ON")
                 nid=db.execute("""INSERT INTO notifications(source,release_name,source_guid,info_hash,received_at)
                     VALUES ('autobrr','Example S01E01','guid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1)""").lastrowid
+                db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",(nid,))
                 settings={"ntfy":{"enabled":True,"reminder_hours":2}}
                 calls=[]
                 def send(*args):
