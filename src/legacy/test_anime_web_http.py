@@ -106,6 +106,26 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertIn("POST /webhook HTTP/1.1",captured[0])
         self.assertNotIn("sensitive-secret",captured[0])
 
+    def test_unmatched_webhook_marks_review_and_does_not_queue(self):
+        from anime_ntfy_monitor import check_once
+        from anime_dashboard_queries import all_jobs
+        values={"source":"nyaa","release_name":"Unverified release 02",
+                "source_guid":"review-transition","info_hash":HASH,
+                "token":"secret-token"}
+        status,_,body=self.request("POST","/webhook",values)
+        self.assertEqual(status,200)
+        nid=json.loads(body)["notification_id"]
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0],"NEEDS_REVIEW")
+            self.assertIsNone(db.execute("SELECT 1 FROM daemon_jobs WHERE subject_key=? AND kind='claimed_acquisition'",(str(nid),)).fetchone())
+            self.assertEqual(all_jobs(db)["items"][0]["status"],"NEEDS REVIEW")
+            sent=[]
+            cfg={"ntfy":{"enabled":True,"reminder_hours":24}}
+            sender=lambda settings,secrets,notification_id,title: sent.append(notification_id) or True
+            self.assertEqual(check_once(db,cfg,{},now=1000,sender=sender)["sent"],1)
+            self.assertEqual(sent,[nid])
+            self.assertEqual(check_once(db,cfg,{},now=1001,sender=sender)["sent"],0)
+
     def test_unmatched_webhook_explains_no_worker_job(self):
         from anime_dashboard_queries import all_jobs
         payload={"source":"nyaa","release_name":"Unmatched release 02",
@@ -114,7 +134,7 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status,200)
         with sqlite3.connect(self.db) as db:
             result=all_jobs(db)
-        self.assertEqual(result["items"][0]["status"],"RECEIVED")
+        self.assertEqual(result["items"][0]["status"],"NEEDS REVIEW")
         self.assertIn("no acquisition job was created",result["items"][0]["activity_detail"])
         self.assertIn("Activity details",self.request("GET","/jobs")[2])
 
