@@ -79,7 +79,8 @@ def main(argv=None):
                         help="Override configured database path for local administration")
     commands=parser.add_subparsers(dest="command",required=True)
 
-    commands.add_parser("upgrade",help="Fast-forward develop and restart the installed service")
+    upgrade_cmd=commands.add_parser("upgrade",help="Upgrade Git checkout or extracted release archive")
+    upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
     commands.add_parser("status",help="Show installed version, service and database readiness")
 
     database=commands.add_parser("database",help="Database administration")
@@ -113,15 +114,22 @@ def main(argv=None):
             config=load_config(args.config_dir)
             configured_db=Path(config["settings"]["daemon"]["database_path"])
             root=Path(__file__).resolve().parents[2]
-            result=upgrade(root,db_path=args.db or configured_db)
+            if args.archive is not None:
+                from anime_admin_archive_upgrade import upgrade_archive
+                result=upgrade_archive(root,args.archive,db_path=args.db or configured_db)
+            else:
+                if not (root/".git").exists():
+                    raise ValueError("Archive installation: download the new release tar.gz and pass its local path to upgrade")
+                result=upgrade(root,db_path=args.db or configured_db)
             print(json.dumps(result,indent=2,sort_keys=True))
         elif args.command=="status":
             from anime_admin_upgrade import command
             root=Path(__file__).resolve().parents[2]
             config=load_config(args.config_dir)
             path=args.db or Path(config["settings"]["daemon"]["database_path"])
-            report={"checkout":str(root),
-                    "version":command("git","rev-parse","--short","HEAD",cwd=root),
+            version=(command("git","rev-parse","--short","HEAD",cwd=root)
+                     if (root/".git").exists() else "archive installation")
+            report={"checkout":str(root),"version":version,
                     "database":doctor(path)}
             try:
                 report["service"]=command("systemctl","is-active","anime-discovery.service")
