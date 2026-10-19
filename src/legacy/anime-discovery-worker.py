@@ -22,6 +22,7 @@ def main(argv=None):
     parser.add_argument("--qb-user", default=os.environ.get("ANIME_QB_USER"))
     parser.add_argument("--qb-password", default=os.environ.get("ANIME_QB_PASSWORD"))
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument("--cleanup-source", action="store_true", help="Remove completed torrent and downloaded files after staging")
     args = parser.parse_args(argv)
 
     if not args.db.is_file():
@@ -38,7 +39,7 @@ def main(argv=None):
 
     handlers = acquisition_handlers(
         args.db, qb_factory, download_root=args.download_root,
-        trial_root=args.trial_root, enabled=True)
+        trial_root=args.trial_root, enabled=True, cleanup_source=args.cleanup_source)
     print("Anime Discovery worker running; Ctrl+C to stop", flush=True)
     try:
         asyncio.run(run_workers(args.db, handlers, concurrency=args.concurrency))
