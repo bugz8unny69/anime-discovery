@@ -1,5 +1,4 @@
 """Small writable homelab UI and Autobrr inbox using the unified database."""
-import argparse
 import base64
 import hashlib
 import hmac
@@ -13,6 +12,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from anime_acquisition_enqueue import enqueue_claimed_acquisition
+from anime_flat_config import load_config
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
@@ -169,18 +169,17 @@ def app(db_path, token):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Anime Discovery homelab web UI and webhook")
-    parser.add_argument("--db", type=Path, default=Path("/var/lib/anime-discovery/anime-discovery.db"))
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--token", required=True, help="Shared bearer token for dashboard and webhook")
-    args = parser.parse_args()
-    if not args.db.is_file():
-        parser.error("Database missing: initialize with admin new-database")
-    if not args.token:
-        parser.error("Token cannot be empty")
-    print(f"Anime Discovery listening on {args.host}:{args.port}",flush=True)
-    ThreadingHTTPServer((args.host,args.port),app(args.db,args.token)).serve_forever()
+    config = load_config()
+    settings, secrets = config["settings"], config["secrets"]
+    token = secrets.get("web_token")
+    if not token:
+        raise RuntimeError("Set web_token in /etc/anime-discovery/secrets.json")
+    db_path = Path(settings["daemon"]["database_path"])
+    if not db_path.is_file():
+        raise RuntimeError("Database missing: " + str(db_path))
+    host, port = settings["web"]["host"], settings["web"]["port"]
+    print(f"Anime Discovery listening on {host}:{port}", flush=True)
+    ThreadingHTTPServer((host, port), app(db_path, token)).serve_forever()
 
 
 if __name__ == "__main__":
