@@ -20,6 +20,8 @@ class FakeQB:
         self.deleted=[]
     def torrent_details(self,infohash):
         return self.record
+    def torrent_files(self,infohash):
+        return [{"name":"subfolder/original.mkv"}]
     def remove_torrent(self,infohash,*,delete_files):
         self.deleted.append((infohash,delete_files))
         self.record=None
@@ -83,7 +85,8 @@ class FinalizationTests(unittest.TestCase):
     def test_torrent_removed_only_after_destination_verification(self):
         folder=self.download/"subfolder"
         folder.mkdir()
-        qb=FakeQB({"save_path":str(folder)})
+        (folder/"original.mkv").write_bytes(self.stage.read_bytes())
+        qb=FakeQB({"save_path":str(self.download)})
         result=finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
         self.assertTrue(result["complete"])
         self.assertEqual(qb.deleted,[(HASH,True)])
