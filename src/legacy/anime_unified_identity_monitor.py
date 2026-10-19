@@ -45,6 +45,8 @@ def ensure_titles(path,*,now=None,downloader=None):
     # Validate the downloaded catalog before replacing a known-good cache.
     import xml.etree.ElementTree as ET
     content=gzip.decompress(payload) if payload.startswith(b"\x1f\x8b") else payload
+    if len(content)>MAX_TITLES*4:
+        raise ValueError("Decompressed AniDB catalog too large")
     if ET.fromstring(content).tag!="animetitles":
         raise ValueError("Unexpected AniDB title catalog")
     path.parent.mkdir(parents=True,exist_ok=True)
