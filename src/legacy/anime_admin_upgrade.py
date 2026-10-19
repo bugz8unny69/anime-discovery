@@ -47,11 +47,11 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
     previous=runner("git","rev-parse","HEAD",cwd=root)
     runner("git","fetch","origin",branch,cwd=root)
     latest=runner("git","rev-parse","FETCH_HEAD",cwd=root)
+    if latest==previous:
+        return {"updated":False,"version":previous,"backup":None}
     merge_base=runner("git","merge-base",previous,latest,cwd=root)
     if merge_base!=previous:
         raise ValueError("Remote release cannot be fast-forwarded")
-    if latest==previous:
-        return {"updated":False,"version":previous,"backup":None}
     backup=None
     if db_path is not None:
         db_path=Path(db_path)
