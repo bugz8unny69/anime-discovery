@@ -60,6 +60,7 @@ jobs:
             test_anime_shared_settings \
             test_anime_dashboard_settings_page \
             test_anime_admin_setup \
+            test_anime_integration_connection \
             test_anime_webhook_lifecycle \
             test_anime_web_http \
             test_anime_dashboard_auth \

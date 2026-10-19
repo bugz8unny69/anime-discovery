@@ -41,7 +41,8 @@ def settings_page(directory):
         out+='<label>Replace credential <input type="password" name="credential" autocomplete="new-password"></label>'
         out+='<button type="button" class="save-credential" data-key="'+key+'">Update credential</button>'
         out+='<button type="button" class="clear-credential" data-key="'+key+'">Clear credential</button>'
-        out+='<button type="submit">Save &amp; Apply</button></form>'
+        out+='<button type="submit">Save &amp; Apply</button>'
+        out+='<button type="button" class="test-connection" data-service="'+name+'">'+('Test Notification' if name=="ntfy" else "Test Connection")+'</button></form>'
         out+='</details>'
     out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button>'
     out+='<p>Settings requiring restart are not hot-reloaded.</p><p id="settings-result" role="status"></p></section>'
@@ -63,6 +64,7 @@ for(const form of document.querySelectorAll('form.integration')){
         body:JSON.stringify({settings:{[section]:fields}})});
       const data=await response.json();
       if(!response.ok)throw new Error(data.error||'Save failed');
+      dirty=false;
       target.textContent=data.restart_required?'Saved. Restart required.':'No changes.';
     }catch(e){target.textContent=e.message}
   });
@@ -87,6 +89,27 @@ for(const button of document.querySelectorAll('.save-credential,.clear-credentia
     }catch(error){target.textContent=error.message}
   });
 }
-document.getElementById('refresh').addEventListener('click',()=>location.reload());
+let dirty=false;
+for(const field of document.querySelectorAll('form.integration input')){
+  field.addEventListener('change',()=>{dirty=true});
+}
+window.addEventListener('beforeunload',event=>{
+  if(dirty){event.preventDefault();event.returnValue='';}
+});
+for(const button of document.querySelectorAll('.test-connection')){
+  button.addEventListener('click',async()=>{
+    const token=document.querySelector('input[name="_csrf"]')?.value;
+    const target=document.getElementById('settings-result');
+    try{
+      const res=await fetch('/api/test-connection',{method:'POST',credentials:'same-origin',
+        headers:{'Content-Type':'application/json','X-CSRF-Token':token},
+        body:JSON.stringify({service:button.dataset.service})});
+      const data=await res.json();
+      if(!res.ok)throw new Error(data.error||'Test failed');
+      target.textContent=data.message;
+    }catch(error){target.textContent=error.message}
+  });
+}
+document.getElementById('refresh').addEventListener('click',()=>{dirty=false;location.reload()});
 </script>"""
     return out+tail()
