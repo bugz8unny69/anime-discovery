@@ -34,19 +34,38 @@ Example `secrets.json`:
 {"web_token": "choose-a-private-token", "qbittorrent_password": "your-qb-password"}
 ```
 
-**First installation:** check out the repository under /opt/anime-discovery,
-then run `sudo python3 deploy/install-homelab.py`. The zero-flag installer
-prompts for existing directories and qBittorrent credentials, writes settings
-and secrets with restricted permissions, creates a fresh database if missing,
-and enables the systemd service. It does not replace existing configuration.
+**First deployment (new VM code, existing JSON configuration is supported):**
 
-Create the configuration directory and keep `secrets.json` readable only
-by its owner (`chmod 600 /etc/anime-discovery/secrets.json`).
-Initialize a fresh database once using the admin CLI, then start:
+Clone the private repository onto the VM as the intended service account:
 
 ```bash
-python src/legacy/anime-discovery-live.py
+git clone --branch develop git@github.com:bugz8unny69/anime-discovery.git /opt/anime-discovery
+cd /opt/anime-discovery
+sudo python3 deploy/install-homelab.py
 ```
+
+The interactive installer detects whether
+`/etc/anime-discovery/settings.json` **and**
+`/etc/anime-discovery/secrets.json` already exist.
+
+- With **existing JSON files**, the installer previews missing settings,
+  asks permission to merge the defaults with a backup, and **never replaces
+  existing values or rewrites secrets**. It validates configured storage,
+  credentials and ownership before creating a brand-new database at the
+  `daemon.database_path` value already in settings.json. If an abandoned
+  database exists there, remove or archive it **yourself** before installing;
+  the installer refuses to overwrite it.
+- With **no JSON files**, the installer prompts for storage and qBittorrent
+  settings, writes new JSON files, initializes a fresh database and installs
+  the systemd service. A partial configuration is refused.
+
+The service account must own the existing mode-0600 `secrets.json` and
+have access to the configuration, media and database paths. The installer
+refuses to change ownership of existing secret files silently.
+A pre-existing systemd service is also refused, to avoid disrupting another
+deployment. After first installation, use
+`anime-discovery-admin.py upgrade` for subsequent releases.
+
 
 The launcher starts the dashboard/webhook and acquisition worker together.
 Open `http://HOMELAB-IP:8765/` with username `anime` and password
@@ -77,7 +96,7 @@ its downloaded source files from qBittorrent.
 ## Migrating existing VM configuration
 
 If `/etc/anime-discovery/settings.json` and `secrets.json` already exist,
-**do not run the fresh-install wizard or replace these files**.
+**use the installer’s existing-configuration adoption path**; it preserves both files.
 The new admin command merges missing supported defaults into the existing
 `settings.json`, preserving the current database path, download/trial paths,
 qBittorrent URL, user preferences, and credentials.
