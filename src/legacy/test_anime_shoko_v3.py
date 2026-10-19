@@ -1,7 +1,7 @@
 """Pinned Shoko v3 API tests; no actual link mutation."""
 import json
 import unittest
-from anime_shoko_v3 import find_file,resolve_episode,plan_link
+from anime_shoko_v3 import find_file,resolve_episode,plan_link,get_file,validate_location
 
 class Reply:
     status=200
@@ -24,6 +24,20 @@ class ShokoTests(unittest.TestCase):
         def opener(req,timeout):
             return Reply([{"ID":5,"Locations":[{"AbsolutePath":"/another/ep.mkv","IsAccessible":True}],"SeriesIDs":[]}])
         self.assertIsNone(find_file("https://shoko.arr.internal","key","/anime/ep.mkv",opener=opener))
+    def test_real_shoko_relative_location_fixture(self):
+        relative="Solo Leveling/Season 1/[Breeze] Solo Leveling - S01E01 [1080p BD AV1][Multi Audio].mkv"
+        record={"ID":62,"Size":731252439,"Locations":[{
+            "ID":72,"FileID":62,"ImportFolderID":1,"RelativePath":relative,
+            "IsAccessible":True}]}
+        verified=validate_location(record,relative_path=relative,import_folder_id=1)
+        self.assertEqual(verified,{"file_id":62,"location_id":72,"accessible":True})
+        with self.assertRaises(RuntimeError):
+            validate_location(record,relative_path=relative,import_folder_id=2)
+        with self.assertRaises(RuntimeError):
+            validate_location(record,relative_path="wrong.mkv",import_folder_id=1)
+        def opener(req,timeout):
+            return Reply(record)
+        self.assertEqual(get_file("https://shoko.arr.internal","key",62,opener=opener)["ID"],62)
     def test_anidb_resolution(self):
         calls=[]
         def opener(req,timeout):
