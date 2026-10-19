@@ -12,6 +12,7 @@ from anime_sonarr_finalize import confirm_sonarr_copies
 from anime_shoko_handoff_state import ensure_schema, enqueue_verified_copies, reconcile_one
 from anime_ntfy import notify_shoko_issue
 from anime_episode_identity import resolve_exact_episode
+from anime_episode_crossref import tvdb_episode_id, resolve_anidb_episode
 from anime_shoko_handoff_state import record_verified_episode
 from anime_shoko_write import request_scan, link_verified
 
@@ -67,12 +68,28 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                     current=db.execute("""SELECT identity_verified FROM shoko_handoff
                         WHERE series_id=? AND notification_id=?""",
                         (series_id,nid)).fetchone()
-                    if current and current[0]!=1 and settings.get("identity",{}).get("episode_map"):
+                    if current and current[0]!=1 and (
+                            settings.get("identity",{}).get("episode_map")
+                            or settings.get("tvdb",{}).get("enabled")):
                         tvdb=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",
                                         (series_id,)).fetchone()
                         if tvdb and str(tvdb[0]).isdigit():
-                            episode_id=resolve_exact_episode(settings,tvdb_id=int(tvdb[0]),
+                            tvdb_id=int(tvdb[0])
+                            episode_id=resolve_exact_episode(settings,tvdb_id=tvdb_id,
                                 season=entry["season"],episode=entry["episode"])
+                            if not episode_id and settings.get("tvdb",{}).get("enabled"):
+                                verified=db.execute("""SELECT anidb_id,tvdb_id
+                                    FROM verified_series_identity WHERE notification_id=?""",
+                                    (nid,)).fetchone()
+                                if verified and str(verified[1])==str(tvdb_id) and str(verified[0]).isdigit():
+                                    tvdb_ep=tvdb_episode_id(settings,secrets,tvdb_id=tvdb_id,
+                                        season=entry["season"],episode=entry["episode"])
+                                    if tvdb_ep:
+                                        episode_id=resolve_anidb_episode(
+                                            settings["shoko"]["base_url"],
+                                            secrets["shoko_api_key"],
+                                            anidb_series_id=int(verified[0]),
+                                            tvdb_episode_id=tvdb_ep)
                             if episode_id:
                                 record_verified_episode(db,series_id=series_id,
                                     notification_id=nid,anidb_episode_id=episode_id)
