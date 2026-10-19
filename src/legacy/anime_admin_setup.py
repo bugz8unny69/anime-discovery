@@ -6,7 +6,7 @@ def initialized(directory):
     cfg=load_config(directory)
     return dashboard_auth.read() is not None and bool(cfg["secrets"].get("web_token"))
 
-def setup(directory, *, reconfigure=False, ask=input, password_prompt=None):
+def setup(directory, *, reconfigure=False, ask=input, password_prompt=None, integration_configurer=None):
     """Bootstrap credentials locally; an interrupted run is safe to repeat."""
     import getpass
     import secrets
@@ -37,6 +37,18 @@ def setup(directory, *, reconfigure=False, ask=input, password_prompt=None):
     if password is not None:
         dashboard_auth.set_password(password)
     changed=apply_settings(directory,{"web":{"host":host,"port":port}})
+    from anime_admin_integrations import configure
+    from anime_admin_jellyfin import configure_jellyfin
+    integration_configurer=integration_configurer or configure
+    configured=[]
+    for service in ("jellyfin","sonarr","shoko","ntfy"):
+        if ask("Configure "+service+" now? [y/N]: ").strip().lower() in ("y","yes"):
+            if service=="jellyfin":
+                configure_jellyfin(directory,ask=ask,secret_prompt=password_prompt)
+            else:
+                integration_configurer(directory,service,ask=ask,secret_prompt=password_prompt)
+            configured.append(service)
     return {"configured":True,"unchanged":False,
             "administrator":"Set","webhook_token":"Set",
-            "restart_required":changed["restart_required"] or password is not None}
+            "restart_required":changed["restart_required"] or password is not None or bool(configured),
+            "configured_integrations":configured,"autobrr":"Webhook token configured"}
