@@ -6,13 +6,20 @@ copying an active database file.
 """
 from datetime import datetime, timezone
 from pathlib import Path
+import os
+import pwd
 import sqlite3
 import subprocess
 
 
 def command(*args, cwd=None):
     if args and args[0]=="git" and cwd is not None:
-        args=("git","-c","safe.directory="+str(Path(cwd).resolve()),*args[1:])
+        owner_id=Path(cwd).stat().st_uid
+        if os.geteuid()==0 and owner_id!=0:
+            owner=pwd.getpwuid(owner_id).pw_name
+            args=("runuser","-u",owner,"--",*args)
+        else:
+            args=("git","-c","safe.directory="+str(Path(cwd).resolve()),*args[1:])
     return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
 
 
