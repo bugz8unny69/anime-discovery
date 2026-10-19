@@ -56,6 +56,15 @@ class ShokoTests(unittest.TestCase):
         plan=plan_link(file_record={"ID":5,"SeriesIDs":[{"EpisodeIDs":[{"ID":6}]}]},
            shoko_episode_id=42,anidb_episode_id=701,identity_verified=True,ordering_verified=True)
         self.assertEqual(plan["action"],"NO_WRITE")
+    def test_real_unrecognized_file_with_null_links_stays_read_only(self):
+        record={"ID":62,"SeriesIDs":None,"Locations":[{"ID":72,"FileID":62,
+            "ImportFolderID":1,"RelativePath":"Solo Leveling/Season 1/episode.mkv",
+            "IsAccessible":True}]}
+        decision=plan_link(file_record=record,shoko_episode_id=42,
+            anidb_episode_id=701,identity_verified=True,ordering_verified=True)
+        self.assertEqual(decision["action"],"NO_WRITE")
+        self.assertFalse(decision["writes_enabled"])
+
     def test_missing_identity_blocks_changes(self):
         plan=plan_link(file_record={"ID":5,"SeriesIDs":[]},shoko_episode_id=42,
            anidb_episode_id=701,identity_verified=False,ordering_verified=True)
