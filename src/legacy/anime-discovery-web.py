@@ -17,6 +17,7 @@ from anime_dashboard_queries import staged_series, all_jobs
 from anime_dashboard_pages import series_page, jobs_page, recognized_page, detail_page
 from anime_flat_config import load_config, DEFAULT_CONFIG_DIR
 from anime_series_aliases import add_alias, remove_alias
+from anime_shared_discovery import identity_for_request, schedule
 
 HASH_RE = re.compile(r"^[a-fA-F0-9]{40}(?:[a-fA-F0-9]{24})?$")
 
@@ -93,7 +94,7 @@ def app(db_path, token, series_map=None, config_dir=None):
                     if path=="/recognized":
                         return self.send(200,recognized_page(aliases(),config_dir is not None))
                     if path=="/":
-                        return self.send(200,series_page(staged_series(db,page=page,size=size)))
+                        return self.send(200,series_page(staged_series(db,page=page,size=size),aliases()))
                     result=all_jobs(db,page=page,size=size)
                 if path=="/api/jobs":
                     return self.send(200,json.dumps(result),"application/json")
@@ -108,13 +109,22 @@ def app(db_path, token, series_map=None, config_dir=None):
                 self.end_headers()
                 return
             route = urlsplit(self.path).path
-            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove"):
+            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = self.form()
                 with self.database() as db:
                     if route == "/webhook":
                         result = receive(db, values, series_map=aliases())
+                    elif route == "/request-anime":
+                        config=load_config(config_dir) if config_dir else {"settings":{"prowlarr":{"enabled":False}}}
+                        if not config["settings"]["prowlarr"]["enabled"]:
+                            raise ValueError("Configure Prowlarr in settings before requesting anime")
+                        identity=identity_for_request(aliases(),
+                            title=values.get("title") or None,
+                            tvdb_id=values.get("tvdb_id") or None,
+                            anidb_id=values.get("anidb_id") or None)
+                        result=schedule(db,**identity,season=int(values.get("season",1)),origin="manual")
                     elif route in ("/alias", "/alias-remove"):
                         if config_dir is None:
                             raise ValueError("Alias editor requires settings directory")
@@ -130,7 +140,7 @@ def app(db_path, token, series_map=None, config_dir=None):
                     else:
                         result = approve(db, values["notification_id"], values)
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
-                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route=="/approve" else "/recognized"))
+                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
                     self.send_response(303)
                     self.send_header("Location", destination)
                     self.send_header("Content-Length", "0")
