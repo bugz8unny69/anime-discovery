@@ -96,6 +96,7 @@ def main(argv=None):
     settings_actions.add_parser("configure-jellyfin",help="Configure immediate Jellyfin library scan credentials")
     integration=settings_actions.add_parser("configure-integration",help="Configure Sonarr, NTFY, TVDB or Shoko")
     integration.add_argument("service",choices=("sonarr","ntfy","tvdb","shoko"))
+    settings_actions.add_parser("probe-shoko",help="Read-only Shoko connection probe")
     migration=settings_actions.add_parser("migrate",help="Preview or apply missing settings to existing JSON files")
     migration.add_argument("--apply",action="store_true",help="Back up settings.json and add missing settings")
     set_cmd=settings_actions.add_parser("set")
@@ -161,6 +162,11 @@ def main(argv=None):
             elif args.settings_command=="configure-integration":
                 from anime_admin_integrations import configure
                 print(json.dumps(configure(args.config_dir,args.service),indent=2))
+            elif args.settings_command=="probe-shoko":
+                from anime_shoko_probe import inspect_shoko
+                cfg=load_config(args.config_dir)["settings"]["shoko"]
+                result=inspect_shoko(cfg["base_url"])
+                print(json.dumps({"reachable":result["reachable"],"writes_enabled":False},indent=2))
             elif args.settings_command=="configure-credentials":
                 from anime_admin_credentials import configure_credentials
                 print(json.dumps(configure_credentials(args.config_dir),indent=2))
