@@ -81,6 +81,12 @@ def app(db_path, token):
             input{padding:.5rem;margin:.3rem}button{padding:.6rem}</style>
             <h1>Anime Discovery</h1><p>Jobs: """ + esc(dict(jobs)) + """</p>
             <h2>Series</h2><table><tr><th>ID</th><th>Title</th><th>TVDB</th><th>Status</th></tr>""" + shows + """</table>
+            <h2>Series actions</h2>
+            <form method="post" action="/series-action">
+            <input name="series_id" type="number" min="1" placeholder="Series ID" required>
+            <select name="action"><option value="reject">Reject</option>
+            <option value="reset">Reset</option><option value="clear-history">Clear History</option></select>
+            <button>Apply</button></form>
             <h2>Autobrr inbox</h2><table><tr><th>ID</th><th>Source</th><th>Release</th><th>Hash</th><th>Status</th></tr>""" + rows + """</table>
             <h2>Approve notification and queue acquisition</h2>
             <p>Use verified TVDB/AniDB IDs and episode numbering. Existing series are reused.</p>
@@ -102,7 +108,7 @@ def app(db_path, token):
                 self.end_headers()
                 return
             route = urlsplit(self.path).path
-            if route not in ("/webhook", "/approve"):
+            if route not in ("/webhook", "/approve", "/series-action"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = self.form()
@@ -118,6 +124,29 @@ def app(db_path, token):
                             (source,release_name,source_guid,info_hash,received_at)
                             VALUES (?,?,?,?,?)""", (source,title,guid,infohash,int(time.time())))
                         result = {"received": True}
+                    elif route == "/series-action":
+                        sid = int(values["series_id"])
+                        action = str(values["action"])
+                        if sid <= 0 or action not in ("reject", "reset", "clear-history"):
+                            raise ValueError("Invalid series action")
+                        db.execute("BEGIN IMMEDIATE")
+                        try:
+                            if not db.execute("SELECT id FROM series WHERE id=?", (sid,)).fetchone():
+                                raise ValueError("Series not found")
+                            if action == "reject":
+                                db.execute("UPDATE series SET status='REJECTED' WHERE id=?", (sid,))
+                                db.execute("INSERT OR REPLACE INTO series_rejection_blocks(series_id,reason) VALUES (?,'USER_REJECTED')", (sid,))
+                            elif action == "reset":
+                                db.execute("UPDATE series SET status='DISCOVERED',initial_search_complete=0 WHERE id=?", (sid,))
+                                db.execute("DELETE FROM series_rejection_blocks WHERE series_id=?", (sid,))
+                                db.execute("DELETE FROM series_quarantine WHERE series_id=?", (sid,))
+                            else:
+                                db.execute("UPDATE series SET initial_search_complete=0 WHERE id=?", (sid,))
+                            db.commit()
+                        except BaseException:
+                            db.rollback()
+                            raise
+                        result = {"action": action, "series_id": sid, "ok": True}
                     else:
                         nid = int(values["notification_id"])
                         tvdb = str(int(values["tvdb_id"]))
