@@ -1,6 +1,8 @@
 """Unified-database review reminder scheduler; never mutates acquisition state."""
 import sqlite3
 import time
+import logging
+LOG=logging.getLogger(__name__)
 from pathlib import Path
 from anime_flat_config import load_config
 from anime_ntfy import notify_best_effort
@@ -40,14 +42,17 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
 
 def main():
     while True:
-        cfg=load_config()
-        settings,secrets=cfg["settings"],cfg["secrets"]
-        if settings["ntfy"]["enabled"]:
-            db_path=Path(settings["daemon"]["database_path"])
-            with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
-                db.execute("PRAGMA foreign_keys=ON")
-                db.execute("PRAGMA busy_timeout=10000")
-                check_once(db,settings,secrets)
+        try:
+            cfg=load_config()
+            settings,secrets=cfg["settings"],cfg["secrets"]
+            if settings["ntfy"]["enabled"]:
+                db_path=Path(settings["daemon"]["database_path"])
+                with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
+                    db.execute("PRAGMA foreign_keys=ON")
+                    db.execute("PRAGMA busy_timeout=10000")
+                    check_once(db,settings,secrets)
+        except Exception as exc:
+            LOG.warning("NTFY monitor iteration failed (%s)",type(exc).__name__)
         time.sleep(60)
 
 if __name__=="__main__":
