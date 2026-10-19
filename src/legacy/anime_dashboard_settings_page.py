@@ -20,139 +20,126 @@ def settings_page(directory):
     data=snapshot(directory)
     settings=data["settings"]
     out=shell("Settings","Settings")
-    out+='<h1>Settings</h1><p class="muted">Saved values. Changes requiring a service restart will be labeled.</p>'
+    out+='''<style>
+.integration{display:flex;flex-direction:column;gap:17px;margin-top:20px;max-width:780px}
+.integration .setting-field{display:grid;grid-template-columns:minmax(130px,180px) minmax(0,1fr);align-items:center;gap:16px}
+.integration .setting-field input:not([type=checkbox]){width:100%;min-width:0}
+.integration .key-control{display:flex;align-items:stretch;min-width:0}
+.integration .key-control input{border-radius:8px 0 0 8px;flex:1}
+.integration .key-control button{border-radius:0 8px 8px 0;min-width:48px;padding:8px;white-space:nowrap}
+.integration .actions{position:static;box-shadow:none;padding:0;background:transparent;border:0;margin-top:8px;justify-content:flex-start}
+.integration .actions button{min-width:130px}
+.integration .form-status{color:#a8bad1;min-height:1.5em}
+@media(max-width:620px){.integration .setting-field{grid-template-columns:1fr;gap:6px}}
+</style><h1>Settings</h1><p class="muted">Edit connection details, test them before saving, then apply when ready.</p>'''
     for name,fields in FIELDS.items():
         title=name.title() if name!="ntfy" else "NTFY"
-        out+='<details class="panel"><summary><strong>'+title+'</strong></summary>'
-        out+='<form class="integration" data-name="'+name+'">'
+        key=SECRETS[name]
+        term=("Access Token" if name=="ntfy" else "Webhook Token" if name=="autobrr" else "API Key")
+        present=bool(data["credential_status"].get(key))
+        out+='<details class="panel"><summary><strong>'+esc(title)+'</strong></summary>'
+        out+='<form class="integration" data-name="'+esc(name)+'" data-key="'+esc(key)+'" data-stored="'+("true" if present else "false")+'">'
         for field in fields:
             value=settings[name][field]
-            kind=("checkbox" if type(value) is bool else
-                  "number" if type(value) is int else "text")
+            kind=("checkbox" if type(value) is bool else "number" if type(value) is int else "text")
+            out+='<label class="setting-field"><span>'+esc(field.replace("_"," ").title())+'</span>'
             if kind=="checkbox":
-                out+=('<label>'+esc(field)+' <input type="checkbox" name="'+field+'"'+
-                      (' checked' if value else '')+'></label>')
+                out+='<input type="checkbox" name="'+field+'"'+(" checked" if value else "")+'>'
             else:
-                out+=('<label>'+esc(field)+' <input type="'+kind+'" name="'+field+
-                      '" value="'+esc(value)+'"></label>')
-        key=SECRETS[name]
-        label="Set" if data["credential_status"].get(key) else "Not set"
-        term=("Access Token" if name=="ntfy" else "Webhook Token" if name=="autobrr" else "API Key")
-        out+='<p>'+term+': '+esc(label)+'</p>'
-        out+='<label>New '+term+' <input type="password" name="credential" autocomplete="new-password" spellcheck="false"></label>'
-        out+='<button type="button" class="toggle-token">Show new value</button>'
-        out+='<button type="button" class="save-credential" data-key="'+key+'">Update '+term+'</button>'
-        out+='<button type="button" class="clear-credential" data-key="'+key+'">Clear '+term+'</button>'
-        out+='<div class="reveal-panel"><label>Confirm admin password to view saved '+term
-        out+='<input type="password" name="reveal_password" autocomplete="current-password"></label>'
-        out+='<button type="button" class="reveal-stored" data-key="'+key+'">View saved '+term+'</button>'
-        out+='<input type="password" name="stored_value" readonly autocomplete="off" aria-label="Saved '+term+'">'
-        out+='<button type="button" class="toggle-stored">Show/Hide saved value</button></div>'
-        out+='<button type="submit">Save &amp; Apply</button>'
-        out+='<button type="button" class="test-connection" data-service="'+name+'">'+('Test Notification' if name=="ntfy" else "Test Connection")+'</button></form>'
-        out+='</details>'
-    out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button>'
-    out+='<p>Settings requiring restart are not hot-reloaded.</p><p id="settings-result" role="status"></p></section>'
+                out+='<input type="'+kind+'" name="'+field+'" value="'+esc(value)+'">'
+            out+='</label>'
+        out+='<label class="setting-field"><span>'+term+'</span><span class="key-control">'
+        out+='<input type="password" name="credential" autocomplete="new-password" spellcheck="false" placeholder="'+("Saved "+term+" ••••••••" if present else "Enter "+term)+'" aria-label="'+term+'">'
+        out+='<button type="button" class="toggle-secret" aria-label="Show or hide '+term+'" title="Show or hide '+term+'">◉</button></span></label>'
+        out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
+        out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
+        out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
+    out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Save &amp; Apply reports when a restart is required. Refresh discards unsaved edits.</p></section>'
     out+="""<script>
-for(const form of document.querySelectorAll('form.integration')){
-  form.addEventListener('submit',async ev=>{
-    ev.preventDefault();
-    const target=document.getElementById('settings-result');
-    const section=form.dataset.name, fields={};
-    for(const input of form.querySelectorAll('input')){
-      if(['credential','reveal_password','stored_value'].includes(input.name))continue;
-      fields[input.name]=input.type==='checkbox'?input.checked:
-        input.type==='number'?Number(input.value):input.value;
-    }
-    const token=document.querySelector('input[name="_csrf"]')?.value;
-    if(!token){target.textContent='Missing session CSRF token';return}
-    try{
-      const response=await fetch('/api/settings',{method:'POST',
-        credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-        body:JSON.stringify({settings:{[section]:fields}})});
-      const data=await response.json();
-      if(!response.ok)throw new Error(data.error||'Save failed');
-      dirty=false;
-      target.textContent=data.restart_required?'Saved. Restart required.':'No changes.';
-    }catch(e){target.textContent=e.message}
-  });
-}
-for(const button of document.querySelectorAll('.save-credential,.clear-credential')){
-  button.addEventListener('click',async()=>{
-    const clear=button.classList.contains('clear-credential');
-    const input=button.closest('form').querySelector('input[name=credential]');
-    if(clear&&!confirm('Clear this credential? Existing integration may stop working.'))return;
-    if(!clear&&!input.value)return;
-    const token=document.querySelector('input[name="_csrf"]')?.value;
-    const target=document.getElementById('settings-result');
-    try{
-      const res=await fetch('/api/credentials',{method:'POST',credentials:'same-origin',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-        body:JSON.stringify({key:button.dataset.key,clear,value:clear?null:input.value})});
-      const body=await res.json();
-      if(!res.ok)throw new Error(body.error||'Credential update failed');
-      input.value='';
-      target.textContent=clear?'Token cleared. Restart may be required.':
-        'Token updated. Restart may be required.';
-    }catch(error){target.textContent=error.message}
-  });
-}
 let dirty=false;
-for(const field of document.querySelectorAll('form.integration input')){
-  field.addEventListener('change',()=>{dirty=true});
+const csrf=document.querySelector('input[name="_csrf"]')?.value;
+const forms=document.querySelectorAll('form.integration');
+function fieldsOf(form){
+  const fields={};
+  for(const input of form.querySelectorAll('input:not([name=credential])')){
+    fields[input.name]=input.type==='checkbox'?input.checked:
+      input.type==='number'?Number(input.value):input.value;
+  }
+  return fields;
+}
+async function post(path,payload){
+  const res=await fetch(path,{method:'POST',credentials:'same-origin',cache:'no-store',
+    headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
+    body:JSON.stringify(payload)});
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.error||'Request failed');
+  return data;
+}
+for(const form of forms){
+  const secret=form.querySelector('input[name=credential]');
+  const status=form.querySelector('.form-status');
+  const setStatus=(message)=>{status.textContent=message};
+  let loadedSaved=false;
+  let changedSecret=false;
+  const key=form.dataset.key;
+  const service=form.dataset.name;
+  form.addEventListener('input',event=>{
+    if(event.target===secret)changedSecret=true;
+    dirty=true;
+  });
+  form.addEventListener('change',()=>{dirty=true});
+  form.querySelector('.toggle-secret').addEventListener('click',async()=>{
+    if(secret.type==='text'){
+      secret.type='password';
+      return;
+    }
+    if(!secret.value&&form.dataset.stored==='true'){
+      try{
+        const payload=await post('/api/credential-reveal',{key});
+        secret.value=payload.value;
+        loadedSaved=true;
+        changedSecret=false;
+      }catch(error){setStatus(error.message);return;}
+    }
+    secret.type='text';
+  });
+  form.addEventListener('submit',async event=>{
+    event.preventDefault();
+    setStatus('Saving…');
+    try{
+      const draft=fieldsOf(form);
+      // No secret written when merely revealing the existing stored value.
+      if(changedSecret&&secret.value){
+        await post('/api/credentials',{key,value:secret.value,clear:false});
+        form.dataset.stored='true';
+        changedSecret=false;
+        loadedSaved=false;
+      }
+      const result=Object.keys(draft).length
+        ?await post('/api/settings',{settings:{[service]:draft}})
+        :{restart_required:false};
+      secret.value='';
+      secret.type='password';
+      dirty=false;
+      setStatus(result.restart_required?'Saved. Service restart required.':'Saved.');
+    }catch(error){setStatus(error.message);}
+  });
+  form.querySelector('.test-connection').addEventListener('click',async()=>{
+    setStatus('Testing…');
+    try{
+      const result=await post('/api/test-connection',{
+        service,settings:fieldsOf(form),credential:secret.value||null
+      });
+      setStatus(result.message||'Test completed');
+    }catch(error){setStatus(error.message);}
+  });
 }
 window.addEventListener('beforeunload',event=>{
   if(dirty){event.preventDefault();event.returnValue='';}
 });
-for(const button of document.querySelectorAll('.test-connection')){
-  button.addEventListener('click',async()=>{
-    const token=document.querySelector('input[name="_csrf"]')?.value;
-    const target=document.getElementById('settings-result');
-    try{
-      const res=await fetch('/api/test-connection',{method:'POST',credentials:'same-origin',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-        body:JSON.stringify({service:button.dataset.service})});
-      const data=await res.json();
-      if(!res.ok)throw new Error(data.error||'Test failed');
-      target.textContent=data.message;
-    }catch(error){target.textContent=error.message}
-  });
-}
-for(const button of document.querySelectorAll('.reveal-stored')){
-  button.addEventListener('click',async()=>{
-    const panel=button.closest('.reveal-panel');
-    const password=panel.querySelector('input[name=reveal_password]');
-    const stored=panel.querySelector('input[name=stored_value]');
-    const target=document.getElementById('settings-result');
-    const csrf=document.querySelector('input[name="_csrf"]')?.value;
-    stored.value='';
-    try{
-      const response=await fetch('/api/credential-reveal',{method:'POST',
-        credentials:'same-origin',cache:'no-store',
-        headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},
-        body:JSON.stringify({key:button.dataset.key,password:password.value})});
-      password.value='';
-      const payload=await response.json();
-      if(!response.ok)throw new Error(payload.error||'Unable to reveal saved value');
-      stored.value=payload.value;
-      stored.type='password';
-      target.textContent='Saved value retrieved for this session. Close or refresh to hide it.';
-    }catch(error){password.value='';target.textContent=error.message}
-  });
-}
-for(const button of document.querySelectorAll('.toggle-stored')){
-  button.addEventListener('click',()=>{
-    const input=button.closest('.reveal-panel').querySelector('input[name=stored_value]');
-    input.type=input.type==='password'?'text':'password';
-  });
-}
-for(const button of document.querySelectorAll('.toggle-token')){
-  button.addEventListener('click',()=>{
-    const input=button.closest('form').querySelector('input[name=credential]');
-    input.type=input.type==='password'?'text':'password';
-    button.textContent=input.type==='password'?'Show new value':'Hide new value';
-  });
-}
-document.getElementById('refresh').addEventListener('click',()=>{dirty=false;location.reload()});
+document.getElementById('refresh').addEventListener('click',()=>{
+  if(dirty&&!confirm('Discard unsaved changes?'))return;
+  dirty=false;location.reload();
+});
 </script>"""
     return out+tail()
