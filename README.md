@@ -153,11 +153,30 @@ installation, use `settings set prowlarr.base_url` and
 `settings set prowlarr.enabled true`, and provision `prowlarr_api_key`
 securely in `secrets.json` (0600), then restart the service.
 
-**Integration status:** Prowlarr search is implemented. Jellyfin currently
-supports writing trial NFO files, not API-based Jellyfin synchronization.
+**Integration status:** Prowlarr search and opt-in Jellyfin immediate library
+refresh are implemented. The refresh is requested only after a staged episode
+is finalized and is best-effort: a Jellyfin outage never removes media or
+retries the acquisition. Jellyfin still indexes the NFO files on its NFS
+mount. No Jellyfin API reads or item deletion are performed.
 ntfy notifications and TVDB API lookups are not implemented in this fresh
 runtime; entering their URLs or keys would not enable those services.
 The installer intentionally does not solicit unused credentials.
+
+### Immediate Jellyfin scan on NFS
+
+Fresh installs ask whether to enable immediate Jellyfin scans, and if enabled
+collect a URL and API key. A successful episode transfer and NFO write precede
+the durable SQLite finalization; only then does the worker send
+`POST /Library/Refresh` with a private `X-Emby-Token` header, bounded by an
+8-second timeout. Scan failure is logged without leaking server URLs or API
+keys and does not fail the acquisition. Jellyfin schedules its scan; indexing
+may take additional time. A failure does not automatically retry the scan.
+
+For existing installations, after deploying the new release, run
+`settings migrate` to preview new settings and `settings migrate --apply`
+to add defaults. Then set `jellyfin.base_url` with the admin CLI and add
+`jellyfin_api_key` to `secrets.json` with mode 0600; only then enable
+`jellyfin.enabled` and restart the service. No SQLite reset is required.
 
 ## Release archive deployment (no Git clone)
 
