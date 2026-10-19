@@ -91,6 +91,8 @@ def main(argv=None):
     settings=commands.add_parser("settings",help="Flat-file settings")
     settings_actions=settings.add_subparsers(dest="settings_command",required=True)
     settings_actions.add_parser("show")
+    migration=settings_actions.add_parser("migrate",help="Preview or apply missing settings to existing JSON files")
+    migration.add_argument("--apply",action="store_true",help="Back up settings.json and add missing settings")
     set_cmd=settings_actions.add_parser("set")
     set_cmd.add_argument("key")
     set_cmd.add_argument("value",help="JSON value, e.g. 5, true, or quoted string")
@@ -137,7 +139,10 @@ def main(argv=None):
             if not report["ready"]:
                 parser.exit(1,"anime-discovery-admin: database readiness failed\\n")
         elif args.command=="settings":
-            if args.settings_command=="show":
+            if args.settings_command=="migrate":
+                from anime_admin_config_migration import migrate
+                print(json.dumps(migrate(args.config_dir,apply=args.apply),indent=2,sort_keys=True))
+            elif args.settings_command=="show":
                 print(json.dumps(load_config(args.config_dir)["settings"],indent=2,sort_keys=True))
             else:
                 try:
