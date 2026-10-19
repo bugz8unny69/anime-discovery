@@ -140,6 +140,49 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertEqual(db.execute("""SELECT count(*) FROM series_rejection_blocks
                 WHERE series_id IN (1,2)""").fetchone()[0],2)
 
+    def test_request_anime_without_prowlarr_stays_disabled(self):
+        status,_,body=self.request("POST","/request-anime",
+            {"title":"Example Show","season":1})
+        self.assertEqual(status,400)
+        self.assertIn("Configure Prowlarr",body)
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM daemon_jobs WHERE kind='series_gap_search'").fetchone()[0],0)
+
+    def test_manual_request_with_recognized_identity_creates_search_only(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as directory:
+            directory=Path(directory)
+            config=json.loads(json.dumps(DEFAULT_SETTINGS))
+            config["prowlarr"]={"enabled":True,"base_url":"http://127.0.0.1:9696"}
+            config["identity"]["series_map"]={"Example Show":{
+                "tvdb_id":123,"anidb_id":456,"season":1}}
+            (directory/"settings.json").write_text(json.dumps(config))
+            (directory/"secrets.json").write_text(json.dumps({"prowlarr_api_key":"test"}))
+            os.chmod(directory/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=directory))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            try:
+                client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+                client.request("POST","/request-anime",
+                    json.dumps({"tvdb_id":123,"season":1}),
+                    {"Authorization":"Bearer secret-token","Content-Type":"application/json"})
+                result=client.getresponse()
+                self.assertEqual(result.status,200)
+                self.assertEqual(json.loads(result.read())["source"],"manual")
+                client.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM daemon_jobs WHERE kind='series_gap_search'").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT count(*) FROM episode_dispatch").fetchone()[0],0)
+
 
 if __name__=="__main__":
     unittest.main()

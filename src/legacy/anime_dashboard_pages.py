@@ -64,6 +64,30 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 <span class="muted">Homelab</span></header><nav aria-label="Main navigation">"""+navigation+"</nav>"
 
 
+def request_panel(mappings):
+    """One-time manual discovery, no episode picker or future monitoring."""
+    out='''<section class="panel"><div class="toolbar"><h2>Request anime for trial</h2>
+    <button type="button" onclick="document.getElementById('request-anime').showModal()">+ Request Anime</button>
+    </div><p class="muted">Choose an anime title or known TVDB/AniDB ID.
+    Anime Discovery searches available episodes once, then uses the usual
+    acquisition pipeline. Autobrr remains responsible for future releases.</p></section>
+    <dialog id="request-anime" style="background:#172335;color:#e8edf7;border:1px solid #52708f;
+    border-radius:14px;padding:24px;width:min(520px,95vw)">
+    <form method="dialog" style="text-align:right"><button class="secondary">Close</button></form>
+    <h2>One-time Anime-Trial request</h2><form method="post" action="/request-anime" class="forms">
+    <label>Anime name<input class="long" name="title" placeholder="Known anime title (optional)"></label>
+    <label>TVDB ID<input name="tvdb_id" type="number" min="1" placeholder="Optional"></label>
+    <label>AniDB ID<input name="anidb_id" type="number" min="1" placeholder="Optional"></label>
+    <label>Season<input name="season" type="number" min="1" max="100" value="1" required></label>
+    <p class="muted">Use any known name or ID from Recognized names.
+    No episode numbers or future subscription are needed.</p>
+    <button>Search missing episodes once</button></form></dialog>'''
+    if mappings:
+        out+='<p class="muted">Recognized: '+', '.join(escape(name) for name in sorted(mappings)[:8])+'</p>'
+    return out
+
+
+
 def tail():
     return "</main></body></html>"
 
@@ -84,7 +108,7 @@ def pager(path,result):
             +'</div>')
 
 
-def series_page(result):
+def series_page(result,mappings=None):
     out=shell("Series","Series")
     out+="""<h1>Series</h1><p class="muted">Anime with completed episodes currently
 staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
@@ -113,6 +137,7 @@ staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
 <button type="submit" class="secondary" name="action" value="reset">Reset</button>
 </div></div></form></section>'''
     out+=pager("/",result)
+    out+=request_panel(mappings or {})
     out+='''<script>
 const checks=[...document.querySelectorAll(".pick")],all=document.getElementById("select-all");
 const bar=document.getElementById("bulk-actions"),count=document.getElementById("selection-count");
@@ -160,7 +185,7 @@ function update(data){
 tbody.replaceChildren();blank.classList.toggle("hidden",data.items.length!==0);
 for(const job of data.items){
 const tr=document.createElement("tr");
-td(tr,new Date(job.received_at*1000).toLocaleString());
+td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
 let title=td(tr,job.release);if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
 td(tr,job.source).classList.add("hide-mobile");

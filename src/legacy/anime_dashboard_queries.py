@@ -5,6 +5,7 @@ recognizing a title in an incoming release. Pagination is applied after
 verifying staged files still exist on disk.
 """
 from pathlib import Path
+import json
 
 PAGE_SIZES=(20,50,100)
 
@@ -88,4 +89,16 @@ def all_jobs(db, *,page=1,size=20):
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "",
                        "staged":bool(stage and Path(stage).is_file())})
+    searches=db.execute("""SELECT id,subject_key,payload_json,state,last_error
+        FROM daemon_jobs WHERE kind='series_gap_search' ORDER BY id DESC""").fetchall()
+    for jid,key,payload,state,error in searches:
+        request=json.loads(payload)
+        job_status={"READY":"QUEUED","LEASED":"RUNNING","DONE":"COMPLETED",
+                    "DEFERRED":"WAITING FOR SEARCH","BLOCKED":"BLOCKED",
+                    "NEEDS_REVIEW":"NEEDS REVIEW"}.get(state,state)
+        result.append({"id":"search-"+str(jid),"source":request["origin"],
+                       "release":request["title"]+" (one-time search)",
+                       "received_at":0,"status":job_status,"season":request["season"],
+                       "episode":None,"series_title":request["title"],
+                       "message":error or "","staged":False})
     return _page(result,page,size)
