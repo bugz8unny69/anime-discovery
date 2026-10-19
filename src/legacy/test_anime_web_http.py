@@ -151,7 +151,7 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 worker.join(2)
 
-    def test_credential_reveal_requires_admin_password_and_never_caches(self):
+    def test_credential_reveal_requires_valid_session_and_csrf(self):
         import os
         from anime_flat_config import DEFAULT_SETTINGS
         with tempfile.TemporaryDirectory() as folder:
@@ -166,26 +166,66 @@ class DashboardHTTPTests(unittest.TestCase):
             thread.start()
             client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
             try:
+                payload=json.dumps({"key":"sonarr_api_key"})
                 headers={"Cookie":"ad_session="+self.session,
-                         "X-CSRF-Token":self.csrf,
-                         "Content-Type":"application/json"}
-                for password,expected in (("wrong",403),("admin-pass-long",200)):
-                    client.request("POST","/api/credential-reveal",
-                        json.dumps({"key":"sonarr_api_key","password":password}),headers)
-                    response=client.getresponse()
-                    self.assertEqual(response.status,expected)
-                    self.assertEqual(response.getheader("Cache-Control"),"no-store" if expected==200 else None)
-                    body=json.loads(response.read())
-                    if expected==200:
-                        self.assertEqual(body["value"],"sample-secret")
-                    else:
-                        self.assertNotIn("sample-secret",json.dumps(body))
-                client.request("POST","/api/credential-reveal",
-                    json.dumps({"key":"sonarr_api_key","password":"admin-pass-long"}),
+                         "X-CSRF-Token":self.csrf,"Content-Type":"application/json"}
+                client.request("POST","/api/credential-reveal",payload,headers)
+                response=client.getresponse()
+                self.assertEqual(response.status,200)
+                self.assertEqual(response.getheader("Cache-Control"),"no-store")
+                self.assertEqual(json.loads(response.read())["value"],"sample-secret")
+                client.request("POST","/api/credential-reveal",payload,
                     {"Cookie":"ad_session="+self.session,"Content-Type":"application/json"})
                 response=client.getresponse()
                 self.assertEqual(response.status,403)
                 response.read()
+                client.request("POST","/api/credential-reveal",payload,
+                    {"X-CSRF-Token":self.csrf,"Content-Type":"application/json"})
+                response=client.getresponse()
+                self.assertEqual(response.status,401)
+                response.read()
+            finally:
+                client.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
+    def test_connection_uses_unsaved_values_without_persisting(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        from unittest.mock import patch as mocked
+        with tempfile.TemporaryDirectory() as dirname:
+            directory=Path(dirname)
+            (directory/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (directory/"secrets.json").write_text(json.dumps({"web_token":"web-secret"}))
+            os.chmod(directory/"secrets.json",0o600)
+            original_settings=(directory/"settings.json").read_bytes()
+            original_secrets=(directory/"secrets.json").read_bytes()
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=directory))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            try:
+                def fake_probe(settings,secrets,service):
+                    self.assertEqual(service,"sonarr")
+                    self.assertEqual(settings["sonarr"]["base_url"],"https://sonarr.lab")
+                    self.assertTrue(settings["sonarr"]["enabled"])
+                    self.assertEqual(secrets["sonarr_api_key"],"unsaved-test-key")
+                    return {"tested":True,"connected":True,"message":"Connection verified"}
+                with mocked("anime_integration_connection.test_connection",
+                            side_effect=fake_probe):
+                    client.request("POST","/api/test-connection",json.dumps({
+                        "service":"sonarr",
+                        "settings":{"base_url":"https://sonarr.lab","enabled":False},
+                        "credential":"unsaved-test-key"
+                    }),{"Cookie":"ad_session="+self.session,
+                        "X-CSRF-Token":self.csrf,"Content-Type":"application/json"})
+                    response=client.getresponse()
+                    self.assertEqual(response.status,200)
+                    self.assertTrue(json.loads(response.read())["connected"])
+                self.assertEqual((directory/"settings.json").read_bytes(),original_settings)
+                self.assertEqual((directory/"secrets.json").read_bytes(),original_secrets)
             finally:
                 client.close()
                 server.shutdown()

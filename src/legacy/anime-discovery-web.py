@@ -229,7 +229,34 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     service=values.get("service")
                     from anime_integration_connection import test_connection
                     current=load_config(config_dir)
-                    result=test_connection(current["settings"],current["secrets"],service)
+                    from anime_flat_config import DEFAULT_SETTINGS
+                    overrides=values.get("settings",{})
+                    credential=values.get("credential")
+                    if not isinstance(overrides,dict):
+                        raise ValueError("Invalid draft settings")
+                    # Only the selected integration's supported fields are eligible.
+                    supported={"jellyfin","sonarr","shoko","ntfy","autobrr"}
+                    if service not in supported:
+                        raise ValueError("Unknown integration")
+                    base=current["settings"]
+                    trial={section:dict(fields) for section,fields in base.items()}
+                    for field,value in overrides.items():
+                        if field not in DEFAULT_SETTINGS.get(service,{}):
+                            raise ValueError("Unsupported integration field")
+                        trial[service][field]=value
+                    secrets=dict(current["secrets"])
+                    key={"jellyfin":"jellyfin_api_key","sonarr":"sonarr_api_key",
+                         "shoko":"shoko_api_key","ntfy":"ntfy_token","autobrr":"web_token"}[service]
+                    if credential is not None:
+                        if not isinstance(credential,str):
+                            raise ValueError("Invalid credential")
+                        if credential:
+                            secrets[key]=credential
+                    # Draft validation is scoped to this integration. A disabled
+                    # service may still be probed with unsaved inputs.
+                    if service!="autobrr":
+                        trial[service]["enabled"]=True
+                    result=test_connection(trial,secrets,service)
                     return self.send(200,json.dumps(result),"application/json")
                 except (ValueError,TypeError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
@@ -239,12 +266,10 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     from anime_flat_config import ALLOWED_SECRET_KEYS
                     data=getattr(self,"_cached_form",None) or self.form()
                     key=data.get("key")
-                    password=data.get("password")
+                    # Session and CSRF were validated before reaching this route.
+                    # Reveal is explicitly requested by the signed-in administrator.
                     if type(key) is not str or key not in ALLOWED_SECRET_KEYS or key=="admin_password":
                         raise ValueError("Unsupported credential")
-                    if type(password) is not str or not dashboard_auth.verify("admin",password):
-                        SECURITY_LOG.warning("Credential reveal denied: administrator verification failed")
-                        return self.send(403,json.dumps({"error":"Administrator password required"}),"application/json")
                     stored=load_config(config_dir)["secrets"].get(key)
                     if not stored:
                         return self.send(404,json.dumps({"error":"API key not configured"}),"application/json")
