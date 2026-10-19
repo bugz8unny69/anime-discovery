@@ -132,6 +132,38 @@ used to match incoming releases, whether or not they have reached
 Anime-Trial. This prevents the library from being confused with the
 inbox or the identity configuration.
 
+## Shared Prowlarr episode discovery
+
+Add this section to `/etc/anime-discovery/settings.json`:
+
+```json
+"prowlarr": {
+  "enabled": true,
+  "base_url": "http://YOUR-PROWLARR-HOST:9696"
+}
+```
+
+Add `"prowlarr_api_key": "YOUR_KEY"` to
+`/etc/anime-discovery/secrets.json` (file mode 0600) and restart the service.
+Do not put the API key into settings.json, environment variables or flags.
+
+Incoming **Autobrr** episode notifications still enqueue their own verified
+release immediately. They also trigger a bounded, one-time Prowlarr search
+for earlier episodes, skipping items already acquired or queued.
+
+The **Request Anime** action on the Series page launches a manual **one-time**
+Prowlarr search. Enter a known anime name or TVDB/AniDB ID, optionally select
+an anime season, and submit. No episode selection and no monitoring of future
+releases. The name or ID must already have an unambiguous mapping under
+Recognized names. Manual and Autobrr search results pass into the same
+verified acquisition and qBittorrent/Anime-Trial staging workflow and
+appear in the Jobs page.
+
+Current Prowlarr integration processes magnet-backed, explicitly numbered
+episode results with matching title aliases. Torrent download URLs and
+anime-title/provider lookup without a recognized mapping are not supported.
+Ambiguous releases are skipped rather than guessed.
+
 ## Offline fresh-install smoke check
 
 From the repository root with Python 3.12:
