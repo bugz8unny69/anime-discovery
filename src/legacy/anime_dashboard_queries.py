@@ -88,7 +88,7 @@ def all_jobs(db, *,page=1,size=20):
         # distinction visible instead of suggesting an idle worker.
         if status=="RECEIVED":
             explanation=("Waiting for episode identity: no acquisition job was created. "
-                         "Recognize the title or approve with TVDB/AniDB IDs and episode.")
+                         "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="QUEUED":
             explanation="Acquisition job queued; waiting for a worker."
         elif status=="RUNNING":
