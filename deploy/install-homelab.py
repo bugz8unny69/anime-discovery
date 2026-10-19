@@ -117,6 +117,9 @@ def _new_setup(account):
     if ask("Enable Prowlarr? (yes/no)","no").lower()=="yes":
         settings["prowlarr"].update(enabled=True,base_url=ask("Prowlarr URL"))
         secrets["prowlarr_api_key"]=ask("Prowlarr API key",secret=True)
+    if ask("Enable immediate Jellyfin library scans after staging? (yes/no)","no").lower()=="yes":
+        settings["jellyfin"].update(enabled=True,base_url=ask("Jellyfin URL"))
+        secrets["jellyfin_api_key"]=ask("Jellyfin API key",secret=True)
     validate_config(settings,secrets)
     CONFIG_DIR.mkdir(mode=0o750,parents=True,exist_ok=True)
     os.chmod(CONFIG_DIR,0o750)
