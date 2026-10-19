@@ -121,6 +121,26 @@ class FreshAcquisitionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT state FROM episode_dispatch").fetchone()[0], "CLAIMED")
 
+    def test_expired_lease_blocks_handler_before_external_client(self):
+        self.enqueue()
+        job = claim(self.db, now=100, lease_seconds=30,
+                    allowed_kinds=["claimed_acquisition"])
+        calls = []
+        def forbidden_qb():
+            calls.append("created")
+            raise AssertionError("Expired lease must not create client")
+        download = Path(self.tmp.name) / "downloads"
+        trial = Path(self.tmp.name) / "trial"
+        download.mkdir()
+        trial.mkdir()
+        handler = make_acquisition_handler(
+            self.path, forbidden_qb, download_root=download, trial_root=trial)
+        with self.assertRaisesRegex(ValueError, "Stale acquisition lease"):
+            asyncio.run(handler(job))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM external_actions").fetchone()[0], 0)
+
     def test_reclaimed_lease_rejects_stale_worker(self):
         self.enqueue()
         first = claim(self.db, now=100, lease_seconds=30,
