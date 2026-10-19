@@ -33,6 +33,11 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None):
         WHERE d.series_id=? AND d.state='DONE'""",(series_id,)).fetchall()
     if not any(path and Path(path).is_file() for (path,) in paths):
         raise ValueError("Keep requires an existing staged episode")
+    if settings.get("tvdb",{}).get("enabled") is True:
+        from anime_tvdb import lookup_tvdb
+        resolved=lookup_tvdb(settings,secrets,row[0])
+        if resolved["tvdb_id"]!=int(row[0]):
+            raise RuntimeError("TVDB identity verification failed")
     result=(sonarr_client or ensure_series)(settings,secrets,tvdb_id=row[0],title=row[1])
     if not isinstance(result,dict) or type(result.get("sonarr_id")) is not int or result["sonarr_id"]<=0:
         raise RuntimeError("Sonarr admission unconfirmed")
