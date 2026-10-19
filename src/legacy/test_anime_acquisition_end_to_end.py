@@ -74,7 +74,8 @@ class EndToEndTests(unittest.TestCase):
         self.assertIsNotNone(job)
         handler=make_acquisition_handler(self.dbpath,lambda:self.qb,
             download_root=self.download,trial_root=self.trial)
-        with (patch("anime_claimed_pipeline.approved_dispatch",return_value=APPROVAL),
+        with (patch("anime_acquisition_handler.approved_dispatch",return_value=APPROVAL),
+              patch("anime_claimed_pipeline.approved_dispatch",return_value=APPROVAL),
               patch("anime_acquisition_flow.approved_dispatch",return_value=APPROVAL),
               patch("anime_media_flow.approved_dispatch",return_value=APPROVAL),
               patch("anime_acquisition_finalize.approved_dispatch",return_value=APPROVAL),
