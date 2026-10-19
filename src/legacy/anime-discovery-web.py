@@ -265,7 +265,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     if not isinstance(overrides,dict):
                         raise ValueError("Invalid draft settings")
                     # Only the selected integration's supported fields are eligible.
-                    supported={"jellyfin","sonarr","shoko","ntfy","autobrr"}
+                    supported={"jellyfin","sonarr","shoko","ntfy","autobrr","tvdb"}
                     if service not in supported:
                         raise ValueError("Unknown integration")
                     base=current["settings"]
@@ -276,7 +276,8 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         trial[service][field]=value
                     secrets=dict(current["secrets"])
                     key={"jellyfin":"jellyfin_api_key","sonarr":"sonarr_api_key",
-                         "shoko":"shoko_api_key","ntfy":"ntfy_token","autobrr":"web_token"}[service]
+                         "shoko":"shoko_api_key","ntfy":"ntfy_token","autobrr":"web_token",
+                         "tvdb":"tvdb_api_key"}[service]
                     if credential is not None:
                         if not isinstance(credential,str):
                             raise ValueError("Invalid credential")
