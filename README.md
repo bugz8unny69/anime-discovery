@@ -174,9 +174,7 @@ may take additional time. A failure does not automatically retry the scan.
 
 For existing installations, after deploying the new release, run
 `settings migrate` to preview new settings and `settings migrate --apply`
-to add defaults. Then set `jellyfin.base_url` with the admin CLI and add
-`jellyfin_api_key` to `secrets.json` with mode 0600; only then enable
-`jellyfin.enabled` and restart the service. No SQLite reset is required.
+to add defaults. Then run the interactive admin command, which securely updates the key\nand enables scanning without showing the key in process arguments:\n\n```bash\nsudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py settings configure-jellyfin\nsudo systemctl restart anime-discovery.service\n```\n\nNo SQLite reset is required.
 
 ## Release archive deployment (no Git clone)
 
