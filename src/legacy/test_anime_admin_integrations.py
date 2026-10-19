@@ -16,7 +16,7 @@ class ConfigureIntegrationTests(unittest.TestCase):
         (self.dir/"secrets.json").write_text(json.dumps({"web_token":"test","admin_password":"different","qbittorrent_password":"preserve"}))
         (self.dir/"secrets.json").chmod(0o600)
     def test_sonarr_preserves_other_secrets(self):
-        answers=iter(["https://sonarr.example","/mnt/media/Anime","4","yes"])
+        answers=iter(["https://sonarr.example","/mnt/media/Anime","Anime","4","yes"])
         result=configure(self.dir,"sonarr",ask=lambda prompt:next(answers),secret_prompt=lambda prompt:"new-api-key")
         self.assertTrue(result["enabled"])
         cfg=load_config(self.dir)
