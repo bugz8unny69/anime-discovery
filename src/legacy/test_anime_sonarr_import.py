@@ -12,11 +12,9 @@ class StagedPlanTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)/"trial"
         self.root.mkdir()
-        self.db=sqlite3.connect(Path(self.tmp.name)/"db.sqlite",isolation_level=None)
-        self.addCleanup(self.db.close)
-        self.db.close()
         initialize(Path(self.tmp.name)/"db.sqlite")
         self.db=sqlite3.connect(Path(self.tmp.name)/"db.sqlite",isolation_level=None)
+        self.addCleanup(self.db.close)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.sid=self.db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb','123','Example')").lastrowid
         nid=self.db.execute("INSERT INTO notifications(source,release_name,source_guid,info_hash,received_at) VALUES ('autobrr','Episode 1','guid','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',0)").lastrowid
