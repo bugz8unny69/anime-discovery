@@ -2,7 +2,7 @@
 name: Anime Discovery Python tests
 on:
   push:
-    branches: [feature/unified-db-foundation]
+    branches: [develop, 'feature/**']
   pull_request:
     branches: [develop]
   workflow_dispatch:
@@ -58,4 +58,5 @@ jobs:
             test_anime_admin_cli \
             test_anime_webhook_lifecycle \
             test_anime_web_http \
-            test_anime_live_acquisition
+            test_anime_live_acquisition \
+            test_anime_admin_upgrade
