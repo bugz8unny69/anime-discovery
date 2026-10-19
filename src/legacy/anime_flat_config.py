@@ -16,7 +16,7 @@ DEFAULT_SETTINGS = {
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "prowlarr": {"enabled": False, "base_url": ""},
     "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
-    "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0},
+    "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
     "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
     "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
@@ -92,9 +92,9 @@ def validate_config(settings,secrets,*,directory=None):
         if type(season) is not int or season<=0:
             raise ValueError("Invalid season for "+alias)
     sonarr=result["sonarr"]
-    if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int:
+    if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int or not isinstance(sonarr["quality_profile_name"],str):
         raise ValueError("Invalid Sonarr settings")
-    if sonarr["enabled"] and (not sonarr["base_url"].startswith(("http://","https://")) or not sonarr["root_folder"].startswith("/") or sonarr["quality_profile_id"]<=0 or not secrets.get("sonarr_api_key")):
+    if sonarr["enabled"] and (not sonarr["base_url"].startswith(("http://","https://")) or not sonarr["root_folder"].startswith("/") or (sonarr["quality_profile_id"]<=0 and not sonarr["quality_profile_name"].strip()) or not secrets.get("sonarr_api_key")):
         raise ValueError("Enabled Sonarr requires URL, API key, root folder and quality profile")
     ntfy=result["ntfy"]
     if type(ntfy["enabled"]) is not bool or type(ntfy["reminder_hours"]) is not int or ntfy["reminder_hours"]<1 or any(not isinstance(ntfy[k],str) for k in ("server","topic","dashboard_url")):
