@@ -69,3 +69,10 @@ The feature branch now starts `anime_shoko_handoff_monitor.py` only when Shoko a
 **Shoko API contract:** the supplied Shoko 5.3.3.0 OpenAPI specifies `GET /api/v3/ImportFolder/{folderID}/Scan` as a whole-folder scan; despite its HTTP GET method it has side effects, so it is deliberately NOT called by the read-only monitor. It also specifies `POST /api/v3/File/{fileID}/Link` with `{"EpisodeIDs":[<internal Shoko episode ID>]}`. Automatic linking is still disabled. Shoko's observed `SeriesIDs:null` cannot be treated as a proved empty list of existing episode links.
 
 **Not production-ready yet:** Sonarr ManualImport command payload awaits a non-destructive VM simulation; the Shoko scan side-effect policy, exact AniDB-episode mapping, final link writes and readback/VFS verification remain blocked pending trustworthy live contract data. The current Sonarr finalizer marks `KEPT` and may perform source cleanup before Shoko completion; this is not yet the desired final end-to-end state. Do not deploy, release, merge or enable destructive actions.
+
+
+### Simplified completion policy
+
+Shoko VFS/Jellyfin visibility is **not** an end-to-end prerequisite. Completion instead requires that Shoko read back the exact verified AniDB episode association for each Sonarr-imported file. The Sonarr finalizer now retains trial files and qB source torrents while Shoko is enabled and that readback has not been recorded as `SHOKO_LINK_VERIFIED` or `SHOKO_ALREADY_LINKED_VERIFIED`. No code path currently promotes records to those states: they remain intentionally blocked until precise episode link verification is implemented. This avoids premature cleanup, but means Keep cannot complete automatically with Shoko enabled yet. Disabling Shoko retains legacy Sonarr-only cleanup logic.
+
+Both components consume central configuration from `load_config()`: Sonarr's `settings.sonarr.base_url` and `secrets.sonarr_api_key`, Shoko's `settings.shoko.base_url` and `secrets.shoko_api_key`. Never insert credentials in logs or repo files.
