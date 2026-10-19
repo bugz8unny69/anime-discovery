@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
     "web": {"host": "0.0.0.0", "port": 8765},
     "storage": {"download_root": "", "trial_root": ""},
-    "identity": {"reuse_verified_cache": True, "series_map": {}},
+    "identity": {"reuse_verified_cache": True, "series_map": {}, "episode_map": {}},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "prowlarr": {"enabled": False, "base_url": ""},
     "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
@@ -91,6 +91,15 @@ def validate_config(settings,secrets,*,directory=None):
         season = mapping.get("season",1)
         if type(season) is not int or season<=0:
             raise ValueError("Invalid season for "+alias)
+    episode_map=result["identity"]["episode_map"]
+    if not isinstance(episode_map,dict) or len(episode_map)>5000:
+        raise ValueError("identity.episode_map must be a mapping of at most 5000 entries")
+    import re
+    for key,item in episode_map.items():
+        if not isinstance(key,str) or not re.fullmatch(r"[1-9][0-9]*:[0-9]+:[1-9][0-9]*",key):
+            raise ValueError("Invalid TVDB episode identity key")
+        if not isinstance(item,dict) or set(item)!={"anidb_episode_id","verified"} or type(item["anidb_episode_id"]) is not int or item["anidb_episode_id"]<=0 or item["verified"] is not True:
+            raise ValueError("Exact AniDB episode mapping requires verified=true")
     sonarr=result["sonarr"]
     if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int or not isinstance(sonarr["quality_profile_name"],str):
         raise ValueError("Invalid Sonarr settings")
