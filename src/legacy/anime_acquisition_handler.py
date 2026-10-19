@@ -5,6 +5,7 @@ import sqlite3
 import time
 from anime_claimed_pipeline import process_claimed
 from anime_acquisition_finalize import finalize_acquisition
+from anime_acquisition_gate import approved_dispatch
 
 
 def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
@@ -29,6 +30,9 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root):
                 return {'state':'DONE' if record else 'NEEDS_REVIEW'}
             if dispatch and dispatch[0]=='NEEDS_REVIEW':
                 return {'state':'NEEDS_REVIEW'}
+            # Recheck approval before constructing any external client. A series
+            # may have been quarantined or rejected since the job was enqueued.
+            approved_dispatch(db, payload['notification_id'])
             result=process_claimed(db, payload['notification_id'],
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
                 qb=qb_factory(), download_root=download_root,
