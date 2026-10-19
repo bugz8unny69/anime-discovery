@@ -6,6 +6,7 @@ No automatic Shoko mutation is issued by this module.
 """
 from pathlib import Path
 from anime_shoko_v3 import _get, get_file, resolve_episode
+from anime_shoko_write import linked_episode_ids
 
 def inspect_imported_episode(base_url, api_key, *, destination, sonarr_root,
                              anidb_episode_id, verified_episode_identity,
@@ -43,14 +44,19 @@ def inspect_imported_episode(base_url, api_key, *, destination, sonarr_root,
         return {"status":"AMBIGUOUS_SHOKO_FILE","writes_enabled":False}
     file_id=verified[0]
     record=get_file(base_url,api_key,file_id,**opts)
-    # Null is an unknown link state, NOT evidence that no links exist.
-    if record.get("SeriesIDs") is None:
-        return {"status":"UNRECOGNIZED_NEEDS_REVIEW","file_id":file_id,
-                "writes_enabled":False}
-    if record.get("SeriesIDs")!=[]:
-        return {"status":"SHOKO_ALREADY_LINKED","file_id":file_id,
+    # SeriesIDs=null is normal for unrecognized files. Confirm through
+    # the dedicated file episode endpoint instead of guessing from metadata.
+    associations=linked_episode_ids(base_url,api_key,file_id,**opts)
+    if len(associations)>1:
+        return {"status":"AMBIGUOUS_SHOKO_LINK","file_id":file_id,
                 "writes_enabled":False}
     ep=resolve_episode(base_url,api_key,anidb_episode_id,**opts)
+    if associations:
+        if associations=={(ep["shoko_episode_id"],anidb_episode_id)}:
+            return {"status":"SHOKO_ALREADY_LINKED_VERIFIED",
+                    "file_id":file_id,"writes_enabled":False}
+        return {"status":"CONFLICTING_SHOKO_LINK","file_id":file_id,
+                "writes_enabled":False}
     return {"status":"LINK_PLAN_READY","file_id":file_id,
             "anidb_episode_id":anidb_episode_id,
             "shoko_episode_id":ep["shoko_episode_id"],
