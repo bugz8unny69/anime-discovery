@@ -82,6 +82,17 @@ class FinalizationTests(unittest.TestCase):
             finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
         self.assertEqual(qb.deleted,[])
         self.assertTrue(self.stage.exists())
+    def test_extra_torrent_video_blocks_cleanup(self):
+        folder=self.download/"subfolder"
+        folder.mkdir()
+        (folder/"original.mkv").write_bytes(self.stage.read_bytes())
+        (folder/"extra.mkv").write_bytes(b"unimported episode")
+        qb=FakeQB({"save_path":str(self.download)})
+        qb.torrent_files=lambda infohash:[{"name":"subfolder/original.mkv"},{"name":"subfolder/extra.mkv"}]
+        with self.assertRaises(RuntimeError):
+            finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
+        self.assertEqual(qb.deleted,[])
+        self.assertTrue(self.stage.exists())
     def test_torrent_removed_only_after_destination_verification(self):
         folder=self.download/"subfolder"
         folder.mkdir()
