@@ -28,6 +28,11 @@ def finalize_acquisition(db, job_id, lease_token, notification_id, *, now=None):
             (int(now),notification_id))
         if updated.rowcount!=1:
             raise ValueError("Dispatch changed during finalization")
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='episodes'").fetchone():
+            db.execute("""UPDATE episodes SET status='STAGED'
+                WHERE (series_id,season,episode) IN (
+                    SELECT series_id,season,episode FROM episode_dispatch
+                    WHERE notification_id=?)""",(notification_id,))
         db.commit()
     except BaseException:
         db.rollback()
