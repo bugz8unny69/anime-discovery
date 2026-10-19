@@ -30,11 +30,11 @@ def settings_page(directory):
             kind=("checkbox" if type(value) is bool else
                   "number" if type(value) is int else "text")
             if kind=="checkbox":
-                out+='<label>'+esc(field)+' <input type="checkbox" name="'+field+'"'+
-                     (' checked' if value else '')+'></label>'
+                out+=('<label>'+esc(field)+' <input type="checkbox" name="'+field+'"'+
+                      (' checked' if value else '')+'></label>')
             else:
-                out+='<label>'+esc(field)+' <input type="'+kind+'" name="'+field+
-                     '" value="'+esc(value)+'"></label>'
+                out+=('<label>'+esc(field)+' <input type="'+kind+'" name="'+field+
+                      '" value="'+esc(value)+'"></label>')
         key=SECRETS[name]
         label="Set" if data["credential_status"].get(key) else "Not set"
         out+='<p>Credential: '+esc(label)+' (never shown in browser)</p>'
