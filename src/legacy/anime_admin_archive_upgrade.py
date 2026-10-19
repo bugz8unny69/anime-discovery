@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -54,7 +55,13 @@ def _extract(archive, destination):
         raise ValueError("Archive is not an Anime Discovery release")
 
 
-def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",runner=command):
+def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",runner=command,
+                    verbose=False,log=None,readiness_attempts=15,sleep=time.sleep):
+    report=log if log is not None else (lambda message: None)
+    def progress(message):
+        if verbose:
+            report("[upgrade] "+message)
+    progress("Validating archive installation and database")
     root=Path(root).absolute()
     archive=Path(archive).absolute()
     if not root.is_dir() or root.is_symlink() or (root/".git").exists():
@@ -80,20 +87,24 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
     stopped=False
     swapped=False
     try:
+        progress("Extracting release archive into staging directory")
         _extract(archive,staged)
         # Preserve service-user ownership if the installed tree is user-owned.
         old_stat=root.stat()
         if os.geteuid()==0 and old_stat.st_uid!=0:
             for path in [staged,*staged.rglob("*")]:
                 os.chown(path,old_stat.st_uid,old_stat.st_gid)
+        progress("Backing up SQLite database safely")
         with sqlite3.connect(db_path.resolve().as_uri()+"?mode=ro",uri=True) as src:
             with sqlite3.connect(db_backup) as dest:
                 src.backup(dest)
                 if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                     raise ValueError("Database backup integrity failure")
         db_backup.chmod(0o600)
+        progress("Stopping "+service)
         runner("systemctl","stop",service)
         stopped=True
+        progress("Activating staged release; keeping previous code backup")
         root.rename(old)
         try:
             staged.rename(root)
@@ -101,11 +112,25 @@ def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",run
         except BaseException:
             old.rename(root)
             raise
+        progress("Starting "+service)
         runner("systemctl","start",service)
-        runner("systemctl","is-active","--quiet",service)
+        progress("Waiting for service readiness")
+        if type(readiness_attempts) is not int or readiness_attempts<1:
+            raise ValueError("Invalid readiness_attempts")
+        for attempt in range(readiness_attempts):
+            try:
+                runner("systemctl","is-active","--quiet",service)
+                progress("Service active; upgrade completed")
+                break
+            except Exception:
+                if attempt==readiness_attempts-1:
+                    raise RuntimeError("Service not active after "+str(readiness_attempts)+" readiness checks") from None
+                progress("Service not yet active (check "+str(attempt+1)+"/"+str(readiness_attempts)+")")
+                sleep(1)
         return {"updated":True,"backup_code":str(old),
                 "backup_database":str(db_backup),"source_archive":str(archive)}
     except BaseException:
+        progress("Upgrade failed; restoring original application code and service")
         if swapped:
             # Roll back code; leave DB backup for deliberate recovery.
             failed=root.with_name(root.name+".failed-"+timestamp)

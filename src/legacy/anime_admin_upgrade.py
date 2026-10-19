@@ -28,7 +28,8 @@ def _version(root):
 
 
 def upgrade(root, *, service="anime-discovery.service", branch="develop", db_path=None,
-            service_manager="systemctl", runner=command):
+            service_manager="systemctl", runner=command,verbose=False,log=None,
+            readiness_attempts=15,sleep=None):
     """Fast-forward only, SQLite backup, service restart, read-only DB check.
 
     No database restoration is attempted automatically if an upgrade fails;
@@ -36,6 +37,13 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
     migration has taken place. An unsuccessful restart restores the previous
     Git commit and retries the prior service.
     """
+    import time
+    sleep=sleep or time.sleep
+    report=log if log is not None else (lambda message: None)
+    def progress(message):
+        if verbose:
+            report("[upgrade] "+message)
+    progress("Validating Git checkout and release branch")
     root=Path(root).resolve()
     if not (root/".git").exists():
         raise ValueError("Upgrade requires a Git checkout")
@@ -45,6 +53,7 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
     if current_branch!=branch:
         raise ValueError("Upgrade requires the deployed "+branch+" branch (found "+current_branch+")")
     previous=runner("git","rev-parse","HEAD",cwd=root)
+    progress("Fetching "+branch+" from origin")
     runner("git","fetch","origin",branch,cwd=root)
     latest=runner("git","rev-parse","FETCH_HEAD",cwd=root)
     if latest==previous:
@@ -71,8 +80,10 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
     stopped=False
     advanced=False
     try:
+        progress("Stopping "+service)
         runner(service_manager,"stop",service)
         stopped=True
+        progress("Fast-forwarding application checkout")
         runner("git","merge","--ff-only","FETCH_HEAD",cwd=root)
         advanced=True
         # No schema migration in version 1. Refuse starting against an unknown version.
@@ -83,8 +94,18 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
                     raise ValueError("Unsupported database schema; original backup preserved")
                 if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                     raise ValueError("Database failed integrity check")
+        progress("Starting "+service)
         runner(service_manager,"start",service)
-        runner(service_manager,"is-active","--quiet",service)
+        progress("Waiting for service readiness")
+        for attempt in range(readiness_attempts):
+            try:
+                runner(service_manager,"is-active","--quiet",service)
+                progress("Service active; upgrade completed")
+                break
+            except Exception:
+                if attempt==readiness_attempts-1:
+                    raise RuntimeError("Service not active after "+str(readiness_attempts)+" readiness checks") from None
+                sleep(1)
     except BaseException:
         if advanced:
             # Only rewind Git if the checkout is exactly the version we moved to.
