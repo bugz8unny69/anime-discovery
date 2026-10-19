@@ -53,7 +53,9 @@ def _existing_setup(account):
     if settings_file.is_symlink() or secrets_file.is_symlink():
         raise ValueError("Configuration symlinks are not accepted")
     if secrets_file.stat().st_mode & 0o077:
-        raise ValueError("secrets.json must be mode 0600 before adopting configuration")
+        if ask("Existing secrets.json permissions are too open; restrict to 0600? (yes/no)","no").lower()!="yes":
+            raise ValueError("secrets.json must be mode 0600 before adopting configuration")
+        os.chmod(secrets_file,0o600)
     print("Found existing Anime Discovery configuration; keeping both files.")
     preview=migrate(CONFIG_DIR,apply=False)
     if not preview["ready"]:
