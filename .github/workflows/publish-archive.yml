@@ -1,0 +1,38 @@
+name: Publish downloadable archive
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check Python source
+        run: python3 -m compileall -q src/legacy
+      - name: Build versioned, self-contained application archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA:0:12}"
+          tag="build-${short}"
+          mkdir -p dist
+          git archive --format=tar --prefix=anime-discovery/ HEAD | gzip -n > "dist/anime-discovery-${tag}.tar.gz"
+          git archive --format=zip --prefix=anime-discovery/ HEAD > "dist/anime-discovery-${tag}.zip"
+          (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          echo "RELEASE_TAG=${tag}" >> "$GITHUB_ENV"
+      - name: Publish immutable package assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" dist/* \
+            --title "Anime Discovery $RELEASE_TAG" \
+            --notes "VM-ready source archive for first installation. Includes deploy/install-homelab.py, admin CLI, and SHA256SUMS. Private repository: authenticate to download release assets. Never contains VM settings or secrets." \
+            --target "$GITHUB_SHA"
