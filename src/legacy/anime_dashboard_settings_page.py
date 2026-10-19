@@ -50,7 +50,7 @@ def settings_page(directory):
             out+='</label>'
         out+='<label class="setting-field"><span>'+term+'</span><span class="key-control">'
         out+='<input type="password" name="credential" autocomplete="new-password" spellcheck="false" placeholder="'+("Saved "+term+" ••••••••" if present else "Enter "+term)+'" aria-label="'+term+'">'
-        out+='<button type="button" class="toggle-secret" aria-label="Show or hide '+term+'" title="Show or hide '+term+'">◉</button></span></label>'
+        out+='<button type="button" class="toggle-secret" aria-label="Show or hide '+term+'" title="Show or hide '+term+'">👁</button></span></label>'
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
         out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
