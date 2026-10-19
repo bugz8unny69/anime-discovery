@@ -18,6 +18,12 @@ def set_setting(directory, dotted_key, value):
     with lock_path.open('a+b') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
         try:
+            if os.geteuid()==0:
+                # Root-run admin actions must not leave a root-owned lock that
+                # prevents the non-root service account editing settings later.
+                owner=(directory/'settings.json').stat()
+                os.fchown(lock.fileno(),owner.st_uid,owner.st_gid)
+                os.fchmod(lock.fileno(),0o600)
             return _set_setting_locked(directory,dotted_key,value)
         finally:
             fcntl.flock(lock,fcntl.LOCK_UN)
@@ -43,7 +49,9 @@ def _set_setting_locked(directory, dotted_key, value):
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-        os.chmod(tmp,path.stat().st_mode & 0o777)
+        existing=path.stat()
+        os.chmod(tmp,existing.st_mode & 0o777)
+        os.chown(tmp,existing.st_uid,existing.st_gid)
         os.replace(tmp,path)
         dfd=os.open(directory,os.O_RDONLY)
         try: os.fsync(dfd)

@@ -1,6 +1,6 @@
 """Interactive, zero-flag Anime Discovery homelab installer.
 
-Run with sudo from the checked-out repository. All application runtime
+Run with sudo from the extracted release archive or a checkout. All application runtime
 preferences are stored in settings.json and secrets.json, never environment
 variables or worker command-line switches.
 """
@@ -53,7 +53,9 @@ def _existing_setup(account):
     if settings_file.is_symlink() or secrets_file.is_symlink():
         raise ValueError("Configuration symlinks are not accepted")
     if secrets_file.stat().st_mode & 0o077:
-        raise ValueError("secrets.json must be mode 0600 before adopting configuration")
+        if ask("Existing secrets.json permissions are too open; restrict to 0600? (yes/no)","no").lower()!="yes":
+            raise ValueError("secrets.json must be mode 0600 before adopting configuration")
+        os.chmod(secrets_file,0o600)
     print("Found existing Anime Discovery configuration; keeping both files.")
     preview=migrate(CONFIG_DIR,apply=False)
     if not preview["ready"]:
@@ -66,16 +68,31 @@ def _existing_setup(account):
         migrated=migrate(CONFIG_DIR,apply=True)
         print("Settings backup:",migrated["backup"])
     config=load_config(CONFIG_DIR)
-    # A service account must read secrets. Never silently chmod/chown existing files.
-    if os.geteuid()==0 and account.pw_uid!=0:
-        st=secrets_file.stat()
-        if st.st_uid!=account.pw_uid:
-            raise ValueError("Existing secrets.json is not owned by service account "+
-                             account.pw_name+"; fix ownership explicitly before installation")
-        for path in (CONFIG_DIR,settings_file):
-            st=path.stat()
-            if st.st_uid!=account.pw_uid and not (st.st_mode & 0o004):
-                raise ValueError(str(path)+" cannot be read by service account "+account.pw_name)
+    # Correct only known application configuration paths, with confirmation.
+    # Never rewrite secrets or recursively chown unrelated directories.
+    fixes=[]
+    for path,mode in ((CONFIG_DIR,0o750),(settings_file,0o640),(secrets_file,0o600)):
+        meta=path.stat()
+        if (meta.st_uid,meta.st_gid,meta.st_mode & 0o777)!=(account.pw_uid,account.pw_gid,mode):
+            fixes.append((path,mode))
+    if fixes:
+        print('Service account needs these ownership/mode corrections:')
+        for path,mode in fixes:
+            print('  ',path,'=>',account.pw_name,oct(mode))
+        if ask('Apply the displayed permission corrections? (yes/no)','no').lower()!='yes':
+            raise ValueError('Configuration permission corrections declined')
+        for path,mode in fixes:
+            os.chown(path,account.pw_uid,account.pw_gid)
+            os.chmod(path,mode)
+    lock=CONFIG_DIR/".settings.lock"
+    if lock.exists():
+        if lock.is_symlink() or not lock.is_file():
+            raise ValueError("Unsafe settings lock file")
+        if (lock.stat().st_uid,lock.stat().st_gid)!=(account.pw_uid,account.pw_gid):
+            if ask("Fix settings lock ownership for the service user? (yes/no)","no").lower()!="yes":
+                raise ValueError("Settings lock ownership requires correction")
+            os.chown(lock,account.pw_uid,account.pw_gid)
+        os.chmod(lock,0o600)
     return config
 
 
@@ -137,13 +154,18 @@ def main():
     existing=settings_file.exists() or secrets_file.exists()
     if existing and not (settings_file.is_file() and secrets_file.is_file()):
         raise SystemExit("Partial existing configuration detected; both JSON files are required")
-    username=pwd.getpwuid(ROOT.stat().st_uid).pw_name
-    if username=="root":
-        username=ask("Non-root account to run Anime Discovery")
+    username=ask("Existing Linux service account", "anime-discovery")
     account=pwd.getpwnam(username)
     if account.pw_uid==0:
         raise ValueError("Service account must be non-root")
-    print("Installing Anime Discovery for account:",username)
+    media=grp.getgrnam("media")
+    if media.gr_gid!=1002:
+        raise ValueError("Expected media GID 1002; found "+str(media.gr_gid)+". Check the VM group configuration")
+    if username not in media.gr_mem and account.pw_gid!=media.gr_gid:
+        raise ValueError("Service account must belong to media (GID 1002) before installation")
+    print("Installing Anime Discovery for account:",username,"and media GID:",media.gr_gid)
+    if not os.access(ROOT,os.X_OK):
+        raise ValueError("Application directory not accessible")
     config=_existing_setup(account) if existing else _new_setup(account)
     db_path=_validate_install_settings(config)
     db_path.parent.mkdir(mode=0o750,parents=True,exist_ok=True)
@@ -153,10 +175,12 @@ def main():
         raise ValueError("Database parent directory is not writable")
     if db_path.parent==DATA_DIR and db_path.parent.stat().st_uid!=account.pw_uid:
         os.chown(db_path.parent,account.pw_uid,account.pw_gid)
+    if db_path.parent.stat().st_uid!=account.pw_uid and not (db_path.parent.stat().st_mode & 0o002):
+        raise ValueError("Database directory must be writable by the service account")
     initialize(db_path)
     os.chown(db_path,account.pw_uid,account.pw_gid)
 
-    media_group="SupplementaryGroups=media\n" if any(g.gr_name=="media" for g in grp.getgrall()) else ""
+    media_group="SupplementaryGroups=media\n"
     service="""[Unit]
 Description=Anime Discovery dashboard, Autobrr intake and acquisition workers
 After=network-online.target
