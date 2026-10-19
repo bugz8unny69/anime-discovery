@@ -12,6 +12,9 @@ from anime_webhook_processing import receive
 from anime_async_daemon import claim, finish
 from anime_acquisition_handler import make_acquisition_handler
 from test_anime_acquisition_end_to_end import FakeQB
+# Included in the existing CI integration suite until test discovery is expanded.
+from test_anime_jellyfin_refresh import JellyfinRefreshTests
+from test_anime_admin_jellyfin import JellyfinAdminTests
 
 HASH="a"*40
 
