@@ -81,6 +81,7 @@ def main(argv=None):
 
     upgrade_cmd=commands.add_parser("upgrade",help="Upgrade Git checkout or extracted release archive")
     upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
+    upgrade_cmd.add_argument("--verbose",action="store_true",help="Show upgrade milestones and service readiness checks")
     commands.add_parser("status",help="Show installed version, service and database readiness")
 
     database=commands.add_parser("database",help="Database administration")
@@ -109,10 +110,6 @@ def main(argv=None):
     legacy_init.add_argument("--force",action="store_true")
 
     args=parser.parse_args(argv)
-    if os.geteuid()==0 and args.command in ("settings","upgrade","database"):
-        print("anime-discovery-admin: running as root; settings writes preserve existing"
-              " file ownership. Verify the anime-discovery service account can"
-              " access /etc/anime-discovery.", file=sys.stderr)
     try:
         if args.command=="upgrade":
             from anime_admin_upgrade import upgrade
@@ -121,11 +118,13 @@ def main(argv=None):
             root=Path(__file__).resolve().parents[2]
             if args.archive is not None:
                 from anime_admin_archive_upgrade import upgrade_archive
-                result=upgrade_archive(root,args.archive,db_path=args.db or configured_db)
+                result=upgrade_archive(root,args.archive,db_path=args.db or configured_db,
+                    verbose=args.verbose,log=lambda message: print(message,file=sys.stderr,flush=True))
             else:
                 if not (root/".git").exists():
                     raise ValueError("Archive installation: download the new release tar.gz and pass its local path to upgrade")
-                result=upgrade(root,db_path=args.db or configured_db)
+                result=upgrade(root,db_path=args.db or configured_db,
+                    verbose=args.verbose,log=lambda message: print(message,file=sys.stderr,flush=True))
             print(json.dumps(result,indent=2,sort_keys=True))
         elif args.command=="status":
             from anime_admin_upgrade import command
