@@ -18,6 +18,11 @@ class KeepTests(unittest.TestCase):
         self.db.execute("PRAGMA foreign_keys=ON")
         self.addCleanup(self.db.close)
         self.sid=self.db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb','123','Example')").lastrowid
+        self.nid=self.db.execute("INSERT INTO notifications(source,release_name,source_guid,info_hash,received_at) VALUES ('autobrr','Example E01','demo','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',0)").lastrowid
+        self.db.execute("INSERT INTO episode_dispatch(notification_id,series_id,season,episode,state) VALUES (?,?,1,1,'DONE')",(self.nid,self.sid))
+        stage=Path(self.tmp.name)/"episode.mkv"
+        stage.write_bytes(b"fixture")
+        self.db.execute("INSERT INTO torrent_recovery_records(notification_id,infohash,magnet_uri,staged_path,sha256,recorded_at) VALUES (?,'hash','magnet',?,'hash',0)",(self.nid,str(stage)))
         self.settings={"sonarr":{"enabled":True,"base_url":"https://sonarr.example","root_folder":"/mnt/media/Anime","quality_profile_id":4}}
         self.secrets={"sonarr_api_key":"not-a-live-key"}
     def test_keep_persists_only_after_confirmation(self):
