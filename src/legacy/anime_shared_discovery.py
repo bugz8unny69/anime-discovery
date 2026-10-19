@@ -115,9 +115,12 @@ def handler_factory(db_path,client_factory):
             request=json.loads(job["payload_json"])
             if set(request)!={"title","tvdb_id","anidb_id","season","up_to","origin"}:
                 return "NEEDS_REVIEW"
-            with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
-                db.execute("PRAGMA foreign_keys=ON")
-                result=await asyncio.to_thread(search_once,db,request,client_factory())
+            def execute():
+                with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
+                    db.execute("PRAGMA foreign_keys=ON")
+                    db.execute("PRAGMA busy_timeout=10000")
+                    return search_once(db,request,client_factory())
+            result=await asyncio.to_thread(execute)
             return result["state"]
         except (ValueError,KeyError,TypeError,json.JSONDecodeError):
             return "NEEDS_REVIEW"
