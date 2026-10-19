@@ -1,5 +1,6 @@
 """Small writable homelab UI and Autobrr inbox using the unified database."""
 import argparse
+import base64
 import hashlib
 import hmac
 import html
@@ -27,7 +28,16 @@ def app(db_path, token):
             self.wfile.write(data)
 
         def authorized(self):
-            return hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token)
+            auth = self.headers.get("Authorization", "")
+            if hmac.compare_digest(auth, "Bearer " + token):
+                return True
+            if auth.startswith("Basic "):
+                try:
+                    credentials = base64.b64decode(auth[6:], validate=True).decode("utf-8")
+                    return hmac.compare_digest(credentials, "anime:" + token)
+                except (ValueError, UnicodeDecodeError):
+                    return False
+            return False
 
         def database(self):
             db = sqlite3.connect(db_path, isolation_level=None, timeout=10)
@@ -49,7 +59,10 @@ def app(db_path, token):
 
         def do_GET(self):
             if not self.authorized():
-                return self.send(401, "Bearer token required", "text/plain")
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Anime Discovery"')
+                self.end_headers()
+                return
             if urlsplit(self.path).path != "/":
                 return self.send(404, "Not found", "text/plain")
             with self.database() as db:
@@ -79,13 +92,15 @@ def app(db_path, token):
             <input name="episode" type="number" min="1" placeholder="Episode" required>
             <input name="magnet_uri" placeholder="Magnet URI" size="55" required>
             <button>Approve and queue</button></form>
-            <p>Use an API client with Authorization: Bearer TOKEN for requests; the browser form
-            requires a browser session that sends the same header.</p>"""
+            <p>Use an API client with Authorization: Bearer TOKEN for requests; browser login uses username anime and password TOKEN.</p>"""
             self.send(200, body)
 
         def do_POST(self):
             if not self.authorized():
-                return self.send(401, "Bearer token required", "text/plain")
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Anime Discovery"')
+                self.end_headers()
+                return
             route = urlsplit(self.path).path
             if route not in ("/webhook", "/approve"):
                 return self.send(404, "Not found", "text/plain")
