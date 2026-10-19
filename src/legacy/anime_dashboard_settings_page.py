@@ -8,10 +8,12 @@ FIELDS={
  "sonarr":["enabled","base_url","root_folder","quality_profile_name","quality_profile_id"],
  "shoko":["enabled","base_url","import_folder_id","poll_seconds","auto_link_verified"],
  "autobrr":[],
+ "tvdb":["enabled","base_url"],
  "ntfy":["enabled","server","topic","dashboard_url","reminder_hours"],
 }
 SECRETS={"jellyfin":"jellyfin_api_key","sonarr":"sonarr_api_key",
-         "shoko":"shoko_api_key","autobrr":"web_token","ntfy":"ntfy_token"}
+         "shoko":"shoko_api_key","autobrr":"web_token","ntfy":"ntfy_token",
+         "tvdb":"tvdb_api_key"}
 def esc(value):
     return html.escape(str(value),quote=True)
 
@@ -54,6 +56,7 @@ def settings_page(directory):
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
         out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
+    out+='<section class="panel"><h2>AniDB</h2><p class="muted">AniDB is currently used through public title and Anime-Lists identity data. This installation has no AniDB API key or independent enable/disable setting. Identity lookups are not yet connected to the unified intake worker.</p></section>'
     out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Save &amp; Apply reports when a restart is required. Refresh discards unsaved edits.</p></section>'
     out+="""<script>
 let dirty=false;
