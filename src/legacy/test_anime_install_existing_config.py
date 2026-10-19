@@ -33,7 +33,7 @@ class AdoptExistingConfigTests(unittest.TestCase):
         (self.root/"Anime-Trial").mkdir()
         (self.config/"settings.json").write_text(json.dumps(old))
         (self.config/"secrets.json").write_text(json.dumps({
-            "web_token":"original-web-token","qbittorrent_password":"original-pass"}))
+            "web_token":"original-web-token","admin_password":"independent-admin-password","qbittorrent_password":"original-pass"}))
         os.chmod(self.config/"secrets.json",0o600)
         self.secrets_bytes=(self.config/"secrets.json").read_bytes()
         self.patch=patch.object(installer,"CONFIG_DIR",self.config)
