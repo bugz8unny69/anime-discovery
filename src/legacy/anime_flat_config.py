@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
     "web": {"host": "0.0.0.0", "port": 8765},
     "storage": {"download_root": "", "trial_root": ""},
-    "identity": {"reuse_verified_cache": True},
+    "identity": {"reuse_verified_cache": True, "series_map": {}},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "jellyfin": {"write_trial_nfo": True},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
@@ -68,6 +68,25 @@ def validate_config(settings,secrets,*,directory=None):
                          ("shoko","enabled"),("shoko","auto_link_verified")):
         if type(result[section][key]) is not bool:
             raise ValueError("Invalid boolean setting: "+section+"."+key)
+    series_map = result["identity"]["series_map"]
+    if not isinstance(series_map,dict) or len(series_map)>500:
+        raise ValueError("identity.series_map must be a mapping with at most 500 aliases")
+    seen = set()
+    for alias, mapping in series_map.items():
+        if not isinstance(alias,str) or not alias.strip() or len(alias)>200:
+            raise ValueError("Invalid series alias")
+        if alias.strip().casefold() in seen:
+            raise ValueError("Duplicate series alias")
+        seen.add(alias.strip().casefold())
+        if not isinstance(mapping,dict) or set(mapping)-{"tvdb_id","anidb_id","season"}:
+            raise ValueError("Invalid mapping for "+alias)
+        for key in ("tvdb_id","anidb_id"):
+            value = mapping.get(key)
+            if type(value) not in (str,int) or not str(value).isdigit() or int(value)<=0:
+                raise ValueError("Invalid "+key+" for "+alias)
+        season = mapping.get("season",1)
+        if type(season) is not int or season<=0:
+            raise ValueError("Invalid season for "+alias)
     if not isinstance(result["shoko"]["base_url"],str):
         raise ValueError("Invalid Shoko URL")
     if type(result["shoko"]["poll_seconds"]) is not int or result["shoko"]["poll_seconds"]<10:
