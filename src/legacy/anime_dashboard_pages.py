@@ -161,21 +161,22 @@ five seconds. Items waiting for episode identity have not entered the worker que
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
     out+='''<table><thead><tr><th>Received</th><th>Release / Anime</th>
-<th class="hide-mobile">Source</th><th>Episode</th><th>Status</th><th>Activity details</th></tr>
+<th class="hide-mobile">Source</th><th>Episode</th><th>Status</th><th>Activity details</th><th>Actions</th></tr>
 </thead><tbody id="job-rows"></tbody></table>
 <div id="no-jobs" class="empty hidden">No release notifications yet.</div>
 </section>'''
     out+=pager("/jobs",result)
-    out+='''<section class="panel"><h2>Unmatched releases</h2>
-<p class="muted">If a release cannot be matched using your recognized-name
-mappings, it stays here until approved.</p>
+    out+='''<dialog id="resolve-dialog" aria-labelledby="resolve-title" style="background:#172335;color:#e8edf7;border:1px solid #52708f;border-radius:14px;padding:24px;width:min(540px,95vw)">
+<h2 id="resolve-title">Resolve unmatched release</h2><p id="resolve-release" class="muted"></p>
 <form method="post" action="/approve" class="forms">
-<input name="notification_id" type="number" min="1" placeholder="Job ID" required>
-<input name="tvdb_id" type="number" min="1" placeholder="TVDB ID" required>
-<input name="anidb_id" type="number" min="1" placeholder="AniDB ID" required>
-<input name="season" type="number" min="1" placeholder="Season" required>
-<input name="episode" type="number" min="1" placeholder="Episode" required>
-<button>Approve &amp; queue</button></form></section>'''
+<input type="hidden" name="notification_id" id="resolve-id">
+<label>TVDB series ID<input name="tvdb_id" type="number" min="1" required></label>
+<label>AniDB series ID<input name="anidb_id" type="number" min="1" required></label>
+<label>Season<input name="season" type="number" min="1" value="1" required></label>
+<label>Episode<input name="episode" type="number" min="1" required></label>
+<button type="submit">Approve &amp; queue</button>
+<button type="button" class="secondary" id="resolve-cancel">Cancel</button>
+</form></dialog>'''
     out+='<script>const initial='+json.dumps(result,separators=(",",":")).replace("<","\\u003c")+';'
     out+=r'''
 const tbody=document.getElementById("job-rows"),blank=document.getElementById("no-jobs");
@@ -186,7 +187,9 @@ tbody.replaceChildren();blank.classList.toggle("hidden",data.items.length!==0);
 for(const job of data.items){
 const tr=document.createElement("tr");
 td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
-let title=td(tr,job.release);if(job.series_title){title.appendChild(document.createElement("br"));
+let title=td(tr,job.release);
+if(typeof job.id==="number"){let id=document.createElement("small");id.className="muted";id.textContent=" · Notification #"+job.id;title.appendChild(id)}
+if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
 td(tr,job.source).classList.add("hide-mobile");
 td(tr,job.episode?"S"+String(job.season).padStart(2,"0")+"E"+String(job.episode).padStart(2,"0"):"—");
@@ -200,7 +203,32 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,job.activity_detail||"No further activity recorded");
 detail.classList.add("muted");
-tbody.appendChild(tr)}}
+let actions=document.createElement("td");
+if(job.can_resolve){
+  let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
+  btn.addEventListener("click",()=>{
+    document.getElementById("resolve-id").value=String(job.id);
+    document.getElementById("resolve-release").textContent=job.release+" · Notification #"+job.id;
+    document.getElementById("resolve-dialog").showModal();
+  });actions.appendChild(btn);
+}
+if(job.can_delete){
+  let btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent="Delete";
+  btn.addEventListener("click",async()=>{
+    if(!confirm("Delete unmatched notification #"+job.id+"? No torrent or media will be deleted."))return;
+    try{
+      let csrf=document.querySelector('input[name="_csrf"]')?.value;
+      let response=await fetch("/api/delete-notification",{method:"POST",credentials:"same-origin",
+        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+        body:JSON.stringify({notification_id:job.id})});
+      let outcome=await response.json();
+      if(!response.ok)throw Error(outcome.error||"Deletion failed");
+      await refresh();
+    }catch(error){alert(error.message)}
+  });actions.appendChild(btn);
+}
+tr.appendChild(actions);tbody.appendChild(tr)}}
+document.getElementById("resolve-cancel").addEventListener("click",()=>document.getElementById("resolve-dialog").close());
 update(initial);
 async function refresh(){if(document.hidden)return;
 try{let response=await fetch("/api/jobs"+location.search,{cache:"no-store"});
