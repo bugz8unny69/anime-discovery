@@ -9,6 +9,48 @@ from anime_external_actions import reserve, transition
 from anime_action_reconcile import reconcile
 from anime_qb_ownership import CATEGORY, reserve_marker, mark_external, confirm_marker
 
+def _rearm_removed_external(db, infohash, fingerprint, qb):
+    """Allow retry after a previously external exact-hash torrent is removed.
+
+    Only the initial pre-existing-torrent classification can be reset. Any
+    previously owned or uncertain submission remains subject to the original
+    reconciliation guard: a vanished torrent alone never proves safe retry.
+    """
+    from anime_external_actions import ensure_schema as ensure_actions
+    from anime_qb_ownership import ensure_schema as ensure_ownership
+    if db.in_transaction:
+        raise ValueError("Autocommit required")
+    ensure_actions(db)
+    ensure_ownership(db)
+    prior=db.execute("""SELECT a.state,a.fingerprint,o.status,o.marker
+        FROM external_actions a JOIN qb_torrent_ownership o
+          ON o.infohash=a.action_key
+        WHERE a.action_type='qbittorrent_submit' AND a.action_key=?""",
+        (infohash,)).fetchone()
+    if not prior or prior!=( "CONFIRMED", fingerprint, "EXTERNAL", None):
+        return False
+    # Read-only external check before the database lock; the normal submit
+    # path checks again immediately before any add.
+    if qb.contains_hash(infohash):
+        return False
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        action=db.execute("""DELETE FROM external_actions
+            WHERE action_type='qbittorrent_submit' AND action_key=?
+              AND fingerprint=? AND state='CONFIRMED'""",
+            (infohash,fingerprint))
+        owner=db.execute("""DELETE FROM qb_torrent_ownership
+            WHERE infohash=? AND status='EXTERNAL' AND marker IS NULL""",
+            (infohash,))
+        if action.rowcount!=1 or owner.rowcount!=1:
+            raise RuntimeError("Submission state changed during external-torrent retry")
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return True
+
+
 def submit_once(db, infohash, magnet_uri, qb, *, save_path=None):
     """Fail closed after uncertain submission; reconcile rather than retry.
 
@@ -25,6 +67,7 @@ def submit_once(db, infohash, magnet_uri, qb, *, save_path=None):
         raise ValueError("Magnet identity does not match verified infohash")
     fingerprint=hashlib.sha256(magnet_uri.encode()).hexdigest()
     action="qbittorrent_submit"
+    _rearm_removed_external(db,infohash,fingerprint,qb)
     token=reserve(db,action,infohash,fingerprint)
     if token is None:
         # Recover a crash after reservation without ever resubmitting blindly.
