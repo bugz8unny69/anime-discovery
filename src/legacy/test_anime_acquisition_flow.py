@@ -10,10 +10,16 @@ class FakeQB:
     def __init__(self):
         self.present=set()
         self.calls=0
+        self.category=""
+        self.tag=""
     def contains_hash(self,key):
         return key in self.present
-    def add_magnet(self,uri):
+    def torrent_identity(self,key):
+        return {"hash":key,"category":self.category,"tags":self.tag} if key in self.present else None
+    def add_magnet(self,uri,*,category,tag):
         self.calls+=1
+        self.category=category
+        self.tag=tag
         self.present.add(HASH)
 
 class FlowTests(unittest.TestCase):
