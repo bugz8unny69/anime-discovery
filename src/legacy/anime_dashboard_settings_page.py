@@ -56,6 +56,11 @@ def settings_page(directory):
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
         out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
+    out+='<section class="panel"><h2>Identity matching</h2>'
+    out+='<p class="muted">TVDB candidate title similarity only. Passing this score never bypasses the exact TVDB/AniDB episode verification gate.</p>'
+    out+='<form id="identity-score-form" class="forms">'
+    out+='<label>Minimum title match score (%) <input type="number" name="match_threshold_pct" min="50" max="100" step="1" value="'+str(settings["identity"]["match_threshold_pct"])+'" required></label>'
+    out+='<button type="submit">Save threshold</button><p id="identity-score-result" role="status"></p></form></section>'
     out+='<section class="panel"><h2>AniDB</h2>'
     out+='<form id="anidb-public"><label class="setting-field"><span>Enabled</span>'
     out+='<input type="checkbox" name="enabled"'+(' checked' if settings["anidb"]["enabled"] else '')+'></label>'
@@ -141,6 +146,15 @@ for(const form of forms){
     }catch(error){setStatus(error.message);}
   });
 }
+document.getElementById('identity-score-form')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const field=event.currentTarget.querySelector('input[name=match_threshold_pct]');
+  const output=document.getElementById('identity-score-result');
+  try{
+    const result=await post('/api/settings',{settings:{identity:{match_threshold_pct:Number(field.value)}}});
+    output.textContent=result.restart_required?'Saved. Worker restarts or next settings reload will use the new threshold.':'Saved.';
+  }catch(error){output.textContent=error.message;}
+});
 document.getElementById('anidb-public')?.addEventListener('submit',async event=>{
   event.preventDefault();
   const checkbox=event.currentTarget.querySelector('input[name=enabled]');
