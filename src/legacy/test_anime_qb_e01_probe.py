@@ -5,6 +5,7 @@ import unittest
 from anime_qb_e01_probe import start_e01_probe
 from anime_qb_manifest_intake import submit_poll_pause
 from anime_qb_ownership import OWNED, ownership
+from anime_trial_policy import record_verified_window, window_for
 from test_anime_qb_manifest_intake import FakeQB, HASH, MAGNET, manifest
 
 
@@ -50,6 +51,14 @@ class SelectionQB(FakeQB):
         return True
 
 
+class AbsoluteQB(SelectionQB):
+    def torrent_files(self, infohash):
+        files=super().torrent_files(infohash)
+        for row in files:
+            row["name"]="Season 02/Anime S02E%02d.mkv"%(row["index"]+13)
+        return files
+
+
 class E01ProbeTests(unittest.TestCase):
     def setUp(self):
         self.db=sqlite3.connect(":memory:", isolation_level=None)
@@ -61,6 +70,36 @@ class E01ProbeTests(unittest.TestCase):
         self.assertEqual(result["state"],"MANIFEST_READY")
         self.assertEqual(ownership(self.db,HASH),OWNED)
         return result
+
+    def test_provider_verified_absolute_episode_13_selects_canonical_e01(self):
+        qb=AbsoluteQB()
+        stopped=self.get_stopped(qb)
+        record_verified_window(self.db,tvdb_id=123,anidb_id=456,season=2,
+            unit_key="season",mode="SEASON",start_episode=1,
+            evidence_ref="anime-lists:123:456:season2")
+        trusted=window_for(self.db,tvdb_id=123,anidb_id=456,season=2)
+        with self.assertLogs("anime_discovery.trial",level="INFO") as logs:
+            started=start_e01_probe(self.db,HASH,qb,season=2,
+                stopped_manifest=stopped,verified_window=trusted,
+                verified_episode_map={ep:ep-12 for ep in range(13,25)})
+        self.assertEqual(started["episode"],1)
+        self.assertEqual(started["file_index"],0)
+        self.assertEqual(qb.start_calls,1)
+        self.assertEqual([qb.priorities[i] for i in range(12)],[1]+[0]*11)
+        self.assertIn("event=TORRENT_SELECTED","\n".join(logs.output))
+
+    def test_unrecorded_absolute_map_must_not_resume(self):
+        qb=AbsoluteQB()
+        stopped=self.get_stopped(qb)
+        fake={"tvdb_id":"123","anidb_id":"456","season":2,
+              "start":1,"end":6,"unit_key":"season","mode":"SEASON",
+              "evidence_ref":"not-durable"}
+        with self.assertRaises(PermissionError):
+            start_e01_probe(self.db,HASH,qb,season=2,stopped_manifest=stopped,
+                verified_window=fake,
+                verified_episode_map={ep:ep-12 for ep in range(13,25)})
+        self.assertEqual(qb.start_calls,0)
+        self.assertEqual(qb.priority_calls,0)
 
     def test_intake_e01_only_and_12_episode_pack(self):
         qb=SelectionQB()
