@@ -149,7 +149,12 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
     if series_map and not any(key in values for key in ("tvdb_id","anidb_id","season","episode")):
         mapped = resolve_release(name,series_map)
         if mapped:
-            values = {**values,**mapped}
+            # One-click Remembered Names are trusted *series* hints, NOT
+            # episode approvals. Leave the Autobrr notification in the
+            # identity worker until it validates this release's exact episode.
+            # Legacy manually entered mappings keep their existing semantics.
+            if not mapped.get("requires_episode_verification"):
+                values = {**values,**mapped}
             matching_aliases=[alias for alias,entry in series_map.items()
                 if str(entry["tvdb_id"])==str(mapped["tvdb_id"])
                 and str(entry["anidb_id"])==str(mapped["anidb_id"])]
