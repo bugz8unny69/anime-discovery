@@ -91,8 +91,8 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
                 sleep(interval)
         if not submitted:
             LOG.warning("event=TORRENT_INTAKE_DEFERRED reason=SUBMISSION_NOT_RECONCILED hash=%s",
-                    infohash[:12])
-        return {"state": "DEFERRED", "reason": "Submission not reconciled"}
+                        infohash[:12])
+            return {"state": "DEFERRED", "reason": "Submission not reconciled"}
     # submit_once may find an externally owned, same-hash torrent: never
     # pause, reprioritize or otherwise control another application's source.
     if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
@@ -102,10 +102,12 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
 
     current = qb.torrent_identity(infohash)
     if not current:
+        LOG.info("event=TORRENT_INTAKE_DEFERRED reason=TORRENT_NOT_VISIBLE hash=%s", infohash[:12])
         return {"state": "DEFERRED", "reason": "Torrent not yet visible"}
     if current.get("state") in STOPPED and not qb.torrent_files(infohash):
         # The earlier active discovery window timed out; try again without
         # adding another magnet. Adapter enforces no manifest on resume.
+        LOG.info("event=TORRENT_METADATA_RETRY reason=INCOMPLETE_MANIFEST hash=%s", infohash[:12])
         qb.resume_owned_metadata(infohash)
 
     for attempt in range(attempts):
@@ -120,6 +122,7 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
             stopped_files = qb.torrent_files(infohash)
             after = _validated_manifest(stopped_files)
             if before != after:
+                LOG.warning("event=TORRENT_INTAKE_REJECTED reason=MANIFEST_CHANGED hash=%s", infohash[:12])
                 raise ValueError("Torrent manifest changed during pause")
             if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
                 raise PermissionError("Torrent ownership changed during pause")
