@@ -18,8 +18,8 @@ def resolve_release(release_name, series_map):
         pattern = re.escape(alias.strip())
         pattern = re.sub(r"(?:\\\ |\\\.|\\_|\\-)+", r"[ ._-]+", pattern)
         prefix = r"^" + pattern
-        season_episode = re.match(prefix + r"[ ._-]+S(?P<s>\d{1,2})E(?P<e>\d{1,3})(?!\d)",title,re.I)
-        dash_episode = re.match(prefix + r"\s+-\s+(?P<e>\d{1,3})(?:v\d+)?(?!\d)",title,re.I)
+        season_episode = re.match(prefix + r"[ ._-]+S(?P<s>\d{1,2})E(?P<e>\d{1,4})(?!\d)",title,re.I)
+        dash_episode = re.match(prefix + r"\s+-\s+(?P<e>\d{1,4})(?:v\d+)?(?!\d)",title,re.I)
         if not season_episode and not dash_episode:
             continue
         season = int(season_episode.group("s")) if season_episode else identity.get("season",1)

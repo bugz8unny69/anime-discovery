@@ -1,5 +1,6 @@
 """Unified-database review reminder scheduler; never mutates acquisition state."""
 import sqlite3
+import re
 import time
 from anime_config_wakeup import wait_for_change
 import logging
@@ -11,6 +12,10 @@ from anime_ntfy import notify_best_effort
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS ntfy_delivery (
         notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+        sent_at INTEGER NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS ntfy_job_delivery (
+        job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),
         sent_at INTEGER NOT NULL
     )""")
 
@@ -28,10 +33,10 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
     now=int(time.time()) if now is None else int(now)
     ensure_schema(db)
     interval=max(3600,settings["ntfy"]["reminder_hours"]*3600)
-    # Only a committed, final identity result may trigger a review alert.
-    # Legacy/unmatched review rows without triage evidence are not eligible.
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
-        return {"sent":0,"pending":0}
+    # Identity and acquisition reviews are separate durable state machines.
+    # The former still requires finalized triage evidence; a terminal
+    # NEEDS_REVIEW acquisition job is independently actionable.
+    has_identity=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone()
     rows=db.execute("""SELECT n.id,n.release_name FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
         JOIN unified_identity_checks c ON c.notification_id=n.id
@@ -42,13 +47,28 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
           AND c.next_at=0
           AND c.checked_at>=n.received_at
           AND (sent.sent_at IS NULL OR sent.sent_at<=?)
-        ORDER BY n.id ASC LIMIT 50""",(now-interval,)).fetchall()
+        ORDER BY n.id ASC LIMIT 50""",(now-interval,)).fetchall() if has_identity else []
+    jobs=db.execute("""SELECT j.id,j.kind,j.last_error FROM daemon_jobs j
+        LEFT JOIN ntfy_job_delivery sent ON sent.job_id=j.id
+        WHERE j.state='NEEDS_REVIEW'
+          AND (sent.sent_at IS NULL OR sent.sent_at<=?)
+        ORDER BY j.id ASC LIMIT 50""",(now-interval,)).fetchall()
     sent=0
     for notification_id,title in rows:
         if sender(settings,secrets,notification_id,title):
             mark_sent(db,notification_id,now=now)
             sent+=1
-    return {"sent":sent,"pending":len(rows)}
+    for job_id,kind,last_error in jobs:
+        reason=str(last_error or "HANDLER_NEEDS_REVIEW")
+        reason=reason if re.fullmatch(r"[A-Za-z0-9_]{1,70}",reason) else "HANDLER_NEEDS_REVIEW"
+        safe_kind=str(kind) if re.fullmatch(r"[a-z_]{1,65}",str(kind)) else "acquisition"
+        summary="Job %d (%s) blocked: %s"%(job_id,safe_kind,reason)
+        if sender(settings,secrets,job_id,summary):
+            db.execute("""INSERT INTO ntfy_job_delivery(job_id,sent_at) VALUES (?,?)
+                ON CONFLICT(job_id) DO UPDATE SET sent_at=excluded.sent_at""",
+                (job_id,now))
+            sent+=1
+    return {"sent":sent,"pending":len(rows)+len(jobs)}
 
 def main():
     while True:

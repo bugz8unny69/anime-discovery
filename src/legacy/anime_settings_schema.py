@@ -43,6 +43,14 @@ SCHEMA = {
             help_text="Four octal digits, e.g. 2770: owner/group rwx, setgid for group inheritance. Group write permits sidecar subtitles."),
         "staged_file_mode":field("0640",label="File mode (octal)",
             help_text="Four octal digits, e.g. 0640: owner rw, group read, no access for others. Does not need group write for sidecar subtitles.")}},
+    "trial": {"dashboard":True,"title":"Trial download size limits",
+              "description":"Hard limits in decimal MB (1 MB = 1,000,000 bytes). When all six eligible episode sizes are known, only the combined trial limit applies; otherwise each incoming episode and the cumulative trial must fit their limits.","fields":{
+        "max_episode_mb":field(600,label="Maximum episode size when six sizes are not known (MB)",
+                               minimum=1,maximum=100000,
+                               help_text="Hard cap for episodes arriving separately or in an incomplete pack. Does not reject an oversized episode if all six verified files fit the full trial budget."),
+        "max_six_episode_mb":field(3000,label="Maximum total size of six episodes (MB)",
+                                   minimum=1,maximum=100000,
+                                   help_text="Hard cumulative budget for the same six-episode trial. The full six-file manifest is evaluated before torrent selection.")}},
     "identity": {"dashboard":True,"title":"Identity matching","fields":{
         "reuse_verified_cache":field(True,visible=False),
         "series_map":field({},visible=False),

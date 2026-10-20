@@ -17,6 +17,7 @@ from anime_xml_response_diagnostics import InvalidXMLResponse,log_bad_xml
 from pathlib import Path
 from anime_flat_config import load_config
 from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
+from anime_batch_selection import release_scope_hint
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
@@ -169,6 +170,16 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
             "matching_pairs":[],"crossref_diagnostics":[],"episode_mapping":None,"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
+    # Hints improve Needs Review diagnostics only: never approve from a
+    # torrent name, especially a batch without a verified file manifest.
+    hint=release_scope_hint(name)
+    report["release_scope_hint"]=hint
+    if hint["kind"] == "season_pack":
+        report["issues"].append("BATCH_FILE_MANIFEST_REQUIRED")
+    elif hint["kind"] == "special":
+        report["issues"].append("SEASON_ZERO_SPECIAL_OUTSIDE_TRIAL_SCOPE")
+    elif hint["kind"] == "ambiguous_season":
+        report["issues"].append("MIXED_OR_AMBIGUOUS_SEASON_HINT")
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
     if not settings.get("anidb",{}).get("enabled",True):
@@ -201,18 +212,31 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("NO_TVDB_SEARCH_RESULTS")
     if errors:
         raise RuntimeError("TVDB search incomplete")
-    if len(candidates)>10:
-        report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
-        return report
-    token=login(secrets["tvdb_api_key"])
+    # Search results must pass the title threshold before being counted as
+    # genuinely ambiguous. Low-scoring noise cannot suppress a valid match.
     accepted={r["tvdb_id"] for r in report["candidate_scores"] if r["passed"]}
     report["workflow"].append({"step":"Title score filter","passed":len(accepted),
                                 "rejected":len(candidates)-len(accepted)})
     if not accepted:
         report["issues"].append("ALL_TVDB_TITLES_BELOW_THRESHOLD")
         return report
+    if len(accepted)>10:
+        report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
+        return report
+    token=login(secrets["tvdb_api_key"])
     aid_set={str(x["anidb_id"]) for x in rows}
-    for candidate in candidates[:10]:
+    # Anime-Lists independently corroborates series ID pairs even if TVDB
+    # lacks an AniDB remote ID. Parse the trusted cached XML exactly once.
+    verified_xml_pairs={}
+    if mapping_xml is not None:
+        root=ET.fromstring(mapping_xml)
+        if root.tag!="anime-list":
+            raise ValueError("Invalid Anime-Lists cross-reference root")
+        for node in root.findall("anime"):
+            aid=node.get("anidbid")
+            if aid in aid_set:
+                verified_xml_pairs.setdefault(aid,[]).append(node.get("tvdbid"))
+    for candidate in candidates:
         tid=str(candidate["tvdb_id"])
         if tid not in accepted:
             continue
@@ -233,14 +257,16 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                                               "MAPPING_PARSE_FAILURE") from None
                 if resolved is not None:
                     mapped[aid]=resolved
-        match=aid_set.intersection(provider_ids)|set(mapped)
+        xml_pairs={aid for aid in aid_set
+                   if verified_xml_pairs.get(aid)==[tid]}
+        match=aid_set.intersection(provider_ids)|set(mapped)|xml_pairs
         report["crossref_diagnostics"].append({
             "tvdb_id":tid,"media_type":media_type,
             "media_labels":media_labels[:8],
             "explicit_anidb_ids":sorted(provider_ids)[:8],
             "anidb_candidate_ids":sorted(aid_set)[:10],
             "matching_anidb_ids":sorted(match),
-            "anime_lists_anidb_ids":sorted(mapped),
+            "anime_lists_anidb_ids":sorted(set(mapped)|xml_pairs),
             "reason":("EXPLICIT_ANIDB_MATCH" if match else
                       "TVDB_ANIDB_ID_CONFLICT" if provider_ids else
                       "TVDB_ANIDB_REMOTE_ID_MISSING")})
@@ -331,6 +357,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     for nid,title,attempts in selected:
         attempts+=1
         retry_delay=None
+        mapping_xml=None
         stage="IDENTITY_RESOLUTION" if probe else "ANIDB_TITLES"
         try:
             if probe:
@@ -354,6 +381,14 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report=investigate(title,settings,secrets,catalog,
                                    mapping_xml=mapping_xml,anidb_resolve=direct)
             decision=report["decision"]
+            # The release name alone never authorizes season-pack acquisition.
+            # Only this network-backed identity worker can promote a pending
+            # Autobrr batch after a pinned alias and independent pair agree.
+            if not probe and mapping_xml is not None and decision!="AUTO_VERIFIED":
+                from anime_batch_verified_intake import authorize_verified_batch
+                if authorize_verified_batch(db,nid,report,settings,mapping_xml):
+                    decision="BATCH_VERIFIED"
+                    report["decision"]=decision
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
                 rule=report.get("episode_mapping")
@@ -438,7 +473,9 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 next_at=excluded.next_at,decision=excluded.decision,
                 evidence_json=excluded.evidence_json""",
                 (nid,now,attempts,now+(retry_delay if retry_delay is not None else min(3600,60*2**attempts)) if retry else 0,decision,safe))
-            if not retry and decision!="AUTO_VERIFIED":
+            if decision=="BATCH_VERIFIED":
+                db.execute("UPDATE notifications SET status='APPROVED_BATCH' WHERE id=? AND status='IDENTIFYING'",(nid,))
+            elif not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
         LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
                  nid,attempts,decision,retry)

@@ -14,7 +14,7 @@ from anime_trial_staging import staged_destination
 
 def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
                     download_root, trial_root, title, tvdb_id, english_title=None,
-                    staged_owner="",staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
+                    staged_owner="",staged_group="", staged_directory_mode="2770", staged_file_mode="0640", selected_file_index=None):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     approval=approved_dispatch(db,notification_id)
@@ -34,6 +34,17 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
         raise
     if torrent.get("progress")!=1 or torrent.get("state") not in ("uploading","stalledUP","pausedUP","queuedUP","forcedUP"):
         return {"state":"DEFERRED","reason":"Torrent not in completed state"}
+    if selected_file_index is not None:
+        # qB manifest admission has already selected the unique video.
+        if type(selected_file_index) is not int or selected_file_index<0:
+            raise ValueError("Invalid selected file index")
+        selected=[entry for entry in torrent.get("files",[])
+                  if isinstance(entry,dict) and entry.get("index")==selected_file_index]
+        if len(selected)!=1:
+            raise ValueError("Approved selected video missing from qB inventory")
+        if selected[0].get("progress")!=1:
+            return {"state":"DEFERRED","reason":"Selected video still downloading"}
+        torrent={**torrent,"files":selected}
     source=verified_media(torrent,download_root)
     # Source-first checks are inside stage_claimed; no NFO failure deletes media.
     try:

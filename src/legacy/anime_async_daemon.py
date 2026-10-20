@@ -166,8 +166,28 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                outcome="DEFERRED"
-                reason=type(exc).__name__
+                # A verified hard size violation cannot fix itself via retry.
+                # Keep the source as-is and create an actionable terminal job
+                # review, rather than spinning forever in DEFERRED.
+                from anime_trial_size_policy import TrialSizeRejected
+                from anime_batch_completion import BatchNeedsReview
+                if isinstance(exc, TrialSizeRejected):
+                    outcome="NEEDS_REVIEW"
+                    reason=exc.reason
+                elif isinstance(exc, BatchNeedsReview):
+                    import re
+                    outcome="NEEDS_REVIEW"
+                    reason=re.sub(r"[^A-Z0-9_]+","_",str(exc).upper()).strip("_")[:70]
+                    if not reason:
+                        reason="BATCH_NEEDS_REVIEW"
+                else:
+                    outcome="DEFERRED"
+                    reason=type(exc).__name__
+            if outcome=="NEEDS_REVIEW":
+                import logging
+                logging.getLogger("anime_discovery.trial").warning(
+                    "event=ACQUISITION_NEEDS_REVIEW reason=%s job=%d kind=%s",
+                    reason or "HANDLER_NEEDS_REVIEW",job["id"],job["kind"])
             with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
                 try:
                     finish(db,job["id"],job["lease_token"],outcome,reason=reason)

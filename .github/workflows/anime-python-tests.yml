@@ -38,6 +38,20 @@ jobs:
             test_anime_handler_routing \
             test_anime_dispatch_audit \
             test_anime_qb_api \
+            test_anime_qb_version_compat \
+            test_anime_qb_manifest_intake \
+            test_anime_qb_e01_probe \
+            test_anime_qb_size_gate \
+            test_anime_batch_completion \
+            test_anime_batch_worker \
+            test_anime_single_size_intake \
+            test_anime_batch_identity_handoff \
+            test_anime_batch_selection \
+            test_anime_trial_policy \
+            test_anime_trial_size_policy \
+            test_anime_verified_trial \
+            test_anime_verified_episode_map \
+            test_anime_release_title_cleanup \
             test_anime_staging_rollback \
             test_anime_nfo_repair \
             test_anime_source_first \

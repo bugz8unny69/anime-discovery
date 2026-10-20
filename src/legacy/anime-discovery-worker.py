@@ -5,6 +5,7 @@ jobs use the latest valid settings/secrets without restarting the worker or
 interrupting in-flight transfers.
 """
 import asyncio
+import logging
 from pathlib import Path
 
 from anime_flat_config import load_config
@@ -14,6 +15,7 @@ from anime_async_daemon import run_workers
 from anime_qb_api import QBittorrentAPI
 from anime_prowlarr_search import ProwlarrClient
 from anime_shared_discovery import handler_factory
+from anime_batch_worker import handler_factory as batch_handler_factory
 from anime_jellyfin_refresh import refresh_library
 
 
@@ -65,7 +67,8 @@ def runtime_handlers(db_path, initial_config):
             staged_owner=settings["storage"].get("staged_owner",""),
             staged_group=settings["storage"].get("staged_group",""),
             staged_directory_mode=settings["storage"].get("staged_directory_mode","2770"),
-            staged_file_mode=settings["storage"].get("staged_file_mode","0640"))
+            staged_file_mode=settings["storage"].get("staged_file_mode","0640"),
+            size_settings=settings["trial"])
         return await live["claimed_acquisition"](job)
 
     async def gap_search(job):
@@ -77,12 +80,32 @@ def runtime_handlers(db_path, initial_config):
                                   secrets["prowlarr_api_key"])
         return await handler_factory(db_path,prowlarr_factory)(job)
 
+    async def batch(job):
+        settings,secrets=configuration(job)
+        # Exactly the same immutable infrastructure-root check used by
+        # the existing single-episode acquisition handler.
+        if (settings["daemon"]["database_path"]!=str(db_path) or
+            any(settings["storage"][key]!=storage[key]
+                for key in ("download_root","trial_root"))):
+            return "BLOCKED"
+        qb_settings=settings["qbittorrent"]
+        def qb_factory(_job):
+            client=QBittorrentAPI(qb_settings["base_url"],allow_writes=True)
+            client.login(qb_settings["username"],secrets["qbittorrent_password"])
+            return client
+        return await batch_handler_factory(db_path,qb_factory,
+            download_root=download_root,trial_root=trial_root,
+            settings_supplier=lambda _job:settings)(job)
+
     handlers["claimed_acquisition"]=acquire
     handlers["series_gap_search"]=gap_search
+    handlers["verified_batch_acquisition"]=batch
     return handlers
 
 
 def main():
+    logging.basicConfig(level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config=load_config()
     settings,secrets=config["settings"],config["secrets"]
     daemon,qb,storage=settings["daemon"],settings["qbittorrent"],settings["storage"]

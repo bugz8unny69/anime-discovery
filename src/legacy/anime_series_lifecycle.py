@@ -45,6 +45,15 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
         WHERE d.series_id=? AND d.state='DONE'""",(series_id,)).fetchall()
     if not any(path and Path(path).is_file() for (path,) in paths):
         raise ValueError("Keep requires an existing staged episode")
+    # Don't import E01 while E02–E06 from its same batch are still pending:
+    # that would freeze Sonarr's import manifest before its source matches
+    # the downloaded file selection, preventing safe final cleanup.
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_batch_executions'").fetchone():
+        unfinished=db.execute("""SELECT x.state FROM anime_batch_executions x
+            JOIN anime_batch_authorizations a ON a.notification_id=x.notification_id
+            WHERE a.tvdb_id=? AND x.state!='DONE' LIMIT 1""",(str(row[0]),)).fetchone()
+        if unfinished:
+            raise ValueError("Batch trial not yet fully staged; finish or review its acquisition job")
     if settings.get("tvdb",{}).get("enabled") is True:
         from anime_tvdb import lookup_tvdb
         resolved=lookup_tvdb(settings,secrets,row[0])

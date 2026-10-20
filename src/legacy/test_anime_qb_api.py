@@ -98,5 +98,102 @@ class QBApiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             QBittorrentAPI("http://user:password@localhost:8080")
 
+
+class PriorityOpener:
+    """Simulate an owned, stopped torrent whose priorities can be read back."""
+    def __init__(self, *, state="stoppedDL", owned=True, apply=True):
+        self.requests=[]
+        self.state=state
+        self.owned=owned
+        self.apply=apply
+        self.priorities={0:1,1:1,2:1}
+
+    def open(self,request,timeout=None):
+        from urllib.parse import parse_qs
+        self.requests.append(request)
+        url=request.full_url
+        if "/torrents/info?" in url:
+            row={"hash":"a"*40,"state":self.state,
+                 "category":"anime-discovery" if self.owned else "other",
+                 "tags":"ad-"+"f"*32 if self.owned else ""}
+            return Response(json.dumps([row]).encode())
+        if "/torrents/files?" in url:
+            rows=[{"index":i,"name":"Show S01E%02d.mkv"%(i+1),
+                   "priority":p} for i,p in self.priorities.items()]
+            return Response(json.dumps(rows).encode())
+        if "/torrents/filePrio" in url:
+            values=parse_qs(request.data.decode())
+            if self.apply:
+                for idx in values["id"][0].split("|"):
+                    self.priorities[int(idx)]=int(values["priority"][0])
+            return Response(b"Ok.")
+        raise AssertionError("Unexpected API endpoint "+url)
+
+
+class QBFileSelectionTests(unittest.TestCase):
+    def test_owned_stopped_torrent_selects_first_two_and_skips_third(self):
+        opener=PriorityOpener()
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+        result=qb.apply_stopped_file_selection("a"*40,
+                                              wanted_indices=[0,1],
+                                              skip_indices=[2])
+        self.assertEqual(result,{"wanted_indices":[0,1],"skip_indices":[2]})
+        self.assertEqual(opener.priorities,{0:1,1:1,2:0})
+        priority_calls=[r for r in opener.requests if "/filePrio" in r.full_url]
+        self.assertEqual(len(priority_calls),2)
+        self.assertIn(b"priority=0",priority_calls[0].data)
+        self.assertIn(b"priority=1",priority_calls[1].data)
+
+    def test_read_only_refuses_without_write(self):
+        opener=PriorityOpener()
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener)
+        with self.assertRaises(PermissionError):
+            qb.apply_stopped_file_selection("a"*40,
+                                            wanted_indices=[0],skip_indices=[1,2])
+        self.assertEqual(opener.requests,[])
+
+    def test_unowned_or_running_refuses_before_priority_write(self):
+        for opts in ({"owned":False},{"state":"downloading"}):
+            opener=PriorityOpener(**opts)
+            qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+            with self.assertRaises((PermissionError,RuntimeError)):
+                qb.apply_stopped_file_selection("a"*40,
+                                                wanted_indices=[0],skip_indices=[1,2])
+            self.assertFalse(any("/filePrio" in r.full_url for r in opener.requests))
+
+    def test_mismatched_or_partial_plan_refuses_without_priority_write(self):
+        for wanted,skipped in (([0],[1]),([0,1],[1,2]),([0,0],[1,2])):
+            opener=PriorityOpener()
+            qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+            with self.assertRaises(ValueError):
+                qb.apply_stopped_file_selection("a"*40,
+                                                wanted_indices=wanted,skip_indices=skipped)
+            self.assertFalse(any("/filePrio" in r.full_url for r in opener.requests))
+
+
+    def test_completed_probe_can_unlock_while_stopped_uploading(self):
+        # qBittorrent may mark the torrent complete for its initially
+        # selected E01, so the next priority transition sees a stoppedUP
+        # (or older pausedUP) state, not stoppedDL.
+        for state in ("stoppedUP","pausedUP"):
+            opener=PriorityOpener(state=state)
+            opener.priorities={0:1,1:0,2:0}
+            qb=QBittorrentAPI("http://localhost:8080",
+                             opener=opener,allow_writes=True)
+            plan=qb.apply_stopped_file_selection("a"*40,
+                                                wanted_indices=[0,1],
+                                                skip_indices=[2])
+            self.assertEqual(plan["wanted_indices"],[0,1])
+            self.assertEqual(opener.priorities,{0:1,1:1,2:0})
+
+    def test_write_ack_without_readback_confirmation_fails(self):
+        opener=PriorityOpener(apply=False)
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+        with self.assertRaisesRegex(RuntimeError,"priority verification"):
+            qb.apply_stopped_file_selection("a"*40,
+                                            wanted_indices=[0,1],skip_indices=[2])
+        self.assertEqual(opener.state,"stoppedDL")
+
+
 if __name__=="__main__":
     unittest.main()

@@ -76,6 +76,20 @@ class ManageTests(unittest.TestCase):
         manage(self.db,sid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=1)
         self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs WHERE id=?",(sid,)).fetchone()[0],"BLOCKED")
 
+    def test_explicit_admin_retry_of_batch_needs_review_is_audited(self):
+        enqueue(self.db,"verified_batch_acquisition","pack","{}")
+        jid=self.db.execute("SELECT id FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0]
+        entry=claim(self.db,now=100,allowed_kinds=["verified_batch_acquisition"])
+        finish(self.db,jid,entry["lease_token"],"NEEDS_REVIEW",
+               reason="TRIAL_TOTAL_EXCEEDED",now=101)
+        result=manage(self.db,jid,"retry",expected_state="NEEDS_REVIEW",
+                      expected_attempts=1,now=102)
+        self.assertEqual(result["state"],"READY")
+        self.assertEqual(latest_events(self.db)[jid]["previous_error"],
+                         "TRIAL_TOTAL_EXCEEDED")
+        self.assertEqual(self.db.execute("SELECT state,last_error FROM daemon_jobs WHERE id=?",
+                       (jid,)).fetchone(),("READY","TRIAL_TOTAL_EXCEEDED"))
+
     def test_active_leases_are_not_cancelable_even_when_expired(self):
         self.deferred()
         worker=claim(self.db,now=110,lease_seconds=30)
