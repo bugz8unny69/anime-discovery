@@ -71,6 +71,16 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(result["queued"],2)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM episode_dispatch").fetchone()[0],3)
 
+    def test_empty_gap_search_writes_journal_summary(self):
+        client=FakeProwlarr([])
+        request={"title":"Example Show","tvdb_id":"123","anidb_id":"456",
+                 "season":1,"up_to":12,"origin":"autobrr"}
+        with self.assertLogs("anime_discovery.trial",level="INFO") as logs:
+            result=search_once(self.db,request,client)
+        self.assertEqual(result["queued"],0)
+        self.assertIn("event=BACKFILL_SUMMARY", "\\n".join(logs.output))
+        self.assertIn("reason=NO_ELIGIBLE_CANDIDATES","\\n".join(logs.output))
+
     def test_duplicate_candidates_do_not_submit_twice(self):
         client=FakeProwlarr([release(1,HASH_A),release(1,HASH_A)])
         request={"title":"Example Show","tvdb_id":"123","anidb_id":"456",
