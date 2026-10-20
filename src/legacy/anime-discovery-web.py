@@ -487,7 +487,9 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         qb.login(cfg["username"],config["secrets"]["qbittorrent_password"])
                         sid=int(values["series_id"])
                         outcome=confirm(db,sid,config["settings"],config["secrets"],
-                                        approved=True,qb=qb)
+                                        approved=True,
+                                        expected_review_fingerprint=values.get("review_fingerprint"),
+                                        qb=qb)
                         return self.send(200,self.with_csrf(sonarr_cleanup_result_page(sid,outcome)))
                     elif route == "/series-check-sonarr":
                         if config_dir is None: raise ValueError("Sonarr configuration required")
