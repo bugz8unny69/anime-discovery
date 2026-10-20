@@ -59,7 +59,7 @@ def _stop_and_wait(qb, infohash, *, sleep):
     raise RuntimeError("Torrent did not stop in time; do not change file selection")
 
 
-def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0,
+def submit_poll_pause(db, infohash, magnet_uri, qb, *, save_path=None, attempts=10, interval=1.0,
                       sleep=time.sleep):
     """Submit once, poll ~once/sec for metadata, then pause and verify files.
 
@@ -78,7 +78,7 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
     if not callable(sleep) or db.in_transaction:
         raise ValueError("Autocommit and sleeper required")
 
-    submitted = submit_once(db, infohash, magnet_uri, qb)
+    submitted = submit_once(db, infohash, magnet_uri, qb, save_path=save_path)
     if not submitted:
         # The add may have succeeded before qB exposes the hash. Poll briefly
         # and reconcile its existing reservation; never issue another add.
