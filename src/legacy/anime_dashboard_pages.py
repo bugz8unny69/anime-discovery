@@ -449,6 +449,7 @@ def detail_page(detail):
         out+='</table>'
         if reconciliation["result"] in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
             out+='<p>Existing Sonarr files are registered, not yet verified as JP+EN suitable replacements. No cleanup is authorized. External or uncertain torrents are never deleted.</p>'
+            out+='<p><a href="/series-review-sonarr-cleanup?id='+str(series[0])+'">Review duplicate cleanup</a></p>'
     else:
         out+='<p>No Sonarr reconciliation check recorded yet.</p>'
     out+='<form method="post" action="/series-check-sonarr"><input type="hidden" name="series_id" value="'+str(series[0])+'"><button class="secondary">Check Sonarr now</button></form></section>'
