@@ -264,6 +264,11 @@ async function openTrace(notificationId){
     for(const candidate of ev.candidate_scores||[]){
       traceLine(body,"TVDB #"+candidate.tvdb_id+" · "+candidate.name+
         " · score "+candidate.score_pct+"% / "+candidate.threshold_pct+"% · "+candidate.reason);
+      traceLine(body,"Compared release: "+(candidate.best_query||"not available")+
+        " ↔ TVDB title: "+(candidate.best_candidate_title||"not available"));
+      if(candidate.candidate_titles?.length){
+        traceLine(body,"Provider titles: "+candidate.candidate_titles.join(" | "));
+      }
     }
     for(const step of ev.workflow||[]){
       traceLine(body,step.step+": "+JSON.stringify(Object.fromEntries(
