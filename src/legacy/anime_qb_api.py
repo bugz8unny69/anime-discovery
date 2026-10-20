@@ -101,6 +101,75 @@ class QBittorrentAPI:
             raise ValueError("Invalid qBittorrent torrent file inventory")
         return records
 
+
+    def apply_stopped_file_selection(self, infohash, *, wanted_indices, skip_indices):
+        """Set and read back all file priorities on an owned, STOPPED torrent.
+
+        This does not resume a torrent, and is not called by the live worker.
+        The caller must separately verify the app's durable ownership marker
+        and transactionally reserve the episode mapping. Any missing or
+        inconsistent metadata fails closed; never resume on an exception.
+        """
+        import re
+        infohash = _hash(infohash)
+        if not self.allow_writes:
+            raise PermissionError("qBittorrent writes disabled")
+        for indices in (wanted_indices, skip_indices):
+            if (not isinstance(indices, (list, tuple)) or
+                    any(type(x) is not int or x < 0 for x in indices) or
+                    len(set(indices)) != len(indices)):
+                raise ValueError("Invalid torrent file indices")
+        wanted = set(wanted_indices)
+        skipped = set(skip_indices)
+        if wanted & skipped:
+            raise ValueError("Overlapping wanted and skipped files")
+        detail = self.torrent_identity(infohash)
+        if not detail or detail.get("category") != "anime-discovery":
+            raise PermissionError("Not an Anime Discovery torrent")
+        tags = str(detail.get("tags") or "").split(",")
+        if not any(re.fullmatch(r"ad-[0-9a-f]{32}",tag.strip()) for tag in tags):
+            raise PermissionError("Owned torrent marker missing")
+        if detail.get("state") not in ("stoppedDL", "pausedDL"):
+            raise RuntimeError("Torrent must remain stopped before selection")
+        before = self.torrent_files(infohash)
+        indices_by_file = {}
+        for entry in before:
+            index = entry.get("index")
+            if (type(index) is not int or index < 0 or
+                    index in indices_by_file or
+                    type(entry.get("priority")) is not int):
+                raise ValueError("Incomplete qBittorrent file priorities")
+            indices_by_file[index] = entry["priority"]
+        if not indices_by_file or set(indices_by_file) != wanted | skipped:
+            raise ValueError("Selection must cover every torrent file exactly")
+        # Skip unwanted files BEFORE assigning wanted priorities.
+        for selection, priority in ((skipped, 0), (wanted, 1)):
+            if selection:
+                answer = self._request("torrents/filePrio", {
+                    "hash": infohash,
+                    "id": "|".join(str(x) for x in sorted(selection)),
+                    "priority": str(priority),
+                })
+                if answer.strip() not in (b"", b"Ok."):
+                    raise RuntimeError("File priority update not acknowledged")
+        after = self.torrent_files(infohash)
+        actual = {}
+        for entry in after:
+            index = entry.get("index")
+            if (type(index) is not int or index in actual or index < 0 or
+                    type(entry.get("priority")) is not int):
+                raise RuntimeError("Incomplete file priority readback")
+            actual[index] = entry["priority"]
+        if (set(actual) != set(indices_by_file) or
+                any(actual[index] != (1 if index in wanted else 0)
+                    for index in actual)):
+            raise RuntimeError("File priority verification failed; torrent must remain stopped")
+        detail_after = self.torrent_identity(infohash)
+        if (not detail_after or detail_after.get("state")
+                not in ("stoppedDL", "pausedDL")):
+            raise RuntimeError("Torrent became active during priority selection")
+        return {"wanted_indices": sorted(wanted), "skip_indices": sorted(skipped)}
+
     def add_magnet(self, magnet_uri, *, category=None, tag=None):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
             raise ValueError("Invalid magnet")
