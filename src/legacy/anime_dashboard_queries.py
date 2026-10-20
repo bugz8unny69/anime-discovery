@@ -65,9 +65,17 @@ def all_jobs(db, *,page=1,size=20):
                 codes=evidence.get("issues") or []
                 safe_codes=[x for x in codes if isinstance(x,str) and
                     len(x)<=100 and all(c.isalnum() or c=="_" for c in x)]
-                identity_checks[nid]=(decision,safe_codes[:3])
-            except (TypeError,ValueError):
-                identity_checks[nid]=("UNKNOWN",[])
+                batch=evidence.get("batch_authorization") or {}
+                scope=(evidence.get("release_scope_hint") or {}).get("kind")
+                batch_action=(batch.get("action","") if isinstance(batch,dict) else "")
+                if not isinstance(batch_action,str):
+                    batch_action=""
+                is_pack=(scope=="season_pack" or
+                         (isinstance(batch,dict) and batch.get("decision")=="BLOCKED"))
+                identity_checks[nid]=(decision,safe_codes[:3],is_pack,
+                                      batch_action[:240])
+            except (TypeError,ValueError,AttributeError):
+                identity_checks[nid]=("UNKNOWN",[],False,"")
     rows=db.execute("""SELECT n.id,n.source,n.release_name,n.received_at,n.status,
         d.season,d.episode,d.state,
         j.id,j.state,j.attempts,j.available_at,j.lease_until,j.last_error,r.staged_path,
@@ -111,8 +119,14 @@ def all_jobs(db, *,page=1,size=20):
         # An unmatched intake record is not an acquisition job. Make that
         # distinction visible instead of suggesting an idle worker.
         if status in ("RECEIVED","NEEDS REVIEW") and not job:
-            explanation=("Identity check finished; manual review is required. No acquisition job was created. "
-                         "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
+            _check=identity_checks.get(nid,("",[],False,""))
+            if _check[2]:
+                explanation=("Season-pack verification requires review; no batch download was authorized. "
+                             +(_check[3] or "Review its season hint, recognized title and independent provider evidence.")+
+                             " Do not assign an arbitrary single episode to a season pack.")
+            else:
+                explanation=("Identity check finished; manual review is required. No acquisition job was created. "
+                             "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="IDENTIFYING":
             explanation="Checking public AniDB titles and TVDB links. Identity is still in progress; NTFY alerts follow the finalized review status."
         elif status=="QUEUED":
@@ -126,7 +140,7 @@ def all_jobs(db, *,page=1,size=20):
         else:
             explanation=error or ("Current job state: "+status.lower())
         if status in ("IDENTIFYING","NEEDS REVIEW") and nid in identity_checks:
-            decision,codes=identity_checks[nid]
+            decision,codes,_is_pack,_action=identity_checks[nid]
             explanation+=" Latest identity check: "+str(decision)[:80]
             if codes:
                 explanation+="; "+", ".join(codes)
@@ -140,6 +154,7 @@ def all_jobs(db, *,page=1,size=20):
                         "source":source,"release":release,
                        "received_at":received,"status":status,
                        "can_resolve":status=="NEEDS REVIEW" and not dispatch and not job,
+                       "can_recheck":nstatus=="NEEDS_REVIEW" and not dispatch and not job,
                        "can_delete":status in ("NEEDS REVIEW","RECEIVED","IDENTIFYING") and not dispatch and not job,
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "", "activity_detail":explanation,

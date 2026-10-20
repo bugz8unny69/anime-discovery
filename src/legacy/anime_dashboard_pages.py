@@ -289,6 +289,25 @@ if(job.can_resolve){
     document.getElementById("resolve-dialog").showModal();
   });actions.appendChild(btn);
 }
+if(job.can_recheck){
+  let btn=document.createElement("button");btn.type="button";
+  btn.className="secondary";btn.textContent="Recheck identity";
+  btn.addEventListener("click",async()=>{
+    if(!confirm("Recheck verified provider identity for notification #"+job.id+"? No torrent will be submitted without successful verification."))return;
+    btn.disabled=true;
+    try{
+      const csrf=document.querySelector('input[name="_csrf"]')?.value;
+      const response=await fetch("/api/recheck-identity",{method:"POST",
+        credentials:"same-origin",
+        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+        body:JSON.stringify({notification_id:job.id})});
+      const outcome=await response.json();
+      if(!response.ok)throw Error(outcome.error||"Identity recheck failed");
+      await refresh();
+    }catch(error){alert(error.message);btn.disabled=false}
+  });
+  actions.appendChild(btn);actions.appendChild(document.createTextNode(" "));
+}
 if(job.can_delete){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent="Delete";
   btn.addEventListener("click",async()=>{

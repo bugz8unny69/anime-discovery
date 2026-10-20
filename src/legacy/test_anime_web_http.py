@@ -181,6 +181,27 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertEqual(sent,[nid])
             self.assertEqual(check_once(db,cfg,{},now=received+3,sender=sender)["sent"],0)
 
+    def test_identity_recheck_is_explicit_and_does_not_queue_acquisition(self):
+        from anime_webhook_processing import receive
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            packet=receive(db,{"source":"autobrr",
+                "release_name":"Example Anime S01 (Batch)",
+                "source_guid":"recheck-only","info_hash":HASH})
+            nid=packet["notification_id"]
+            db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",(nid,))
+        status,_,body=self.request("POST","/api/recheck-identity",
+                                    {"notification_id":nid})
+        self.assertEqual(status,200,body)
+        self.assertEqual(json.loads(body)["status"],"IDENTIFYING")
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM daemon_jobs WHERE subject_key=?",
+                (str(nid),)).fetchone()[0],0)
+        status,_,body=self.request("POST","/api/recheck-identity",
+                                    {"notification_id":nid})
+        self.assertEqual(status,409)
+        self.assertIn("Only terminal",json.loads(body)["error"])
+
     def test_unmatched_webhook_explains_no_worker_job(self):
         from anime_dashboard_queries import all_jobs
         payload={"source":"nyaa","release_name":"Unmatched release 02",
