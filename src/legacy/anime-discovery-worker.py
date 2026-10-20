@@ -5,6 +5,7 @@ jobs use the latest valid settings/secrets without restarting the worker or
 interrupting in-flight transfers.
 """
 import asyncio
+import logging
 from pathlib import Path
 
 from anime_flat_config import load_config
@@ -83,6 +84,8 @@ def runtime_handlers(db_path, initial_config):
 
 
 def main():
+    logging.basicConfig(level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config=load_config()
     settings,secrets=config["settings"],config["secrets"]
     daemon,qb,storage=settings["daemon"],settings["qbittorrent"],settings["storage"]
