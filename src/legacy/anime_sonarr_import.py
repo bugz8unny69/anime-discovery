@@ -3,7 +3,27 @@
 Never requests MOVE. No torrent deletion; cleanup requires separate ownership proof.
 """
 from pathlib import Path
+import logging
+from urllib.parse import quote
+
 from anime_sonarr import _request
+
+LOG = logging.getLogger("anime_discovery.sonarr")
+
+
+class SonarrImportNeedsReview(RuntimeError):
+    """Safe, actionable Sonarr candidate mismatch; no import was submitted."""
+
+    def __init__(self, reason, message):
+        self.reason = reason
+        super().__init__(message)
+
+
+def _candidate_review(reason, *, sonarr_id, item, count, message):
+    LOG.warning(
+        "event=SONARR_KEEP_REVIEW reason=%s sonarr_id=%s season=%s episode=%s candidates=%d",
+        reason, sonarr_id, item["season"], item["episode"], count)
+    raise SonarrImportNeedsReview(reason, message)
 
 def plan_staged_imports(db,series_id,*,trial_root):
     root=Path(trial_root).resolve(strict=True)
@@ -44,19 +64,65 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
             raise RuntimeError("Sonarr episode identity not unique")
         # Sonarr must have access to these exact staged files through a shared mount.
         candidates=_request(cfg["base_url"],key,"GET",
-            "manualimport?folder="+__import__("urllib.parse",fromlist=["quote"]).quote(str(Path(item["path"]).parent),safe=""),**kwargs)
+            "manualimport?folder="+quote(str(Path(item["path"]).parent),safe=""),**kwargs)
         if not isinstance(candidates,list):
             raise RuntimeError("Invalid Sonarr manual import candidates")
         matches_file=[c for c in candidates if c.get("path")==item["path"]
                       and c.get("series",{}).get("id")==sonarr_id
                       and any(e.get("id")==matches[0]["id"] for e in c.get("episodes",[]))]
         if len(matches_file)!=1:
-            raise RuntimeError("Sonarr did not identify exact staged file and episode")
+            # Distinguish Sonarr filesystem visibility from its identity
+            # parsing. Neither case may be fixed by guessing an episode or
+            # silently changing the candidate's verified series assignment.
+            same_path=[c for c in candidates if isinstance(c,dict)
+                       and c.get("path")==item["path"]]
+            same_series=[c for c in same_path if
+                         isinstance(c.get("series"),dict) and
+                         c["series"].get("id")==sonarr_id]
+            if not candidates:
+                reason="SOURCE_FOLDER_NOT_VISIBLE"
+                message=("Sonarr returned no importable files from Anime-Trial. "
+                         "Verify Sonarr can read the staged folder and its files "
+                         "using Wanted > Manual Import. Anime-Trial is a source, "
+                         "not the Sonarr root folder.")
+            elif not same_path:
+                reason="STAGED_FILE_PATH_NOT_VISIBLE"
+                message=("Sonarr did not return the exact Anime-Trial file path. "
+                         "Check that Sonarr and Anime Discovery see the staged "
+                         "folder at the same absolute path, including container "
+                         "mounts, and that Sonarr can read the file.")
+            elif not same_series:
+                reason="SERIES_IDENTITY_MISMATCH"
+                message=("Sonarr sees the staged file but associates it with "
+                         "another series or no series. Check the series TVDB "
+                         "identity in Sonarr and inspect Wanted > Manual Import.")
+            elif not any(any(isinstance(e,dict) and
+                             e.get("id")==matches[0]["id"]
+                             for e in c.get("episodes",[]))
+                         for c in same_series):
+                reason="EPISODE_IDENTITY_MISMATCH"
+                message=("Sonarr sees the staged file and series, but its "
+                         "episode mapping differs from Anime Discovery. "
+                         "Review Sonarr's season/episode numbering and the "
+                         "manual-import candidate before retrying Keep.")
+            else:
+                reason="AMBIGUOUS_IMPORT_CANDIDATES"
+                message=("Sonarr returned multiple candidates for the same "
+                         "staged file, series and episode. Review the manual "
+                         "import candidates before retrying Keep.")
+            _candidate_review(reason,sonarr_id=sonarr_id,item=item,
+                              count=len(candidates),message=message)
         candidate=matches_file[0]
         if candidate.get("rejections"):
-            raise RuntimeError("Sonarr rejected manual import candidate; review required")
+            _candidate_review(
+                "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,
+                count=len(candidates),
+                message="Sonarr rejected the manual-import candidate. Review its reasons in Wanted > Manual Import before retrying Keep.")
         if not candidate.get("quality") or not candidate.get("languages"):
-            raise RuntimeError("Sonarr import quality/language mapping incomplete")
+            _candidate_review(
+                "QUALITY_LANGUAGE_UNRESOLVED",sonarr_id=sonarr_id,item=item,
+                count=len(candidates),
+                message="Sonarr could not determine the staged episode quality or language. Review Wanted > Manual Import before retrying Keep.")
         selected.append({"path":item["path"],"seriesId":sonarr_id,
                          "episodeIds":[matches[0]["id"]],
                          "quality":candidate["quality"],"languages":candidate["languages"]})
