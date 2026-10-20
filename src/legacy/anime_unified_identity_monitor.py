@@ -88,7 +88,42 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
     if len(report["matching_pairs"])==1 and episode and not report["issues"]:
-        report["decision"]="SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED"
+        pair=report["matching_pairs"][0]
+        tid=pair["tvdb_id"]
+        mapping=settings.get("identity",{}).get("episode_map",{}).get(
+            tid+":1:"+str(episode))
+        if isinstance(mapping,dict) and mapping.get("verified") is True and type(
+                mapping.get("anidb_episode_id")) is int and mapping["anidb_episode_id"]>0:
+            # A locally reviewed, exact episode mapping is required. Also
+            # independently confirm this aired TVDB episode actually exists.
+            seen=[]
+            for page in range(20):
+                url=TVDB_URL+"/series/"+str(int(tid))+"/episodes/default?page="+str(page)
+                response=fetch(url,bearer=token)
+                contents=response.get("data") or {}
+                episodes=(contents.get("episodes",[]) if isinstance(contents,dict)
+                          else contents if isinstance(contents,list) else [])
+                if not isinstance(episodes,list):
+                    raise ValueError("Invalid TVDB episode response")
+                seen.extend(row for row in episodes if isinstance(row,dict) and
+                            row.get("seasonNumber")==1 and row.get("number")==episode)
+                links=response.get("links") or {}
+                if not isinstance(links,dict) or not links.get("next"):
+                    break
+            else:
+                raise ValueError("TVDB episode pagination exceeded")
+            if len(seen)==1 and isinstance(seen[0].get("id"),int):
+                report["decision"]="AUTO_VERIFIED"
+                report["approval"]={"tvdb_id":int(tid),
+                                    "anidb_id":int(pair["anidb_id"]),
+                                    "season":1,"episode":episode}
+                report["verified_anidb_episode_id"]=mapping["anidb_episode_id"]
+            else:
+                report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
+        else:
+            report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
+        if report["decision"]!="AUTO_VERIFIED":
+            report["decision"]="SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED"
     else:
         report["issues"].append("EXACT_IDENTITY_NOT_VERIFIED")
     return report
