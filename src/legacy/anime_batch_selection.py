@@ -17,6 +17,50 @@ _SEASON_FOLDER = re.compile(r"^Season[ ._-]*(?P<season>\d{1,2})$", re.I)
 _EXTRA_E = re.compile(r"(?<![A-Za-z])E\d{1,3}(?!\d)", re.I)
 
 
+
+_RELEASE_EPISODE = re.compile(
+    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})(?!\d)", re.I)
+_RELEASE_SEASON = re.compile(
+    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![A-Za-z0-9])", re.I)
+_RELEASE_SEASON_WORD = re.compile(
+    r"\bSeason[ ._-]*S?(?P<season>\d{1,2})\b", re.I)
+_BATCH_WORD = re.compile(r"\b(?:Batch|Complete[ ._-]*Season|Season[ ._-]*Pack)\b", re.I)
+
+
+def release_scope_hint(release_name):
+    """Advisory release classification, never authorization or canonical ID.
+
+    Useful for a safe Needs Review explanation. Even a visible "Season S2"
+    cannot prove per-file season/episode mappings or TVDB/AniDB identity.
+    """
+    if not isinstance(release_name, str) or not release_name.strip():
+        return {"kind": "unknown", "season_hint": None, "episode_hint": None}
+    episodes = list(_RELEASE_EPISODE.finditer(release_name))
+    if any(int(match.group("season")) == 0 for match in episodes):
+        match = next(x for x in episodes if int(x.group("season")) == 0)
+        return {"kind": "special", "season_hint": 0,
+                "episode_hint": int(match.group("episode"))}
+    season_words = [int(x.group("season"))
+                    for x in _RELEASE_SEASON_WORD.finditer(release_name)]
+    season_tokens = [int(x.group("season"))
+                     for x in _RELEASE_SEASON.finditer(release_name)]
+    all_seasons = set(season_words + season_tokens
+                      + [int(x.group("season")) for x in episodes])
+    is_pack = bool(_BATCH_WORD.search(release_name) or season_words)
+    if len(all_seasons) > 1:
+        return {"kind": "ambiguous_season", "season_hint": None,
+                "episode_hint": None}
+    if is_pack:
+        return {"kind": "season_pack", "season_hint":
+                next(iter(all_seasons)) if all_seasons else None,
+                "episode_hint": None}
+    if len(episodes) == 1:
+        match = episodes[0]
+        return {"kind": "single_episode",
+                "season_hint": int(match.group("season")),
+                "episode_hint": int(match.group("episode"))}
+    return {"kind": "unknown", "season_hint": None, "episode_hint": None}
+
 class SelectionNeedsReview(ValueError):
     """A torrent cannot safely be mapped to one season and unique episodes."""
 
