@@ -565,6 +565,7 @@ def sonarr_cleanup_review_page(title,review):
         out+='<p>After a fresh safety recheck, eligible Anime-Trial video files will be deleted. Fully verified Anime Discovery-owned torrents will be removed with their files. Other torrents are preserved. This cannot be undone.</p>'
         out+='<form method="post" action="/series-confirm-sonarr-cleanup">'
         out+='<input type="hidden" name="series_id" value="'+str(review["series_id"])+'">'
+        out+='<input type="hidden" name="review_fingerprint" value="'+escape(review["review_fingerprint"])+'">'
         out+='<label><input type="checkbox" name="confirm" value="DELETE_VERIFIED_DUPLICATES" required> I authorize deletion of eligible redundant staged files and proven-owned torrents only.</label>'
         out+='<button type="submit">Confirm deletion of verified duplicates</button></form></section>'
     else:
