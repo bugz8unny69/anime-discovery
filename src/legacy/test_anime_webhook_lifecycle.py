@@ -50,6 +50,21 @@ class WebhookLifecycleTests(unittest.TestCase):
         self.assertTrue(second["duplicate"])
         self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0], 1)
 
+    def test_webhook_pending_and_repeated_review_report_actual_status(self):
+        payload=dict(release_name="[Group] Solo Leveling - 01",
+                     source_guid="solo-guid",info_hash=HASH)
+        first=receive(self.db,payload)
+        self.assertEqual(first["identity_status"],"IDENTIFYING")
+        self.assertTrue(first["identification_pending"])
+        self.assertFalse(first["needs_review"])
+        self.db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",
+                        (first["notification_id"],))
+        second=receive(self.db,payload)
+        self.assertTrue(second["duplicate"])
+        self.assertEqual(second["identity_status"],"NEEDS_REVIEW")
+        self.assertTrue(second["needs_review"])
+        self.assertFalse(second["identification_pending"])
+
     def test_guid_conflicting_hash_rejected(self):
         receive(self.db, self.event())
         with self.assertRaisesRegex(ValueError,"different torrent"):
