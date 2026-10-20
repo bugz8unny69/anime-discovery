@@ -195,6 +195,46 @@ class DashboardHTTPTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_webhook_token_rotation_takes_effect_without_web_restart(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as folder:
+            config=Path(folder)
+            (config/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (config/"secrets.json").write_text(json.dumps({"web_token":"previous-token"}))
+            os.chmod(config/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"previous-token",config_dir=config))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            def post(path,body,headers):
+                client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+                try:
+                    client.request("POST",path,json.dumps(body),
+                        {"Content-Type":"application/json",**headers})
+                    response=client.getresponse()
+                    return response.status,response.read().decode()
+                finally:
+                    client.close()
+            try:
+                auth_headers={"Cookie":"ad_session="+self.session,"X-CSRF-Token":self.csrf}
+                status,_=post("/api/credentials",
+                    {"key":"web_token","clear":False,"value":"new-token"},auth_headers)
+                self.assertEqual(status,200)
+                original={"release_name":"Changed token episode 01","source_guid":"rotation-old",
+                          "info_hash":HASH,"token":"previous-token"}
+                self.assertEqual(post("/webhook",original,{})[0],401)
+                original["token"]="new-token"
+                original["source_guid"]="rotation-new"
+                self.assertEqual(post("/webhook",original,{})[0],200)
+                original["token"]=""
+                original["source_guid"]="rotation-empty"
+                self.assertEqual(post("/webhook?token=",original,{})[0],401)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_settings_page_provides_working_csrf_for_integration_actions(self):
         import os
         import re
