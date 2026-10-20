@@ -100,14 +100,25 @@ def keep_review_page(series_id, error):
     back=("/series?id="+valid_id if valid_id else "/")
     reason=getattr(error,"reason",None)
     detail=str(error)[:400]
-    out=shell("Keep needs attention","Series")
-    out+='<h1>Keep needs attention</h1>'
+    already=(reason=="SONARR_EPISODE_ALREADY_PRESENT")
+    out=shell("Existing Sonarr episode" if already else "Keep needs attention","Series")
+    out+='<h1>'+("Episode already registered in Sonarr" if already
+                  else "Keep needs attention")+'</h1>'
     out+='<section class="panel" role="alert">'
-    out+='<h2>Sonarr has not confirmed this import</h2>'
+    out+='<h2>'+("Sonarr has an existing episode file" if already
+                   else "Sonarr has not confirmed this import")+'</h2>'
     out+='<p>'+escape(detail)+'</p>'
     if reason:
         out+='<p class="muted">Diagnostic reason: <code>'+escape(reason)+'</code></p>'
-    out+='''<p><strong>Check these Sonarr settings:</strong></p>
+    if already:
+        out+='''<p>Sonarr's API reports an already registered episode file. This does
+not prove it is identical to the Anime-Trial video, that it has Japanese and
+English audio, or that the staged video was imported. Anime Discovery has
+preserved the staged source and has not marked Keep complete.</p>
+<p>Review the existing episode in Sonarr before choosing to replace it or
+retain it. No Sonarr library file or torrent has been removed.</p>'''
+    else:
+        out+='''<p><strong>Check these Sonarr settings:</strong></p>
 <ol>
 <li>In Sonarr, <strong>Settings → Media Management → Root Folders</strong>
 must point to the permanent anime library, not Anime-Trial.</li>
@@ -168,7 +179,10 @@ staged in Anime-Trial. Completed series stay visible if trial files are missing 
         if item.get("missing_staged_episodes"):
             count+=" ("+str(item["missing_staged_episodes"])+" missing)"
         out+='<td>'+count+'</td><td>'+escape(item["latest_episode"] or "—")+'</td>'
-        out+='<td><span class="status">'+escape(item["status"])+'</span></td></tr>'
+        out+='<td><span class="status">'+escape(item["status"])+'</span>'
+        if item.get("sonarr_reconciliation") in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
+            out+='<div><a href="/series-review-sonarr-cleanup?id='+str(sid)+'">Sonarr duplicates — review cleanup</a></div>'
+        out+='</td></tr>'
     if not result["items"]:
         out+='<tr><td colspan="6" class="empty">No series have reached Anime-Trial yet. Watch Jobs for incoming episodes.</td></tr>'
     out+='''</tbody></table><input type="hidden" name="return_size" value="'''+str(result["page_size"])+'''">
@@ -444,9 +458,31 @@ def detail_page(detail):
     series=detail["series"]
     out=shell(series[1],"Series")
     out+='<h1>'+escape(series[1])+'</h1><p class="muted">TVDB '+escape(series[2])+' · '+escape(series[3])+'</p>'
+    reconciliation=detail.get("reconciliation")
+    out+='<section class="panel"><h2>Sonarr reconciliation</h2>'
+    if reconciliation:
+        out+='<p><strong>'+escape(reconciliation["result"].replace("_"," "))+'</strong>'
+        out+=' · Checked '+escape(reconciliation["checked_at"])+'</p>'
+        if reconciliation["monitored"] is not None:
+            out+='<p>Series monitored: '+("Yes" if reconciliation["monitored"] else "No")+'</p>'
+        out+='<table><tr><th>Season</th><th>Episode</th><th>Sonarr status</th></tr>'
+        for entry in reconciliation["episodes"]:
+            out+='<tr><td>'+escape(entry["season"])+'</td><td>'+escape(entry["episode"])+'</td><td>'+escape(entry["status"])+'</td></tr>'
+        out+='</table>'
+        if reconciliation["result"] in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
+            out+='<p>Existing Sonarr files are registered, not yet verified as JP+EN suitable replacements. No cleanup is authorized. External or uncertain torrents are never deleted.</p>'
+            out+='<p><a href="/series-review-sonarr-cleanup?id='+str(series[0])+'">Review duplicate cleanup</a></p>'
+    else:
+        out+='<p>No Sonarr reconciliation check recorded yet.</p>'
+    out+='<form method="post" action="/series-check-sonarr"><input type="hidden" name="series_id" value="'+str(series[0])+'"><button class="secondary">Check Sonarr now</button></form></section>'
+    if series[3]=="SONARR_MANAGED_REVIEW":
+        out+='<section class="panel" role="status"><h2>Already managed in Sonarr</h2>'
+        out+='<p>The staged files were not imported again. Review redundant files before confirming deletion; external torrents remain protected.</p>'
+        out+='<p><a href="/series-review-sonarr-cleanup?id='+str(series[0])+'">Review redundant files and torrents</a></p></section>'
     preserved=detail.get("cleanup_notices") or []
     if preserved:
         action=("Keep has been submitted to Sonarr." if series[3]=="SONARR_IMPORT_PENDING"
+                else "Sonarr already manages these episodes; review cleanup." if series[3]=="SONARR_MANAGED_REVIEW"
                 else "Keep completed.")
         out+='<section class="panel" role="status" aria-live="polite">'
         out+='<h2>Original qBittorrent files preserved</h2><p>'+escape(action)+' '
@@ -481,8 +517,10 @@ def detail_page(detail):
         out+='</section>'
     out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    if series[3] in ("KEPT","SONARR_IMPORT_PENDING"):
-        out+='<button type="button" disabled>Keep already submitted</button></form>'
+    if series[3] in ("KEPT","SONARR_IMPORT_PENDING","SONARR_MANAGED_REVIEW"):
+        out+=('<button type="button" disabled>Already managed in Sonarr</button></form>'
+              if series[3]=="SONARR_MANAGED_REVIEW" else
+              '<button type="button" disabled>Keep already submitted</button></form>')
     else:
         out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
     out+='<details style="margin-top:18px"><summary>Manage series</summary>'
@@ -502,4 +540,52 @@ if(resetForm)resetForm.addEventListener("submit",function(event){
   if(!confirm("Delete this series' completed trial copies and prior acquisition jobs, then recreate fresh jobs from saved Autobrr records? Original torrents remain untouched."))event.preventDefault();
 });
 </script>"""
+    return out+tail()
+
+def sonarr_cleanup_review_page(title,review):
+    """Human review screen; no DELETE on GET, confirmation is CSRF protected."""
+    out=shell(title+" — review cleanup","Series")
+    out+='<h1>Review redundant Anime-Trial cleanup</h1>'
+    out+='<p><a href="/series?id='+str(review["series_id"])+'">Back to series</a></p>'
+    out+='<p>Sonarr registered episode files have been checked against their canonical IDs and their actual Japanese and English audio tracks. Different releases may not be byte-identical. This action never deletes the permanent Sonarr library.</p>'
+    out+='<section class="panel"><h2>Trial episodes</h2>'
+    out+='<table><tr><th>Season</th><th>Episode</th><th>Cleanup eligibility</th><th>Bytes</th></tr>'
+    for item in review["episodes"]:
+        reason=(item.get("reason") or "")
+        status=("Eligible (JP+EN verified)" if item["status"]=="REGISTERED"
+                else "Retain — "+item["status"]+(" ("+reason+")" if reason else ""))
+        out+='<tr><td>'+escape(item["season"])+'</td><td>'+escape(item["episode"])+'</td><td>'+escape(status)+'</td><td>'+escape(item.get("size") or "-")+'</td></tr>'
+    out+='</table><p>'+str(review["eligible"])+' eligible staged file(s), '+str(review["bytes_eligible"])+' bytes.</p></section>'
+    out+='<section class="panel"><h2>Original qBittorrent data</h2><ul>'
+    for record in review["torrents"]:
+        out+='<li><code>'+escape(record["infohash"])+'</code>: '+escape(record["ownership"])+'</li>'
+    out+='</ul><p>Only torrents with independently verified Anime Discovery ownership and a safe complete file manifest can be removed. EXTERNAL, UNCERTAIN or shared torrents are preserved. Their cleanup is manual.</p></section>'
+    if review["eligible"]:
+        out+='<section class="panel"><h2>Confirm selected eligible cleanup</h2>'
+        out+='<p>After a fresh safety recheck, eligible Anime-Trial video files will be deleted. Fully verified Anime Discovery-owned torrents will be removed with their files. Other torrents are preserved. This cannot be undone.</p>'
+        out+='<form method="post" action="/series-confirm-sonarr-cleanup">'
+        out+='<input type="hidden" name="series_id" value="'+str(review["series_id"])+'">'
+        out+='<input type="hidden" name="review_fingerprint" value="'+escape(review["review_fingerprint"])+'">'
+        out+='<label><input type="checkbox" name="confirm" value="DELETE_VERIFIED_DUPLICATES" required> I authorize deletion of eligible redundant staged files and proven-owned torrents only.</label>'
+        out+='<button type="submit">Confirm deletion of verified duplicates</button></form></section>'
+    else:
+        out+='<section class="panel"><p>No episodes are currently eligible for safe cleanup.</p></section>'
+    return out+tail()
+
+
+def sonarr_cleanup_result_page(series_id,result):
+    out=shell("Duplicate cleanup result","Series")
+    out+='<h1>Duplicate cleanup outcome</h1>'
+    out+='<p>Audit #'+escape(result["audit_id"])+'</p>'
+    out+='<p>Staged episodes removed: '+escape(len(result["removed_notification_ids"]))+'</p>'
+    out+='<p>Owned torrents removed: '+escape(len(result["removed_owned_torrents"]))+'</p>'
+    out+='<h2>Preserved torrents</h2><ul>'
+    for item in result["preserved_torrents"]:
+        out+='<li><code>'+escape(item["infohash"])+'</code> — '+escape(item["ownership"])+'</li>'
+    out+='</ul>'
+    if result["errors"]:
+        out+='<h2>Items retained for review</h2><ul>'
+        for error in result["errors"]:out+='<li>'+escape(error)+'</li>'
+        out+='</ul>'
+    out+='<p><a href="/series?id='+str(series_id)+'">Return to series</a></p>'
     return out+tail()

@@ -49,6 +49,11 @@ def staged_series(db, *, page=1,size=20):
             continue
         grouped[sid]["staged_episodes"]+=1
         grouped[sid]["latest_episode"]="S%02dE%02d"%(season,episode)
+    if grouped and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sonarr_reconciliation'").fetchone():
+        for sid,result in db.execute("""SELECT series_id,result FROM sonarr_reconciliation
+            WHERE result IN ('ALREADY_MANAGED','PARTIALLY_MANAGED')"""):
+            if sid in grouped:
+                grouped[sid]["sonarr_reconciliation"]=result
     return _page(list(grouped.values()),page,size)
 
 

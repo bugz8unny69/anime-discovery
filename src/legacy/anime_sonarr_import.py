@@ -3,7 +3,9 @@
 Never requests MOVE. No torrent deletion; cleanup requires separate ownership proof.
 """
 from pathlib import Path
+import json
 import logging
+import re
 from urllib.parse import quote
 
 from anime_sonarr import _request
@@ -19,13 +21,171 @@ class SonarrImportNeedsReview(RuntimeError):
         super().__init__(message)
 
 
-def _candidate_review(reason, *, sonarr_id, item, count, message):
+def _candidate_review(reason, *, sonarr_id, item, count, message,
+                      rejection_count=None):
     LOG.warning(
-        "event=SONARR_KEEP_REVIEW reason=%s sonarr_id=%s season=%s episode=%s candidates=%d",
-        reason, sonarr_id, item["season"], item["episode"], count)
+        "event=SONARR_KEEP_REVIEW reason=%s sonarr_id=%s season=%s episode=%s "
+        "candidates=%d rejection_count=%s",
+        reason, sonarr_id, item["season"], item["episode"], count,
+        "-" if rejection_count is None else str(rejection_count))
     raise SonarrImportNeedsReview(reason, message)
 
-def plan_staged_imports(db,series_id,*,trial_root):
+def _public_rejections(rejections):
+    """Preserve Sonarr's rejection explanation, without source paths or credentials.
+
+    Sonarr v3 uses {reason, type}; some newer versions use {message, type}.
+    Keep only bounded single-line explanations and never store arbitrary
+    upstream JSON, file paths, query strings or credentials in journald.
+    """
+    if not isinstance(rejections,list):
+        return [{"type":"unknown","reason":"Invalid Sonarr rejection response"}]
+    result=[]
+    for entry in rejections[:6]:
+        if not isinstance(entry,dict):
+            result.append({"type":"unknown","reason":"Malformed rejection"})
+            continue
+        typ=entry.get("type")
+        kind=str(typ) if type(typ) in (str,int) else "unknown"
+        kind=re.sub(r"[^A-Za-z0-9_-]","",kind)[:32] or "unknown"
+        description=entry.get("reason") or entry.get("message")
+        description=description if isinstance(description,str) else "Unspecified Sonarr rejection"
+        description=" ".join(description.split())
+        description=re.sub(r"(?i)(?:https?://|/|\\\\)[^\s,;]+","[redacted-path]",description)
+        description=re.sub(r"(?i)(?:api[_-]?key|token|password)\s*[:=]\s*\S+",
+                           "[redacted-credential]",description)
+        result.append({"type":kind,"reason":description[:180]})
+    return result or [{"type":"unknown","reason":"Unspecified Sonarr rejection"}]
+
+
+def _rejected_with_inventory(cfg,key,sonarr_id,item,episode,plan_episodes,
+                             rejections,kwargs):
+    details=_public_rejections(rejections)
+    LOG.warning(
+        "event=SONARR_MANUAL_IMPORT_REJECTIONS sonarr_id=%d season=%d episode=%d "
+        "episode_id=%d details=%s",
+        sonarr_id,item["season"],item["episode"],episode["id"],
+        json.dumps(details,ensure_ascii=True,separators=(",",":")))
+    confirmed=set()
+    if any(type(row.get("episodeFileId")) is int and row["episodeFileId"]>0
+           and row.get("hasFile") is True for row in plan_episodes.values()):
+        try:
+            files=_request(cfg["base_url"],key,"GET",
+                "episodefile?seriesId="+str(sonarr_id),**kwargs)
+            if not isinstance(files,list):
+                raise ValueError("Invalid file inventory")
+            file_ids={file["id"] for file in files if isinstance(file,dict) and
+                      type(file.get("id")) is int and
+                      file.get("seriesId")==sonarr_id and
+                      isinstance(file.get("path"),str) and file["path"] and
+                      type(file.get("size")) is int and file["size"]>0}
+            for number,row in plan_episodes.items():
+                if (row.get("hasFile") is True and
+                        type(row.get("episodeFileId")) is int and
+                        row["episodeFileId"] in file_ids):
+                    confirmed.add(number)
+        except (OSError,RuntimeError,ValueError) as exc:
+            # Probe failure must not hide the original Sonarr rejection.
+            LOG.warning("event=SONARR_EXISTING_INVENTORY reason=UNAVAILABLE "
+                        "sonarr_id=%d error_type=%s",
+                        sonarr_id,type(exc).__name__)
+    current=(item["season"],item["episode"])
+    LOG.info(
+        "event=SONARR_EXISTING_INVENTORY reason=API_EPISODE_FILE_LINKS "
+        "sonarr_id=%d staged_count=%d registered_count=%d "
+        "all_staged_registered=%s current_registered=%s",
+        sonarr_id,len(plan_episodes),len(confirmed),
+        str(len(plan_episodes)==len(confirmed)).lower(),
+        str(current in confirmed).lower())
+    summary="; ".join(detail["reason"] for detail in details[:3])[:260]
+    if current in confirmed:
+        _candidate_review(
+            "SONARR_EPISODE_ALREADY_PRESENT",sonarr_id=sonarr_id,item=item,
+            count=1,rejection_count=len(details),
+            message=("Sonarr reports this episode already has a registered library "
+                     "file. Its manual-import reasons: "+summary+
+                     ". This does not prove the Anime-Trial copy was imported. "
+                     "No staged files were deleted and Keep was not finalized."))
+    _candidate_review(
+        "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,
+        count=1,rejection_count=len(details),
+        message=("Sonarr refused the candidate: "+summary+
+                 ". Review Wanted > Manual Import before retrying Keep."))
+
+
+
+
+def inspect_registered_episodes(settings,secrets,*,sonarr_id,plan,opener=None):
+    """Read-only, fail-closed classification of precisely staged Sonarr episodes.
+
+    Registered means a canonical episode is linked to a positive-size Sonarr
+    episodefile record. It does NOT prove on-disk accessibility, JP/EN audio,
+    copy equivalence, successful import or permission to delete trial media.
+    """
+    if type(sonarr_id) is not int or sonarr_id<=0:
+        raise ValueError("Invalid Sonarr series ID")
+    if not isinstance(plan,list) or not plan or len(plan)>100:
+        raise ValueError("Invalid bounded trial manifest")
+    keys=[]
+    for item in plan:
+        if not isinstance(item,dict):
+            raise ValueError("Invalid staged item")
+        season,number=item.get("season"),item.get("episode")
+        if type(season) is not int or type(number) is not int or season<0 or number<=0:
+            raise ValueError("Invalid staged episode")
+        keys.append((season,number))
+    if len(set(keys))!=len(keys):
+        raise ValueError("Duplicate staged episode")
+    cfg=settings["sonarr"]
+    kwargs={} if opener is None else {"opener":opener}
+    episodes=_request(cfg["base_url"],secrets["sonarr_api_key"],"GET",
+                      "episode?seriesId="+str(sonarr_id),**kwargs)
+    files=_request(cfg["base_url"],secrets["sonarr_api_key"],"GET",
+                   "episodefile?seriesId="+str(sonarr_id),**kwargs)
+    if not isinstance(episodes,list) or not isinstance(files,list):
+        raise RuntimeError("Invalid Sonarr inventory")
+    by_number={}
+    for episode in episodes:
+        if not isinstance(episode,dict):
+            raise RuntimeError("Malformed Sonarr episode")
+        key=(episode.get("seasonNumber"),episode.get("episodeNumber"))
+        if key in keys:
+            by_number.setdefault(key,[]).append(episode)
+    by_id={}
+    for file in files:
+        if not isinstance(file,dict):
+            raise RuntimeError("Malformed Sonarr episode file")
+        fid=file.get("id")
+        if type(fid) is int and fid>0:
+            by_id.setdefault(fid,[]).append(file)
+    result=[]
+    for item,key in zip(plan,keys):
+        matched=by_number.get(key,[])
+        status="NEEDS_REVIEW"
+        eid=None
+        fid=None
+        if len(matched)==1 and type(matched[0].get("id")) is int and matched[0]["id"]>0:
+            ep=matched[0]
+            eid=ep["id"]
+            candidate=ep.get("episodeFileId")
+            if ep.get("hasFile") is False and candidate in (None,0):
+                status="MISSING"
+            elif ep.get("hasFile") is True and type(candidate) is int and candidate>0:
+                linked=by_id.get(candidate,[])
+                if (len(linked)==1 and linked[0].get("seriesId")==sonarr_id
+                        and type(linked[0].get("size")) is int and linked[0]["size"]>0
+                        and isinstance(linked[0].get("path"),str)
+                        and bool(linked[0]["path"].strip())):
+                    status="REGISTERED"
+                    fid=candidate
+        result.append({"season":key[0],"episode":key[1],"sonarr_episode_id":eid,
+                       "sonarr_episode_file_id":fid,"status":status})
+    LOG.info("event=SONARR_RECONCILIATION sonarr_id=%d checked=%d registered=%d missing=%d review=%d",
+             sonarr_id,len(result),sum(x["status"]=="REGISTERED" for x in result),
+             sum(x["status"]=="MISSING" for x in result),
+             sum(x["status"]=="NEEDS_REVIEW" for x in result))
+    return result
+
+def plan_staged_imports(db,series_id,*,trial_root,skip_missing=False):
     root=Path(trial_root).resolve(strict=True)
     rows=db.execute("""SELECT d.notification_id,d.season,d.episode,r.staged_path
         FROM episode_dispatch d JOIN torrent_recovery_records r
@@ -38,6 +198,8 @@ def plan_staged_imports(db,series_id,*,trial_root):
     seen=set()
     for nid,season,episode,filename in rows:
         file=Path(filename)
+        if skip_missing and not file.exists() and not file.is_symlink():
+            continue
         path=file.resolve(strict=True)
         if not path.is_file() or not path.is_relative_to(root) or path==root:
             raise ValueError("Staged file outside trusted trial root")
@@ -49,7 +211,8 @@ def plan_staged_imports(db,series_id,*,trial_root):
         plan.append({"notification_id":nid,"season":season,"episode":episode,"path":str(path)})
     return plan
 
-def _reprocess_verified_identity(cfg, key, sonarr_id, item, candidate, episode_id, kwargs):
+def _reprocess_verified_identity(cfg, key, sonarr_id, item, candidate, episode_id,
+                                 episode, plan_episodes, kwargs):
     """Submit canonical IDs in the first identity assignment for every file.
 
     POST /manualimport reprocesses a preview; it does NOT import anything.
@@ -85,9 +248,8 @@ def _reprocess_verified_identity(cfg, key, sonarr_id, item, candidate, episode_i
             "SONARR_REPROCESS_IDENTITY_MISMATCH",sonarr_id=sonarr_id,item=item,count=1,
             message="Sonarr did not confirm the supplied TVDB-backed series and canonical episode. Review Sonarr episode numbering.")
     if confirmed.get("rejections"):
-        _candidate_review(
-            "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,count=1,
-            message="Sonarr rejected the explicitly reprocessed manual-import candidate. Review Wanted > Manual Import.")
+        _rejected_with_inventory(cfg,key,sonarr_id,item,episode,plan_episodes,
+                                 confirmed["rejections"],kwargs)
     if not isinstance(confirmed.get("quality"),dict) or not confirmed.get("languages"):
         _candidate_review(
             "QUALITY_LANGUAGE_UNRESOLVED",sonarr_id=sonarr_id,item=item,count=1,
@@ -115,6 +277,13 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
     episodes=_request(cfg["base_url"],key,"GET","episode?seriesId="+str(sonarr_id),**kwargs)
     if not isinstance(episodes,list):
         raise RuntimeError("Invalid Sonarr episode inventory")
+    plan_episodes={}
+    for entry in plan:
+        lookup=[e for e in episodes if isinstance(e,dict) and
+                e.get("seasonNumber")==entry["season"] and
+                e.get("episodeNumber")==entry["episode"]]
+        if len(lookup)==1:
+            plan_episodes[(entry["season"],entry["episode"])]=lookup[0]
     selected=[]
     for item in plan:
         matches=[e for e in episodes if isinstance(e,dict) and
@@ -159,12 +328,10 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
         # GET manualimport?seriesId=... cannot replace this: Sonarr switches
         # that request to the series library instead of Anime-Trial.
         candidate=_reprocess_verified_identity(
-            cfg,key,sonarr_id,item,same_path[0],eid,kwargs)
+            cfg,key,sonarr_id,item,same_path[0],eid,matches[0],plan_episodes,kwargs)
         if candidate.get("rejections"):
-            _candidate_review(
-                "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,
-                count=len(candidates),
-                message="Sonarr rejected the manual-import candidate. Review its reasons in Wanted > Manual Import before retrying Keep.")
+            _rejected_with_inventory(cfg,key,sonarr_id,item,matches[0],
+                                     plan_episodes,candidate["rejections"],kwargs)
         if not isinstance(candidate.get("quality"),dict) or not candidate.get("languages"):
             _candidate_review(
                 "QUALITY_LANGUAGE_UNRESOLVED",sonarr_id=sonarr_id,item=item,

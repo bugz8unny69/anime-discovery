@@ -2,7 +2,7 @@
 name: Anime Discovery Python tests
 on:
   push:
-    branches: [develop, 'feature/**']
+    branches: [develop, 'feature/**', 'fix/**']
   pull_request:
     branches: [develop]
   workflow_dispatch:
@@ -102,6 +102,7 @@ jobs:
             test_anime_xml_cache_integrity \
             test_anime_xml_response_diagnostics \
             test_anime_sonarr_import \
+            test_anime_sonarr_duplicate_cleanup \
             test_anime_sonarr_finalize \
             test_anime_shoko_v3 \
             test_anime_shoko_handoff \
