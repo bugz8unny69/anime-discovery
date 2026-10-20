@@ -77,7 +77,7 @@ class SubmissionTests(unittest.TestCase):
             qb.identity_visible=False
             self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
             qb.records.clear()
-            self.assertIsNone(submit_once(db,HASH,MAGNET,qb))
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
             self.assertEqual(qb.calls,1)
             self.assertEqual(ownership(db,HASH),UNCERTAIN)
 
