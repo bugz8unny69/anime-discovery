@@ -35,7 +35,7 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
     row=db.execute("SELECT external_id,title,status FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
     if row is None or not str(row[0]).isdigit() or int(row[0])<=0:
         raise ValueError("Series lacks TVDB identity")
-    if row[2] in ("SONARR_IMPORT_PENDING","KEPT"):
+    if row[2] in ("SONARR_IMPORT_PENDING","KEPT","SONARR_MANAGED_REVIEW"):
         raise ValueError("Keep already submitted or completed")
     if row[2]=="REJECTED" or db.execute("SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(series_id,)).fetchone():
         raise ValueError("Rejected series requires reset")
@@ -72,11 +72,33 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
     # notice on the series page. Never infer ownership from qB category alone.
     preserved=[row for row in ownership_for_series(db,series_id)
                if row["ownership"]!=OWNED]
+    # Existing Sonarr episodes are not import candidates. They get separate
+    # managed-state review, never the post-copy finalizer.
+    already_managed=False
+    import_manifest=manifest
+    if sonarr_client is None and result.get("already_exists") is True:
+        from anime_sonarr_import import inspect_registered_episodes
+        observed=inspect_registered_episodes(settings,secrets,
+            sonarr_id=result["sonarr_id"],plan=manifest)
+        states=[entry["status"] for entry in observed]
+        if states and all(state=="REGISTERED" for state in states):
+            already_managed=True
+            import_manifest=[]
+        elif "REGISTERED" in states and all(
+                state in ("REGISTERED","MISSING") for state in states):
+            missing={(e["season"],e["episode"]) for e in observed
+                     if e["status"]=="MISSING"}
+            import_manifest=[item for item in manifest
+                             if (item["season"],item["episode"]) in missing]
+        elif "NEEDS_REVIEW" in states:
+            from anime_sonarr_import import SonarrImportNeedsReview
+            raise SonarrImportNeedsReview("SONARR_INVENTORY_NEEDS_REVIEW",
+                "Sonarr episode-file records are ambiguous. Review them before Keep.")
     command_id=None
-    if sonarr_client is None or import_client is not None:
+    if not already_managed and (sonarr_client is None or import_client is not None):
         from anime_sonarr_import import request_import
         submitted=(import_client or request_import)(settings,secrets,
-            sonarr_id=result["sonarr_id"],plan=manifest)
+            sonarr_id=result["sonarr_id"],plan=import_manifest)
         command_id=submitted.get("command_id")
         if type(command_id) is not int or command_id<=0:
             raise RuntimeError("Sonarr did not confirm import submission")
@@ -99,7 +121,7 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
             VALUES (?,?,?) ON CONFLICT(series_id) DO UPDATE SET
             manifest_json=excluded.manifest_json,
             submitted_command_id=excluded.submitted_command_id""",
-            (series_id,json.dumps(manifest),command_id))
+            (series_id,json.dumps(import_manifest),command_id))
         ensure_cleanup_notice_schema(db)
         db.execute("DELETE FROM sonarr_keep_cleanup_notice WHERE series_id=?",(series_id,))
         from time import time
@@ -107,13 +129,15 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
             (series_id,infohash,ownership,created_at) VALUES (?,?,?,?)""",
             [(series_id,row["infohash"],row["ownership"],int(time()))
              for row in preserved])
-        db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
+        db.execute("UPDATE series SET status=? WHERE id=?",
+                   ("SONARR_MANAGED_REVIEW" if already_managed else "SONARR_IMPORT_PENDING",series_id))
         db.commit()
     except BaseException:
         db.rollback()
         raise
     return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
-            "trial_media_preserved":True,"import_pending":True,"command_id":command_id,
+            "trial_media_preserved":True,"already_managed":already_managed,
+            "import_pending":not already_managed,"command_id":command_id,
             "torrent_cleanup_authorized":False,"torrents_preserved":len(preserved),
             "cleanup_notice":"Original qBittorrent torrents will be preserved for manual removal after Sonarr import." if preserved else None}
 
@@ -208,7 +232,7 @@ def inspect(db, series_id):
     rejected=bool(db.execute(
         "SELECT 1 FROM series_rejection_blocks WHERE series_id=?", (series_id,)).fetchone())
     cleanup_notices=[]
-    if row[3] in ("SONARR_IMPORT_PENDING","KEPT"):
+    if row[3] in ("SONARR_IMPORT_PENDING","KEPT","SONARR_MANAGED_REVIEW"):
         ensure_cleanup_notice_schema(db)
         cleanup_notices=[{"infohash":hash_value,"ownership":ownership_state}
             for hash_value,ownership_state in db.execute(
