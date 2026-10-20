@@ -66,14 +66,14 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
               patch("anime_source_retention.confirmed_jp_en",return_value=True)):
             return asyncio.run(self.handler(job))
 
-    def test_staging_finishes_before_torrent_and_source_removal(self):
+    def test_staging_preserves_original_until_sonarr_keep(self):
         job=claim(self.db,allowed_kinds=["claimed_acquisition"])
         outcome=self.run_handler(job)
         finish(self.db,job["id"],job["lease_token"],outcome)
         self.assertEqual(outcome,"DONE")
-        self.assertEqual(self.qb.removals,[(HASH,True)])
+        self.assertEqual(self.qb.removals,[])
         self.assertEqual(self.scans,["refresh"])
-        self.assertFalse(self.source.exists())
+        self.assertTrue(self.source.exists())
         staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
         self.assertTrue(staged.is_file())
         self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs").fetchone()[0],"DONE")
@@ -97,26 +97,19 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
         staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
         self.assertTrue(staged.exists())
 
-    def test_cleanup_outage_retries_without_copying_media_twice(self):
+    def test_source_removal_failure_cannot_interrupt_trial_acquisition(self):
         job=claim(self.db,allowed_kinds=["claimed_acquisition"])
         self.qb.fail_removal=True
-        with self.assertRaisesRegex(OSError,"removal"):
-            self.run_handler(job)
-        self.assertEqual(self.db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"DONE")
-        staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
-        self.assertTrue(staged.is_file())
-        self.assertTrue(self.source.exists())
-        self.qb.fail_removal=False
-        job=claim(self.db,now=time.time()+301,allowed_kinds=["claimed_acquisition"])
-        self.assertIsNotNone(job)
         outcome=self.run_handler(job)
         finish(self.db,job["id"],job["lease_token"],outcome)
         self.assertEqual(outcome,"DONE")
-        self.assertEqual(self.qb.adds,1)
-        self.assertEqual(self.qb.removals,[(HASH,True)])
-        self.assertFalse(self.source.exists())
+        self.assertEqual(self.qb.removals,[])
+        self.assertTrue(self.source.exists())
+        staged=Path(self.db.execute(
+            "SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
         self.assertTrue(staged.is_file())
-        self.assertEqual(self.scans,["refresh"])
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM episode_dispatch").fetchone()[0],"DONE")
 
 
 if __name__=="__main__":
