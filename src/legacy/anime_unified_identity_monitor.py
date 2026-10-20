@@ -16,6 +16,7 @@ from anime_flat_config import load_config
 from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
+from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
 
 LOG=logging.getLogger(__name__)
 MAX_TITLES=32*1024*1024
@@ -60,6 +61,32 @@ def ensure_titles(path,*,now=None,downloader=None):
         tmp.unlink(missing_ok=True)
     return path
 
+
+def ensure_anime_lists(path, *, now=None, downloader=None):
+    """Refresh the Anime-Lists mapping cache daily, validating before publish."""
+    import xml.etree.ElementTree as ET
+    now=int(time.time() if now is None else now)
+    path=Path(path)
+    if path.is_file() and now-int(path.stat().st_mtime)<86400:
+        data=path.read_bytes()
+    else:
+        data=(downloader or download_anime_lists)()
+        if not isinstance(data,bytes) or not data or len(data)>16*1024*1024:
+            raise ValueError("Anime-Lists cache invalid or oversized")
+        if ET.fromstring(data).tag!="anime-list":
+            raise ValueError("Unexpected Anime-Lists root")
+        path.parent.mkdir(parents=True,exist_ok=True)
+        tmp=path.with_suffix(".tmp")
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
+    if ET.fromstring(data).tag!="anime-list":
+        raise ValueError("Unexpected Anime-Lists root")
+    return data
+
+
 def candidate_score(aliases,names):
     """Highest normalized title similarity, recorded for review only."""
     normalized=[norm(x) for x in aliases if isinstance(x,str) and norm(x)]
@@ -91,13 +118,13 @@ def title_diagnostics(aliases,candidates,threshold):
                      "reason":reason})
     return rows
 
-def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json):
+def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,shoko_resolve=None):
     aliases,episode=release_title(name)
     threshold=settings.get("identity",{}).get("match_threshold_pct",90)
     report={"title_queries":aliases[:5],"threshold_pct":threshold,
             "episode_candidate":episode,"anidb_candidates":[],
             "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
-            "matching_pairs":[],"crossref_diagnostics":[],"workflow":[],
+            "matching_pairs":[],"crossref_diagnostics":[],"episode_mapping":None,"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
@@ -146,13 +173,20 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             raise ValueError("TVDB ID response mismatch")
         provider_ids=set(explicit_anidb_ids(detail))
         media_type,media_labels=classify_tvdb(detail)
-        match=aid_set.intersection(provider_ids)
+        mapped={}
+        if mapping_xml is not None and episode:
+            for aid in sorted(aid_set):
+                resolved=resolve_anime_lists_episode(mapping_xml,aid,tid,episode)
+                if resolved is not None:
+                    mapped[aid]=resolved
+        match=aid_set.intersection(provider_ids)|set(mapped)
         report["crossref_diagnostics"].append({
             "tvdb_id":tid,"media_type":media_type,
             "media_labels":media_labels[:8],
             "explicit_anidb_ids":sorted(provider_ids)[:8],
             "anidb_candidate_ids":sorted(aid_set)[:10],
             "matching_anidb_ids":sorted(match),
+            "anime_lists_anidb_ids":sorted(mapped),
             "reason":("EXPLICIT_ANIDB_MATCH" if match else
                       "TVDB_ANIDB_ID_CONFLICT" if provider_ids else
                       "TVDB_ANIDB_REMOTE_ID_MISSING")})
@@ -160,7 +194,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             report["crossref_diagnostics"][-1]["reason"]="REJECTED_UNSUITABLE_TVDB_MEDIA_TYPE"
             continue
         for aid in sorted(match):
-            report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
+            report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid,
+               "episode_rule":mapped.get(aid)})
     report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
                                 "matching_pairs":len(report["matching_pairs"]),
                                 "records_inspected":len(report["crossref_diagnostics"])})
@@ -171,39 +206,49 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if len(report["matching_pairs"])==1 and episode and not report["issues"]:
         pair=report["matching_pairs"][0]
         tid=pair["tvdb_id"]
+        rule=pair.get("episode_rule")
+        report["episode_mapping"]=rule
+        season=rule["tvdb_season"] if rule else 1
+        mapped_ep=rule["tvdb_episode"] if rule else episode
         mapping=settings.get("identity",{}).get("episode_map",{}).get(
-            tid+":1:"+str(episode))
-        if isinstance(mapping,dict) and mapping.get("verified") is True and type(
-                mapping.get("anidb_episode_id")) is int and mapping["anidb_episode_id"]>0:
-            # A locally reviewed, exact episode mapping is required. Also
-            # independently confirm this aired TVDB episode actually exists.
-            seen=[]
-            for page in range(20):
-                url=TVDB_URL+"/series/"+str(int(tid))+"/episodes/default?page="+str(page)
-                response=fetch(url,bearer=token)
-                contents=response.get("data") or {}
-                episodes=(contents.get("episodes",[]) if isinstance(contents,dict)
-                          else contents if isinstance(contents,list) else [])
-                if not isinstance(episodes,list):
-                    raise ValueError("Invalid TVDB episode response")
-                seen.extend(row for row in episodes if isinstance(row,dict) and
-                            row.get("seasonNumber")==1 and row.get("number")==episode)
-                links=response.get("links") or {}
-                if not isinstance(links,dict) or not links.get("next"):
-                    break
-            else:
-                raise ValueError("TVDB episode pagination exceeded")
-            if len(seen)==1 and isinstance(seen[0].get("id"),int):
+            tid+":"+str(season)+":"+str(mapped_ep))
+        episode_id=(mapping.get("anidb_episode_id")
+             if isinstance(mapping,dict) and mapping.get("verified") is True
+             and type(mapping.get("anidb_episode_id")) is int
+             and mapping["anidb_episode_id"]>0 else None)
+        seen=[]
+        for page in range(20):
+            url=TVDB_URL+"/series/"+str(int(tid))+"/episodes/default?page="+str(page)
+            response=fetch(url,bearer=token)
+            contents=response.get("data") or {}
+            episodes=(contents.get("episodes",[]) if isinstance(contents,dict)
+                      else contents if isinstance(contents,list) else [])
+            if not isinstance(episodes,list):
+                raise ValueError("Invalid TVDB episode response")
+            seen.extend(row for row in episodes if isinstance(row,dict) and
+                        row.get("seasonNumber")==season and row.get("number")==mapped_ep)
+            links=response.get("links") or {}
+            if not isinstance(links,dict) or not links.get("next"):
+                break
+        else:
+            raise ValueError("TVDB episode pagination exceeded")
+        if len(seen)!=1 or type(seen[0].get("id")) is not int:
+            report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
+        else:
+            tvdb_ep_id=seen[0]["id"]
+            if episode_id is None and rule and shoko_resolve is not None:
+                episode_id=shoko_resolve(int(pair["anidb_id"]),tvdb_ep_id)
+                if type(episode_id) is not int or episode_id<=0:
+                    episode_id=None
+            if episode_id is not None:
                 report["decision"]="AUTO_VERIFIED"
                 report["approval"]={"tvdb_id":int(tid),
                                     "anidb_id":int(pair["anidb_id"]),
-                                    "season":1,"episode":episode}
-                report["verified_anidb_episode_id"]=mapping["anidb_episode_id"]
+                                    "season":season,"episode":mapped_ep}
+                report["verified_anidb_episode_id"]=episode_id
             else:
-                report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
-        else:
-            report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
-            report["workflow"].append({"step":"Verified episode map", "passed":False})
+                report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
+                report["workflow"].append({"step":"Verified episode map","passed":False})
         if report["decision"]!="AUTO_VERIFIED":
             report["decision"]="SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED"
     else:
@@ -234,7 +279,16 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report={"decision":"NEEDS_REVIEW","issues":["ANIDB_PUBLIC_SOURCE_DISABLED"]}
             else:
                 catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
-                report=investigate(title,settings,secrets,catalog)
+                mapping_xml=ensure_anime_lists(
+                    Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml")
+                resolver=None
+                if settings.get("shoko",{}).get("enabled") and secrets.get("shoko_api_key"):
+                    from anime_episode_crossref import resolve_anidb_episode
+                    resolver=lambda aid,teid: resolve_anidb_episode(
+                        settings["shoko"]["base_url"],secrets["shoko_api_key"],
+                        anidb_series_id=aid,tvdb_episode_id=teid)
+                report=investigate(title,settings,secrets,catalog,
+                                   mapping_xml=mapping_xml,shoko_resolve=resolver)
             decision=report["decision"]
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
