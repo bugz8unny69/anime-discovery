@@ -137,6 +137,17 @@ class E01ProbeTests(unittest.TestCase):
         self.assertEqual(qb.priority_calls,0)
         self.assertEqual(qb.start_calls,0)
 
+    def test_error_state_never_counts_as_active_probe(self):
+        qb=SelectionQB()
+        stopped=self.get_stopped(qb)
+        qb.records[HASH]["state"]="error"
+        qb.priorities={i:(1 if i==0 else 0) for i in range(12)}
+        with self.assertRaisesRegex(RuntimeError,"recognized E01 transfer state"):
+            start_e01_probe(self.db,HASH,qb,season=2,
+                            stopped_manifest=stopped)
+        self.assertEqual(qb.start_calls,0)
+        self.assertEqual(qb.priority_calls,0)
+
     def test_foreign_torrent_refuses_without_modifying(self):
         qb=SelectionQB(externally_owned=True)
         fake={"state":"MANIFEST_READY","infohash":HASH,
