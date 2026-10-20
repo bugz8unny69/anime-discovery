@@ -282,6 +282,8 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 (nid,now,attempts,now+min(3600,60*2**attempts) if retry else 0,decision,safe))
             if not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
+        LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
+                 nid,attempts,decision,retry)
         done+=1
     return {"processed":done,"pending_retries":pending_retries}
 
