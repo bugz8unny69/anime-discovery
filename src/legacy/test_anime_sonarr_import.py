@@ -236,6 +236,18 @@ class ExistingSonarrInventoryTests(unittest.TestCase):
         self.assertIn("registered_count=0",log)
         self.assertFalse(any("episodefile?" in url for _,url in calls))
 
+    def test_existing_inventory_has_distinct_html_not_mount_error(self):
+        from anime_dashboard_pages import keep_review_page
+        from anime_sonarr_import import SonarrImportNeedsReview
+        page=keep_review_page(11,SonarrImportNeedsReview(
+            "SONARR_EPISODE_ALREADY_PRESENT",
+            "Sonarr: Not an upgrade for existing episode file(s)"))
+        self.assertIn("Episode already registered in Sonarr",page)
+        self.assertIn("has not marked Keep complete",page)
+        self.assertIn("Not an upgrade",page)
+        self.assertNotIn("Check these Sonarr settings",page)
+        self.assertIn("/series?id=11",page)
+
     def test_rejection_detail_redacts_paths_credentials_and_newlines(self):
         from anime_sonarr_import import _public_rejections
         result=_public_rejections([{"type":"permanent",
