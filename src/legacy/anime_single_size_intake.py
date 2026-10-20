@@ -51,7 +51,7 @@ def _first_staged(db, series_id, window):
 
 
 def admit_single_episode(db, notification_id, infohash, magnet_uri, qb, *,
-                         size_settings=None):
+                         size_settings=None, download_root=None):
     """Return selected index only when owned, mapped, sized and safely started.
 
     DEFERRED is a normal wait (first-episode probe or metadata). Permanent
@@ -78,7 +78,9 @@ def admit_single_episode(db, notification_id, infohash, magnet_uri, qb, *,
         FROM anime_single_file_admissions WHERE notification_id=?""",
         (notification_id,)).fetchone()
     if previous is None:
-        intake=submit_poll_pause(db,infohash,magnet_uri,qb)
+        from pathlib import Path
+        save_path=str(Path(download_root).resolve(strict=True)) if download_root is not None else None
+        intake=submit_poll_pause(db,infohash,magnet_uri,qb,save_path=save_path)
         if intake["state"]=="DEFERRED":
             return {"state":"DEFERRED","reason":intake.get("reason")}
         if intake["state"]!="MANIFEST_READY":

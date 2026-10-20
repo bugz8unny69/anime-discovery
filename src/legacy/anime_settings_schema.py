@@ -33,7 +33,7 @@ SCHEMA = {
         "port":field(8765,visible=False,minimum=1,maximum=65535)}},
     "storage": {"dashboard":True,"title":"Staged media permissions",
                 "description":"Optional owner and group for new Anime-Trial media. Leave blank to use the Anime Discovery service account. A different owner may require privileges the service does not have; inaccessible targets fail safely.","fields":{
-        "download_root":field("",visible=False),
+        "download_root":field("",label="qBittorrent download root",help_text="Absolute path shared by Anime Discovery and qBittorrent. New Anime Discovery-owned torrents are saved here; existing torrents are never relocated. Must be reachable in the worker filesystem namespace."),
         "trial_root":field("",visible=False),
         "staged_owner":field("",label="Staged file owner (optional)",
             help_text="Linux username or numeric UID. Blank keeps the service user; changing owner requires sufficient filesystem permissions."),

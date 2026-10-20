@@ -63,7 +63,7 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 # independent of the qB HTTP transport implementation.
                 intake=admit_single_episode(db,payload['notification_id'],
                     payload['infohash'],payload['magnet_uri'],client,
-                    size_settings=size_settings)
+                    size_settings=size_settings,download_root=download_root)
                 if intake["state"]=="DEFERRED":
                     return intake
                 selected_index=intake["file_index"]

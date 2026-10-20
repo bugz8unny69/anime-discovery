@@ -9,7 +9,7 @@ from anime_external_actions import reserve, transition
 from anime_action_reconcile import reconcile
 from anime_qb_ownership import CATEGORY, reserve_marker, mark_external, confirm_marker
 
-def submit_once(db, infohash, magnet_uri, qb):
+def submit_once(db, infohash, magnet_uri, qb, *, save_path=None):
     """Fail closed after uncertain submission; reconcile rather than retry.
 
     qb exposes contains_hash(), torrent_identity() and add_magnet().
@@ -46,7 +46,10 @@ def submit_once(db, infohash, magnet_uri, qb):
         marker=reserve_marker(db,infohash)
         if marker is None:
             raise RuntimeError("Cannot submit torrent without provenance marker")
-        qb.add_magnet(magnet_uri,category=CATEGORY,tag=marker)
+        options={"category":CATEGORY,"tag":marker}
+        if save_path is not None:
+            options["save_path"]=save_path
+        qb.add_magnet(magnet_uri,**options)
     # A successful add response is not proof of existence or authorship.
     found=reconcile(db,action,infohash,fingerprint,
                     lambda _type,key: key if qb.contains_hash(key) else None)

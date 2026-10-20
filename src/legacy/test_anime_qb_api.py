@@ -37,6 +37,10 @@ class QBApiTests(unittest.TestCase):
         self.assertIn(b"deleteFiles=true",opener.requests[1].data)
         qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40)
         self.assertEqual(len(opener.requests),3)
+        qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40,save_path="/mnt/media/Torrents/anime")
+        self.assertIn(b"savepath=%2Fmnt%2Fmedia%2FTorrents%2Fanime",opener.requests[-1].data)
+        with self.assertRaises(ValueError):
+            qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40,save_path="../outside")
 
     def test_category_and_ownership_marker_are_sent_with_magnet(self):
         import json
