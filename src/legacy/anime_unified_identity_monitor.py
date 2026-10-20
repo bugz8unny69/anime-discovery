@@ -216,6 +216,18 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             retry=attempts<3
             pending_retries+=int(retry)
             LOG.warning("Identity triage retry notification=%s error_type=%s",nid,type(exc).__name__)
+        LOG.info("identity notification=%s attempt=%s decision=%s threshold=%s anidb_matches=%s tvdb_candidates=%s issues=%s",
+                 nid,attempts,decision,report.get("threshold_pct","n/a"),
+                 len(report.get("anidb_candidates",[])),
+                 report.get("tvdb_results_count","n/a"),
+                 ",".join(report.get("issues",[])[:8]))
+        for candidate in report.get("candidate_scores",[])[:10]:
+            LOG.info("identity notification=%s tvdb_candidate=%s score=%s threshold=%s result=%s",
+                     nid,candidate["tvdb_id"],candidate["score_pct"],
+                     candidate["threshold_pct"],candidate["reason"])
+        for step in report.get("workflow",[])[:12]:
+            LOG.info("identity notification=%s step=%s details=%s",
+                     nid,step.get("step"),json.dumps({k:v for k,v in step.items() if k!="step"},sort_keys=True))
         # Never expose API keys or release payloads in stored diagnostics.
         safe=json.dumps(report,sort_keys=True)[:16000]
         with db:
@@ -233,6 +245,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     return {"processed":done,"pending_retries":pending_retries}
 
 def main():
+    logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     while True:
         try:
             cfg=load_config()
