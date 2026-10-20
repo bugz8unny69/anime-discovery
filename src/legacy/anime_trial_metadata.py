@@ -26,6 +26,32 @@ def _write_xml(path, root):
             os.unlink(name)
 
 
+
+def tvdb_english_title(tvdb_id, api_key, *, login=None, fetch=None):
+    """Read the TVDB English translation for an already verified series ID.
+
+    Metadata-only best effort; never affects identity approval or acquisition.
+    """
+    if not api_key or not str(tvdb_id).isdigit() or int(tvdb_id) <= 0:
+        return None
+    from anime_identity_verify import TVDB_URL, tvdb_token, request_json
+    login = login or tvdb_token
+    fetch = fetch or request_json
+    try:
+        token = login(api_key)
+        record = fetch(TVDB_URL + "/series/" + str(int(tvdb_id)) +
+                       "/translations/eng", bearer=token).get("data")
+        if not isinstance(record, dict):
+            return None
+        title = record.get("name")
+        if (not isinstance(title, str) or not title.strip() or
+                len(title) > 180 or not all(c.isprintable() for c in title)):
+            return None
+        return title.strip()
+    except Exception:
+        # Jellyfin NFO translations are optional: do not block staged media.
+        return None
+
 def _display_title(title, english_title):
     """Only an explicitly supplied English title may override the canonical title."""
     if isinstance(english_title, str) and english_title.strip():
