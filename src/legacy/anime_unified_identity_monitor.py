@@ -29,6 +29,13 @@ def ensure_schema(db):
         next_at INTEGER NOT NULL DEFAULT 0,
         decision TEXT NOT NULL,
         evidence_json TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS verified_anidb_episode_ids (
+        notification_id INTEGER PRIMARY KEY REFERENCES notifications(id),
+        anidb_id INTEGER NOT NULL,
+        anidb_episode_number INTEGER NOT NULL,
+        anidb_episode_id INTEGER NOT NULL,
+        source TEXT NOT NULL
+    )""")
 
 def ensure_titles(path,*,now=None,downloader=None):
     """Use cached public AniDB titles; refresh at most daily."""
@@ -297,6 +304,19 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
                 approve(db,nid,report["approval"],source="verified_identity_mapping")
+                rule=report.get("episode_mapping")
+                if rule and type(report.get("verified_anidb_episode_id")) is int:
+                    db.execute("""INSERT INTO verified_anidb_episode_ids
+                        (notification_id,anidb_id,anidb_episode_number,anidb_episode_id,source)
+                        VALUES (?,?,?,?,?)
+                        ON CONFLICT(notification_id) DO UPDATE SET
+                        anidb_id=excluded.anidb_id,
+                        anidb_episode_number=excluded.anidb_episode_number,
+                        anidb_episode_id=excluded.anidb_episode_id,
+                        source=excluded.source""",
+                        (nid,report["approval"]["anidb_id"],
+                         rule["anidb_episode_number"],
+                         report["verified_anidb_episode_id"],"AniDB"))
                 # approve() atomically records proof and queues the job.
                 db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
             retry=False
