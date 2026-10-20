@@ -6,6 +6,7 @@ verifying staged files still exist on disk.
 """
 from pathlib import Path
 import json
+from anime_job_management import latest_events
 
 PAGE_SIZES=(20,50,100)
 
@@ -53,6 +54,7 @@ def staged_series(db, *, page=1,size=20):
 def all_jobs(db, *,page=1,size=20):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
+    events=latest_events(db)
     identity_checks={}
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
         for nid,decision,document in db.execute(
@@ -67,7 +69,7 @@ def all_jobs(db, *,page=1,size=20):
                 identity_checks[nid]=("UNKNOWN",[])
     rows=db.execute("""SELECT n.id,n.source,n.release_name,n.received_at,n.status,
         d.season,d.episode,d.state,
-        j.state,j.last_error,r.staged_path,
+        j.id,j.state,j.attempts,j.available_at,j.lease_until,j.last_error,r.staged_path,
         COALESCE(s.title,'')
         FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
@@ -77,8 +79,12 @@ def all_jobs(db, *,page=1,size=20):
         LEFT JOIN torrent_recovery_records r ON r.notification_id=n.id
         ORDER BY n.id DESC""").fetchall()
     result=[]
-    for nid,source,release,received,nstatus,season,episode,dispatch,job,error,stage,title in rows:
-        if job=="DONE" and dispatch=="DONE":
+    for nid,source,release,received,nstatus,season,episode,dispatch,job_id,job,attempts,retry_at,lease_until,error,stage,title in rows:
+        event=events.get(job_id)
+        canceled=job=="BLOCKED" and event is not None and event["action"]=="cancel"
+        if canceled:
+            status="CANCELED"
+        elif job=="DONE" and dispatch=="DONE":
             status="COMPLETED"
         elif job=="LEASED":
             status="RUNNING"
@@ -113,6 +119,8 @@ def all_jobs(db, *,page=1,size=20):
             explanation="Acquisition worker has leased this job."
         elif status=="COMPLETED":
             explanation="Acquisition job completed."
+        elif status=="CANCELED":
+            explanation="Canceled by an administrator. The job will not be retried; no torrent or media was deleted."
         else:
             explanation=error or ("Current job state: "+status.lower())
         if status in ("IDENTIFYING","NEEDS REVIEW") and nid in identity_checks:
@@ -120,21 +128,41 @@ def all_jobs(db, *,page=1,size=20):
             explanation+=" Latest identity check: "+str(decision)[:80]
             if codes:
                 explanation+="; "+", ".join(codes)
-        result.append({"id":nid,"source":source,"release":release,
+        result.append({"id":nid,"job_id":job_id,"job_state":job,"attempts":attempts,
+                        "next_retry_at":retry_at if job=="DEFERRED" else None,
+                        "lease_until":lease_until if job=="LEASED" else None,
+                        "last_error":error or None,
+                        "can_retry":job=="DEFERRED",
+                        "can_cancel":job in ("READY","DEFERRED","NEEDS_REVIEW"),
+                        "last_admin_action":event,
+                        "source":source,"release":release,
                        "received_at":received,"status":status,
                        "can_resolve":status=="NEEDS REVIEW" and not dispatch and not job,
                        "can_delete":status in ("NEEDS REVIEW","RECEIVED","IDENTIFYING") and not dispatch and not job,
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "", "activity_detail":explanation,
                        "staged":bool(stage and Path(stage).is_file())})
-    searches=db.execute("""SELECT id,subject_key,payload_json,state,last_error
+    searches=db.execute("""SELECT id,subject_key,payload_json,state,attempts,
+        available_at,lease_until,last_error
         FROM daemon_jobs WHERE kind='series_gap_search' ORDER BY id DESC""").fetchall()
-    for jid,key,payload,state,error in searches:
+    for jid,key,payload,state,attempts,retry_at,lease_until,error in searches:
         request=json.loads(payload)
+        event=events.get(jid)
+        canceled=state=="BLOCKED" and event is not None and event["action"]=="cancel"
         job_status={"READY":"QUEUED","LEASED":"RUNNING","DONE":"COMPLETED",
                     "DEFERRED":"WAITING FOR SEARCH","BLOCKED":"BLOCKED",
                     "NEEDS_REVIEW":"NEEDS REVIEW"}.get(state,state)
-        result.append({"id":"search-"+str(jid),"source":request["origin"],
+        if canceled:
+            job_status="CANCELED"
+        explanation=("Canceled by an administrator. No torrent or media was deleted."
+                     if canceled else error or ("Search job: "+job_status.lower()))
+        result.append({"id":"search-"+str(jid),"job_id":jid,"job_state":state,
+                        "attempts":attempts,"next_retry_at":retry_at if state=="DEFERRED" else None,
+                        "lease_until":lease_until if state=="LEASED" else None,
+                        "last_error":error or None,"last_admin_action":event,
+                        "can_retry":state=="DEFERRED",
+                        "can_cancel":state in ("READY","DEFERRED","NEEDS_REVIEW"),
+                        "activity_detail":explanation,"source":request["origin"],
                        "release":request["title"]+" (one-time search)",
                        "received_at":0,"status":job_status,"season":request["season"],
                        "episode":None,"series_title":request["title"],

@@ -156,7 +156,9 @@ def jobs_page(result):
     out=shell("Jobs","Jobs")
     out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
 from receipt through download and completion. Status and activity details refresh every
-five seconds. Items waiting for episode identity have not entered the worker queue.</p><section class="panel">
+five seconds. Retry Now bypasses backoff for deferred jobs. Cancel Job stops
+future retries for waiting jobs only; it does not interrupt running jobs or delete
+torrents or media. Jobs waiting for episode identity have not entered the worker queue.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
@@ -202,13 +204,36 @@ td(tr,job.episode?"S"+String(job.season).padStart(2,"0")+"E"+String(job.episode)
 let cell=document.createElement("td"),status=document.createElement("span");
 status.className="status "+(job.status==="COMPLETED"?"completed":
 job.status==="RUNNING"?"running":job.status.includes("WAITING")?"waiting":
-job.status==="BLOCKED"?"blocked":"");
+(job.status==="BLOCKED"||job.status==="CANCELED")?"blocked":"");
 status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,job.activity_detail||"No further activity recorded");
 detail.classList.add("muted");
+if(typeof job.job_id==="number"){
+  const line=document.createElement("div");
+  line.textContent="Job #"+job.job_id+" · "+(job.job_state||"UNKNOWN")+
+    " · Attempts: "+(job.attempts??0)+
+    (job.last_error?" · Last error: "+job.last_error:"");
+  detail.appendChild(line);
+  if(job.next_retry_at!==null && job.next_retry_at!==undefined){
+    const next=document.createElement("div");
+    next.textContent="Next retry: "+new Date(job.next_retry_at*1000).toLocaleString();
+    detail.appendChild(next);
+  }
+  if(job.lease_until!==null && job.lease_until!==undefined){
+    const lease=document.createElement("div");
+    lease.textContent="Lease expires: "+new Date(job.lease_until*1000).toLocaleString();
+    detail.appendChild(lease);
+  }
+  if(job.last_admin_action){
+    const audit=document.createElement("div");
+    audit.textContent="Last admin action: "+job.last_admin_action.action+
+      " · "+new Date(job.last_admin_action.at*1000).toLocaleString();
+    detail.appendChild(audit);
+  }
+}
 let actions=document.createElement("td");
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
@@ -232,6 +257,17 @@ if(job.can_delete){
       await refresh();
     }catch(error){alert(error.message)}
   });actions.appendChild(btn);
+}
+if(job.can_retry || job.can_cancel){
+  for(const [operation,label] of [["retry","Retry Now"],["cancel","Cancel Job"]]){
+    if(!(operation==="retry"?job.can_retry:job.can_cancel))continue;
+    const btn=document.createElement("button");
+    btn.type="button";btn.className=operation==="cancel"?"secondary":"";
+    btn.textContent=label;
+    btn.addEventListener("click",()=>manageJob(job,operation,btn));
+    actions.appendChild(btn);
+    actions.appendChild(document.createTextNode(" "));
+  }
 }
 if(typeof job.id==="number" && job.status!=="COMPLETED"){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";
@@ -284,6 +320,23 @@ async function openTrace(notificationId){
     traceLine(body,"Verified cross-reference pairs: "+(ev.matching_pairs||[]).length);
     traceLine(body,"Reasons: "+((ev.issues||[]).join(", ")||"No reason codes recorded"));
   }catch(error){traceLine(body,"Could not load matching details: "+error.message)}
+}
+async function manageJob(job,action,button){
+  const subject=job.release+" (job #"+job.job_id+")";
+  if(action==="cancel" && !confirm("Cancel future attempts for "+subject+
+      "? This will not delete or stop any torrent or media."))return;
+  button.disabled=true;
+  try{
+    const csrf=document.querySelector('input[name="_csrf"]')?.value;
+    const response=await fetch("/api/manage-job",{method:"POST",credentials:"same-origin",
+      headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+      body:JSON.stringify({job_id:job.job_id,action:action,
+        expected_state:job.job_state,expected_attempts:job.attempts})});
+    const outcome=await response.json();
+    if(!response.ok)throw Error(outcome.error||"Job action failed");
+    await refresh();
+  }catch(error){alert(error.message);await refresh()}
+  finally{button.disabled=false}
 }
 update(initial);
 async function refresh(){if(document.hidden)return;

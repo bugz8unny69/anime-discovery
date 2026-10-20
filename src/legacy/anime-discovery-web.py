@@ -282,6 +282,22 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     SECURITY_LOG.warning("CSRF rejected route=%s reason=mismatch",route)
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/api/manage-job":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    from anime_job_management import manage
+                    if (type(values.get("job_id")) is not int or
+                            type(values.get("expected_attempts")) is not int):
+                        raise ValueError("Numeric job ID and attempt count required")
+                    with self.database() as db:
+                        outcome=manage(db,values["job_id"],values.get("action"),
+                            expected_state=values.get("expected_state"),
+                            expected_attempts=values["expected_attempts"])
+                    SECURITY_LOG.info("Authenticated job management action=%s job_id=%d",
+                                      outcome["action"],outcome["job_id"])
+                    return self.send(200,json.dumps(outcome),"application/json")
+                except (ValueError,TypeError,sqlite3.Error) as exc:
+                    return self.send(409,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/delete-notification":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()
