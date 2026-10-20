@@ -63,7 +63,8 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
 
     def run_handler(self,job):
         with (patch("anime_media_flow.confirmed_jp_en",return_value=True),
-              patch("anime_source_retention.confirmed_jp_en",return_value=True)):
+              patch("anime_source_retention.confirmed_jp_en",return_value=True),
+              patch("anime_acquisition_handler.tvdb_english_title",return_value="Example")):
             return asyncio.run(self.handler(job))
 
     def test_staging_preserves_original_until_sonarr_keep(self):
