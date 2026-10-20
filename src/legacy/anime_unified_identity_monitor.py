@@ -17,6 +17,7 @@ from anime_xml_response_diagnostics import InvalidXMLResponse,log_bad_xml
 from pathlib import Path
 from anime_flat_config import load_config
 from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
+from anime_batch_selection import release_scope_hint
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
@@ -169,6 +170,16 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
             "matching_pairs":[],"crossref_diagnostics":[],"episode_mapping":None,"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
+    # Hints improve Needs Review diagnostics only: never approve from a
+    # torrent name, especially a batch without a verified file manifest.
+    hint=release_scope_hint(name)
+    report["release_scope_hint"]=hint
+    if hint["kind"] == "season_pack":
+        report["issues"].append("BATCH_FILE_MANIFEST_REQUIRED")
+    elif hint["kind"] == "special":
+        report["issues"].append("SEASON_ZERO_SPECIAL_OUTSIDE_TRIAL_SCOPE")
+    elif hint["kind"] == "ambiguous_season":
+        report["issues"].append("MIXED_OR_AMBIGUOUS_SEASON_HINT")
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
     if not settings.get("anidb",{}).get("enabled",True):
