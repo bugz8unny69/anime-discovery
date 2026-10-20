@@ -55,6 +55,32 @@ class SubmissionTests(unittest.TestCase):
             self.assertEqual(ownership(db,HASH),EXTERNAL)
             self.assertEqual(qb.records[HASH]["category"],"movies")
 
+    def test_retry_rearms_after_preexisting_external_torrent_removed(self):
+        with sqlite3.connect(":memory:",isolation_level=None) as db:
+            qb=FakeQB()
+            qb.records[HASH]={"hash":HASH,"category":"other","tags":""}
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
+            self.assertEqual(ownership(db,HASH),EXTERNAL)
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
+            self.assertEqual(qb.calls,0)
+            qb.records.pop(HASH)
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
+            self.assertEqual(qb.calls,1)
+            self.assertEqual(ownership(db,HASH),OWNED)
+            self.assertTrue(qb.records[HASH]["tags"].startswith("ad-"))
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
+            self.assertEqual(qb.calls,1)
+
+    def test_uncertain_missing_torrent_never_resubmitted(self):
+        with sqlite3.connect(":memory:",isolation_level=None) as db:
+            qb=FakeQB()
+            qb.identity_visible=False
+            self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
+            qb.records.clear()
+            self.assertIsNone(submit_once(db,HASH,MAGNET,qb))
+            self.assertEqual(qb.calls,1)
+            self.assertEqual(ownership(db,HASH),UNCERTAIN)
+
     def test_missing_post_add_marker_is_not_owned(self):
         with sqlite3.connect(":memory:",isolation_level=None) as db:
             qb=FakeQB()
