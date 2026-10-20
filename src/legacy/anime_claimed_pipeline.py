@@ -14,7 +14,7 @@ from anime_trial_staging import staged_destination
 
 def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
                     download_root, trial_root, title, tvdb_id, english_title=None,
-                    staged_owner="",staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
+                    staged_owner="",staged_group="", staged_directory_mode="2770", staged_file_mode="0640", selected_file_index=None):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     approval=approved_dispatch(db,notification_id)
