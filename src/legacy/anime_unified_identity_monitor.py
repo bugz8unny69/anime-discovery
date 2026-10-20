@@ -344,6 +344,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     for nid,title,attempts in selected:
         attempts+=1
         retry_delay=None
+        mapping_xml=None
         stage="IDENTITY_RESOLUTION" if probe else "ANIDB_TITLES"
         try:
             if probe:
