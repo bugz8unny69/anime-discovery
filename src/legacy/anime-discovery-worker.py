@@ -63,7 +63,9 @@ def runtime_handlers(db_path, initial_config):
             enabled=True,cleanup_source=qb["cleanup_source"],
             jellyfin_refresh=jellyfin_refresh,
             staged_owner=settings["storage"].get("staged_owner",""),
-            staged_group=settings["storage"].get("staged_group",""))
+            staged_group=settings["storage"].get("staged_group",""),
+            staged_directory_mode=settings["storage"].get("staged_directory_mode","2770"),
+            staged_file_mode=settings["storage"].get("staged_file_mode","0640"))
         return await live["claimed_acquisition"](job)
 
     async def gap_search(job):
