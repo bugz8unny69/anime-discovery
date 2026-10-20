@@ -436,6 +436,22 @@ def detail_page(detail):
     series=detail["series"]
     out=shell(series[1],"Series")
     out+='<h1>'+escape(series[1])+'</h1><p class="muted">TVDB '+escape(series[2])+' · '+escape(series[3])+'</p>'
+    reconciliation=detail.get("reconciliation")
+    out+='<section class="panel"><h2>Sonarr reconciliation</h2>'
+    if reconciliation:
+        out+='<p><strong>'+escape(reconciliation["result"].replace("_"," "))+'</strong>'
+        out+=' · Checked '+escape(reconciliation["checked_at"])+'</p>'
+        if reconciliation["monitored"] is not None:
+            out+='<p>Series monitored: '+("Yes" if reconciliation["monitored"] else "No")+'</p>'
+        out+='<table><tr><th>Season</th><th>Episode</th><th>Sonarr status</th></tr>'
+        for entry in reconciliation["episodes"]:
+            out+='<tr><td>'+escape(entry["season"])+'</td><td>'+escape(entry["episode"])+'</td><td>'+escape(entry["status"])+'</td></tr>'
+        out+='</table>'
+        if reconciliation["result"] in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
+            out+='<p>Existing Sonarr files are registered, not yet verified as JP+EN suitable replacements. No cleanup is authorized. External or uncertain torrents are never deleted.</p>'
+    else:
+        out+='<p>No Sonarr reconciliation check recorded yet.</p>'
+    out+='<form method="post" action="/series-check-sonarr"><input type="hidden" name="series_id" value="'+str(series[0])+'"><button class="secondary">Check Sonarr now</button></form></section>'
     preserved=detail.get("cleanup_notices") or []
     if preserved:
         action=("Keep has been submitted to Sonarr." if series[3]=="SONARR_IMPORT_PENDING"
