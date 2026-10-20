@@ -20,10 +20,11 @@ def main():
         # Monitor reloads config each cycle, including enablement changes.
         # Always launch it so Save & Apply can enable NTFY without a daemon restart.
         processes.append(subprocess.Popen([sys.executable, str(base / "anime_ntfy_monitor.py")]))
-        if config["settings"]["sonarr"]["enabled"]:
-            processes.append(subprocess.Popen([sys.executable, str(base / "anime_sonarr_import_monitor.py")]))
-        if config["settings"]["sonarr"]["enabled"] and config["settings"]["shoko"]["enabled"]:
-            processes.append(subprocess.Popen([sys.executable, str(base / "anime_shoko_handoff_monitor.py")]))
+        # Both monitors exit their iteration without side effects when disabled.
+        # Keep them alive so enabling Sonarr or Shoko takes effect without a
+        # supervisor restart (and without bypassing manual Keep).
+        processes.append(subprocess.Popen([sys.executable, str(base / "anime_sonarr_import_monitor.py")]))
+        processes.append(subprocess.Popen([sys.executable, str(base / "anime_shoko_handoff_monitor.py")]))
         web = config["settings"]["web"]
         print(f"Anime Discovery running at http://{web['host']}:{web['port']}/", flush=True)
         while True:
