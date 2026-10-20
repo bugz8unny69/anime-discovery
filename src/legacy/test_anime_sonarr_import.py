@@ -53,6 +53,8 @@ class KeepCandidateDiagnosisTests(unittest.TestCase):
                 return Reply([{"id":2443,"seasonNumber":1,"episodeNumber":1}])
             if "manualimport?folder=" in request.full_url:
                 return Reply(candidates)
+            if request.full_url.endswith("/manualimport"):
+                return Reply([])  # Deliberately fail the identity reprocess.
             raise AssertionError("Manual import command must not be sent on mismatch")
         with self.assertLogs("anime_discovery.sonarr",level="WARNING") as lines:
             with self.assertRaises(SonarrImportNeedsReview) as failure:
@@ -73,18 +75,90 @@ class KeepCandidateDiagnosisTests(unittest.TestCase):
 
     def test_sonarr_sees_path_but_wrong_series(self):
         self.assertEqual(self.call_import([{"path":self.PATH,
-                "series":{"id":999},"episodes":[{"id":2443}]}]),
-                "SERIES_IDENTITY_MISMATCH")
+                "series":{"id":999},"episodes":[{"id":2443}],
+                "quality":{"quality":{"id":9}},"languages":[{"id":8}]}]),
+                "SONARR_REPROCESS_UNCONFIRMED")
 
     def test_sonarr_sees_series_but_wrong_episode(self):
         self.assertEqual(self.call_import([{"path":self.PATH,
-                "series":{"id":124},"episodes":[{"id":2442}]}]),
-                "EPISODE_IDENTITY_MISMATCH")
+                "series":{"id":124},"episodes":[{"id":2442}],
+                "quality":{"quality":{"id":9}},"languages":[{"id":8}]}]),
+                "SONARR_REPROCESS_UNCONFIRMED")
 
     def test_malformed_candidate_does_not_cause_attribute_error(self):
         self.assertEqual(self.call_import([None,{"path":self.PATH,
-                "series":None,"episodes":None}]),"SERIES_IDENTITY_MISMATCH")
+                "series":None,"episodes":None}]),"QUALITY_LANGUAGE_UNRESOLVED")
 
+
+class VerifiedOverrideTests(unittest.TestCase):
+    def test_explicit_sonarr_identity_reprocesses_name_only_stage_and_copies(self):
+        import json
+        path="/mnt/media/Anime-Trial/Solo Leveling/Season 01/S01E01.mkv"
+        requests=[]
+        class Reply:
+            def __init__(self,data): self.data=data
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self): return json.dumps(self.data).encode()
+        def opener(req,timeout):
+            payload=json.loads(req.data) if req.data else None
+            requests.append((req.get_method(),req.full_url,payload))
+            if "episode?seriesId" in req.full_url:
+                return Reply([{"id":777,"seasonNumber":1,"episodeNumber":1}])
+            if "manualimport?folder=" in req.full_url:
+                # Sonarr can read the file but cannot infer Solo Leveling from S01E01.mkv.
+                return Reply([{"path":path,"series":None,"episodes":[],
+                               "quality":{"quality":{"id":9}},
+                               "languages":[{"id":8}],"rejections":[{"reason":"Unknown Series"}]}])
+            if req.full_url.endswith("/manualimport"):
+                self.assertEqual(payload[0]["path"],path)
+                self.assertEqual(payload[0]["seriesId"],24)
+                self.assertEqual(payload[0]["episodeIds"],[777])
+                return Reply([{**payload[0],"episodeIds":None,
+                    "episodes":[{"id":777}],"rejections":[]}])
+            if req.full_url.endswith("/command"):
+                self.assertEqual(payload["name"],"ManualImport")
+                self.assertEqual(payload["importMode"],"copy")
+                self.assertEqual(payload["files"][0]["path"],path)
+                self.assertEqual(payload["files"][0]["seriesId"],24)
+                self.assertEqual(payload["files"][0]["episodeIds"],[777])
+                return Reply({"id":501})
+            raise AssertionError("Unexpected Sonarr API call")
+        with self.assertLogs("anime_discovery.sonarr",level="INFO") as lines:
+            result=request_import({"sonarr":{"base_url":"https://sonarr.example"}},
+                {"sonarr_api_key":"dummy"},sonarr_id=24,
+                plan=[{"season":1,"episode":1,"path":path}],opener=opener)
+        self.assertEqual(result["command_id"],501)
+        self.assertFalse(result["source_cleanup_authorized"])
+        self.assertIn("EXPLICIT_VERIFIED_EPISODE"," ".join(lines.output))
+        self.assertEqual([r[0] for r in requests],["GET","GET","POST","POST"])
+
+    def test_reprocess_wrong_episode_is_not_trusted(self):
+        import json
+        from anime_sonarr_import import SonarrImportNeedsReview
+        path="/mnt/media/Anime-Trial/Solo Leveling/Season 01/S01E01.mkv"
+        class Reply:
+            def __init__(self,data): self.data=data
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self): return json.dumps(self.data).encode()
+        def opener(req,timeout):
+            payload=json.loads(req.data) if req.data else None
+            if "episode?seriesId" in req.full_url:
+                return Reply([{"id":777,"seasonNumber":1,"episodeNumber":1}])
+            if "manualimport?folder=" in req.full_url:
+                return Reply([{"path":path,"series":None,"episodes":[],
+                               "quality":{"quality":{"id":9}},
+                               "languages":[{"id":8}]}])
+            if req.full_url.endswith("/manualimport"):
+                return Reply([{**payload[0],"episodeIds":None,
+                               "episodes":[{"id":999}],"rejections":[]}])
+            raise AssertionError("Rejected reprocess must never submit import")
+        with self.assertRaises(SonarrImportNeedsReview) as failure:
+            request_import({"sonarr":{"base_url":"https://sonarr.example"}},
+                {"sonarr_api_key":"dummy"},sonarr_id=24,
+                plan=[{"season":1,"episode":1,"path":path}],opener=opener)
+        self.assertEqual(failure.exception.reason,"SONARR_REPROCESS_IDENTITY_MISMATCH")
 
 class RejectionTests(unittest.TestCase):
     def test_existing_higher_quality_blocks_manual_import(self):
