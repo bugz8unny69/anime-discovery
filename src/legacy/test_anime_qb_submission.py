@@ -33,6 +33,19 @@ class SubmissionTests(unittest.TestCase):
             self.assertEqual(submit_once(db,HASH,MAGNET,qb),HASH)
             self.assertEqual(qb.calls,1)
 
+    def test_new_owned_torrent_receives_explicit_save_path(self):
+        class PathQB(FakeQB):
+            def add_magnet(self,uri,*,category,tag,save_path=None):
+                self.submitted_path=save_path
+                super().add_magnet(uri,category=category,tag=tag)
+        with sqlite3.connect(":memory:",isolation_level=None) as db:
+            qb=PathQB()
+            submit_once(db,HASH,MAGNET,qb,save_path="/mnt/media/Torrents/anime")
+            self.assertEqual(qb.submitted_path,"/mnt/media/Torrents/anime")
+            self.assertEqual(ownership(db,HASH),OWNED)
+            submit_once(db,HASH,MAGNET,qb,save_path="/mnt/media/Torrents/anime")
+            self.assertEqual(qb.calls,1)
+
     def test_preexisting_exact_hash_is_external_and_never_added(self):
         with sqlite3.connect(":memory:",isolation_level=None) as db:
             qb=FakeQB()
