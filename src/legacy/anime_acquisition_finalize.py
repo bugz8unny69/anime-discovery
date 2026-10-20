@@ -4,8 +4,9 @@ Called after staged media and a durable recovery record have been verified.
 """
 import time
 from anime_acquisition_gate import approved_dispatch
+from anime_series_naming import clean_series_name
 
-def finalize_acquisition(db, job_id, lease_token, notification_id, *, now=None):
+def finalize_acquisition(db, job_id, lease_token, notification_id, *, series_title=None, now=None):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     now=time.time() if now is None else now
@@ -28,6 +29,11 @@ def finalize_acquisition(db, job_id, lease_token, notification_id, *, now=None):
             (int(now),notification_id))
         if updated.rowcount!=1:
             raise ValueError("Dispatch changed during finalization")
+        if series_title is not None:
+            name=clean_series_name(series_title)
+            db.execute("""UPDATE series SET title=? WHERE id=(
+                SELECT series_id FROM episode_dispatch WHERE notification_id=?)""",
+                (name,notification_id))
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='episodes'").fetchone():
             db.execute("""UPDATE episodes SET status='STAGED'
                 WHERE (series_id,season,episode) IN (
