@@ -456,6 +456,7 @@ def detail_page(detail):
     preserved=detail.get("cleanup_notices") or []
     if preserved:
         action=("Keep has been submitted to Sonarr." if series[3]=="SONARR_IMPORT_PENDING"
+                else "Sonarr already manages these episodes; review cleanup." if series[3]=="SONARR_MANAGED_REVIEW"
                 else "Keep completed.")
         out+='<section class="panel" role="status" aria-live="polite">'
         out+='<h2>Original qBittorrent files preserved</h2><p>'+escape(action)+' '
@@ -478,8 +479,10 @@ def detail_page(detail):
     out+='</table></section>'
     out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    if series[3] in ("KEPT","SONARR_IMPORT_PENDING"):
-        out+='<button type="button" disabled>Keep already submitted</button></form>'
+    if series[3] in ("KEPT","SONARR_IMPORT_PENDING","SONARR_MANAGED_REVIEW"):
+        out+=('<button type="button" disabled>Already managed in Sonarr</button></form>'
+              if series[3]=="SONARR_MANAGED_REVIEW" else
+              '<button type="button" disabled>Keep already submitted</button></form>')
     else:
         out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
     out+='<details style="margin-top:18px"><summary>Manage series</summary>'
