@@ -252,6 +252,15 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     SECURITY_LOG.warning("CSRF rejected route=%s reason=mismatch",route)
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/api/delete-notification":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    from anime_notification_management import delete_unmatched
+                    with self.database() as db:
+                        outcome=delete_unmatched(db,values.get("notification_id"))
+                    return self.send(200,json.dumps(outcome),"application/json")
+                except (ValueError,TypeError,sqlite3.Error) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/test-connection":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 try:
