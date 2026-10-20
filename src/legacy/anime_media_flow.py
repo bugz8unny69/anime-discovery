@@ -8,7 +8,7 @@ from anime_trial_staging import stage_verified
 from anime_audio_verification import confirmed_jp_en
 
 def stage_claimed(db, notification_id, torrent, download_root, trial_root,
-                  *, title, tvdb_id, english_title=None, staged_owner="", staged_group=""):
+                  *, title, tvdb_id, english_title=None, staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     approval=approved_dispatch(db,notification_id)
@@ -31,4 +31,5 @@ def stage_claimed(db, notification_id, torrent, download_root, trial_root,
     return stage_verified(source,trial_root,title=title,tvdb_id=tvdb_id,
                           series_id=approval["series_id"],
                           season=approval["season"],episode=approval["episode"],english_title=english_title,
-                          staged_owner=staged_owner,staged_group=staged_group)
+                          staged_owner=staged_owner,staged_group=staged_group,
+            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode)
