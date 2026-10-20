@@ -56,6 +56,12 @@ class FinalizationTests(unittest.TestCase):
         self.settings={"sonarr":{"base_url":"https://sonarr.example","root_folder":str(self.root)},
                        "storage":{"trial_root":str(self.trial),"download_root":str(self.download)}}
         self.secrets={"sonarr_api_key":"test-key"}
+    def mark_owned(self):
+        from anime_qb_ownership import ensure_schema,CATEGORY,OWNED
+        ensure_schema(self.db)
+        self.db.execute("""INSERT INTO qb_torrent_ownership
+            VALUES (?,?,?,?,1)""",(HASH,OWNED,"ad-"+"1"*32,CATEGORY))
+
     def opener(self,request,timeout):
         url=request.full_url
         if "/command/" in url:return Response({"id":88,"status":"completed"})
@@ -77,12 +83,14 @@ class FinalizationTests(unittest.TestCase):
         self.assertEqual(qb.deleted,[])
         self.assertTrue(self.stage.exists())
     def test_wrong_qb_path_never_deletes(self):
+        self.mark_owned()
         qb=FakeQB({"save_path":str(self.root)})
         with self.assertRaises(RuntimeError):
             finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
         self.assertEqual(qb.deleted,[])
         self.assertTrue(self.stage.exists())
     def test_extra_torrent_video_blocks_cleanup(self):
+        self.mark_owned()
         folder=self.download/"subfolder"
         folder.mkdir()
         (folder/"original.mkv").write_bytes(self.stage.read_bytes())
@@ -93,7 +101,32 @@ class FinalizationTests(unittest.TestCase):
             finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
         self.assertEqual(qb.deleted,[])
         self.assertTrue(self.stage.exists())
+    def test_existing_external_torrent_is_preserved_after_successful_keep(self):
+        from anime_qb_ownership import ensure_schema,CATEGORY,EXTERNAL
+        ensure_schema(self.db)
+        self.db.execute("""INSERT INTO qb_torrent_ownership VALUES (?,?,?,?,1)""",
+                        (HASH,EXTERNAL,None,CATEGORY))
+        # qB save path and payload are intentionally not managed by us.
+        qb=FakeQB({"save_path":"/somebody-elses-torrent"})
+        result=finalize_import(self.db,self.sid,self.settings,self.secrets,
+                               qb=qb,opener=self.opener)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["torrents_preserved"],1)
+        self.assertEqual(result["torrents_reconciled"],0)
+        self.assertEqual(qb.deleted,[])
+        self.assertFalse(self.stage.exists())
+        self.assertTrue(self.dest.exists())
+
+    def test_legacy_unknown_ownership_is_preserved(self):
+        qb=FakeQB({"save_path":str(self.download)})
+        result=finalize_import(self.db,self.sid,self.settings,self.secrets,
+                               qb=qb,opener=self.opener)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["torrents_preserved"],1)
+        self.assertEqual(qb.deleted,[])
+
     def test_torrent_removed_only_after_destination_verification(self):
+        self.mark_owned()
         folder=self.download/"subfolder"
         folder.mkdir()
         (folder/"original.mkv").write_bytes(self.stage.read_bytes())
