@@ -13,8 +13,17 @@ _SEASON_EPISODE = re.compile(
 _EPISODE = re.compile(
     r"(?<![A-Za-z0-9])(?:Episode|EP|E)[ ._-]*(?P<episode>\d{1,3})(?!\d)", re.I)
 _DASH_EPISODE = re.compile(r"\s-\s(?P<episode>\d{1,3})(?!\d)")
-_SEASON_FOLDER = re.compile(r"^Season[ ._-]*(?P<season>\d{1,2})$", re.I)
+_SEASON_FOLDER = re.compile(r"^(?:Season[ ._-]*|S)(?P<season>\d{1,2})$", re.I)
 _EXTRA_E = re.compile(r"(?<![A-Za-z])E\d{1,3}(?!\d)", re.I)
+_X_EPISODE = re.compile(
+    r"(?<![A-Za-z0-9])(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)", re.I)
+_BRACKET_EPISODE = re.compile(r"[\[(](?P<episode>\d{1,3})[\])]")
+_JP_EPISODE = re.compile(r"第\s*(?P<episode>\d{1,3})\s*話")
+_BARE_EPISODE = re.compile(r"^\s*(?P<episode>\d{1,3})\s*$")
+_SEASON_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![A-Za-z0-9])", re.I)
+_MORE_EPISODES = re.compile(
+    r"^\s*(?:[-+~&]|to)\s*(?:E(?:P(?:isode)?)?[ ._-]*)?\d{1,3}(?![A-Za-z0-9])", re.I)
 
 
 
@@ -66,11 +75,11 @@ class SelectionNeedsReview(ValueError):
 
 
 def _video_episode(name, confirmed_season):
-    """Return (season, episode), or None for non-video file entries."""
+    """Return a defensible (season, episode), never guess file ordering."""
     if not isinstance(name, str) or not name or len(name) > 2048 or "\\" in name:
         raise SelectionNeedsReview("Invalid qBittorrent file name")
     relative = PurePosixPath(name)
-    if (relative.is_absolute() or any(p in (".", "..") for p in name.split("/"))
+    if (relative.is_absolute() or any(p in (".", "..", "") for p in name.split("/"))
             or not relative.name):
         raise SelectionNeedsReview("Unsafe qBittorrent file path")
     if relative.suffix.lower() not in VIDEO_SUFFIXES:
@@ -78,35 +87,48 @@ def _video_episode(name, confirmed_season):
 
     base = relative.stem
     explicit = list(_SEASON_EPISODE.finditer(base))
-    # One video file may not silently represent multiple episodes.
-    if len(explicit) > 1 or len(_EXTRA_E.findall(base)) > 1:
+    x_form = list(_X_EPISODE.finditer(base))
+    # A multi-episode video (E01E02, 01-02, 01+02, etc.) cannot be
+    # represented as one E01 file; never stage a partial mapping.
+    if len(explicit) + len(x_form) > 1 or len(_EXTRA_E.findall(base)) > 1:
         raise SelectionNeedsReview("Multi-episode video requires review: " + name)
 
     folder_seasons = [int(match.group("season"))
                       for part in relative.parts[:-1]
                       if (match := _SEASON_FOLDER.fullmatch(part))]
-    if len(set(folder_seasons)) > 1:
-        raise SelectionNeedsReview("Conflicting season folders: " + name)
-    folder_season = folder_seasons[0] if folder_seasons else None
+    season_tokens = [int(m.group("season")) for m in _SEASON_TOKEN.finditer(base)]
+    season_hints = set(folder_seasons + season_tokens)
+    if len(season_hints) > 1 or (season_hints and confirmed_season not in season_hints):
+        raise SelectionNeedsReview("Conflicting season hints: " + name)
 
-    if explicit:
-        season = int(explicit[0].group("season"))
-        episode = int(explicit[0].group("episode"))
+    if explicit or x_form:
+        match = (explicit or x_form)[0]
+        season = int(match.group("season"))
+        episode = int(match.group("episode"))
+        if _MORE_EPISODES.match(base[match.end():]):
+            raise SelectionNeedsReview("Multi-episode video requires review: " + name)
     else:
-        identified = list(_EPISODE.finditer(base))
-        if not identified:
-            identified = list(_DASH_EPISODE.finditer(base))
-        if len(identified) != 1:
+        # Common fan-sub naming conventions. A bracketed [01] is meaningful,
+        # whereas [1080p] and [2026] are not episode indicators. Bare "01"
+        # is trusted only inside an explicit verified season directory.
+        matches = []
+        for pattern in (_EPISODE, _DASH_EPISODE,
+                        _BRACKET_EPISODE, _JP_EPISODE):
+            matches.extend(pattern.finditer(base))
+        if not matches and folder_seasons:
+            matches = list(_BARE_EPISODE.finditer(base))
+        numbers = {int(m.group("episode")) for m in matches}
+        if len(numbers) != 1 or not matches:
             raise SelectionNeedsReview("Episode number missing or ambiguous: " + name)
-        season = folder_season or confirmed_season
-        episode = int(identified[0].group("episode"))
+        for match in matches:
+            if _MORE_EPISODES.match(base[match.end():]):
+                raise SelectionNeedsReview("Multi-episode video requires review: " + name)
+        season = confirmed_season
+        episode = numbers.pop()
 
-    if (season < 1 or episode < 1 or
-            season != confirmed_season or
-            (folder_season is not None and folder_season != season)):
+    if season < 1 or episode < 1 or season != confirmed_season:
         raise SelectionNeedsReview("Season/episode mismatch: " + name)
     return season, episode
-
 
 def plan_first_six(files, *, season, already_satisfied=()):
     """Build a conservative selection from a complete qBittorrent manifest.
