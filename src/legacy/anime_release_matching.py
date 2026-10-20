@@ -37,9 +37,12 @@ def resolve_release(release_name, series_map):
         if season != configured_season or episode<1:
             # A season may be a different AniDB production than the previous.
             continue
-        matches.append({"tvdb_id":identity.get("tvdb_id"),
-                        "anidb_id":identity.get("anidb_id"),
-                        "season":season,"episode":episode})
+        row={"tvdb_id":identity.get("tvdb_id"),
+             "anidb_id":identity.get("anidb_id"),
+             "season":season,"episode":episode}
+        if identity.get("verify_each_episode") is True:
+            row["requires_episode_verification"]=True
+        matches.append(row)
     if len(matches)!=1:
         return None
     return matches[0]
