@@ -40,10 +40,10 @@ class MonitorTests(unittest.TestCase):
                 settings={"ntfy":{"enabled":True,"reminder_hours":24}}
                 result=check_once(db,settings,{},now=1000,
                     sender=lambda *_: calls.append(nid) or True)
-                self.assertEqual(result["sent"],1)
-                self.assertEqual(calls,[nid])
+                self.assertEqual(result["sent"],0)
+                self.assertEqual(calls,[])
                 self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",
-                    (nid,)).fetchone()[0],"NEEDS_REVIEW")
+                    (nid,)).fetchone()[0],"UNTRUSTED")
 
     def test_disabled_no_schema_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:

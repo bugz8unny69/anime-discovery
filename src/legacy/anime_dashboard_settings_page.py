@@ -56,7 +56,11 @@ def settings_page(directory):
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
         out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
         out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
-    out+='<section class="panel"><h2>AniDB</h2><p class="muted">AniDB is currently used through public title and Anime-Lists identity data. This installation has no AniDB API key or independent enable/disable setting. Identity lookups are not yet connected to the unified intake worker.</p></section>'
+    out+='<section class="panel"><h2>AniDB</h2>'
+    out+='<form id="anidb-public"><label class="setting-field"><span>Enabled</span>'
+    out+='<input type="checkbox" name="enabled"'+(' checked' if settings["anidb"]["enabled"] else '')+'></label>'
+    out+='<p class="muted">Public AniDB title catalog; no API key required. Verified TVDB episode mappings are still required for automatic acquisition.</p>'
+    out+='<button type="submit">Save &amp; Apply</button><p role="status" id="anidb-status"></p></form></section>'
     out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Save &amp; Apply reports when a restart is required. Refresh discards unsaved edits.</p></section>'
     out+="""<script>
 let dirty=false;
@@ -137,6 +141,16 @@ for(const form of forms){
     }catch(error){setStatus(error.message);}
   });
 }
+document.getElementById('anidb-public')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const checkbox=event.currentTarget.querySelector('input[name=enabled]');
+  const output=document.getElementById('anidb-status');
+  try{
+    const result=await post('/api/settings',{settings:{anidb:{enabled:checkbox.checked}}});
+    dirty=false;
+    output.textContent=result.restart_required?'Saved. Restart required.':'Saved.';
+  }catch(error){output.textContent=error.message}
+});
 window.addEventListener('beforeunload',event=>{
   if(dirty){event.preventDefault();event.returnValue='';}
 });

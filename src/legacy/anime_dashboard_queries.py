@@ -53,6 +53,18 @@ def staged_series(db, *, page=1,size=20):
 def all_jobs(db, *,page=1,size=20):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
+    identity_checks={}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
+        for nid,decision,document in db.execute(
+                "SELECT notification_id,decision,evidence_json FROM unified_identity_checks"):
+            try:
+                evidence=json.loads(document)
+                codes=evidence.get("issues") or []
+                safe_codes=[x for x in codes if isinstance(x,str) and
+                    len(x)<=100 and all(c.isalnum() or c=="_" for c in x)]
+                identity_checks[nid]=(decision,safe_codes[:3])
+            except (TypeError,ValueError):
+                identity_checks[nid]=("UNKNOWN",[])
     rows=db.execute("""SELECT n.id,n.source,n.release_name,n.received_at,n.status,
         d.season,d.episode,d.state,
         j.state,j.last_error,r.staged_path,
@@ -82,6 +94,8 @@ def all_jobs(db, *,page=1,size=20):
             status="COMPLETED"
         elif dispatch=="CLAIMED":
             status="QUEUED"
+        elif nstatus=="IDENTIFYING":
+            status="IDENTIFYING"
         elif nstatus=="NEEDS_REVIEW" and not dispatch:
             status="NEEDS REVIEW"
         else:
@@ -91,6 +105,8 @@ def all_jobs(db, *,page=1,size=20):
         if status in ("RECEIVED","NEEDS REVIEW"):
             explanation=("Waiting for episode identity: no acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
+        elif status=="IDENTIFYING":
+            explanation="Checking public AniDB titles and TVDB links; review notification follows if not verified."
         elif status=="QUEUED":
             explanation="Acquisition job queued; waiting for a worker."
         elif status=="RUNNING":
@@ -99,6 +115,11 @@ def all_jobs(db, *,page=1,size=20):
             explanation="Acquisition job completed."
         else:
             explanation=error or ("Current job state: "+status.lower())
+        if status in ("IDENTIFYING","NEEDS REVIEW") and nid in identity_checks:
+            decision,codes=identity_checks[nid]
+            explanation+=" Latest identity check: "+str(decision)[:80]
+            if codes:
+                explanation+="; "+", ".join(codes)
         result.append({"id":nid,"source":source,"release":release,
                        "received_at":received,"status":status,
                        "season":season,"episode":episode,

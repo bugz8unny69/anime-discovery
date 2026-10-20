@@ -16,8 +16,10 @@ def main():
     try:
         for script in ("anime-discovery-web.py", "anime-discovery-worker.py"):
             processes.append(subprocess.Popen([sys.executable, str(base / script)]))
-        if config["settings"]["ntfy"]["enabled"]:
-            processes.append(subprocess.Popen([sys.executable, str(base / "anime_ntfy_monitor.py")]))
+        processes.append(subprocess.Popen([sys.executable, str(base / "anime_unified_identity_monitor.py")]))
+        # Monitor reloads config each cycle, including enablement changes.
+        # Always launch it so Save & Apply can enable NTFY without a daemon restart.
+        processes.append(subprocess.Popen([sys.executable, str(base / "anime_ntfy_monitor.py")]))
         if config["settings"]["sonarr"]["enabled"]:
             processes.append(subprocess.Popen([sys.executable, str(base / "anime_sonarr_import_monitor.py")]))
         if config["settings"]["sonarr"]["enabled"] and config["settings"]["shoko"]["enabled"]:

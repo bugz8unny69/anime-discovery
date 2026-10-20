@@ -116,15 +116,19 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status,200)
         nid=json.loads(body)["notification_id"]
         with sqlite3.connect(self.db,isolation_level=None) as db:
-            self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0],"NEEDS_REVIEW")
+            self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0],"IDENTIFYING")
             self.assertIsNone(db.execute("SELECT 1 FROM daemon_jobs WHERE subject_key=? AND kind='claimed_acquisition'",(str(nid),)).fetchone())
-            self.assertEqual(all_jobs(db)["items"][0]["status"],"NEEDS REVIEW")
+            self.assertEqual(all_jobs(db)["items"][0]["status"],"IDENTIFYING")
             sent=[]
             cfg={"ntfy":{"enabled":True,"reminder_hours":24}}
             sender=lambda settings,secrets,notification_id,title: sent.append(notification_id) or True
-            self.assertEqual(check_once(db,cfg,{},now=1000,sender=sender)["sent"],1)
+            self.assertEqual(check_once(db,cfg,{},now=1000,sender=sender)["sent"],0)
+            self.assertEqual(sent,[])
+            from anime_unified_identity_monitor import check_once as check_identity
+            check_identity(db,{}, {},now=1001,probe=lambda *_:{"decision":"NEEDS_REVIEW","issues":["UNVERIFIED"]})
+            self.assertEqual(check_once(db,cfg,{},now=1002,sender=sender)["sent"],1)
             self.assertEqual(sent,[nid])
-            self.assertEqual(check_once(db,cfg,{},now=1001,sender=sender)["sent"],0)
+            self.assertEqual(check_once(db,cfg,{},now=1003,sender=sender)["sent"],0)
 
     def test_unmatched_webhook_explains_no_worker_job(self):
         from anime_dashboard_queries import all_jobs
@@ -134,8 +138,8 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status,200)
         with sqlite3.connect(self.db) as db:
             result=all_jobs(db)
-        self.assertEqual(result["items"][0]["status"],"NEEDS REVIEW")
-        self.assertIn("no acquisition job was created",result["items"][0]["activity_detail"])
+        self.assertEqual(result["items"][0]["status"],"IDENTIFYING")
+        self.assertIn("Checking public AniDB",result["items"][0]["activity_detail"])
         self.assertIn("Activity details",self.request("GET","/jobs")[2])
 
     def test_webhook_token_cannot_access_dashboard(self):

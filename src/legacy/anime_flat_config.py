@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
     "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
     "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
+    "anidb": {"enabled": True},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60, "import_folder_id": 0}
 }
@@ -69,7 +70,7 @@ def validate_config(settings,secrets,*,directory=None):
     if result["qbittorrent"]["manage_download_limit"] is not False:
         raise ValueError("qBittorrent owns its download limit")
     for section, key in (("identity","reuse_verified_cache"),("jellyfin","write_trial_nfo"),("jellyfin","enabled"),
-                         ("shoko","enabled"),("shoko","auto_link_verified")):
+                         ("shoko","enabled"),("shoko","auto_link_verified"),("anidb","enabled")):
         if type(result[section][key]) is not bool:
             raise ValueError("Invalid boolean setting: "+section+"."+key)
     series_map = result["identity"]["series_map"]
