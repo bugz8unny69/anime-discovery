@@ -22,12 +22,11 @@ def check_once(settings,secrets,*,qb_factory=None):
     with sqlite3.connect(path,isolation_level=None,timeout=10) as db:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("PRAGMA busy_timeout=10000")
-        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='sonarr_import_manifest'").fetchone():
-            return {"processed":0}
+        has_import_manifest=bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='sonarr_import_manifest'").fetchone())
         pending=db.execute("""SELECT s.id FROM series s
             JOIN sonarr_import_manifest m ON m.series_id=s.id
             WHERE s.status='SONARR_IMPORT_PENDING'
-              AND m.submitted_command_id IS NOT NULL ORDER BY s.id LIMIT 20""").fetchall()
+              AND m.submitted_command_id IS NOT NULL ORDER BY s.id LIMIT 20""").fetchall() if has_import_manifest else []
         # Reuse this existing monitor for bounded, read-only six-hour checks.
         # Never treat an unavailable Sonarr as permission to delete anything.
         from anime_sonarr_reconciliation import ensure_schema, check_series
@@ -43,7 +42,21 @@ def check_once(settings,secrets,*,qb_factory=None):
             ORDER BY COALESCE(rc.checked_at,0),s.id LIMIT 5""",(stale,)).fetchall()
         for (sid,) in candidates:
             try:
-                check_series(db,sid,settings,secrets)
+                outcome=check_series(db,sid,settings,secrets)
+                if outcome["result"] in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
+                    from anime_ntfy import notify_sonarr_duplicate
+                    last=db.execute("SELECT alert_at FROM sonarr_reconciliation WHERE series_id=?",
+                                    (sid,)).fetchone()[0]
+                    if last is None or last<=int(time.time())-86400:
+                        title=db.execute("SELECT title FROM series WHERE id=?",(sid,)).fetchone()[0]
+                        try:
+                            sent=notify_sonarr_duplicate(settings,secrets,sid,title)
+                            if sent:
+                                db.execute("UPDATE sonarr_reconciliation SET alert_at=? WHERE series_id=?",
+                                           (int(time.time()),sid))
+                        except Exception as alert_exc:
+                            LOG.warning("event=SONARR_DUPLICATE_ALERT_DEFERRED series_id=%d error_type=%s",
+                                        sid,type(alert_exc).__name__)
             except Exception as exc:
                 # Retry at the next cadence, never block normal import finalization.
                 LOG.warning("event=SONARR_RECONCILIATION_DEFERRED series_id=%d error_type=%s",
