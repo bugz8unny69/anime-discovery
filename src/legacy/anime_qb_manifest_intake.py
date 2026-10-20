@@ -100,11 +100,14 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
             # Metadata appears atomically in qB, but verify file identities
             # again after stopping to reject races/unstable file inventories.
             before = _validated_manifest(files)
-            after = _validated_manifest(qb.torrent_files(infohash))
+            stopped_files = qb.torrent_files(infohash)
+            after = _validated_manifest(stopped_files)
             if before != after:
                 raise ValueError("Torrent manifest changed during pause")
+            if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
+                raise PermissionError("Torrent ownership changed during pause")
             return {"state": "MANIFEST_READY", "infohash": infohash.lower(),
-                    "files": qb.torrent_files(infohash)}
+                    "files": stopped_files}
         if attempt + 1 < attempts:
             sleep(interval)
     _stop_and_wait(qb, infohash, sleep=sleep)
