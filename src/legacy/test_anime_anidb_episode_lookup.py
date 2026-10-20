@@ -1,11 +1,13 @@
 """Offline AniDB HTTP episode catalog/cache tests: never contact AniDB."""
+import gzip
 import sqlite3
 import tempfile
+import zlib
 import unittest
 from pathlib import Path
 from anime_anidb_episode_lookup import (
-    API_URL, AniDBLookupDeferred, parse_catalog, parse_episode_id,
-    lookup_episode_id,
+    API_URL, MAX_BYTES, AniDBLookupDeferred, decode_episode_xml,
+    parse_catalog, parse_episode_id, lookup_episode_id,
 )
 
 XML=b'''<anime id="456"><episodes>
@@ -16,8 +18,12 @@ XML=b'''<anime id="456"><episodes>
 
 
 class FakeResponse:
-    def __init__(self, data):
+    def __init__(self, data, *, encoding=None):
         self.data=data
+        self.status=200
+        self.headers={"Content-Type":"text/xml"}
+        if encoding is not None:
+            self.headers["Content-Encoding"]=encoding
     def __enter__(self):
         return self
     def __exit__(self,*args):
@@ -33,6 +39,7 @@ class AniDBEpisodeLookupTests(unittest.TestCase):
         self.db_path=Path(self.tmp.name)/"anime-metadata.db"
         self.urls=[]
         self.payload=XML
+        self.encoding=None
 
     def opener(self,request,timeout):
         self.urls.append(request.full_url)
@@ -40,7 +47,8 @@ class AniDBEpisodeLookupTests(unittest.TestCase):
         self.assertTrue(request.full_url.startswith(API_URL+"?"))
         self.assertIn("client=registeredclient",request.full_url)
         self.assertNotIn("password",request.full_url.lower())
-        return FakeResponse(self.payload)
+        self.assertIn("gzip",request.get_header("Accept-encoding"))
+        return FakeResponse(self.payload,encoding=self.encoding)
 
     def resolve(self,aid,number,*,now):
         return lookup_episode_id(aid,number,client="registeredclient",
@@ -101,6 +109,63 @@ class AniDBEpisodeLookupTests(unittest.TestCase):
             self.resolve(456,2,now=100500)
         self.payload=XML
         self.assertEqual(self.resolve(456,2,now=100600),9876)
+
+    def test_gzip_compressed_xml_with_content_encoding(self):
+        self.payload=gzip.compress(XML)
+        self.encoding="gzip"
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+        self.assertEqual(self.resolve(456,3,now=100001),9877)
+        self.assertEqual(len(self.urls),1)
+
+    def test_gzip_compressed_without_content_encoding_header(self):
+        self.payload=gzip.compress(XML)
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+        self.assertEqual(len(self.urls),1)
+
+    def test_deflate_zlib_encoding_and_magic_sniffing(self):
+        self.payload=zlib.compress(XML)
+        self.encoding="deflate"
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+        self.assertEqual(len(self.urls),1)
+        content,coding=decode_episode_xml(zlib.compress(XML))
+        self.assertEqual((content,coding),(XML,"deflate"))
+
+    def test_uncompressed_legacy_xml_still_supported(self):
+        self.assertEqual(decode_episode_xml(XML),(XML,"identity"))
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+
+    def test_compressed_error_is_logged_after_decompression_and_not_cached(self):
+        from anime_xml_response_diagnostics import InvalidXMLResponse
+        self.encoding="gzip"
+        self.payload=gzip.compress(b'<error code="555">Temporary failure</error>')
+        with self.assertLogs("anime_xml_response_diagnostics",level="WARNING") as captured:
+            with self.assertRaises(InvalidXMLResponse) as exc:
+                self.resolve(456,2,now=100000)
+        self.assertEqual(exc.exception.kind,"ANIDB_ERROR_555")
+        message=" ".join(captured.output)
+        self.assertIn("content_encoding=gzip",message)
+        self.assertIn("http_status=200",message)
+        self.assertIn("preview=",message)
+        self.assertIn("Temporary failure",message)
+        self.assertIn("encoded_bytes=",message)
+        with sqlite3.connect(self.db_path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM anidb_anime_catalog").fetchone()[0],0)
+
+    def test_corrupt_or_oversized_compressed_response_fails_closed(self):
+        from anime_xml_response_diagnostics import InvalidXMLResponse
+        self.encoding="gzip"
+        self.payload=gzip.compress(XML)[:-7]
+        with self.assertRaises(InvalidXMLResponse):
+            self.resolve(456,2,now=100000)
+        with self.assertRaisesRegex(ValueError,"oversized"):
+            decode_episode_xml(gzip.compress(b'A'*(MAX_BYTES+1)),
+                               encoding="gzip")
+        with self.assertRaises(ValueError):
+            decode_episode_xml(XML,encoding="br")
+        with sqlite3.connect(self.db_path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM anidb_anime_catalog").fetchone()[0],0)
 
     def test_no_client_or_invalid_inputs(self):
         with self.assertRaises(ValueError):
