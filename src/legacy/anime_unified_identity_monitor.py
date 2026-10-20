@@ -195,7 +195,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             continue
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid,
-               "episode_rule":mapped.get(aid)})
+               **({"episode_rule":mapped[aid]} if aid in mapped else {})})
     report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
                                 "matching_pairs":len(report["matching_pairs"]),
                                 "records_inspected":len(report["crossref_diagnostics"])})
