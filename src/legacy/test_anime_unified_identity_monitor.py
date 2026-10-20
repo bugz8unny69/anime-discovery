@@ -44,6 +44,18 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=2000,sender=self.sender)["sent"],1)
         self.assertEqual(self.db.execute("SELECT attempts FROM unified_identity_checks").fetchone()[0],3)
 
+    def test_verified_episode_mapping_queues_only_once(self):
+        from anime_dashboard_queries import all_jobs
+        report={"decision":"AUTO_VERIFIED","issues":[],
+                "approval":{"tvdb_id":123,"anidb_id":456,"season":1,"episode":2},
+                "verified_anidb_episode_id":9876}
+        result=check_once(self.db,{}, {},now=1000,probe=lambda *_:report)
+        self.assertEqual(result["processed"],1)
+        self.assertEqual(self.db.execute("SELECT status FROM notifications").fetchone()[0],"APPROVED")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs").fetchone()[0],1)
+        self.assertEqual(alerts(self.db,self.settings,{},now=1001,sender=self.sender)["sent"],0)
+        self.assertEqual(check_once(self.db,{}, {},now=1002,probe=lambda *_:report)["processed"],0)
+
     def test_unique_verified_series_still_requires_episode_mapping(self):
         self.assertEqual(check_once(self.db,{}, {},now=2000,probe=lambda *_:{
             "decision":"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED",
