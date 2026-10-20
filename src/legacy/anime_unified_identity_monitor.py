@@ -10,6 +10,7 @@ import json
 import logging
 import sqlite3
 import time
+from anime_config_wakeup import wait_for_change
 import urllib.request
 from pathlib import Path
 from anime_flat_config import load_config
@@ -393,7 +394,7 @@ def main():
                 check_once(db,cfg["settings"],cfg["secrets"])
         except Exception as exc:
             LOG.warning("Identity triage failed error_type=%s",type(exc).__name__)
-        time.sleep(60)
+        wait_for_change(60)
 
 if __name__=="__main__":
     main()
