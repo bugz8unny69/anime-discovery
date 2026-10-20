@@ -313,6 +313,17 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,sqlite3.Error) as exc:
                     return self.send(409,json.dumps({"error":str(exc)}),"application/json")
+            if route=="/api/recheck-identity":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    from anime_notification_management import recheck_unmatched_identity
+                    with self.database() as db:
+                        outcome=recheck_unmatched_identity(db,values.get("notification_id"))
+                    SECURITY_LOG.info("Authenticated identity recheck notification=%d",
+                                      outcome["notification_id"])
+                    return self.send(200,json.dumps(outcome),"application/json")
+                except (ValueError,TypeError,sqlite3.Error) as exc:
+                    return self.send(409,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/delete-notification":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()
