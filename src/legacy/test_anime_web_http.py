@@ -506,6 +506,55 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertEqual(db.execute(
                 "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],"LEASED")
 
+    def test_series_management_explains_actions_and_requeues_saved_autobrr(self):
+        import hashlib
+        from anime_webhook_processing import receive
+        trial=self.db.parent/"Anime-Trial"
+        trial.mkdir()
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            db.execute("PRAGMA foreign_keys=ON")
+            item=receive(db,{"source":"autobrr","source_guid":"reset-one",
+                "release_name":"Solo Leveling S01E01","info_hash":HASH,
+                "tvdb_id":389597,"anidb_id":123,"season":1,"episode":1})
+            nid=item["notification_id"]
+            sid=item["series_id"]
+            path=trial/"TVDB-389597-S1"/"Season 01"/"S01E01.mkv"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"verified trial video")
+            digest=hashlib.sha256(path.read_bytes()).hexdigest()
+            db.execute("""INSERT INTO torrent_recovery_records
+                (notification_id,infohash,magnet_uri,staged_path,sha256,recorded_at)
+                VALUES (?,?,?,?,?,1)""",(nid,HASH,
+                "magnet:?xt=urn:btih:"+HASH,str(path),digest))
+            db.execute("UPDATE episode_dispatch SET state='DONE' WHERE notification_id=?",(nid,))
+            db.execute("UPDATE episodes SET status='STAGED' WHERE series_id=?",(sid,))
+            db.execute("UPDATE daemon_jobs SET state='DONE' WHERE subject_key=?",(str(nid),))
+        status,_,page=self.request("GET","/series?id="+str(sid))
+        self.assertEqual(status,200)
+        for expected in ("Manage series","Hide old activity",
+            "Remove rejection / quarantine","Reset acquisitions",
+            'action="/series-reset-acquisitions"'):
+            self.assertIn(expected,page)
+        self.assertNotIn('>Clear history</button>',page)
+        with patch.object(web,"load_config",return_value={
+                "settings":{"storage":{"trial_root":str(trial)}}}):
+            self.assertEqual(self.request("POST","/series-reset-acquisitions",{
+                "series_id":str(sid)})[0],409)
+            status,location,_=self.request("POST","/series-reset-acquisitions",{
+                "series_id":str(sid),"reset_confirm":"RESET"})
+        self.assertEqual(status,303)
+        self.assertEqual(location,"/jobs")
+        self.assertFalse(path.exists())
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute("SELECT state FROM daemon_jobs WHERE subject_key=?",
+                (str(nid),)).fetchone()[0],"READY")
+            self.assertEqual(db.execute("SELECT count(*) FROM notifications WHERE id=?",
+                (nid,)).fetchone()[0],1)
+        # The Series view remains accessible even if the staged file vanished
+        # without first running the reset operation.
+        status,_,page=self.request("GET","/series?id="+str(sid))
+        self.assertEqual(status,200)
+
     def test_identity_trace_requires_session_and_shows_scores(self):
         import os
         from anime_flat_config import DEFAULT_SETTINGS
