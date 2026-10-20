@@ -75,7 +75,8 @@ def all_jobs(db, *,page=1,size=20):
         FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
         LEFT JOIN series s ON s.id=d.series_id
-        LEFT JOIN daemon_jobs j ON j.kind='claimed_acquisition'
+        LEFT JOIN daemon_jobs j ON j.kind IN
+             ('claimed_acquisition','verified_batch_acquisition')
              AND j.subject_key=CAST(n.id AS TEXT)
         LEFT JOIN torrent_recovery_records r ON r.notification_id=n.id
         ORDER BY n.id DESC""").fetchall()
@@ -109,7 +110,7 @@ def all_jobs(db, *,page=1,size=20):
             status="RECEIVED"
         # An unmatched intake record is not an acquisition job. Make that
         # distinction visible instead of suggesting an idle worker.
-        if status in ("RECEIVED","NEEDS REVIEW"):
+        if status in ("RECEIVED","NEEDS REVIEW") and not job:
             explanation=("Identity check finished; manual review is required. No acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="IDENTIFYING":
@@ -133,7 +134,7 @@ def all_jobs(db, *,page=1,size=20):
                         "next_retry_at":retry_at if job=="DEFERRED" else None,
                         "lease_until":lease_until if job=="LEASED" else None,
                         "last_error":error or None,
-                        "can_retry":job=="DEFERRED",
+                        "can_retry":job in ("DEFERRED","NEEDS_REVIEW"),
                         "can_cancel":job in ("READY","DEFERRED","NEEDS_REVIEW"),
                         "last_admin_action":event,
                         "source":source,"release":release,
