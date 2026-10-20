@@ -225,6 +225,17 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         return report
     token=login(secrets["tvdb_api_key"])
     aid_set={str(x["anidb_id"]) for x in rows}
+    # Anime-Lists independently corroborates series ID pairs even if TVDB
+    # lacks an AniDB remote ID. Parse the trusted cached XML exactly once.
+    verified_xml_pairs={}
+    if mapping_xml is not None:
+        root=ET.fromstring(mapping_xml)
+        if root.tag!="anime-list":
+            raise ValueError("Invalid Anime-Lists cross-reference root")
+        for node in root.findall("anime"):
+            aid=node.get("anidbid")
+            if aid in aid_set:
+                verified_xml_pairs.setdefault(aid,[]).append(node.get("tvdbid"))
     for candidate in candidates:
         tid=str(candidate["tvdb_id"])
         if tid not in accepted:
@@ -246,14 +257,16 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                                               "MAPPING_PARSE_FAILURE") from None
                 if resolved is not None:
                     mapped[aid]=resolved
-        match=aid_set.intersection(provider_ids)|set(mapped)
+        xml_pairs={aid for aid in aid_set
+                   if verified_xml_pairs.get(aid)==[tid]}
+        match=aid_set.intersection(provider_ids)|set(mapped)|xml_pairs
         report["crossref_diagnostics"].append({
             "tvdb_id":tid,"media_type":media_type,
             "media_labels":media_labels[:8],
             "explicit_anidb_ids":sorted(provider_ids)[:8],
             "anidb_candidate_ids":sorted(aid_set)[:10],
             "matching_anidb_ids":sorted(match),
-            "anime_lists_anidb_ids":sorted(mapped),
+            "anime_lists_anidb_ids":sorted(set(mapped)|xml_pairs),
             "reason":("EXPLICIT_ANIDB_MATCH" if match else
                       "TVDB_ANIDB_ID_CONFLICT" if provider_ids else
                       "TVDB_ANIDB_REMOTE_ID_MISSING")})
