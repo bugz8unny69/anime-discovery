@@ -270,6 +270,37 @@ to be wired into the automatic batch worker. The current isolated planner
 raises `SelectionNeedsReview`; it does not yet perform alternate search.
 Genuinely conflicting identity evidence remains operator-review territory.
 
+## Completed development slice: alternate verified-season batch candidates
+
+`anime_batch_fallback.py` now offers two **source-only** building blocks:
+
+- `batch_candidates()`: rank up to five deduplicated Prowlarr season packs
+  by seeders. Release titles must normalize **exactly** to the independently
+  verified series name, with an explicit matching season hint. Reject unrelated
+  title fragments, specials, single-episode results and invalid BTIH magnets.
+  Ranking is *not* permission to trust a TVDB/AniDB identity.
+- `try_batch_candidates()`: use the existing normal-add/manifest-poll/pause
+  intake; if the file list cannot uniquely identify E01, remember that hash
+  as `UNMAPPABLE` in SQLite and try the next eligible candidate. A delayed
+  manifest, qBittorrent error, unknown ownership or uncertain API result
+  **stops the loop** instead of spawning competing downloads. Once a probe
+  starts, remember the chosen hash and do not download another candidate
+  on restart. No torrent is automatically deleted.
+
+It returns `PROBE_DOWNLOADING`, `PROBE_ALREADY_SELECTED`, `DEFERRED`,
+`NEEDS_REVIEW` or `NO_MAPPABLE_BATCH` as appropriate. It does **not**
+implement a production job/lease, verified batch-identity persistence,
+automatic periodic search, media completion, ffprobe or E02-E06 unlock.
+The caller must pass **independently verified** series IDs/title/season;
+a dictionary supplied by untrusted webhook data is not sufficient.
+Do not call this module from a live handler until that boundary is in
+place and a single job owns the series/season. Existing single-episode
+Prowlarr discovery remains unchanged.
+
+A rejected pack remains stopped, with files/torrent retained under normal
+ownership controls. Implement safe owned-torrent cleanup or scheduled
+housekeeping later before enabling high-volume unattended fallback.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
