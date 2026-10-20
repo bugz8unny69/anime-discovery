@@ -70,6 +70,21 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("Season-pack verification requires review",detail)
         self.assertNotIn("approve notification",detail)
 
+    def test_real_cyberpunk_s02_batch_title_parses_unambiguously(self):
+        from anime_batch_selection import release_scope_hint
+        from anime_identification_probe import release_title
+        from anime_identification_probe import norm
+        release=("[Trix] Cyberpunk Edgerunners S02 1080p NF WEB-DL "
+                 "Opus2.0 AV1 (Dual-Audio, Multi-Subs) (Season S2) (Batch)")
+        hint=release_scope_hint(release)
+        self.assertEqual(hint,{"kind":"season_pack","season_hint":2,
+                                "episode_hint":None})
+        names,episode=release_title(release)
+        self.assertEqual(norm(names[0]),norm("Cyberpunk Edgerunners"))
+        self.assertIsNone(episode)
+        # The later PIN must separately agree with both this release's
+        # season and an independently corroborated AniDB/TVDB provider pair.
+
     def test_missing_explicit_season_is_actionable_not_generic_episode_error(self):
         # A release such as "Cyberpunk Edgerunners (Batch)" proves packaging,
         # not the TVDB season. Do not default an unlabeled pack to S01.
