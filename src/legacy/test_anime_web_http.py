@@ -419,6 +419,93 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
                                            (nid,)).fetchone())
 
+    def test_manage_job_api_retry_cancel_and_visible_activity(self):
+        from anime_async_daemon import enqueue
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            nid=db.execute("""INSERT INTO notifications
+                (source,release_name,source_guid,info_hash,received_at,status)
+                VALUES ('autobrr','Solo Leveling','job-actions-test',?,1,'APPROVED')""",
+                (HASH,)).lastrowid
+            enqueue(db,"claimed_acquisition",str(nid),'{"notification_id":1}')
+            jid=db.execute("""SELECT id FROM daemon_jobs WHERE kind='claimed_acquisition'
+                AND subject_key=?""",(str(nid),)).fetchone()[0]
+            db.execute("""UPDATE daemon_jobs SET state='DEFERRED',
+                attempts=10,available_at=9999999999,last_error='IdentityNotReady'
+                WHERE id=?""",(jid,))
+        status,_,page=self.request("GET","/jobs")
+        self.assertEqual(status,200)
+        self.assertIn("Retry Now",page)
+        self.assertIn("Cancel Job",page)
+        self.assertIn("Next retry:",page)
+        status,_,body=self.request("GET","/api/jobs")
+        self.assertEqual(status,200)
+        item=next(j for j in json.loads(body)["items"] if j.get("job_id")==jid)
+        self.assertEqual(item["attempts"],10)
+        self.assertEqual(item["last_error"],"IdentityNotReady")
+        self.assertTrue(item["can_retry"])
+        self.assertTrue(item["can_cancel"])
+        data={"job_id":jid,"action":"retry","expected_state":"DEFERRED",
+              "expected_attempts":10}
+        status,_,body=self.request("POST","/api/manage-job",data)
+        self.assertEqual(status,200,body)
+        self.assertEqual(json.loads(body)["state"],"READY")
+        self.assertEqual(self.request("POST","/api/manage-job",data)[0],409)
+        data={"job_id":jid,"action":"cancel","expected_state":"READY",
+              "expected_attempts":10}
+        status,_,body=self.request("POST","/api/manage-job",data)
+        self.assertEqual(status,200,body)
+        self.assertEqual(json.loads(body)["state"],"BLOCKED")
+        status,_,body=self.request("GET","/api/jobs")
+        item=next(j for j in json.loads(body)["items"] if j.get("job_id")==jid)
+        self.assertEqual(item["status"],"CANCELED")
+        self.assertEqual(item["last_admin_action"]["action"],"cancel")
+        self.assertFalse(item["can_retry"])
+        self.assertFalse(item["can_cancel"])
+        with sqlite3.connect(self.db) as db:
+            state=db.execute("""SELECT state,attempts,last_error FROM daemon_jobs
+                WHERE id=?""",(jid,)).fetchone()
+            self.assertEqual(state,("BLOCKED",10,"IdentityNotReady"))
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM daemon_job_admin_events WHERE job_id=?",(jid,)
+            ).fetchone()[0],2)
+
+    def test_manage_job_rejects_unauthorized_csrf_and_active_lease(self):
+        from anime_async_daemon import enqueue
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            enqueue(db,"series_gap_search","test-admin-search",'{}')
+            jid=db.execute("""SELECT id FROM daemon_jobs
+                WHERE kind='series_gap_search'""").fetchone()[0]
+        request={"job_id":jid,"action":"cancel","expected_state":"READY",
+                 "expected_attempts":0}
+        client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
+        try:
+            client.request("POST","/api/manage-job",json.dumps(request),
+                           {"Content-Type":"application/json"})
+            response=client.getresponse()
+            self.assertEqual(response.status,401)
+            response.read()
+            client.request("POST","/api/manage-job",json.dumps(request),
+                           {"Content-Type":"application/json",
+                            "Cookie":"ad_session="+self.session,
+                            "X-CSRF-Token":"wrong"})
+            response=client.getresponse()
+            self.assertEqual(response.status,403)
+            response.read()
+        finally:
+            client.close()
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            db.execute("""UPDATE daemon_jobs SET state='LEASED',lease_token='inflight',
+                lease_until=9999999999,attempts=1 WHERE id=?""",(jid,))
+        self.assertEqual(self.request("POST","/api/manage-job",{
+            "job_id":jid,"action":"cancel","expected_state":"LEASED",
+            "expected_attempts":1})[0],409)
+        self.assertEqual(self.request("POST","/api/manage-job",{
+            "job_id":jid,"action":"cancel","expected_state":"READY",
+            "expected_attempts":0})[0],409)
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute(
+                "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],"LEASED")
+
     def test_identity_trace_requires_session_and_shows_scores(self):
         import os
         from anime_flat_config import DEFAULT_SETTINGS
