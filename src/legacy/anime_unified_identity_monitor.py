@@ -317,6 +317,15 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["episode_mapping"]=rule
         season=rule["tvdb_season"] if rule else 1
         mapped_ep=rule["tvdb_episode"] if rule else episode
+        if (hint.get("kind")=="single_episode"
+                and hint.get("season_hint")!=season):
+            # Never assign a TVDB Season 2 release to Season 1 merely
+            # because its cleaned title matches Season 1's AniDB record.
+            report["issues"].append("RELEASE_SEASON_PROVIDER_MISMATCH")
+            report["workflow"].append({"step":"Provider season agreement",
+                "release_season":hint.get("season_hint"),
+                "mapped_season":season,"passed":False})
+            return report
         mapping=settings.get("identity",{}).get("episode_map",{}).get(
             tid+":"+str(season)+":"+str(mapped_ep))
         episode_id=(mapping.get("anidb_episode_id")
