@@ -12,6 +12,8 @@ import sqlite3
 import time
 from anime_config_wakeup import wait_for_change
 import urllib.request
+import xml.etree.ElementTree as ET
+from anime_xml_response_diagnostics import InvalidXMLResponse,log_bad_xml
 from pathlib import Path
 from anime_flat_config import load_config
 from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
@@ -67,23 +69,31 @@ def _validate_mapping(data):
     return data
 
 
-def _validated_cache(path,validator):
+def _validated_cache(path,validator,source):
+    if not path.is_file():
+        return None
     try:
-        return validator(path.read_bytes()) if path.is_file() else None
-    except Exception:
+        raw=path.read_bytes()
+        return validator(raw)
+    except Exception as failure:
         # Do not reuse truncated, malformed, or otherwise untrusted cache data.
+        log_bad_xml(source,locals().get("raw",b""),reason="CACHE_"+type(failure).__name__)
         return None
 
 
 def _refresh_cache(path,*,now,downloader,validator,source):
     """Cache validated XML atomically, retaining last-good on HTTP/XML errors."""
     path=Path(path)
-    cached=_validated_cache(path,validator)
+    cached=_validated_cache(path,validator,source)
     if cached is not None and 0<=now-int(path.stat().st_mtime)<86400:
         return cached
+    downloaded_raw=None
     try:
-        downloaded=validator(downloader())
+        downloaded_raw=downloader()
+        downloaded=validator(downloaded_raw)
     except Exception as exc:
+        if downloaded_raw is not None:
+            log_bad_xml(source,downloaded_raw,reason=type(exc).__name__)
         if cached is not None:
             LOG.warning("Metadata refresh deferred source=%s error_type=%s using_last_good=true",
                         source,type(exc).__name__)
@@ -164,7 +174,12 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if not settings.get("anidb",{}).get("enabled",True):
         report["issues"].append("ANIDB_PUBLIC_SOURCE_DISABLED")
         return report
-    rows,truncated=anidb_matches(catalog,aliases,limit=10)
+    try:
+        rows,truncated=anidb_matches(catalog,aliases,limit=10)
+    except ET.ParseError:
+        log_bad_xml("ANIDB_TITLES_CACHE",Path(catalog).read_bytes(),
+                    reason="ITERPARSE_FAILURE")
+        raise InvalidXMLResponse("ANIDB_TITLES_CACHE","ITERPARSE_FAILURE") from None
     report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
                                 "mode":"exact normalized title","truncated":bool(truncated)})
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
@@ -209,7 +224,13 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         mapped={}
         if mapping_xml is not None and episode:
             for aid in sorted(aid_set):
-                resolved=resolve_anime_lists_episode(mapping_xml,aid,tid,episode)
+                try:
+                    resolved=resolve_anime_lists_episode(mapping_xml,aid,tid,episode)
+                except ET.ParseError:
+                    log_bad_xml("ANIME_LISTS_MAPPING",mapping_xml,
+                                reason="MAPPING_PARSE_FAILURE")
+                    raise InvalidXMLResponse("ANIME_LISTS_MAPPING",
+                                              "MAPPING_PARSE_FAILURE") from None
                 if resolved is not None:
                     mapped[aid]=resolved
         match=aid_set.intersection(provider_ids)|set(mapped)
@@ -359,10 +380,10 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
         except Exception as exc:
             import xml.etree.ElementTree as ET
             from anime_anidb_episode_lookup import AniDBLookupDeferred
-            if isinstance(exc,(MetadataUnavailable,ET.ParseError,gzip.BadGzipFile,EOFError)):
+            if isinstance(exc,(MetadataUnavailable,InvalidXMLResponse,ET.ParseError,gzip.BadGzipFile,EOFError)):
                 # An unavailable public metadata feed is not a user-review
                 # decision, regardless of how often the provider has failed.
-                source=exc.source if isinstance(exc,MetadataUnavailable) else stage
+                source=exc.source if isinstance(exc,(MetadataUnavailable,InvalidXMLResponse)) else stage
                 decision="LOOKUP_RETRY"
                 report={"decision":decision,"issues":["METADATA_UNAVAILABLE_"+source]}
                 retry=True
