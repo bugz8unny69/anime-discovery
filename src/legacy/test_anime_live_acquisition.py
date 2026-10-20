@@ -93,7 +93,7 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.scans,["attempt"])
         self.assertNotIn("private server detail",str(logs.output))
         self.assertEqual(self.db.execute("SELECT state FROM episode_dispatch").fetchone()[0],"DONE")
-        self.assertEqual(self.qb.removals,[(HASH,True)])
+        self.assertEqual(self.qb.removals,[])
         staged=Path(self.db.execute("SELECT staged_path FROM torrent_recovery_records").fetchone()[0])
         self.assertTrue(staged.exists())
 
