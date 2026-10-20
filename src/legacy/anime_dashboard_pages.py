@@ -271,29 +271,6 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,job.activity_detail||"No further activity recorded");
 detail.classList.add("muted");
-if(typeof job.job_id==="number" && !job.batch_download_active){
-  const line=document.createElement("div");
-  line.textContent="Job #"+job.job_id+" · "+(job.job_state||"UNKNOWN")+
-    " · Attempts: "+(job.attempts??0)+
-    (job.last_error?" · Last error: "+job.last_error:"");
-  detail.appendChild(line);
-  if(job.next_retry_at!==null && job.next_retry_at!==undefined){
-    const next=document.createElement("div");
-    next.textContent="Next retry: "+new Date(job.next_retry_at*1000).toLocaleString();
-    detail.appendChild(next);
-  }
-  if(job.lease_until!==null && job.lease_until!==undefined){
-    const lease=document.createElement("div");
-    lease.textContent="Lease expires: "+new Date(job.lease_until*1000).toLocaleString();
-    detail.appendChild(lease);
-  }
-  if(job.last_admin_action){
-    const audit=document.createElement("div");
-    audit.textContent="Last admin action: "+job.last_admin_action.action+
-      " · "+new Date(job.last_admin_action.at*1000).toLocaleString();
-    detail.appendChild(audit);
-  }
-}
 let actions=document.createElement("td");
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
