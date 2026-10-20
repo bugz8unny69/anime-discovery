@@ -157,6 +157,39 @@ class DuplicateCleanupTests(unittest.TestCase):
         self.assertTrue(outside.is_dir())
         self.assertTrue(nested.is_symlink())
 
+    def test_confirm_removes_verified_nfos_and_series_tree(self):
+        from anime_trial_metadata import write_episode_nfo, write_series_nfo
+        series=self.trial/"Solo Leveling"
+        season=series/"Season 01"
+        season.mkdir(parents=True)
+        write_series_nfo(series,title="Solo Leveling",tvdb_id=123)
+        updated=[]
+        for i,(nid,src) in enumerate(self.paths,1):
+            moved=season/src.name
+            src.rename(moved)
+            write_episode_nfo(moved,title="Solo Leveling",season=1,episode=i,tvdb_id=123)
+            self.db.execute("UPDATE torrent_recovery_records SET staged_path=? WHERE notification_id=?",
+                            (str(moved),nid))
+            updated.append((nid,moved))
+        self.paths=updated
+        token=review(self.db,self.sid,self.settings,self.secrets,
+                     opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
+        result=confirm(self.db,self.sid,self.settings,self.secrets,approved=True,
+                       expected_review_fingerprint=token,qb=FakeQB(),
+                       opener=self.opener,audio_probe=lambda p:True)
+        self.assertFalse(series.exists())
+        self.assertTrue(self.trial.is_dir())
+        self.assertEqual(len(result["removed_metadata"]),3)
+        self.assertEqual(result["errors"],[])
+
+    def test_unrecognized_nfo_is_preserved(self):
+        from anime_sonarr_duplicate_cleanup import _remove_verified_nfo
+        path=self.trial/"E01.nfo"
+        path.write_text("<unrelated/>")
+        with self.assertRaises(ValueError):
+            _remove_verified_nfo(path,self.trial,tvdb_id=123,season=1,episode=1)
+        self.assertTrue(path.exists())
+
     def test_changed_review_cannot_expand_cleanup_selection(self):
         token=review(self.db,self.sid,self.settings,self.secrets,
                      opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
