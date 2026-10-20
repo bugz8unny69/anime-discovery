@@ -205,9 +205,9 @@ def confirm(db,series_id,settings,secrets,*,approved=False,qb=None,opener=None,
     if db.in_transaction:raise ValueError("Autocommit connection required")
     if qb is None:raise ValueError("Authenticated qB client required")
     ensure_schema(db)
+    review_data=review(db,series_id,settings,secrets,opener=opener,audio_probe=audio_probe)
     db.execute("BEGIN IMMEDIATE")
     try:
-        review_data=review(db,series_id,settings,secrets,opener=opener,audio_probe=audio_probe)
         eligible=[x for x in review_data["episodes"] if x["status"]=="REGISTERED"]
         if not eligible:raise ValueError("No verified redundant trial episodes")
         # Prevent deleting files whose acquisition/dispatch may still be active.
