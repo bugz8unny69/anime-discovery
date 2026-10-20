@@ -246,6 +246,58 @@ def _prune_empty_staging_parents(path, root):
     return removed
 
 
+def _remove_verified_nfo(path, root, *, tvdb_id, season=None, episode=None):
+    """Remove one Anime Discovery-shaped metadata file with confirmed identity."""
+    import xml.etree.ElementTree as ET
+    target=Path(path)
+    if not target.exists() and not target.is_symlink():
+        return False
+    before=_trusted_file(target,root)
+    if before.st_size>1024*1024:
+        raise ValueError("Oversized metadata file")
+    doc=ET.parse(target).getroot()
+    if season is None:
+        if target.name!="tvshow.nfo" or doc.tag!="tvshow":
+            raise ValueError("Not an Anime Discovery series NFO")
+    elif (doc.tag!="episodedetails" or
+          doc.findtext("season")!=str(season) or
+          doc.findtext("episode")!=str(episode)):
+        raise ValueError("Episode NFO identity differs")
+    ids=[(x.attrib.get("type"),x.text) for x in doc.findall("uniqueid")]
+    if ("tvdb",str(tvdb_id)) not in ids:
+        raise ValueError("NFO TVDB identity differs")
+    parentfd=os.open(target.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        after=os.stat(target.name,dir_fd=parentfd,follow_symlinks=False)
+        if (after.st_ino,after.st_dev,after.st_size,after.st_mtime_ns,after.st_nlink)!=(
+                before.st_ino,before.st_dev,before.st_size,before.st_mtime_ns,1):
+            raise RuntimeError("NFO changed before removal")
+        os.unlink(target.name,dir_fd=parentfd)
+    finally:
+        os.close(parentfd)
+    return True
+
+
+def _remove_orphan_series_nfo(video_path, root, *, tvdb_id):
+    """Remove series NFO only when the entire staging series tree is clear."""
+    series=Path(video_path).parent.parent
+    base=Path(root).resolve(strict=True)
+    if not series.is_relative_to(base) or series==base:
+        return False
+    if series.is_symlink():
+        raise ValueError("Unsafe series metadata directory")
+    # Never erase series metadata while another season, video or unknown file
+    # exists. Other empty season folders are pruned only after this check.
+    for child in series.iterdir():
+        if child.name=="tvshow.nfo" and child.is_file() and not child.is_symlink():
+            continue
+        if child.is_symlink() or not child.is_dir():
+            return False
+        if any(child.iterdir()):
+            return False
+    return _remove_verified_nfo(series/"tvshow.nfo",root,tvdb_id=tvdb_id)
+
+
 def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_fingerprint=None,qb=None,opener=None,
             audio_probe=confirmed_jp_en):
     """Explicit operator approval, independent fresh proof, durable audit."""
@@ -293,6 +345,7 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
     audit_id=cursor.lastrowid
     removed=[]
     directories_removed=[]
+    metadata_removed=[]
     torrent_removed=[]
     errors=[]
     # Revalidate the complete current Sonarr/audio picture BEFORE touching qB.
@@ -310,6 +363,7 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
         return {"audit_id":audit_id,"removed_notification_ids":[],
                 "removed_owned_torrents":[],"preserved_torrents":preserved,
                 "errors":errors}
+    tvdb_id=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()[0]
     # Irreversible operations are outside the SQLite lock, audited individually.
     for h in owned:
         try:
@@ -335,6 +389,14 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
             _unlink_verified(entry["path"],settings["storage"]["trial_root"],metadata)
             removed.append(entry["notification_id"])
             try:
+                nfo=Path(entry["path"]).with_suffix(".nfo")
+                if _remove_verified_nfo(nfo,settings["storage"]["trial_root"],
+                        tvdb_id=tvdb_id,season=entry["season"],
+                        episode=entry["episode"]):
+                    metadata_removed.append(str(nfo))
+                if _remove_orphan_series_nfo(entry["path"],settings["storage"]["trial_root"],
+                        tvdb_id=tvdb_id):
+                    metadata_removed.append(str(Path(entry["path"]).parent.parent/"tvshow.nfo"))
                 directories_removed.extend(_prune_empty_staging_parents(
                     entry["path"],settings["storage"]["trial_root"]))
             except Exception as exc:
@@ -342,6 +404,7 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
         except Exception as exc:
             errors.append("Trial episode "+str(entry["notification_id"])+": "+type(exc).__name__)
     outcome={"removed_notification_ids":removed,"removed_directories":directories_removed,
+             "removed_metadata":metadata_removed,
              "removed_owned_torrents":torrent_removed,
              "preserved_torrents":preserved,"errors":errors}
     db.execute("""UPDATE sonarr_duplicate_cleanup_audit SET result=?,item_json=?,reason=?
