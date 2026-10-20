@@ -8,6 +8,7 @@ import re
 import sqlite3
 import urllib.parse
 import urllib.request
+import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from anime_config_runtime import data_path, get
@@ -31,7 +32,7 @@ def release_title(raw):
     return list(dict.fromkeys(x for x in aliases if x)), episode
 
 def norm(s):
-    return re.sub(r'[^a-z0-9]+', '', s.casefold())
+    return ''.join(ch for ch in unicodedata.normalize('NFKC', s).casefold() if ch.isalnum())
 
 def load_anidb(path):
     content = path.read_bytes()
@@ -55,6 +56,35 @@ def anidb_matches(path, aliases, limit=10):
                 break
     return matches, len(matches) > limit
 
+def candidate_titles(record, limit=16, max_length=180):
+    """Keep provider-supplied titles only; never substitute our search query."""
+    titles = []
+    for field in ('name', 'name_translated', 'original_name'):
+        value = record.get(field)
+        if isinstance(value, str):
+            titles.append(value)
+    aliases = record.get('aliases') or []
+    if isinstance(aliases, list):
+        for item in aliases[:32]:
+            if isinstance(item, str):
+                titles.append(item)
+            elif isinstance(item, dict):
+                # TVDB aliases may be localized records; only the title is evidence.
+                value = item.get('name')
+                if isinstance(value, str):
+                    titles.append(value)
+    seen, result = set(), []
+    for title in titles:
+        title = ''.join(ch for ch in title.strip() if ch.isprintable())[:max_length]
+        key = norm(title)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(title)
+            if len(result) >= limit:
+                break
+    return result
+
+
 def tvdb_candidates(aliases, api_key):
     token = tvdb_token(api_key)
     results = {}
@@ -64,14 +94,27 @@ def tvdb_candidates(aliases, api_key):
         try:
             response = request_json(url, bearer=token)
             for record in (response.get('data') or [])[:15]:
+                if not isinstance(record, dict):
+                    continue
                 ident = record.get('tvdb_id') or record.get('id')
                 if not ident:
                     continue
                 key = str(ident)
-                names = [record.get('name') or '', record.get('name_translated') or '', record.get('original_name') or '']
-                names += [x for x in (record.get('aliases') or []) if isinstance(x, str)]
-                results[key] = {'tvdb_id': key, 'name': record.get('name'), 'matched_query': alias,
-                                'exact_title_overlap': bool({norm(n) for n in names if n} & {norm(a) for a in aliases})}
+                names = candidate_titles(record)
+                if key not in results:
+                    results[key] = {'tvdb_id': key, 'name': names[0] if names else '',
+                                    'candidate_titles': names, 'matched_query': alias,
+                                    'exact_title_overlap': False}
+                else:
+                    existing = results[key]['candidate_titles']
+                    results[key]['candidate_titles'] = candidate_titles(
+                        {'name': existing[0] if existing else '',
+                         'aliases': existing[1:] + names})
+                    if not results[key]['name'] and names:
+                        results[key]['name'] = names[0]
+                results[key]['exact_title_overlap'] = bool(
+                    {norm(n) for n in results[key]['candidate_titles']} &
+                    {norm(a) for a in aliases if isinstance(a, str)})
         except Exception as exc:
             errors.append(f'TVDB search failed for {alias!r}: {type(exc).__name__}')
     return list(results.values()), errors

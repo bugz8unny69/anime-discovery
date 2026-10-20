@@ -14,3 +14,10 @@ identity notification=27 step=TVDB search details={"returned": 2, "threshold_pct
 ```
 
 The app never writes API keys or provider bearer tokens to diagnostics. Logs are bounded to 10 candidates and 12 steps per investigation. The dashboard's read-only trace is available only to an authenticated administrator. Source data for old releases may lack score details because it was recorded before this upgrade.
+
+
+## Multilingual TVDB candidate evidence
+
+TVDB search candidates now retain bounded provider-supplied primary, translated, original and alias titles. Unicode NFKC normalization retains non-Latin scripts but does not transliterate them. Each title-score diagnostic records the best release query and real provider title, their score and the configured threshold. The originating search query is never treated as candidate title evidence. An empty title set is reported as `NO_USABLE_CANDIDATE_TITLES`.
+
+A passed title score does not verify an identity: the explicit TVDB/AniDB cross-reference, reviewed exact episode mapping, confirmed aired TVDB episode and acquisition approval remain mandatory. Similarity collisions require review when cross-references are ambiguous.

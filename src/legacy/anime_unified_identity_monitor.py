@@ -72,14 +72,23 @@ def candidate_score(aliases,names):
 def title_diagnostics(aliases,candidates,threshold):
     rows=[]
     for row in candidates:
-        names=[row.get("name") or "",row.get("matched_query") or ""]
-        # matched_query is a search input, not candidate evidence; never score it.
-        names=names[:1]+[x for x in row.get("aliases",[]) if isinstance(x,str)]
-        score=candidate_score(aliases,names)
+        names=row.get("candidate_titles")
+        if not isinstance(names,list):
+            names=[row.get("name") or ""] + (row.get("aliases") or [])
+        names=[n[:180] for n in names[:16] if isinstance(n,str) and norm(n)]
+        pairs=[(round(100*SequenceMatcher(None,norm(query),norm(title),autojunk=False).ratio()),
+                query[:180],title)
+               for query in aliases[:5] if isinstance(query,str) and norm(query)
+               for title in names]
+        score,query,title=max(pairs,key=lambda p:p[0]) if pairs else (0,"","")
+        reason=("NO_USABLE_CANDIDATE_TITLES" if not names else
+                "NO_USABLE_RELEASE_TITLES" if not pairs else
+                "TITLE_SCORE_PASSED" if score>=threshold else "BELOW_TITLE_THRESHOLD")
         rows.append({"tvdb_id":str(row["tvdb_id"]),"name":str(row.get("name") or "")[:180],
-                     "score_pct":score,"threshold_pct":threshold,
-                     "passed":score>=threshold,
-                     "reason":"TITLE_SCORE_PASSED" if score>=threshold else "BELOW_TITLE_THRESHOLD"})
+                     "candidate_titles":names,"best_query":query,
+                     "best_candidate_title":title,"score_pct":score,
+                     "threshold_pct":threshold,"passed":bool(pairs) and score>=threshold,
+                     "reason":reason})
     return rows
 
 def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json):
@@ -230,9 +239,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                  report.get("tvdb_results_count","n/a"),
                  ",".join(report.get("issues",[])[:8]))
         for candidate in report.get("candidate_scores",[])[:10]:
-            LOG.info("identity notification=%s tvdb_candidate=%s score=%s threshold=%s result=%s",
-                     nid,candidate["tvdb_id"],candidate["score_pct"],
-                     candidate["threshold_pct"],candidate["reason"])
+            LOG.info("identity candidate=%s",json.dumps({"notification":nid,**candidate},ensure_ascii=True)[:1800])
         for step in report.get("workflow",[])[:12]:
             LOG.info("identity notification=%s step=%s details=%s",
                      nid,step.get("step"),json.dumps({k:v for k,v in step.items() if k!="step"},sort_keys=True))
