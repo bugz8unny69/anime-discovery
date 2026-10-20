@@ -126,6 +126,9 @@ def search_once(db,request,client):
                 reason="QUEUED" if result.get("queued") else "DUPLICATE_OR_SKIPPED",
                 tvdb_id=tvdb_id,season=season,episode=episode,
                 start=window["start"],end=window["end"])
+    journal("BACKFILL_SUMMARY",
+            reason="CANDIDATES_QUEUED" if queued else "NO_ELIGIBLE_CANDIDATES",
+            tvdb_id=tvdb_id,season=season,start=window["start"],end=bound)
     return {"state":"DONE","queued":queued}
 
 
