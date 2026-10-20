@@ -255,6 +255,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                                     "anidb_id":int(pair["anidb_id"]),
                                     "season":season,"episode":mapped_ep}
                 report["verified_anidb_episode_id"]=episode_id
+                report["episode_id_source"]=(
+                    "reviewed_episode_map" if mapping else "AniDB HTTP catalog")
             else:
                 report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
                 report["workflow"].append({"step":"Verified episode map","passed":False})
@@ -281,6 +283,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     pending_retries=0
     for nid,title,attempts in selected:
         attempts+=1
+        retry_delay=None
         try:
             if probe:
                 report=probe(title,settings,secrets)
@@ -292,18 +295,17 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                     Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml")
                 aid_cfg=settings.get("anidb",{})
                 direct=None
-                if aid_cfg.get("http_api_url") and aid_cfg.get("client"):
+                if aid_cfg.get("client"):
                     from anime_anidb_episode_lookup import lookup_episode_id
                     direct=lambda aid,ep: lookup_episode_id(
-                        aid,ep,endpoint=aid_cfg["http_api_url"],
-                        client=aid_cfg["client"],clientver=aid_cfg["clientver"],
-                        cache_dir=Path(settings["daemon"]["database_path"]).parent/"anidb-episode-cache")
+                        aid,ep,client=aid_cfg["client"],
+                        clientver=aid_cfg.get("clientver",1),
+                        metadata_path=Path(settings["daemon"]["database_path"]).parent/"anime-metadata.db")
                 report=investigate(title,settings,secrets,catalog,
                                    mapping_xml=mapping_xml,anidb_resolve=direct)
             decision=report["decision"]
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
-                approve(db,nid,report["approval"],source="verified_identity_mapping")
                 rule=report.get("episode_mapping")
                 if rule and type(report.get("verified_anidb_episode_id")) is int:
                     db.execute("""INSERT INTO verified_anidb_episode_ids
@@ -316,16 +318,32 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                         source=excluded.source""",
                         (nid,report["approval"]["anidb_id"],
                          rule["anidb_episode_number"],
-                         report["verified_anidb_episode_id"],"AniDB"))
+                         report["verified_anidb_episode_id"],
+                         report.get("episode_id_source","verified_mapping")))
+                # Save the exact AniDB ID first: if this write fails, do not
+                # authorize a download without retained post-Keep provenance.
+                db.commit()
+                approve(db,nid,report["approval"],source="verified_identity_mapping")
                 # approve() atomically records proof and queues the job.
                 db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
             retry=False
         except Exception as exc:
-            decision="LOOKUP_RETRY" if attempts<3 else "NEEDS_REVIEW"
-            report={"decision":decision,"issues":["LOOKUP_"+type(exc).__name__]}
-            retry=attempts<3
-            pending_retries+=int(retry)
-            LOG.warning("Identity triage retry notification=%s error_type=%s",nid,type(exc).__name__)
+            from anime_anidb_episode_lookup import AniDBLookupDeferred
+            if isinstance(exc,AniDBLookupDeferred):
+                # A shared AniDB cooldown is a wait, not a failed identity.
+                attempts-=1
+                decision="LOOKUP_RETRY"
+                report={"decision":decision,"issues":["ANIDB_HTTP_COOLDOWN"]}
+                retry=True
+                retry_delay=exc.retry_after_seconds+1
+                pending_retries+=1
+            else:
+                decision="LOOKUP_RETRY" if attempts<3 else "NEEDS_REVIEW"
+                report={"decision":decision,"issues":["LOOKUP_"+type(exc).__name__]}
+                retry=attempts<3
+                pending_retries+=int(retry)
+                LOG.warning("Identity triage retry notification=%s error_type=%s",
+                            nid,type(exc).__name__)
         LOG.info("identity notification=%s attempt=%s decision=%s threshold=%s anidb_matches=%s tvdb_candidates=%s issues=%s",
                  nid,attempts,decision,report.get("threshold_pct","n/a"),
                  len(report.get("anidb_candidates",[])),
@@ -357,7 +375,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 checked_at=excluded.checked_at,attempts=excluded.attempts,
                 next_at=excluded.next_at,decision=excluded.decision,
                 evidence_json=excluded.evidence_json""",
-                (nid,now,attempts,now+min(3600,60*2**attempts) if retry else 0,decision,safe))
+                (nid,now,attempts,now+(retry_delay if retry_delay is not None else min(3600,60*2**attempts)) if retry else 0,decision,safe))
             if not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
         LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
