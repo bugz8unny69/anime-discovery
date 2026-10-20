@@ -7,9 +7,14 @@ series identity and season *before* calling this function.
 This module never unlocks E02-E06 or stages media. The later ffprobe gate
 must supply durable evidence before doing either operation.
 """
-from anime_batch_selection import plan_gated_first_six, SelectionNeedsReview
+import logging
+from anime_batch_selection import (plan_gated_first_six,plan_verified_trial,
+                                   SelectionNeedsReview)
 from anime_qb_manifest_intake import _validated_manifest, STOPPED
 from anime_qb_ownership import OWNED, owned_now, ownership
+from anime_trial_policy import window_for
+
+LOG=logging.getLogger("anime_discovery.trial")
 
 def _inventory(files):
     """Immutable torrent file identity; priorities/progress may change."""
@@ -17,7 +22,8 @@ def _inventory(files):
             for idx, name, size, _priority in _validated_manifest(files)]
 
 
-def start_e01_probe(db, infohash, qb, *, season, stopped_manifest):
+def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
+                    verified_window=None, verified_episode_map=None):
     """Revalidate ownership and file identity, set E01-only, then resume.
 
     stopped_manifest must come from a successful submit_poll_pause() result.
@@ -35,12 +41,33 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest):
         raise ValueError("Manifest torrent hash mismatch")
     original_files = stopped_manifest.get("files")
     original = _inventory(original_files)
-    plan = plan_gated_first_six(original_files, season=season)
-    if plan["phase"] != "PROBE_E01" or len(plan["wanted_indices"]) != 1:
-        raise SelectionNeedsReview("Cannot safely select unique E01")
-    idx = plan["wanted_indices"][0]
-    if plan["wanted_episodes"] != {1:idx}:
-        raise SelectionNeedsReview("Expected E01-only plan")
+    trial_episode=1
+    try:
+        if verified_window is None and verified_episode_map is None:
+            plan=plan_gated_first_six(original_files,season=season)
+        else:
+            # Never unlock an absolute/part/ongoing numbering mode just
+            # because a caller supplies an offset or a filename.
+            if not isinstance(verified_window,dict) or not verified_window.get("evidence_ref"):
+                raise ValueError("Durable provider-confirmed window required")
+            stored=window_for(db,tvdb_id=verified_window.get("tvdb_id"),
+                              anidb_id=verified_window.get("anidb_id"),
+                              season=season)
+            if stored!=verified_window or not stored.get("evidence_ref"):
+                raise PermissionError("Trial window evidence not durably verified")
+            trial_episode=stored["start"]
+            plan=plan_verified_trial(original_files,season=season,
+                                     start_episode=trial_episode,
+                                     episode_map=verified_episode_map)
+        if len(plan["wanted_indices"])!=1:
+            raise SelectionNeedsReview("Cannot safely select unique first trial episode")
+        idx=plan["wanted_indices"][0]
+        if plan["wanted_episodes"]!={trial_episode:idx}:
+            raise SelectionNeedsReview("First trial episode mapping is ambiguous")
+    except (SelectionNeedsReview,ValueError,PermissionError) as exc:
+        LOG.warning("event=TORRENT_SELECTION_REJECTED reason=%s hash=%s season=%d",
+                    type(exc).__name__,infohash[:12],season)
+        raise
     current = qb.torrent_identity(infohash)
     if not current:
         raise RuntimeError("qBittorrent torrent missing")
@@ -67,8 +94,10 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest):
         if (len(priorities) == len(current_files)
                 and all(priorities.get(i) == (1 if i == idx else 0)
                         for i in range(len(current_files)))):
+            LOG.info("event=TORRENT_SELECTED reason=ALREADY_RUNNING hash=%s season=%d episode=%d file_index=%d skipped=%d",
+                     infohash[:12],season,trial_episode,idx,len(skipped))
             return {"state":"PROBE_DOWNLOADING", "infohash":infohash.lower(),
-                    "season":season, "episode":1, "file_index":idx,
+                    "season":season, "episode":trial_episode, "file_index":idx,
                     "already_running":True}
         raise RuntimeError("Active torrent has unapproved priorities; stop it before retry")
 
@@ -83,6 +112,8 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest):
         raise PermissionError("Torrent ownership changed before resume")
     qb.start_selected_torrent(infohash, wanted_indices=wanted,
                               skip_indices=skipped)
+    LOG.info("event=TORRENT_SELECTED reason=FIRST_TRIAL_EPISODE hash=%s season=%d episode=%d file_index=%d skipped=%d",
+             infohash[:12],season,trial_episode,idx,len(skipped))
     return {"state":"PROBE_DOWNLOADING", "infohash":infohash.lower(),
-            "season":season, "episode":1, "file_index":idx,
+            "season":season, "episode":trial_episode, "file_index":idx,
             "already_running":False}
