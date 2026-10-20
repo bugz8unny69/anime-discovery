@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from anime_acquisition_gate import approved_dispatch
 from anime_async_daemon import ensure_schema
 from anime_release_matching import resolve_release
+from anime_trial_policy import eligibility, journal
 
 HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
@@ -48,6 +49,10 @@ def approve(db, notification_id, values, *, source="manual"):
     """Create exactly one approved dispatch and acquisition job in one transaction."""
     nid = _positive(notification_id, "notification_id")
     tvdb, anidb, season, episode = _approval_values(values)
+    policy = eligibility(db,tvdb_id=tvdb,anidb_id=anidb,
+                         season=season,episode=episode)
+    if not policy["eligible"]:
+        raise ValueError("Episode outside verified trial window; acquisition refused")
     if db.in_transaction:
         raise ValueError("Approval needs autocommit connection")
     db.execute("BEGIN IMMEDIATE")
@@ -151,9 +156,12 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
                 gap_title=matching_aliases[0]
     auto_fields = ("tvdb_id","anidb_id","season","episode")
     auto = all(values.get(field) is not None and str(values[field]).strip() for field in auto_fields)
+    policy = None
     if auto:
-        _approval_values(values)
+        tvdb, anidb, season, episode = _approval_values(values)
         _magnet(values.get("magnet_uri") or values.get("magnet"), infohash)
+        policy = eligibility(db,tvdb_id=tvdb,anidb_id=anidb,
+                             season=season,episode=episode)
     if db.in_transaction:
         raise ValueError("Webhook requires autocommit connection")
     db.execute("BEGIN IMMEDIATE")
@@ -170,6 +178,15 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
             nid = db.execute("""INSERT INTO notifications
                 (source,release_name,source_guid,info_hash,received_at)
                 VALUES (?,?,?,?,?)""", (source,name,guid,infohash,int(time.time()))).lastrowid
+        if auto and not policy["eligible"]:
+            prior=db.execute("SELECT season,episode FROM episode_dispatch WHERE notification_id=?",
+                             (nid,)).fetchone()
+            if prior and prior!=(season,episode):
+                raise ValueError("Existing approval conflicts with supplied episode identity")
+            if not prior:
+                db.execute("""UPDATE notifications SET status='EXCLUDED_TRIAL_WINDOW'
+                    WHERE id=? AND status IN ('UNTRUSTED','RECEIVED','IDENTIFYING')""",
+                    (nid,))
         if not auto:
             # Existing alias/identity matching failed to establish an exact
             # episode, so fail closed and require review.
@@ -185,6 +202,18 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
               # Backwards compatible flag, but only true for actual final review.
               "needs_review": actual_status == "NEEDS_REVIEW"}
     if auto:
+        if not policy["eligible"]:
+            result.update({"queued":False,"excluded":True,
+                           "eligibility_reason":policy["reason"]})
+            journal("TRIGGER_SKIPPED",reason=policy["reason"],tvdb_id=tvdb,
+                    season=season,episode=episode,start=policy["window"]["start"],
+                    end=policy["window"]["end"],infohash=infohash)
+            if gap_search_enabled and not result["duplicate"] and source=="autobrr":
+                from anime_shared_discovery import schedule
+                result["gap_search"]=schedule(db,title=gap_title or name,
+                    tvdb_id=tvdb,anidb_id=anidb,season=season,
+                    up_to=episode,origin="autobrr")["queued"]
+            return result
         approved=approve(db,nid,values,source="autobrr")
         result.update(approved)
         if gap_search_enabled and not result["duplicate"] and source=="autobrr":
