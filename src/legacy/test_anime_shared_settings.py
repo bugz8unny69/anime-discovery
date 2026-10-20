@@ -37,6 +37,17 @@ class SharedSettingsTests(unittest.TestCase):
             apply_settings(self.path,{"web":{"port":0},"daemon":{"concurrency":3}})
         self.assertEqual(before,(self.path/"settings.json").read_bytes())
 
+    def test_anidb_http_client_persists_and_is_validated(self):
+        saved=apply_settings(self.path,{"anidb":{"client":"registeredclient","clientver":2}})
+        self.assertTrue(saved["saved"])
+        self.assertIn("anidb.client",saved["changed"])
+        self.assertEqual(snapshot(self.path)["settings"]["anidb"]["client"],"registeredclient")
+        prior=(self.path/"settings.json").read_bytes()
+        for invalid in ({"clientver":0},{"clientver":True},{"client":"invalid client name"}):
+            with self.assertRaises(ValueError):
+                apply_settings(self.path,{"anidb":invalid})
+            self.assertEqual((self.path/"settings.json").read_bytes(),prior)
+
     def test_noop_is_not_restart(self):
         self.assertFalse(apply_settings(self.path,{"web":{"port":8765}})["restart_required"])
 
