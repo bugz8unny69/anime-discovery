@@ -95,6 +95,28 @@ class HandoffTests(unittest.TestCase):
         self.run_identity(REPORT.copy())
         self.assert_blocked_reason("BATCH_PINNED_PROVIDER_PAIR_MISMATCH")
 
+    def test_recheck_terminal_pack_after_correcting_pinned_alias(self):
+        from anime_dashboard_queries import all_jobs
+        from anime_notification_management import recheck_unmatched_identity
+        self.settings["identity"]={"series_map":{}}
+        self.run_identity(REPORT.copy())
+        self.assert_blocked_reason("BATCH_PINNED_ALIAS_MISSING")
+        self.assertTrue(all_jobs(self.db)["items"][0]["can_recheck"])
+        result=recheck_unmatched_identity(self.db,self.nid)
+        self.assertEqual(result["status"],"IDENTIFYING")
+        self.assertFalse(result["queued"])
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone())
+        self.settings["identity"]=SETTINGS["identity"]
+        self.run_identity(REPORT.copy())
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "APPROVED_BATCH")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0],1)
+        with self.assertRaises(ValueError):
+            recheck_unmatched_identity(self.db,self.nid)
+
     def test_provider_pair_conflict_creates_review_not_batch_job(self):
         report={**REPORT,"matching_pairs":[{"tvdb_id":"999","anidb_id":"456"}]}
         self.run_identity(report)
