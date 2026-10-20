@@ -282,7 +282,9 @@ def _remove_orphan_series_nfo(video_path, root, *, tvdb_id):
     """Remove series NFO only when the entire staging series tree is clear."""
     series=Path(video_path).parent.parent
     base=Path(root).resolve(strict=True)
-    if not series.is_relative_to(base) or series==base or series.is_symlink():
+    if not series.is_relative_to(base) or series==base:
+        return False
+    if series.is_symlink():
         raise ValueError("Unsafe series metadata directory")
     # Never erase series metadata while another season, video or unknown file
     # exists. Other empty season folders are pruned only after this check.
