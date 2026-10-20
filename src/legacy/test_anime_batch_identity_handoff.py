@@ -59,6 +59,33 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0],0)
 
+    def test_provider_proved_part_two_has_distinct_13_to_18_window(self):
+        from anime_batch_verified_intake import authorize_verified_batch
+        from anime_trial_policy import window_for,record_verified_window
+        xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
+             b'defaulttvdbseason="1" episodeoffset="12" /></anime-list>')
+        settings={"identity":{"series_map":{"Example Show":{
+            "tvdb_id":123,"anidb_id":456,"season":1}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path=Path(tmp)/"unit.sqlite"
+            initialize(db_path)
+            with sqlite3.connect(db_path,isolation_level=None) as db:
+                got=receive(db,{"source":"autobrr","source_guid":"part-two",
+                    "release_name":"Example Show S01 Part 2 (Batch)",
+                    "info_hash":"b"*40})
+                self.assertTrue(authorize_verified_batch(db,got["notification_id"],
+                    REPORT.copy(),settings,xml))
+                window=window_for(db,tvdb_id=123,anidb_id=456,
+                                  season=1,unit_key="part:2")
+                self.assertEqual((window["start"],window["end"]),(13,18))
+                record_verified_window(db,tvdb_id=123,anidb_id=456,season=1,
+                     unit_key="season",mode="SEASON",start_episode=1,
+                     evidence_ref="tvdb:123:first:cour")
+                with self.assertRaisesRegex(ValueError,"Ambiguous"):
+                    window_for(db,tvdb_id=123,anidb_id=456,season=1)
+                self.assertEqual(window_for(db,tvdb_id=123,anidb_id=456,
+                    season=1,unit_key="part:2")["start"],13)
+
     def test_missing_episode_mapping_without_provider_crossref_is_not_promoted(self):
         report={**REPORT,"matching_pairs":[]}
         self.run_identity(report)
