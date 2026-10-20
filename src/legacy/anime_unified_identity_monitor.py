@@ -99,6 +99,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
                                 "mode":"exact normalized title","truncated":bool(truncated)})
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
+    if not rows:
+        report["issues"].append("NO_ANIDB_EXACT_TITLE_MATCH")
     if truncated:
         report["issues"].append("AMBIGUOUS_ANIDB_TITLES")
     if not settings["tvdb"]["enabled"] or not secrets.get("tvdb_api_key"):
@@ -111,6 +113,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     report["workflow"].append({"step":"TVDB search","returned":len(candidates),
                                 "threshold_pct":threshold})
     report["issues"].extend(errors)
+    if not candidates:
+        report["issues"].append("NO_TVDB_SEARCH_RESULTS")
     if errors:
         raise RuntimeError("TVDB search incomplete")
     if len(candidates)>10:
@@ -136,6 +140,10 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
     report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
                                 "matching_pairs":len(report["matching_pairs"])})
+    if not report["matching_pairs"]:
+        report["issues"].append("NO_EXPLICIT_TVDB_ANIDB_CROSSREF")
+    elif len(report["matching_pairs"])>1:
+        report["issues"].append("MULTIPLE_TVDB_ANIDB_CROSSREFS")
     if len(report["matching_pairs"])==1 and episode and not report["issues"]:
         pair=report["matching_pairs"][0]
         tid=pair["tvdb_id"]
