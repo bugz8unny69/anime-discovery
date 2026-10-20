@@ -156,7 +156,7 @@ def all_jobs(db, *,page=1,size=20):
         if error=="QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT":
             explanation=("qBittorrent's save_path is outside Anime Discovery's configured "
                          "download_root. Compare the exact torrent save_path with "
-                         "settings.paths.download_root in the worker's filesystem namespace. "
+                         "settings.storage.download_root in the worker's filesystem namespace. "
                          "Correct the path configuration or the torrent save location; "
                          "do not disable the containment check or move verified files blindly.")
         if status in ("IDENTIFYING","NEEDS REVIEW") and nid in identity_checks:
