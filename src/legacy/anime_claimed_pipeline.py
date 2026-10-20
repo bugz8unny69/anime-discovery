@@ -14,7 +14,7 @@ from anime_trial_staging import staged_destination
 
 def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
                     download_root, trial_root, title, tvdb_id, english_title=None,
-                    staged_owner="",staged_group=""):
+                    staged_owner="",staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     approval=approved_dispatch(db,notification_id)
@@ -39,7 +39,8 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
     try:
         staged=stage_claimed(db,notification_id,torrent,download_root,trial_root,
                              title=title,tvdb_id=tvdb_id,english_title=english_title,
-                             staged_owner=staged_owner,staged_group=staged_group)
+                             staged_owner=staged_owner,staged_group=staged_group,
+            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode)
     except FileExistsError:
         # A previous worker may have copied media before its lease expired.
         # Reconcile only the exact expected destination; never overwrite it.

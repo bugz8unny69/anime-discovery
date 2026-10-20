@@ -38,7 +38,11 @@ SCHEMA = {
         "staged_owner":field("",label="Staged file owner (optional)",
             help_text="Linux username or numeric UID. Blank keeps the service user; changing owner requires sufficient filesystem permissions."),
         "staged_group":field("",label="Staged file group (optional)",
-            help_text="Linux group name or numeric GID, e.g. media or 1002. The service must have permission to assign this group.")}},
+            help_text="Linux group name or numeric GID, e.g. media or 1002. The service must have permission to assign this group."),
+        "staged_directory_mode":field("2770",label="Directory mode (octal)",
+            help_text="Four octal digits, e.g. 2770: owner/group rwx, setgid for group inheritance. Group write permits sidecar subtitles."),
+        "staged_file_mode":field("0640",label="File mode (octal)",
+            help_text="Four octal digits, e.g. 0640: owner rw, group read, no access for others. Does not need group write for sidecar subtitles.")}},
     "identity": {"dashboard":True,"title":"Identity matching","fields":{
         "reuse_verified_cache":field(True,visible=False),
         "series_map":field({},visible=False),

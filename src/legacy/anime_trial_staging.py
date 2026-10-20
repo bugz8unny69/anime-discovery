@@ -11,7 +11,7 @@ from pathlib import Path
 from anime_trial_metadata import write_episode_nfo,write_series_nfo
 from anime_series_naming import clean_series_name
 import xml.etree.ElementTree as ET
-from anime_staging_permissions import resolve_policy,apply_directory,apply_file
+from anime_staging_permissions import resolve_policy,apply_directory,apply_file,parse_mode
 
 def staged_destination(trial_root, *, title, season, episode, suffix, english_title=None):
     """One path function shared by staging and interrupted-worker reconciliation."""
@@ -23,7 +23,7 @@ def staged_destination(trial_root, *, title, season, episode, suffix, english_ti
     return (Path(trial_root)/folder/("Season %02d"%season)/
             ("S%02dE%02d"%(season,episode)+suffix.lower()))
 
-def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id, english_title=None, staged_owner="", staged_group=""):
+def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id, english_title=None, staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
     source=Path(source)
     root=Path(trial_root)
     if source.is_symlink() or not source.is_file() or source.stat().st_size<=0:
@@ -39,6 +39,8 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
     if source.suffix.lower() not in (".mkv",".mp4",".m4v",".avi"):
         raise ValueError("Unsupported media format")
     uid,gid=resolve_policy(staged_owner,staged_group)
+    parse_mode(staged_directory_mode,directory=True)
+    parse_mode(staged_file_mode,directory=False)
     dest=staged_destination(root,title=title,english_title=english_title,
                             season=season,episode=episode,suffix=source.suffix)
     folder=dest.parent.parent
@@ -46,7 +48,7 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
     if folder.is_symlink() or dest.parent.is_symlink():
         raise ValueError("Unsafe series directory")
     folder.mkdir(exist_ok=True)
-    apply_directory(folder,gid=gid)
+    apply_directory(folder,gid=gid,mode=staged_directory_mode)
     nfo=folder/"tvshow.nfo"
     if nfo.is_symlink():
         raise ValueError("Unsafe series metadata")
@@ -60,7 +62,7 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
             raise ValueError("English series folder belongs to another TVDB identity")
     season_dir=dest.parent
     season_dir.mkdir(exist_ok=True)
-    apply_directory(season_dir,gid=gid)
+    apply_directory(season_dir,gid=gid,mode=staged_directory_mode)
     if season_dir.is_symlink():
         raise ValueError("Unsafe season directory")
     if dest.exists() or dest.is_symlink():
@@ -92,7 +94,7 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
             raise ValueError("Source changed during staging")
         # A mkstemp file begins at 0600: set effective media permissions
         # before publishing the hard link (which shares the inode mode).
-        apply_file(Path(tmp),uid=uid,gid=gid)
+        apply_file(Path(tmp),uid=uid,gid=gid,mode=staged_file_mode)
         # Exclusive creation prevents accidental overwrite of existing media.
         os.link(tmp,dest)
         os.unlink(tmp)
@@ -106,7 +108,7 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         # Apply the same group policy when NFOs were successfully created.
         for metadata in (folder/"tvshow.nfo", dest.with_suffix(".nfo")):
             if metadata.exists() or metadata.is_symlink():
-                apply_file(metadata,uid=uid,gid=gid)
+                apply_file(metadata,uid=uid,gid=gid,mode=staged_file_mode)
         return dest
     finally:
         if os.path.exists(tmp):

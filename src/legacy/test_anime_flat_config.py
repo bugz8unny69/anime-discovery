@@ -24,6 +24,19 @@ class FlatConfigTests(unittest.TestCase):
         self.assertEqual(result["secrets"]["shoko_api_key"],"test")
         self.assertFalse(result["settings"]["qbittorrent"]["manage_download_limit"])
 
+    def test_storage_modes_are_validated_and_optional(self):
+        self.assertEqual(load_config(self.path)["settings"]["storage"]["staged_directory_mode"],"2770")
+        self.assertEqual(load_config(self.path)["settings"]["storage"]["staged_file_mode"],"0640")
+        self.write({"storage":{"staged_directory_mode":"2775",
+                               "staged_file_mode":"0660"}},{})
+        storage=load_config(self.path)["settings"]["storage"]
+        self.assertEqual((storage["staged_directory_mode"],storage["staged_file_mode"]),("2775","0660"))
+        for section in ({"staged_directory_mode":"0640"},{"staged_file_mode":"2770"},
+                        {"staged_directory_mode":"not-octal"}):
+            self.write({"storage":section},{})
+            with self.assertRaises(ValueError):
+                load_config(self.path)
+
     def test_rejects_unsupported_priority(self):
         self.write({"qbittorrent":{"priority_mode":"high"}},{})
         with self.assertRaises(ValueError):
