@@ -235,6 +235,45 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 thread.join(2)
 
+    def test_unverified_webhook_never_sends_ntfy_until_finalized(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as folder:
+            directory=Path(folder)
+            config=json.loads(json.dumps(DEFAULT_SETTINGS))
+            config["ntfy"].update({"enabled":True,"server":"https://ntfy.example",
+                                    "topic":"anime","dashboard_url":"https://dashboard.example"})
+            (directory/"settings.json").write_text(json.dumps(config))
+            (directory/"secrets.json").write_text(json.dumps({"web_token":"web-secret"}))
+            os.chmod(directory/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"web-secret",config_dir=directory))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            try:
+                payload={"source":"nyaa","release_name":"[Group] Unidentified - 01",
+                         "source_guid":"no-premature-ntfy","info_hash":HASH,
+                         "token":"web-secret"}
+                with patch("anime_ntfy.notify_best_effort",
+                           side_effect=AssertionError("Premature NTFY call")) as notify:
+                    client.request("POST","/webhook",json.dumps(payload),
+                                   {"Content-Type":"application/json"})
+                    response=client.getresponse()
+                    self.assertEqual(response.status,200)
+                    result=json.loads(response.read())
+                    self.assertTrue(result["identification_pending"])
+                    self.assertFalse(result["needs_review"])
+                    notify.assert_not_called()
+                with sqlite3.connect(self.db) as db:
+                    self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",
+                        (result["notification_id"],)).fetchone()[0],"IDENTIFYING")
+            finally:
+                client.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_settings_page_provides_working_csrf_for_integration_actions(self):
         import os
         import re
