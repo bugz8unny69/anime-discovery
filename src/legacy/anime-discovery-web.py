@@ -460,6 +460,8 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
 
 
 def main():
+    logging.basicConfig(level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = load_config()
     settings, secrets = config["settings"], config["secrets"]
     token = secrets.get("web_token")
