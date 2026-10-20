@@ -1,3 +1,35 @@
+## Operational journald decision log
+
+The existing `anime-discovery-worker.py` configures Python INFO logging on
+stdout/stderr. When operated as the systemd worker service, those lines
+appear in `journalctl`; no additional log daemon or database table is
+required to see eligibility decisions. The `anime_discovery.trial` logger
+uses single-line key/value event codes without magnet URLs, tokens,
+credentials or raw release titles.
+
+Relevant entries include `WINDOW_LOCKED`, `EPISODE_ELIGIBILITY`
+(`INSIDE_TRIAL_WINDOW` / `OUTSIDE_TRIAL_WINDOW`),
+`TRIGGER_SKIPPED`, `BACKFILL_SKIPPED`, `BACKFILL_DECISION`,
+`BACKFILL_SUMMARY` (`NO_ELIGIBLE_CANDIDATES` /
+`CANDIDATES_QUEUED`), `TORRENT_MANIFEST_READY`,
+`TORRENT_METADATA_RETRY`, `TORRENT_INTAKE_DEFERRED`,
+`TORRENT_INTAKE_REJECTED`, `TORRENT_SELECTION_REJECTED` and
+`TORRENT_SELECTED`. Fields include the TVDB series ID, canonical
+season/episode, six-episode trial bounds, short infohash, file index
+and a stable reason code where applicable.
+
+Use `journalctl -u anime-discovery-worker -f` **only after verifying
+the actual installed service unit name**; to inspect historic decisions,
+`journalctl -u <verified-unit> --since today --no-pager | grep 'event='`.
+The repo does not itself prove the production systemd unit name.
+
+Important: the trial-window and batch-manifest/probe components remain
+source-only or partially connected in the draft branch. An event is
+emitted only for paths actively invoked by the installed worker. Logs
+alone do not prove audio verification, provider identity, or completed
+deployment. Keep the PR draft until the remaining batch worker, E01
+ffprobe gate and per-episode download/staging ledger are integrated.
+
 # Batch-aware first-six planner: integration contract
 
 Status: **planner and offline tests only**. NOT DEPLOYED, NOT CONNECTED to
