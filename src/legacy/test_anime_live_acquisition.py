@@ -63,7 +63,11 @@ class LiveAcquisitionIntegrationTests(unittest.TestCase):
 
     def run_handler(self,job):
         with (patch("anime_media_flow.confirmed_jp_en",return_value=True),
-              patch("anime_source_retention.confirmed_jp_en",return_value=True)):
+              patch("anime_source_retention.confirmed_jp_en",return_value=True),
+              patch("anime_acquisition_handler.tvdb_english_title",return_value="Example"),
+              patch("anime_acquisition_handler.load_config",return_value={
+                  "settings":{"tvdb":{"enabled":True},"identity":{"series_map":{}}},
+                  "secrets":{"tvdb_api_key":"test"}})):
             return asyncio.run(self.handler(job))
 
     def test_staging_preserves_original_until_sonarr_keep(self):

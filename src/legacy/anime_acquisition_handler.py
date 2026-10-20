@@ -8,6 +8,7 @@ from anime_acquisition_finalize import finalize_acquisition
 from anime_acquisition_gate import approved_dispatch
 from anime_jellyfin_refresh import refresh_best_effort
 from anime_trial_metadata import tvdb_english_title
+from anime_series_naming import resolve_series_name
 from anime_flat_config import load_config
 
 
@@ -37,21 +38,28 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 return {'state':'NEEDS_REVIEW'}
             # Recheck approval before constructing any external client. A series
             # may have been quarantined or rejected since the job was enqueued.
-            approved_dispatch(db, payload['notification_id'])
-            # Translation is advisory NFO metadata, never identity proof.
+            approval=approved_dispatch(db, payload['notification_id'])
+            # Resolve a clean English series name from verified TVDB identity
+            # or a unique recognized mapping BEFORE contacting qBittorrent.
+            # Never use the Autobrr release label as a folder name.
+            config=None
             try:
                 config=load_config()
                 key=(config.get('secrets') or {}).get('tvdb_api_key') if config.get('settings',{}).get('tvdb',{}).get('enabled') else None
                 english_title=tvdb_english_title(payload['tvdb_id'],key)
             except (OSError,ValueError,KeyError):
                 english_title=None
+            aliases=(config or {}).get('settings',{}).get('identity',{}).get('series_map',{})
+            series_name=resolve_series_name(db,approval['series_id'],payload['tvdb_id'],
+                english_title=english_title,series_map=aliases)
             result=process_claimed(db, payload['notification_id'],
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
                 qb=qb_factory(), download_root=download_root,
-                trial_root=trial_root, title=payload['title'],
-                tvdb_id=payload['tvdb_id'],english_title=english_title)
+                trial_root=trial_root, title=series_name,
+                tvdb_id=payload['tvdb_id'],english_title=series_name)
             if result['state']=='DONE':
-                finalize_acquisition(db,job['id'],job['lease_token'],payload['notification_id'])
+                finalize_acquisition(db,job['id'],job['lease_token'],
+                    payload['notification_id'],series_title=series_name)
                 # Only scan once after durable finalization; never undo staging
                 # or retry acquisition because the Jellyfin service is down.
                 refresh_best_effort(jellyfin_refresh)

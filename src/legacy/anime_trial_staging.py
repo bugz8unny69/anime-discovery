@@ -9,6 +9,18 @@ import shutil
 import tempfile
 from pathlib import Path
 from anime_trial_metadata import write_episode_nfo,write_series_nfo
+from anime_series_naming import clean_series_name
+import xml.etree.ElementTree as ET
+
+def staged_destination(trial_root, *, title, season, episode, suffix, english_title=None):
+    """One path function shared by staging and interrupted-worker reconciliation."""
+    if type(season) is not int or season<1 or type(episode) is not int or episode<1:
+        raise ValueError("Invalid episode ordering")
+    if suffix.lower() not in (".mkv",".mp4",".m4v",".avi"):
+        raise ValueError("Unsupported media format")
+    folder=clean_series_name(english_title if english_title is not None else title)
+    return (Path(trial_root)/folder/("Season %02d"%season)/
+            ("S%02dE%02d"%(season,episode)+suffix.lower()))
 
 def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id, english_title=None):
     source=Path(source)
@@ -25,15 +37,28 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         raise ValueError("Missing series metadata")
     if source.suffix.lower() not in (".mkv",".mp4",".m4v",".avi"):
         raise ValueError("Unsupported media format")
-    folder=root/("TVDB-"+str(int(tvdb_id))+"-S"+str(series_id))
-    folder.mkdir(exist_ok=True)
-    if folder.is_symlink():
+    dest=staged_destination(root,title=title,english_title=english_title,
+                            season=season,episode=episode,suffix=source.suffix)
+    folder=dest.parent.parent
+    # Inspect pre-existing paths before mkdir: refuse symlinks or conflicting NFO.
+    if folder.is_symlink() or dest.parent.is_symlink():
         raise ValueError("Unsafe series directory")
-    season_dir=folder/("Season %02d"%season)
+    folder.mkdir(exist_ok=True)
+    nfo=folder/"tvshow.nfo"
+    if nfo.is_symlink():
+        raise ValueError("Unsafe series metadata")
+    if nfo.is_file():
+        try:
+            ids=[item.text for item in ET.parse(nfo).getroot().findall("uniqueid")
+                 if item.attrib.get("type")=="tvdb"]
+        except ET.ParseError as exc:
+            raise ValueError("Existing series metadata invalid") from exc
+        if str(tvdb_id) not in ids:
+            raise ValueError("English series folder belongs to another TVDB identity")
+    season_dir=dest.parent
     season_dir.mkdir(exist_ok=True)
     if season_dir.is_symlink():
         raise ValueError("Unsafe season directory")
-    dest=season_dir/("S%02dE%02d"%(season,episode)+source.suffix.lower())
     if dest.exists() or dest.is_symlink():
         raise FileExistsError("Existing staged media requires manual reconciliation")
     fd,tmp=tempfile.mkstemp(prefix=".anime-stage-",suffix=".tmp",dir=season_dir)

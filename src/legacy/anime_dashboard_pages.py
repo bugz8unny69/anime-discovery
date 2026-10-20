@@ -111,7 +111,7 @@ def pager(path,result):
 def series_page(result,mappings=None):
     out=shell("Series","Series")
     out+="""<h1>Series</h1><p class="muted">Anime with completed episodes currently
-staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
+staged in Anime-Trial. Completed series stay visible if trial files are missing so you can reset acquisitions. Incoming releases and downloads appear under Jobs.</p>
 <section class="panel"><div class="toolbar">
 <div><h2>Anime-Trial library</h2><span class="muted">Select one or more series to manage.</span></div>"""
     out+=pager("/",result)+"</div>"
@@ -124,18 +124,24 @@ staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
         out+='<tr><td><input type="checkbox" name="series_ids" value="'+str(sid)+'" class="pick" aria-label="Select '+escape(item["title"])+'"></td>'
         out+='<td><a href="/series?id='+str(sid)+'">'+escape(item["title"])+'</a></td>'
         out+='<td class="hide-mobile">'+escape(item["tvdb_id"])+'</td>'
-        out+='<td>'+str(item["staged_episodes"])+'</td><td>'+escape(item["latest_episode"])+'</td>'
+        count=str(item["staged_episodes"])
+        if item.get("missing_staged_episodes"):
+            count+=" ("+str(item["missing_staged_episodes"])+" missing)"
+        out+='<td>'+count+'</td><td>'+escape(item["latest_episode"] or "—")+'</td>'
         out+='<td><span class="status">'+escape(item["status"])+'</span></td></tr>'
     if not result["items"]:
         out+='<tr><td colspan="6" class="empty">No series have reached Anime-Trial yet. Watch Jobs for incoming episodes.</td></tr>'
     out+='''</tbody></table><input type="hidden" name="return_size" value="'''+str(result["page_size"])+'''">
 <input type="hidden" name="return_page" value="'''+str(result["page"])+'''">
 <div id="bulk-actions" class="actions hidden">
-<strong id="selection-count">0 selected</strong><div class="inline">
-<button type="submit" name="action" value="reject">Reject</button>
-<button type="submit" class="secondary" name="action" value="clear-history">Clear history</button>
-<button type="submit" class="secondary" name="action" value="reset">Reset</button>
-</div></div></form></section>'''
+<strong id="selection-count">0 selected</strong>
+<details><summary>Manage selected series</summary>
+<p class="muted">These controls do not delete staged files or restart completed jobs.</p>
+<div class="inline">
+<button type="submit" name="action" value="reject">Reject series</button>
+<button type="submit" class="secondary" name="action" value="clear-history">Hide old activity</button>
+<button type="submit" class="secondary" name="action" value="reset">Remove rejection / quarantine</button>
+</div></details></div></form></section>'''
     out+=pager("/",result)
     out+=request_panel(mappings or {})
     out+='''<script>
@@ -402,6 +408,27 @@ def detail_page(detail):
     for nid,release,season,episode,state,job,path in detail["releases"]:
         out+='<tr>'+''.join('<td>'+escape(v)+'</td>' for v in (release,season,episode,state,job,path))+'</tr>'
     out+='</table></section>'
+    out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    out+='<button name="action" value="keep">Keep in Sonarr</button><button name="action" value="reject">Reject</button><button name="action" value="clear-history">Clear history</button><button name="action" value="reset">Reset</button></form>'
+    if series[3] in ("KEPT","SONARR_IMPORT_PENDING"):
+        out+='<button type="button" disabled>Keep already submitted</button></form>'
+    else:
+        out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
+    out+='<details style="margin-top:18px"><summary>Manage series</summary>'
+    out+='<p class="muted">Choose an operation below. Hide activity and remove rejection do not delete files or rerun episodes.</p>'
+    out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
+    out+='<button class="secondary" name="action" value="clear-history">Hide old activity</button>'
+    out+='<button class="secondary" name="action" value="reset">Remove rejection / quarantine</button>'
+    out+='<button class="secondary" name="action" value="reject">Reject series</button></form>'
+    out+='<p class="muted"><strong>Reset acquisitions:</strong> Delete this series\' completed staging copies and previous completed acquisition jobs, then recreate pending jobs from stored Autobrr notifications and verified identities. Original torrents and other series are preserved.</p>'
+    out+='<form method="post" action="/series-reset-acquisitions" class="forms" id="acquisition-reset-form">'
+    out+='<input type="hidden" name="series_id" value="'+str(series[0])+'"><input type="hidden" name="reset_confirm" value="RESET">'
+    out+='<button type="submit" class="secondary">Reset acquisitions &amp; retry</button></form>'
+    out+='</details></section>'
+    out+="""<script>
+const resetForm=document.getElementById("acquisition-reset-form");
+if(resetForm)resetForm.addEventListener("submit",function(event){
+  if(!confirm("Delete this series' completed trial copies and prior acquisition jobs, then recreate fresh jobs from saved Autobrr records? Original torrents remain untouched."))event.preventDefault();
+});
+</script>"""
     return out+tail()

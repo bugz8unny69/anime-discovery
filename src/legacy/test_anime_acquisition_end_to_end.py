@@ -63,12 +63,14 @@ class EndToEndTests(unittest.TestCase):
         self.qb=FakeQB()
         with self.connect() as db:
             ensure_schema(db)
+            db.execute("CREATE TABLE series(id INTEGER PRIMARY KEY,source TEXT,external_id TEXT,title TEXT)")
+            db.execute("INSERT INTO series VALUES (4,'tvdb','123','Example')")
             db.execute("CREATE TABLE notifications(id INTEGER PRIMARY KEY,info_hash TEXT)")
             db.execute("INSERT INTO notifications VALUES(7,?)",(HASH,))
             db.execute("CREATE TABLE verified_series_identity(notification_id INTEGER,tvdb_id TEXT)")
             db.execute("INSERT INTO verified_series_identity VALUES(7,'123')")
-            db.execute("CREATE TABLE episode_dispatch(notification_id INTEGER PRIMARY KEY,state TEXT,last_error TEXT,updated_at INTEGER)")
-            db.execute("INSERT INTO episode_dispatch VALUES(7,'CLAIMED',NULL,0)")
+            db.execute("CREATE TABLE episode_dispatch(notification_id INTEGER PRIMARY KEY,series_id INTEGER,state TEXT,last_error TEXT,updated_at INTEGER)")
+            db.execute("INSERT INTO episode_dispatch VALUES(7,4,'CLAIMED',NULL,0)")
             db.execute("INSERT INTO daemon_jobs(kind,subject_key,payload_json,state) VALUES(?,?,?,'READY')",
                 ("claimed_acquisition","7",json.dumps({
                     "notification_id":7,"infohash":HASH,"magnet_uri":MAGNET,
@@ -94,7 +96,7 @@ class EndToEndTests(unittest.TestCase):
         return outcome
     def test_complete_pipeline_and_sha256(self):
         self.assertEqual(self.run_claim(),"DONE")
-        staged=self.trial/"TVDB-123-S4"/"Season 01"/"S01E01.mkv"
+        staged=self.trial/"Example"/"Season 01"/"S01E01.mkv"
         self.assertTrue(staged.is_file())
         digest=hashlib.sha256(self.source.read_bytes()).hexdigest()
         self.assertEqual(hashlib.sha256(staged.read_bytes()).hexdigest(),digest)
@@ -105,7 +107,7 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT sha256 FROM torrent_recovery_records").fetchone()[0],digest)
             self.assertEqual(db.execute("SELECT state FROM daemon_jobs").fetchone()[0],"DONE")
     def test_preexisting_staged_file_reconciles_after_restart(self):
-        staged=self.trial/"TVDB-123-S4"/"Season 01"/"S01E01.mkv"
+        staged=self.trial/"Example"/"Season 01"/"S01E01.mkv"
         staged.parent.mkdir(parents=True)
         staged.write_bytes(self.source.read_bytes())
         self.assertEqual(self.run_claim(),"DONE")
@@ -114,7 +116,7 @@ class EndToEndTests(unittest.TestCase):
         with self.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM torrent_recovery_records").fetchone()[0],1)
     def test_corrupt_preexisting_stage_never_finalizes(self):
-        staged=self.trial/"TVDB-123-S4"/"Season 01"/"S01E01.mkv"
+        staged=self.trial/"Example"/"Season 01"/"S01E01.mkv"
         staged.parent.mkdir(parents=True)
         staged.write_bytes(b"corrupt")
         with self.assertRaisesRegex(ValueError,"size"):
@@ -130,7 +132,7 @@ class EndToEndTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError,"simulated crash"):
                 self.run_claim()
         self.assertTrue(self.source.exists())
-        season=self.trial/"TVDB-123-S4"/"Season 01"
+        season=self.trial/"Example"/"Season 01"
         self.assertFalse((season/"S01E01.mkv").exists())
         self.assertEqual(list(season.glob(".anime-stage-*")),[])
         with self.connect() as db:

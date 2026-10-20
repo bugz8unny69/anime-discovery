@@ -10,6 +10,7 @@ from anime_completed_snapshot import completed_torrent_snapshot
 from anime_media_completion import verified_media
 from anime_media_flow import stage_claimed
 from anime_source_retention import retain_recovery_record
+from anime_trial_staging import staged_destination
 
 def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
                     download_root, trial_root, title, tvdb_id, english_title=None):
@@ -40,9 +41,8 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
     except FileExistsError:
         # A previous worker may have copied media before its lease expired.
         # Reconcile only the exact expected destination; never overwrite it.
-        dest=(Path(trial_root)/("TVDB-"+str(int(tvdb_id))+"-S"+
-              str(approval["series_id"]))/("Season %02d"%approval["season"])/
-              ("S%02dE%02d"%(approval["season"],approval["episode"])+source.suffix.lower()))
+        dest=staged_destination(trial_root,title=title,english_title=english_title,
+            season=approval["season"],episode=approval["episode"],suffix=source.suffix)
         if dest.is_symlink() or not dest.is_file():
             return {"state":"NEEDS_REVIEW","reason":"Expected staged media missing or unsafe"}
         staged=dest

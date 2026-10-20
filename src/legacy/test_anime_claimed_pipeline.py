@@ -40,7 +40,7 @@ class PipelineTests(unittest.TestCase):
             root=Path(tmp)
             source=root/"original.mkv"
             source.write_bytes(b"media")
-            staged=root/"TVDB-2-S4"/"Season 01"/"S01E01.mkv"
+            staged=root/"Anime"/"Season 01"/"S01E01.mkv"
             staged.parent.mkdir(parents=True)
             staged.write_bytes(b"media")
             torrent={"progress":1,"state":"uploading"}

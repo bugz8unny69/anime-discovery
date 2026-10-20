@@ -41,11 +41,12 @@ def staged_series(db, *, page=1,size=20):
         ORDER BY lower(s.title),s.id,d.season,d.episode""").fetchall()
     grouped={}
     for sid,title,tvdb,status,season,episode,path in records:
-        if not path or not Path(path).is_file():
-            continue
         if sid not in grouped:
             grouped[sid]={"id":sid,"title":title,"tvdb_id":tvdb,
-                          "status":status,"staged_episodes":0,"latest_episode":""}
+                          "status":status,"staged_episodes":0,"missing_staged_episodes":0,"latest_episode":""}
+        if not path or not Path(path).is_file():
+            grouped[sid]["missing_staged_episodes"]+=1
+            continue
         grouped[sid]["staged_episodes"]+=1
         grouped[sid]["latest_episode"]="S%02dE%02d"%(season,episode)
     return _page(list(grouped.values()),page,size)
