@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from anime_acquisition_gate import approved_dispatch
 from anime_async_daemon import ensure_schema
 from anime_release_matching import resolve_release
+from anime_batch_selection import release_scope_hint
 from anime_trial_policy import eligibility, journal
 
 HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -191,6 +192,18 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
             # Existing alias/identity matching failed to establish an exact
             # episode, so fail closed and require review.
             db.execute("UPDATE notifications SET status='IDENTIFYING' WHERE id=? AND status IN ('UNTRUSTED','RECEIVED') AND NOT EXISTS (SELECT 1 FROM episode_dispatch WHERE notification_id=?)",(nid,nid))
+            # Persist the original Autobrr magnet securely as part of intake;
+            # the identity monitor, not this untrusted webhook, decides
+            # whether an actual batch acquisition is allowed.
+            hint=release_scope_hint(name)
+            if source=="autobrr" and hint["kind"]=="season_pack":
+                from anime_batch_verified_intake import ensure_schema as batch_schema
+                batch_schema(db)
+                magnet=_magnet(values.get("magnet_uri") or values.get("magnet"),infohash)
+                old_magnet=db.execute("SELECT magnet_uri FROM anime_batch_pending WHERE notification_id=?",(nid,)).fetchone()
+                if old_magnet and old_magnet[0]!=magnet:
+                    raise ValueError("Duplicate season-pack notification changed magnet identity")
+                db.execute("INSERT OR IGNORE INTO anime_batch_pending VALUES (?,?)",(nid,magnet))
         db.commit()
     except BaseException:
         db.rollback()
