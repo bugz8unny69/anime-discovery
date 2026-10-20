@@ -77,8 +77,21 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
                                         (series_id,)).fetchone()
                         if tvdb and str(tvdb[0]).isdigit():
                             tvdb_id=int(tvdb[0])
-                            episode_id=resolve_exact_episode(settings,tvdb_id=tvdb_id,
-                                season=entry["season"],episode=entry["episode"])
+                            episode_id=None
+                            if db.execute("""SELECT 1 FROM sqlite_master
+                                WHERE type='table' AND name='verified_anidb_episode_ids'""").fetchone():
+                                record=db.execute("""SELECT v.anidb_episode_id FROM
+                                    verified_anidb_episode_ids v
+                                    JOIN verified_series_identity i ON i.notification_id=v.notification_id
+                                    WHERE v.notification_id=? AND i.tvdb_id=?
+                                      AND CAST(v.anidb_id AS TEXT)=i.anidb_id
+                                      AND i.episode_identity_verified=1""",
+                                    (nid,str(tvdb_id))).fetchone()
+                                if record and type(record[0]) is int and record[0]>0:
+                                    episode_id=record[0]
+                            if not episode_id:
+                                episode_id=resolve_exact_episode(settings,tvdb_id=tvdb_id,
+                                    season=entry["season"],episode=entry["episode"])
                             if not episode_id and settings.get("tvdb",{}).get("enabled"):
                                 verified=db.execute("""SELECT anidb_id,tvdb_id
                                     FROM verified_series_identity WHERE notification_id=?""",
