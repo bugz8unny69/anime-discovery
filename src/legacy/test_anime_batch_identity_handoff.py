@@ -85,6 +85,56 @@ class HandoffTests(unittest.TestCase):
         # The later PIN must separately agree with both this release's
         # season and an independently corroborated AniDB/TVDB provider pair.
 
+    def test_cyberpunk_title_and_anime_lists_season2_anidb_are_selected_without_pin(self):
+        from anime_batch_verified_intake import authorize_verified_batch
+        from anime_trial_policy import window_for
+        import json
+        release=("[Trix] Cyberpunk Edgerunners S02 1080p NF WEB-DL "
+                 "Opus2.0 AV1 (Dual-Audio, Multi-Subs) (Season S2) (Batch)")
+        xml=(b'<anime-list>'
+             b'<anime anidbid="15610" tvdbid="384541" defaulttvdbseason="1">'
+             b'<name>Cyberpunk: Edgerunners</name></anime>'
+             b'<anime anidbid="19445" tvdbid="384541" defaulttvdbseason="2">'
+             b'<name>Cyberpunk: Edgerunners II</name></anime>'
+             b'</anime-list>')
+        report={"decision":"NEEDS_REVIEW",
+            "matching_pairs":[{"tvdb_id":"384541","anidb_id":"15610"}],
+            "issues":["BATCH_FILE_MANIFEST_REQUIRED","EPISODE_NUMBER_UNRESOLVED",
+                      "EXACT_IDENTITY_NOT_VERIFIED"],
+            "crossref_diagnostics":[{"tvdb_id":"384541","media_type":"ANIMATION",
+                                     "matching_anidb_ids":["15610"]}]}
+        incoming=receive(self.db,{"source":"autobrr",
+            "source_guid":"cyberpunk-s02",
+            "release_name":release,"info_hash":"c"*40})
+        self.assertTrue(authorize_verified_batch(
+            self.db,incoming["notification_id"],report,
+            {"identity":{"series_map":{}}},xml))
+        self.assertEqual(self.db.execute(
+            "SELECT tvdb_id,anidb_id,season FROM anime_batch_authorizations "
+            "WHERE notification_id=?",(incoming["notification_id"],)).fetchone(),
+            ("384541","19445",2))
+        window=window_for(self.db,tvdb_id=384541,anidb_id=19445,season=2)
+        self.assertEqual((window["start"],window["end"]),(1,6))
+        self.assertEqual(report["batch_season_mapping"]["initial_anidb_id"],"15610")
+        self.assertEqual(report["batch_authorization"]["decision"],"ELIGIBLE")
+
+    def test_cyberpunk_season2_mapping_missing_fails_closed(self):
+        from anime_batch_verified_intake import authorize_verified_batch
+        xml=(b'<anime-list><anime anidbid="15610" tvdbid="384541" '
+             b'defaulttvdbseason="1"/></anime-list>')
+        report={"decision":"NEEDS_REVIEW",
+                "matching_pairs":[{"tvdb_id":"384541","anidb_id":"15610"}],
+                "issues":["BATCH_FILE_MANIFEST_REQUIRED","EPISODE_NUMBER_UNRESOLVED",
+                          "EXACT_IDENTITY_NOT_VERIFIED"],
+                "crossref_diagnostics":[{"tvdb_id":"384541","media_type":"ANIMATION",
+                                         "matching_anidb_ids":["15610"]}]}
+        incoming=receive(self.db,{"source":"autobrr",
+            "source_guid":"cyberpunk-s02-absent",
+            "release_name":"Cyberpunk Edgerunners S02 (Batch)","info_hash":"d"*40})
+        self.assertFalse(authorize_verified_batch(
+            self.db,incoming["notification_id"],report,{"identity":{"series_map":{}}},xml))
+        self.assertEqual(report["issues"][0],"BATCH_SEASON_MAPPING_UNAVAILABLE")
+
     def test_missing_explicit_season_is_actionable_not_generic_episode_error(self):
         # A release such as "Cyberpunk Edgerunners (Batch)" proves packaging,
         # not the TVDB season. Do not default an unlabeled pack to S01.
@@ -93,16 +143,22 @@ class HandoffTests(unittest.TestCase):
         self.run_identity(REPORT.copy())
         self.assert_blocked_reason("BATCH_SEASON_HINT_REQUIRED")
 
-    def test_absent_recognized_alias_is_actionable_not_silent(self):
+    def test_no_recognized_names_still_automatically_authorizes_batch(self):
         self.settings["identity"]={"series_map":{}}
         self.run_identity(REPORT.copy())
-        self.assert_blocked_reason("BATCH_PINNED_ALIAS_MISSING")
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "APPROVED_BATCH")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0],1)
 
-    def test_recognized_alias_with_wrong_season_is_distinguished(self):
+    def test_pin_for_another_season_does_not_block_independent_proof(self):
         self.settings["identity"]={"series_map":{"Example Show":{
             "tvdb_id":123,"anidb_id":456,"season":1}}}
         self.run_identity(REPORT.copy())
-        self.assert_blocked_reason("BATCH_PINNED_SEASON_MISMATCH")
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "APPROVED_BATCH")
 
     def test_series_pair_really_verified_but_pinned_ids_conflict(self):
         self.settings["identity"]={"series_map":{"Example Show":{
@@ -113,16 +169,17 @@ class HandoffTests(unittest.TestCase):
     def test_recheck_terminal_pack_after_correcting_pinned_alias(self):
         from anime_dashboard_queries import all_jobs
         from anime_notification_management import recheck_unmatched_identity
-        self.settings["identity"]={"series_map":{}}
+        self.settings["identity"]={"series_map":{"Example Show":{
+            "tvdb_id":999,"anidb_id":456,"season":2}}}
         self.run_identity(REPORT.copy())
-        self.assert_blocked_reason("BATCH_PINNED_ALIAS_MISSING")
+        self.assert_blocked_reason("BATCH_PINNED_PROVIDER_PAIR_MISMATCH")
         self.assertTrue(all_jobs(self.db)["items"][0]["can_recheck"])
         result=recheck_unmatched_identity(self.db,self.nid)
         self.assertEqual(result["status"],"IDENTIFYING")
         self.assertFalse(result["queued"])
         self.assertIsNone(self.db.execute(
             "SELECT 1 FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone())
-        self.settings["identity"]=SETTINGS["identity"]
+        self.settings["identity"]={"series_map":{}}
         self.run_identity(REPORT.copy())
         self.assertEqual(self.db.execute(
             "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
