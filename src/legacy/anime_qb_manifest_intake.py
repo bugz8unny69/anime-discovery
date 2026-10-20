@@ -77,7 +77,17 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
 
     submitted = submit_once(db, infohash, magnet_uri, qb)
     if not submitted:
-        return {"state": "DEFERRED", "reason": "Submission not reconciled"}
+        # The add may have succeeded before qB exposes the hash. Poll briefly
+        # and reconcile its existing reservation; never issue another add.
+        for check in range(attempts):
+            if qb.contains_hash(infohash):
+                submitted = submit_once(db, infohash, magnet_uri, qb)
+                if submitted:
+                    break
+            if check + 1 < attempts:
+                sleep(interval)
+        if not submitted:
+            return {"state": "DEFERRED", "reason": "Submission not reconciled"}
     # submit_once may find an externally owned, same-hash torrent: never
     # pause, reprioritize or otherwise control another application's source.
     if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
