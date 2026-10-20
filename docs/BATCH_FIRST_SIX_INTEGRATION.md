@@ -145,6 +145,48 @@ webhook, release title, or a 100% torrent-progress indicator.
   may retry metadata or wait for peers without user clicks; fundamentally
   contradictory identity/file data must fail closed without guessing.
 
+
+## Installed qBittorrent compatibility target (Debian 12)
+
+Production package reported by operator:
+\`qbittorrent-nox 4.5.2-3+deb12u1\`. Do **not** require a qBittorrent
+upgrade for progressive E01-first trial sampling.
+
+The server's actual \`GET /api/v2/app/webapiVersion\` value (not the Debian
+package suffix) determines endpoint behavior. Our offline adapter
+\`QBittorrentAPI.web_api_version()\` requires Web API >=2.8.2 and <3.0
+for reliable \`torrents/files\` \`index\` and \`filePrio\` support:
+
+- Web API <2.11.0 (qBittorrent 4.5.2): \`torrents/add\` with \`paused=true\`,
+  \`torrents/pause\` and \`torrents/resume\`; stopped states are
+  \`pausedDL\` and \`pausedUP\`.
+- Web API >=2.11.0 (qBittorrent 5.x): \`torrents/add\` with \`stopped=true\`,
+  \`torrents/stop\` and \`torrents/start\`; stopped states are
+  \`stoppedDL\` and \`stoppedUP\`.
+- Both share \`torrents/files\`, \`torrents/filePrio\`, priorities \`0\`
+  (not wanted) and \`1\` (normal), exact single-torrent hash operations,
+  marker ownership checks and a complete file-priority readback.
+
+These version-aware helpers (\`stop_owned_torrent\`,
+\`start_selected_torrent\`, and \`add_magnet(..., stopped=True)\`) are
+*not integrated in the running acquisition worker*. The worker MUST
+verify durable DB-owned provenance in addition to matching tag/category,
+hold the relevant lease, preserve selected-E01 audio evidence, and only
+resume once the complete manifest is validated.
+
+**Unresolved safety boundary:** A paused magnet can remain unable to
+discover a file list until a peer session obtains torrent metadata.
+The 4.5.2 adapter alone does not provide a metadata-only payload-safe
+download mode. The worker must obtain a verified .torrent manifest or
+implement an isolated metadata-only fetch that cannot download file
+payloads. It must never resume a default-selected magnet just to obtain
+its file list.
+
+Testing is currently synthetic/fake Web API transport. Before deploying,
+check the actual \`app/version\` and \`app/webapiVersion\` read-only,
+and verify \`pausedUP\` transitions and file-priority effects on a
+disposable isolated 4.5.2 instance. Never use existing torrents as tests.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
