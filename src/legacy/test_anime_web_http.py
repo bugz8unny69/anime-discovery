@@ -317,6 +317,26 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 thread.join(2)
 
+    def test_jobs_resolve_dialog_and_safe_delete_api(self):
+        status,_,page=self.request("GET","/jobs")
+        self.assertEqual(status,200)
+        self.assertIn('id="resolve-dialog"',page)
+        self.assertIn('name="notification_id"',page)
+        self.assertIn("Notification #",page)
+        payload={"source":"nyaa","release_name":"Unmatched for deletion",
+                 "source_guid":"delete-api-test","info_hash":HASH,
+                 "token":"secret-token"}
+        status,_,body=self.request("POST","/webhook",payload)
+        self.assertEqual(status,200)
+        nid=json.loads(body)["notification_id"]
+        status,_,body=self.request("POST","/api/delete-notification",
+                                 {"notification_id":nid})
+        self.assertEqual(status,200)
+        self.assertTrue(json.loads(body)["deleted"])
+        with sqlite3.connect(self.db) as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
+                                           (nid,)).fetchone())
+
     def test_session_mutations_require_csrf(self):
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
         try:
