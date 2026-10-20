@@ -12,7 +12,7 @@ from anime_media_flow import stage_claimed
 from anime_source_retention import retain_recovery_record
 
 def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
-                    download_root, trial_root, title, tvdb_id):
+                    download_root, trial_root, title, tvdb_id, english_title=None):
     if db.in_transaction:
         raise ValueError("Autocommit required")
     approval=approved_dispatch(db,notification_id)
@@ -36,7 +36,7 @@ def process_claimed(db, notification_id, *, infohash, magnet_uri, qb,
     # Source-first checks are inside stage_claimed; no NFO failure deletes media.
     try:
         staged=stage_claimed(db,notification_id,torrent,download_root,trial_root,
-                             title=title,tvdb_id=tvdb_id)
+                             title=title,tvdb_id=tvdb_id,english_title=english_title)
     except FileExistsError:
         # A previous worker may have copied media before its lease expired.
         # Reconcile only the exact expected destination; never overwrite it.

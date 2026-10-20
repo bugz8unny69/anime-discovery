@@ -5,7 +5,7 @@ No media copying, torrent operations or deletion. Explicit maintenance only.
 from pathlib import Path
 from anime_trial_metadata import write_episode_nfo,write_series_nfo
 
-def repair_nfo(staged_path, *, title, tvdb_id, season, episode):
+def repair_nfo(staged_path, *, title, tvdb_id, season, episode, english_title=None):
     staged=Path(staged_path)
     if staged.is_symlink() or not staged.is_file():
         raise ValueError("Staged media missing or unsafe")
@@ -17,6 +17,6 @@ def repair_nfo(staged_path, *, title, tvdb_id, season, episode):
     series_dir=season_dir.parent
     if season_dir.is_symlink() or series_dir.is_symlink():
         raise ValueError("Unsafe metadata directory")
-    write_series_nfo(series_dir,title=title,tvdb_id=tvdb_id)
-    write_episode_nfo(staged,title=title,season=season,episode=episode,tvdb_id=tvdb_id)
+    write_series_nfo(series_dir,title=title,tvdb_id=tvdb_id,english_title=english_title)
+    write_episode_nfo(staged,title=title,season=season,episode=episode,tvdb_id=tvdb_id,english_title=english_title)
     return {"media_preserved":True,"metadata_repaired":True}
