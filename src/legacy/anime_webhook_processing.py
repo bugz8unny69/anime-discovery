@@ -164,6 +164,8 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
             raise ValueError("GUID already belongs to a different torrent")
         if old:
             nid = old[0]
+            # A duplicate is idempotent: don't restart identification or
+            # present the old terminal review as a new worker run.
         else:
             nid = db.execute("""INSERT INTO notifications
                 (source,release_name,source_guid,info_hash,received_at)
@@ -176,8 +178,12 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
     except BaseException:
         db.rollback()
         raise
+    actual_status=db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()[0]
     result = {"received": True, "notification_id": nid, "duplicate": bool(old),
-              "needs_review": not auto}
+              "identity_status": actual_status,
+              "identification_pending": actual_status == "IDENTIFYING",
+              # Backwards compatible flag, but only true for actual final review.
+              "needs_review": actual_status == "NEEDS_REVIEW"}
     if auto:
         approved=approve(db,nid,values,source="autobrr")
         result.update(approved)
