@@ -83,3 +83,125 @@ def _store(db, notification_id, state, infohash, manifest, episode_map):
     except BaseException:
         db.rollback()
         raise
+
+
+def step(db, job, qb, *, download_root, trial_root, settings, runner=None):
+    """Advance one safely leased job by a bounded action; no idle busy loop."""
+    if db.in_transaction or not isinstance(job,dict) or job.get("kind")!=JOB_KIND:
+        raise ValueError("Verified batch job with autocommit connection required")
+    lease=db.execute("""SELECT 1 FROM daemon_jobs WHERE id=? AND kind=?
+        AND state='LEASED' AND lease_token=? AND lease_until>strftime('%s','now')""",
+        (job.get("id"),JOB_KIND,job.get("lease_token"))).fetchone()
+    if not lease:
+        raise PermissionError("Stale verified batch lease")
+    payload=json.loads(job["payload_json"])
+    if (not isinstance(payload,dict) or set(payload)!={"notification_id"}
+            or type(payload["notification_id"]) is not int
+            or str(payload["notification_id"])!=job.get("subject_key")):
+        raise BatchNeedsReview("UNVERIFIED_BATCH_JOB_PAYLOAD")
+    nid=payload["notification_id"]
+    row=db.execute("""SELECT a.tvdb_id,a.anidb_id,a.season,a.unit_key,a.title,
+        a.xml_sha256,a.infohash,p.magnet_uri,n.status
+        FROM anime_batch_authorizations a
+        JOIN anime_batch_pending p ON p.notification_id=a.notification_id
+        JOIN notifications n ON n.id=a.notification_id
+        WHERE a.notification_id=?""",(nid,)).fetchone()
+    if not row or row[8]!="APPROVED_BATCH":
+        raise BatchNeedsReview("BATCH_IDENTITY_NOT_AUTHORIZED")
+    tvdb,anidb,season,unit,title,xml_sha,infohash,magnet,_=row
+    window=window_for(db,tvdb_id=tvdb,anidb_id=anidb,season=season)
+    if window["unit_key"]!=unit or not window.get("evidence_ref"):
+        raise BatchNeedsReview("PERSISTED_BATCH_WINDOW_MISSING")
+    limits=size_limits(settings["trial"])
+    ensure_schema(db)
+    record=db.execute("""SELECT state,infohash,manifest_json,map_json
+        FROM anime_batch_executions WHERE notification_id=?""",(nid,)).fetchone()
+    if record is None:
+        # This is the sole torrent-submission stage. On a delayed metadata
+        # response, submit_once reconciles by hash rather than adding again.
+        acquired=submit_poll_pause(db,infohash,magnet,qb)
+        if acquired["state"]=="DEFERRED":
+            return "DEFERRED"
+        if acquired["state"]!="MANIFEST_READY":
+            raise BatchNeedsReview("BATCH_MANIFEST_INTAKE_REJECTED")
+        xml_path=Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml"
+        try:
+            xml=xml_path.read_bytes()
+        except OSError:
+            return "DEFERRED"
+        if hashlib.sha256(xml).hexdigest()!=xml_sha:
+            raise BatchNeedsReview("PROVIDER_CACHE_CHANGED")
+        try:
+            episode_map=_episode_mapping(acquired["files"],season=season,
+                tvdb_id=tvdb,anidb_id=anidb,xml_bytes=xml)
+            probe=plan_verified_trial(acquired["files"],season=season,
+                start_episode=window["start"],episode_map=episode_map)
+        except (ValueError, SelectionNeedsReview) as exc:
+            raise BatchNeedsReview("BATCH_EPISODES_UNMAPPABLE") from exc
+        if len(probe["wanted_indices"])!=1:
+            raise BatchNeedsReview("FIRST_BATCH_EPISODE_MISSING")
+        _store(db,nid,"MANIFEST_READY",infohash,acquired,episode_map)
+        record=("MANIFEST_READY",infohash,json.dumps(acquired),json.dumps(episode_map))
+    state,saved_hash,manifest_json,map_json=record
+    if saved_hash!=infohash:
+        raise BatchNeedsReview("AUTHORIZED_TORRENT_CHANGED")
+    manifest=json.loads(manifest_json)
+    episode_map={int(key):value for key,value in json.loads(map_json).items()}
+    if state=="MANIFEST_READY":
+        start_e01_probe(db,infohash,qb,season=season,stopped_manifest=manifest,
+                        verified_window=window,verified_episode_map=episode_map,
+                        size_settings=limits)
+        _store(db,nid,"PROBE",infohash,manifest,episode_map)
+        return "DEFERRED"
+    if state=="PROBE":
+        args=dict(window=window,stopped_manifest=manifest,episode_map=episode_map,
+                  episode=window["start"],download_root=download_root,
+                  trial_root=trial_root,title=title)
+        if runner is not None:
+            args["runner"]=runner
+        first=stage_completed_batch_file(db,infohash,qb,**args)
+        if first["state"]=="DEFERRED":
+            return "DEFERRED"
+        unlock_verified_remaining(db,infohash,qb,window=window,
+            stopped_manifest=manifest,episode_map=episode_map,size_settings=limits)
+        _store(db,nid,"UNLOCKED",infohash,manifest,episode_map)
+        return "DEFERRED"
+    if state=="UNLOCKED":
+        eligible=plan_verified_trial(manifest["files"],season=season,
+            start_episode=window["start"],episode_map=episode_map,
+            probe_verified=True)["wanted_episodes"]
+        complete=True
+        for episode in sorted(eligible):
+            args=dict(window=window,stopped_manifest=manifest,episode_map=episode_map,
+                      episode=episode,download_root=download_root,
+                      trial_root=trial_root,title=title)
+            if runner is not None:
+                args["runner"]=runner
+            outcome=stage_completed_batch_file(db,infohash,qb,**args)
+            complete=complete and outcome["state"]=="STAGED"
+        if not complete:
+            return "DEFERRED"
+        _store(db,nid,"DONE",infohash,manifest,episode_map)
+        LOG.info("event=BATCH_TRIAL_COMPLETED reason=ALL_PRESENT_EPISODES_STAGED "
+                 "tvdb=%s season=%d hash=%s",tvdb,season,infohash[:12])
+        return "DONE"
+    if state=="DONE":
+        return "DONE"
+    raise BatchNeedsReview("UNEXPECTED_BATCH_EXECUTION_STATE")
+
+
+def handler_factory(db_path, qb_factory, *, download_root, trial_root,
+                    settings_supplier, runner=None):
+    """Create one async job handler; qB credentials are loaded per job."""
+    async def handler(job):
+        def execute():
+            with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
+                db.execute("PRAGMA foreign_keys=ON")
+                db.execute("PRAGMA busy_timeout=10000")
+                kwargs=dict(download_root=download_root,trial_root=trial_root,
+                            settings=settings_supplier(job))
+                if runner is not None:
+                    kwargs["runner"]=runner
+                return step(db,job,qb_factory(job),**kwargs)
+        return await asyncio.to_thread(execute)
+    return handler
