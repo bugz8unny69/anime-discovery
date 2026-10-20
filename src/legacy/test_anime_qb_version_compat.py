@@ -31,7 +31,11 @@ class Response:
 class FakeQb:
     def __init__(self, webapi, *, owned=True, initial_priorities=None):
         self.webapi = webapi
-        self.new = tuple(map(int, webapi.split("."))) >= (2, 11, 0)
+        try:
+            parts = tuple(map(int, webapi.split(".")))
+        except ValueError:
+            parts = (0, 0, 0)
+        self.new = parts >= (2, 11, 0)
         self.state = "stoppedDL" if self.new else "pausedDL"
         self.owned = owned
         self.priority = initial_priorities or {0: 1, 1: 1, 2: 1}
