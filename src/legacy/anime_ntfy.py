@@ -60,3 +60,30 @@ def notify_shoko_issue(settings,secrets,series_id,notification_id,reason,*,opene
         if response.status not in (200,201,202):
             raise RuntimeError("NTFY Shoko alert rejected")
     return True
+
+
+def notify_sonarr_duplicate(settings,secrets,series_id,title,*,opener=urlopen):
+    """Actionable alert only; never authorizes any deletion."""
+    cfg=settings["ntfy"]
+    if not cfg["enabled"]:return False
+    parsed=urlsplit(cfg["server"])
+    dashboard=cfg["dashboard_url"].rstrip("/")
+    if (parsed.scheme!="https" or not parsed.netloc or parsed.username
+            or parsed.password or parsed.query or parsed.fragment
+            or urlsplit(dashboard).scheme!="https"):
+        raise ValueError("NTFY requires trusted HTTPS URLs")
+    if type(series_id) is not int or series_id<=0:
+        raise ValueError("Invalid series ID")
+    headers={"Title":"Anime Discovery: Sonarr has trial episodes",
+             "Click":dashboard+"/series?id="+str(series_id),
+             "Priority":"3","Content-Type":"text/plain; charset=utf-8"}
+    token=secrets.get("ntfy_token")
+    if token:headers["Authorization"]="Bearer "+token
+    request=Request(cfg["server"].rstrip("/")+"/"+quote(cfg["topic"],safe=""),
+                    data=("Sonarr already manages trial episodes for "+str(title)[:120]+
+                          ". Review them in Anime Discovery; no files were deleted.").encode(),
+                    method="POST",headers=headers)
+    with opener(request,timeout=8) as response:
+        if response.status not in (200,201,202):
+            raise RuntimeError("NTFY alert rejected")
+    return True
