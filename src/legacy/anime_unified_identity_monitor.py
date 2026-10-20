@@ -229,7 +229,17 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             LOG.info("identity notification=%s step=%s details=%s",
                      nid,step.get("step"),json.dumps({k:v for k,v in step.items() if k!="step"},sort_keys=True))
         # Never expose API keys or release payloads in stored diagnostics.
-        safe=json.dumps(report,sort_keys=True)[:16000]
+        safe=json.dumps(report,sort_keys=True)
+        if len(safe)>16000:
+            compact={"decision":decision,"issues":report.get("issues",[])[:8],
+                     "threshold_pct":report.get("threshold_pct"),
+                     "tvdb_results_count":report.get("tvdb_results_count"),
+                     "candidate_scores":report.get("candidate_scores",[])[:5],
+                     "workflow":report.get("workflow",[])[:5]}
+            safe=json.dumps(compact,sort_keys=True)
+            if len(safe)>16000:
+                safe=json.dumps({"decision":decision,"issues":["TRACE_TRUNCATED"]})
+
         with db:
             db.execute("""INSERT INTO unified_identity_checks
                 (notification_id,checked_at,attempts,next_at,decision,evidence_json)
