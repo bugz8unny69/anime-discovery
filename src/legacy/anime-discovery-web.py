@@ -189,6 +189,22 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         "attempts":attempts,"decision":decision,"evidence":json.loads(document)}),"application/json")
                 except (ValueError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
+            if path=="/series-review-sonarr-cleanup":
+                try:
+                    ids=parse_qs(route.query).get("id",[])
+                    if len(ids)!=1 or not ids[0].isdigit() or int(ids[0])<=0:
+                        raise ValueError("A valid series ID is required")
+                    if config_dir is None: raise ValueError("Sonarr configuration required")
+                    from anime_sonarr_duplicate_cleanup import review
+                    from anime_dashboard_pages import sonarr_cleanup_review_page
+                    config=load_config(config_dir)
+                    with self.database() as db:
+                        row=db.execute("SELECT title FROM series WHERE id=?",(int(ids[0]),)).fetchone()
+                        if row is None:raise ValueError("Series not found")
+                        report=review(db,int(ids[0]),config["settings"],config["secrets"])
+                    return self.send(200,self.with_csrf(sonarr_cleanup_review_page(row[0],report)))
+                except (ValueError,RuntimeError,OSError,sqlite3.Error) as exc:
+                    return self.send(409,"Cleanup review unavailable: "+type(exc).__name__,"text/plain")
             if path=="/api/settings":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 from anime_shared_settings import snapshot
@@ -412,7 +428,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,OSError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
-            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-check-sonarr"):
+            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-check-sonarr", "/series-confirm-sonarr-cleanup"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = getattr(self,"_cached_form",None) or self.form()
@@ -437,6 +453,21 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                                                values["anidb_id"], values.get("season",1))
                         else:
                             result = remove_alias(config_dir, values["alias"])
+                    elif route == "/series-confirm-sonarr-cleanup":
+                        if config_dir is None:raise ValueError("Sonarr configuration required")
+                        if values.get("confirm")!="DELETE_VERIFIED_DUPLICATES":
+                            raise PermissionError("Cleanup requires explicit confirmation")
+                        from anime_sonarr_duplicate_cleanup import confirm
+                        from anime_qb_api import QBittorrentAPI
+                        from anime_dashboard_pages import sonarr_cleanup_result_page
+                        config=load_config(config_dir)
+                        cfg=config["settings"]["qbittorrent"]
+                        qb=QBittorrentAPI(cfg["base_url"],allow_writes=True)
+                        qb.login(cfg["username"],config["secrets"]["qbittorrent_password"])
+                        sid=int(values["series_id"])
+                        outcome=confirm(db,sid,config["settings"],config["secrets"],
+                                        approved=True,qb=qb)
+                        return self.send(200,self.with_csrf(sonarr_cleanup_result_page(sid,outcome)))
                     elif route == "/series-check-sonarr":
                         if config_dir is None: raise ValueError("Sonarr configuration required")
                         from anime_sonarr_reconciliation import check_series
@@ -461,7 +492,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     self.end_headers()
                 else:
                     self.send(200,json.dumps(result),"application/json")
-            except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError,RuntimeError) as exc:
+            except (ValueError,KeyError,TypeError,PermissionError,OSError,sqlite3.Error,json.JSONDecodeError,RuntimeError) as exc:
                 # Browser Keep uses an HTML form. Never render a raw JSON
                 # error document for this user-facing operation. Preserve the
                 # existing JSON error contract for automation/API clients.
