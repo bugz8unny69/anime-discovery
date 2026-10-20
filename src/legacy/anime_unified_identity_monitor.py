@@ -50,7 +50,7 @@ def _validate_titles(payload):
     if not isinstance(payload,bytes) or not payload or len(payload)>MAX_TITLES:
         raise ValueError("Invalid or oversized AniDB titles")
     content=(gzip.GzipFile(fileobj=io.BytesIO(payload)).read(MAX_TITLES*4+1)
-             if payload.startswith(b"\\x1f\\x8b") else payload)
+             if payload.startswith(b"\x1f\x8b") else payload)
     if len(content)>MAX_TITLES*4:
         raise ValueError("AniDB titles decompressed past size limit")
     if ET.fromstring(content).tag!="animetitles":
