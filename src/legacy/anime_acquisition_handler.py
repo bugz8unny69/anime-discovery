@@ -10,10 +10,12 @@ from anime_jellyfin_refresh import refresh_best_effort
 from anime_trial_metadata import tvdb_english_title
 from anime_series_naming import resolve_series_name
 from anime_flat_config import load_config
+from anime_qb_api import QBittorrentAPI
+from anime_single_size_intake import admit_single_episode
 
 
 def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None,
-                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
+                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -53,13 +55,26 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
             aliases=(config or {}).get('settings',{}).get('identity',{}).get('series_map',{})
             series_name=resolve_series_name(db,approval['series_id'],payload['tvdb_id'],
                 english_title=english_title,series_map=aliases)
+            client=qb_factory()
+            selected_index=None
+            if isinstance(client,QBittorrentAPI):
+                # Real qB intake always enforces the hard MB budget before
+                # selecting any file. Legacy injected fakes keep offline tests
+                # independent of the qB HTTP transport implementation.
+                intake=admit_single_episode(db,payload['notification_id'],
+                    payload['infohash'],payload['magnet_uri'],client,
+                    size_settings=size_settings)
+                if intake["state"]=="DEFERRED":
+                    return intake
+                selected_index=intake["file_index"]
             result=process_claimed(db, payload['notification_id'],
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
-                qb=qb_factory(), download_root=download_root,
+                qb=client, download_root=download_root,
                 trial_root=trial_root, title=series_name,
                 tvdb_id=payload['tvdb_id'],english_title=series_name,
                 staged_owner=staged_owner,staged_group=staged_group,
-            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode)
+            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode,
+            selected_file_index=selected_index)
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],
                     payload['notification_id'],series_title=series_name)
