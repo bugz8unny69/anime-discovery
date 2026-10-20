@@ -88,6 +88,46 @@ def request_panel(mappings):
 
 
 
+def keep_review_page(series_id, error):
+    """Human-readable, HTML-escaped form failure; API clients still get JSON.
+
+    The library root is Sonarr's destination. The Anime-Trial staging path
+    must separately be visible and readable to Sonarr at the exact path used
+    by Anime Discovery, even when each service runs in a different container.
+    """
+    valid_id=(str(series_id) if str(series_id).isdigit()
+              and int(series_id)>0 else None)
+    back=("/series?id="+valid_id if valid_id else "/")
+    reason=getattr(error,"reason",None)
+    detail=str(error)[:400]
+    out=shell("Keep needs attention","Series")
+    out+='<h1>Keep needs attention</h1>'
+    out+='<section class="panel" role="alert">'
+    out+='<h2>Sonarr has not confirmed this import</h2>'
+    out+='<p>'+escape(detail)+'</p>'
+    if reason:
+        out+='<p class="muted">Diagnostic reason: <code>'+escape(reason)+'</code></p>'
+    out+='''<p><strong>Check these Sonarr settings:</strong></p>
+<ol>
+<li>In Sonarr, <strong>Settings → Media Management → Root Folders</strong>
+must point to the permanent anime library, not Anime-Trial.</li>
+<li>Sonarr must separately be able to read the Anime-Trial staged files.
+For this version of Anime Discovery, the staged path must be the
+<strong>same absolute path from both services</strong>. Check NFS/container
+mounts and the Sonarr service account's folder and file permissions.</li>
+<li>In Sonarr, open <strong>Wanted → Manual Import</strong> and navigate to
+the staged episode. Verify its series, season, episode, quality and language.
+If those disagree, correct Sonarr's identification before trying Keep again.</li>
+</ol>
+<p>The Keep operation was not finalized here. Anime Discovery has not deleted
+its staged files; a Sonarr series record may have already been created.
+No replacement-release search is started.</p>'''
+    out+='<p><a href="'+escape(back)+'">Back to anime</a> · '
+    out+='<a href="/settings">Anime Discovery Sonarr settings</a></p>'
+    out+='</section>'
+    return out+tail()
+
+
 def tail():
     return "</main></body></html>"
 
