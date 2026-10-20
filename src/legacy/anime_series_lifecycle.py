@@ -214,5 +214,8 @@ def inspect(db, series_id):
             for hash_value,ownership_state in db.execute(
                 """SELECT infohash,ownership FROM sonarr_keep_cleanup_notice
                    WHERE series_id=? ORDER BY infohash""",(series_id,))]
+    from anime_sonarr_reconciliation import snapshot
+    reconciliation=snapshot(db,series_id)
     return {"series":row,"episodes":episodes,"releases":releases,
-            "rejected":rejected,"cleanup_notices":cleanup_notices}
+            "rejected":rejected,"cleanup_notices":cleanup_notices,
+            "reconciliation":reconciliation}
