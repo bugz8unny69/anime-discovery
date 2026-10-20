@@ -453,6 +453,10 @@ def detail_page(detail):
     else:
         out+='<p>No Sonarr reconciliation check recorded yet.</p>'
     out+='<form method="post" action="/series-check-sonarr"><input type="hidden" name="series_id" value="'+str(series[0])+'"><button class="secondary">Check Sonarr now</button></form></section>'
+    if series[3]=="SONARR_MANAGED_REVIEW":
+        out+='<section class="panel" role="status"><h2>Already managed in Sonarr</h2>'
+        out+='<p>The staged files were not imported again. Review redundant files before confirming deletion; external torrents remain protected.</p>'
+        out+='<p><a href="/series-review-sonarr-cleanup?id='+str(series[0])+'">Review redundant files and torrents</a></p></section>'
     preserved=detail.get("cleanup_notices") or []
     if preserved:
         action=("Keep has been submitted to Sonarr." if series[3]=="SONARR_IMPORT_PENDING"
