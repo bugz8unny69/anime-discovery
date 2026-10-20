@@ -23,12 +23,19 @@ class FakeQB:
     def __init__(self):
         self.adds=0
         self.present=False
+        self.category=""
+        self.tag=""
     def contains_hash(self, key):
         return self.present and key==HASH
-    def add_magnet(self, magnet):
+    def torrent_identity(self,key):
+        return ({"hash":HASH,"category":self.category,"tags":self.tag}
+                if self.present and key==HASH else None)
+    def add_magnet(self, magnet, *, category, tag):
         if magnet!=MAGNET:
             raise ValueError("Wrong magnet")
         self.adds+=1
+        self.category=category
+        self.tag=tag
         self.present=True
     def _request(self, endpoint):
         path,_,query=endpoint.partition("?")
