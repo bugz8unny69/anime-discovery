@@ -47,6 +47,53 @@ already in terminal Needs Review will not automatically be re-evaluated merely
 because this feature branch is merged. Design a reviewed, idempotent re-triage
 action that preserves notification ID and avoids torrent resubmission.
 
+
+## No-intervention automation policy (explicitly required)
+
+Normal Nyaa/Autobrr ingestion **must not require clicking Resolve**.
+Operator review is a fail-closed last resort for genuinely contradictory
+provider identities, unsafe or irreconcilable file lists, or verified-audio
+failures requiring a policy choice. Invalid/out-of-scope media should be
+automatically excluded with an explicit reason, without staging or starting a
+download. This includes `S00` movie/special releases under the current
+strict positive-season, first-six policy.
+
+Nyaa names require deterministic, safe normalization **before** sending
+title queries to AniDB and TVDB. For notification #4, the *only* direct
+series query should be `Cyberpunk Edgerunners`; technical `Season S2`,
+`Batch`, `1080p`, `AV1`, and `WEB-DL` are not query aliases.
+The configured 90% title threshold stays in place. Count only candidates
+that pass the title filter as meaningful ambiguity, then demand canonical
+TVDB/AniDB cross-reference evidence. Metadata `S02` is a hint, not proof
+that a verified provider has a corresponding season; do not silently
+reinterpret it as S01. A verified series title alone does **not** authorize
+download of a batch with unmapped episode files.
+
+### Next integration steps for zero-touch flow
+
+- Persist a **series-level identity decision** independently of episode
+  mapping so batches can proceed to *stopped* torrent metadata inspection.
+  Introduce durable states such as `WAITING_FILE_MANIFEST` and
+  `EXCLUDED_OUT_OF_SCOPE` rather than reusing the single-episode approval.
+- For a verified multi-file batch, automatically fetch torrent metadata
+  while stopped, plan E01-E06 for the discovered season, set and verify
+  all file priorities, then resume the approved files only. Never auto-resume
+  if metadata, indices, ownership, or readback are incomplete.
+- The new `QBittorrentAPI.apply_stopped_file_selection()` is currently
+  **not wired to the worker**; it rejects running/unowned torrents and
+  checks that selected/skipped indices cover every file. Tests only, no
+  live torrent touched. Caller must also verify ownership in the database.
+- Model per-episode outcomes under one torrent, with individual ffprobe and
+  idempotent Jellyfin import. A single audio failure must not invalidate
+  other independently verified episodes.
+- On deployment of a new resolver, re-triage terminal review notifications
+  from known old parser defects **automatically and at most once**,
+  preserving notification IDs, prior evidence, existing ownership, and
+  any completed downloads. Do not silently repeat external acquisition.
+- Notification #3 should be excluded as a season-zero special rather than
+  requiring user approval for an ordinary six-episode trial. A separate
+  deliberate movie/special workflow can be added later if desired.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
