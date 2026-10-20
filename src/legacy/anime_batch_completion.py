@@ -45,7 +45,8 @@ def _window(db, window):
         raise PermissionError("Persisted provider-confirmed batch window required")
     stored = window_for(db, tvdb_id=window.get("tvdb_id"),
                         anidb_id=window.get("anidb_id"),
-                        season=window.get("season"))
+                        season=window.get("season"),
+                        unit_key=window.get("unit_key"))
     if stored != window:
         raise PermissionError("Batch window differs from durable identity evidence")
     return stored
