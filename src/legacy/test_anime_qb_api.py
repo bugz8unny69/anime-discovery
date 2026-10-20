@@ -38,6 +38,53 @@ class QBApiTests(unittest.TestCase):
         qb.add_magnet("magnet:?xt=urn:btih:"+"b"*40)
         self.assertEqual(len(opener.requests),3)
 
+    def test_category_and_ownership_marker_are_sent_with_magnet(self):
+        import json
+        class MultiOpener:
+            def __init__(self):self.requests=[]
+            def open(self,request,timeout=None):
+                self.requests.append(request)
+                url=request.full_url
+                if url.endswith("/torrents/categories"):
+                    return Response(json.dumps({"anime-discovery":{"name":"anime-discovery","savePath":""}}).encode())
+                return Response(b"Ok.")
+        opener=MultiOpener()
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+        marker="ad-"+"f"*32
+        qb.add_magnet("magnet:?xt=urn:btih:"+"a"*40,
+                      category="anime-discovery",tag=marker)
+        self.assertEqual(len(opener.requests),2)
+        data=opener.requests[-1].data
+        self.assertIn(b"category=anime-discovery",data)
+        self.assertIn(b"tags="+marker.encode(),data)
+        with self.assertRaises(ValueError):
+            qb.add_magnet("magnet:?xt=urn:btih:"+"a"*40,category="movies",tag=marker)
+
+    def test_missing_fixed_category_is_created_once(self):
+        import json
+        class Categories:
+            def __init__(self):self.requests=[];self.exists=False
+            def open(self,request,timeout=None):
+                self.requests.append(request)
+                if request.full_url.endswith("/torrents/categories"):
+                    return Response(json.dumps({"anime-discovery":{}} if self.exists else {}).encode())
+                if request.full_url.endswith("/torrents/createCategory"):
+                    self.exists=True
+                return Response(b"Ok.")
+        opener=Categories()
+        qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
+        qb.add_magnet("magnet:?xt=urn:btih:"+"a"*40,category="anime-discovery",
+                      tag="ad-"+"a"*32)
+        self.assertTrue(opener.exists)
+        self.assertIn(b"savePath=",opener.requests[1].data)
+        self.assertIn(b"category=anime-discovery",opener.requests[1].data)
+
+    def test_torrent_identity_requires_exact_hash(self):
+        payload=json.dumps([{"hash":"b"*40,"category":"anime-discovery","tags":"ad-test"},
+                            {"hash":"a"*40,"category":"anime-discovery","tags":"ad-valid"}]).encode()
+        qb=QBittorrentAPI("http://localhost:8080",opener=Opener(payload))
+        self.assertEqual(qb.torrent_identity("a"*40)["tags"],"ad-valid")
+
     def test_login_does_not_enable_writes(self):
         opener=Opener(b"Ok.")
         qb=QBittorrentAPI("http://localhost:8080",opener=opener)
