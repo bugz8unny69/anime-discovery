@@ -87,6 +87,20 @@ class ManifestIntakeTests(unittest.TestCase):
         self.assertEqual(qb.records[HASH]["state"], "pausedDL")
         self.assertGreaterEqual(qb.file_polls, 3)
 
+    def test_journal_records_manifest_and_metadata_timeout(self):
+        qb=FakeQB(ready_after=0)
+        with self.assertLogs("anime_discovery.trial", level="INFO") as logs:
+            result=self.run_intake(qb)
+        self.assertEqual(result["state"],"MANIFEST_READY")
+        self.assertIn("event=TORRENT_MANIFEST_READY", "\\n".join(logs.output))
+        delayed=FakeQB(ready_after=100)
+        with sqlite3.connect(":memory:",isolation_level=None) as db:
+            with self.assertLogs("anime_discovery.trial",level="INFO") as logs:
+                state=submit_poll_pause(db,HASH,MAGNET,delayed,attempts=2,
+                                        interval=0,sleep=lambda _:None)
+            self.assertEqual(state["state"],"DEFERRED")
+            self.assertIn("reason=METADATA_NOT_READY", "\\n".join(logs.output))
+
     def test_delayed_torrent_visibility_reconciles_without_duplicate_add(self):
         qb = FakeQB(ready_after=0, visibility_delay=4)
         result = self.run_intake(qb, attempts=6)
