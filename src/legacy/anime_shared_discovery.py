@@ -13,6 +13,7 @@ from pathlib import Path
 from anime_async_daemon import enqueue
 from anime_prowlarr_search import candidates
 from anime_webhook_processing import receive
+from anime_trial_policy import window_for, eligibility, journal
 
 
 def identity_for_request(series_map,*,title=None,tvdb_id=None,anidb_id=None):
@@ -73,6 +74,14 @@ def search_once(db,request,client):
     season=request["season"]
     upper=request["up_to"]
     origin=request["origin"]
+    window=window_for(db,tvdb_id=tvdb_id,anidb_id=anidb_id,season=season)
+    # The webhook episode is a search trigger, not permission to acquire it.
+    # Never backfill beyond the verified six-episode window.
+    bound=min(upper,window["end"]) if upper is not None else window["end"]
+    if bound < window["start"]:
+        journal("BACKFILL_SKIPPED",reason="TRIGGER_BEFORE_TRIAL",tvdb_id=tvdb_id,
+                season=season,episode=upper,start=window["start"],end=window["end"])
+        return {"state":"DONE","queued":0}
     existing=db.execute("SELECT id,status FROM series WHERE source='tvdb' AND external_id=?",
                         (tvdb_id,)).fetchone()
     if existing:
@@ -83,10 +92,14 @@ def search_once(db,request,client):
         if db.execute("SELECT 1 FROM series_quarantine WHERE series_id=?",(sid,)).fetchone():
             return {"state":"BLOCKED","reason":"Series quarantined"}
     matches=candidates(client.search(title),alias=title,tvdb_id=tvdb_id,
-                       anidb_id=anidb_id,season=season,max_episode=upper)
+                       anidb_id=anidb_id,season=season,max_episode=bound)
     queued=0
     for release in matches:
         episode=release["episode"]
+        policy=eligibility(db,tvdb_id=tvdb_id,anidb_id=anidb_id,
+                           season=season,episode=episode)
+        if not policy["eligible"] or episode > bound:
+            continue
         if existing:
             rows=db.execute("""SELECT d.state,r.staged_path
                 FROM episode_dispatch d
@@ -96,6 +109,9 @@ def search_once(db,request,client):
             if any(state in ("CLAIMED","NEEDS_REVIEW") or
                    (state=="DONE" and path and Path(path).is_file())
                    for state,path in rows):
+                journal("BACKFILL_SKIPPED",reason="ALREADY_RESERVED",tvdb_id=tvdb_id,
+                        season=season,episode=episode,start=window["start"],
+                        end=window["end"])
                 continue
         # A Prowlarr result enters the same verified episode acquisition path.
         result=receive(db,{"source":origin,
@@ -106,6 +122,10 @@ def search_once(db,request,client):
             "tvdb_id":tvdb_id,"anidb_id":anidb_id,
             "season":season,"episode":episode})
         queued+=bool(result.get("queued"))
+        journal("BACKFILL_DECISION",
+                reason="QUEUED" if result.get("queued") else "DUPLICATE_OR_SKIPPED",
+                tvdb_id=tvdb_id,season=season,episode=episode,
+                start=window["start"],end=window["end"])
     return {"state":"DONE","queued":queued}
 
 
