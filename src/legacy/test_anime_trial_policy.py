@@ -97,6 +97,26 @@ class TrialPolicyTests(unittest.TestCase):
             record_verified_window(self.db,**{**params,"start_episode":1002})
         self.assertEqual(self.db.execute("SELECT count(*) FROM anime_trial_windows").fetchone()[0],1)
 
+    def test_ongoing_1003_only_backfills_1001_and_1002(self):
+        record_verified_window(self.db,tvdb_id=TVDB,anidb_id=ANIDB,season=1,
+            unit_key="ongoing:1001",mode="ONGOING",start_episode=1001,
+            evidence_ref="tvdb:123:ongoing:1001")
+        alias={"Example Show":{"tvdb_id":TVDB,"anidb_id":ANIDB,"season":1}}
+        triggered=receive(self.db,event(1003),series_map=alias,
+                          gap_search_enabled=True)
+        self.assertTrue(triggered["queued"])
+        self.assertTrue(triggered["gap_search"])
+        job=self.db.execute("""SELECT payload_json FROM daemon_jobs
+            WHERE kind='series_gap_search'""").fetchone()[0]
+        import json
+        request=json.loads(job)
+        self.assertEqual(request["title"],"Example Show")
+        search=search_once(self.db,request,
+            FakeClient([release(n) for n in range(998,1008)]))
+        self.assertEqual(search["queued"],2)
+        rows=self.db.execute("SELECT episode FROM episode_dispatch ORDER BY episode").fetchall()
+        self.assertEqual(rows,[(1001,),(1002,),(1003,)])
+
     def test_verified_part_two_13_to_18_not_old_part_one(self):
         record_verified_window(self.db,tvdb_id=TVDB,anidb_id=ANIDB,season=1,
                                unit_key="part:2",mode="PART",start_episode=13,
