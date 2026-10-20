@@ -210,6 +210,27 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
                 if old_magnet and old_magnet[0]!=magnet:
                     raise ValueError("Duplicate season-pack notification changed magnet identity")
                 db.execute("INSERT OR IGNORE INTO anime_batch_pending VALUES (?,?)",(nid,magnet))
+        # An explicitly canceled attempt is terminal. On a fresh webhook,
+        # reuse persisted verified batch authorization and create a NEW job.
+        # The old job remains in archived history and is never reactivated.
+        if old:
+            from anime_batch_verified_intake import JOB_KIND as BATCH_KIND
+            is_verified=db.execute("""SELECT 1 FROM anime_batch_authorizations a
+                JOIN notifications n ON n.id=a.notification_id
+                WHERE a.notification_id=? AND n.status='APPROVED_BATCH'""",
+                (nid,)).fetchone() if db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='anime_batch_authorizations'"
+                ).fetchone() else None
+            if is_verified:
+                from anime_async_daemon import ensure_schema as job_schema
+                job_schema(db)
+                current=db.execute("""SELECT state FROM daemon_jobs
+                    WHERE kind=? AND subject_key=?""",(BATCH_KIND,str(nid))).fetchone()
+                if current is None:
+                    db.execute("""INSERT INTO daemon_jobs
+                        (kind,subject_key,payload_json,state)
+                        VALUES (?,?,?,'READY')""",
+                        (BATCH_KIND,str(nid),json.dumps({"notification_id":nid})))
         db.commit()
     except BaseException:
         db.rollback()
