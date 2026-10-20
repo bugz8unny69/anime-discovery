@@ -20,7 +20,7 @@ def ensure_schema(db):
         previous_error TEXT,
         created_at REAL NOT NULL
     )""")
-    db.execute("""CREATE INDEX IF NOT EXISTS daemon_job_admin_events_latest
+    db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_archived_subjects (\n        job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),\n        kind TEXT NOT NULL, original_subject_key TEXT NOT NULL)""")\n    db.execute("""CREATE INDEX IF NOT EXISTS daemon_job_admin_events_latest
         ON daemon_job_admin_events(job_id,id)""")
 
 def latest_events(db):
@@ -39,8 +39,8 @@ def latest_events(db):
 def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None):
     """Compare-and-swap an idle job; preserve the attempt and error history.
 
-    - retry: DEFERRED/NEEDS_REVIEW -> READY, only by explicit administrator action
-    - cancel: READY/DEFERRED/NEEDS_REVIEW -> BLOCKED, with audit event
+    - retry: NEEDS_REVIEW -> READY, only by explicit administrator action
+    - cancel: NEEDS_REVIEW -> BLOCKED, archived subject and audit event
     Neither changes payload, identity, qBittorrent, dispatch, or media.
     """
     if type(job_id) is not int or job_id<=0:
@@ -49,7 +49,7 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
         raise ValueError("Unknown job action")
     if type(expected_attempts) is not int or expected_attempts<0:
         raise ValueError("Expected attempt count required")
-    if expected_state not in ("READY","DEFERRED","NEEDS_REVIEW"):
+    if expected_state!="NEEDS_REVIEW":
         raise ValueError("Expected waiting job state required")
     if db.in_transaction:
         raise ValueError("Job management requires autocommit connection")
@@ -59,19 +59,19 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
     db.execute("BEGIN IMMEDIATE")
     try:
         ensure_schema(db)
-        row=db.execute("""SELECT kind,state,attempts,last_error
+        row=db.execute("""SELECT kind,state,attempts,last_error,subject_key
             FROM daemon_jobs WHERE id=?""",(job_id,)).fetchone()
         if row is None:
             raise ValueError("Job not found")
-        kind,state,attempts,error=row
+        kind,state,attempts,error,subject_key=row
         if kind not in MANAGEABLE_KINDS:
             raise ValueError("Unsupported job kind")
         if state!=expected_state or attempts!=expected_attempts:
             raise ValueError("Job changed; refresh and try again")
-        if operation=="retry" and state not in ("DEFERRED","NEEDS_REVIEW"):
-            raise ValueError("Only deferred or reviewed jobs can be manually retried")
-        if operation=="cancel" and state not in ("READY","DEFERRED","NEEDS_REVIEW"):
-            raise ValueError("Only waiting jobs can be canceled")
+        if operation=="retry" and state!="NEEDS_REVIEW":
+            raise ValueError("Only needs-review jobs can be manually retried")
+        if operation=="cancel" and state!="NEEDS_REVIEW":
+            raise ValueError("Only needs-review jobs can be canceled")
         new_state="READY" if operation=="retry" else "BLOCKED"
         # Compare-and-swap under a write lock prevents racing claim/retry
         # across dashboard requests and all workers. Do not reset attempts.
