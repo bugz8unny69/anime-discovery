@@ -106,7 +106,7 @@ def all_jobs(db, *,page=1,size=20):
             explanation=("Identity check finished; manual review is required. No acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="IDENTIFYING":
-            explanation="Identity check in progress; an NTFY alert is sent only after final review status is saved."
+            explanation="Checking public AniDB titles and TVDB links. Identity is still in progress; NTFY alerts follow the finalized review status."
         elif status=="QUEUED":
             explanation="Acquisition job queued; waiting for a worker."
         elif status=="RUNNING":
