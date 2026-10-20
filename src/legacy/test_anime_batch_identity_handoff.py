@@ -76,6 +76,35 @@ class HandoffTests(unittest.TestCase):
             "SELECT 1 FROM anime_batch_authorizations WHERE notification_id=?",(nid,)).fetchone())
         self.assertEqual(recheck_unmatched_identity(self.db,nid)["status"],"IDENTIFYING")
 
+    def test_new_webhook_after_cancel_creates_new_attempt_with_cached_identity(self):
+        from anime_job_management import manage
+        from anime_async_daemon import claim,finish
+        self.run_identity(REPORT.copy())
+        job=claim(self.db,now=2100,allowed_kinds=["verified_batch_acquisition"])
+        finish(self.db,job["id"],job["lease_token"],"NEEDS_REVIEW",now=2101,
+               reason="TEST_REVIEW")
+        manage(self.db,job["id"],"cancel",
+               expected_state="NEEDS_REVIEW",expected_attempts=1,now=2102)
+        payload={"source":"autobrr","source_guid":"batch-handoff",
+            "release_name":RELEASE,"info_hash":HASH,"magnet_uri":MAGNET}
+        replay=receive(self.db,payload)
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(replay["notification_id"],self.nid)
+        rows=self.db.execute("""SELECT id,state FROM daemon_jobs
+            WHERE kind='verified_batch_acquisition' ORDER BY id""").fetchall()
+        self.assertEqual(len(rows),2)
+        self.assertEqual(rows[0],(job["id"],"BLOCKED"))
+        self.assertNotEqual(rows[1][0],job["id"])
+        self.assertEqual(rows[1][1],"READY")
+        receive(self.db,payload)
+        self.assertEqual(self.db.execute("""SELECT COUNT(*) FROM daemon_jobs
+            WHERE kind='verified_batch_acquisition'""").fetchone()[0],2)
+        from anime_dashboard_queries import all_jobs
+        displayed=all_jobs(self.db)["items"]
+        self.assertTrue(any(x["status"]=="CANCELED" and
+            not x["can_retry"] and not x["can_cancel"] for x in displayed))
+        self.assertTrue(any(x["status"]=="QUEUED" for x in displayed))
+
     def test_legacy_indexer_pack_without_pending_has_actionable_blocker(self):
         from anime_batch_verified_intake import authorize_verified_batch
         import copy
