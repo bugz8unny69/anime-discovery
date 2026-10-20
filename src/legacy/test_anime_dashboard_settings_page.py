@@ -35,7 +35,10 @@ class DashboardSettingsTests(unittest.TestCase):
             self.assertIn('type="password" name="credential"',html)
             self.assertNotIn("private-value-here",html)
             self.assertNotIn("other-private-value",html)
-            self.assertIn("Refresh",html)
+            self.assertNotIn('id="refresh"',html)
+            self.assertNotIn("Complex and internal settings",html)
+            self.assertIn("Saved and applied automatically",html)
+            self.assertIn("api/credential-reveal",html)
             self.assertIn("Save &amp; Apply",html)
 
     def test_anidb_client_and_version_are_generated_without_credentials(self):
