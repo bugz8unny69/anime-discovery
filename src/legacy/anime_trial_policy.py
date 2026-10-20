@@ -116,7 +116,7 @@ def window_for(db, *, tvdb_id, anidb_id, season, unit_key=None):
         if not isinstance(unit_key,str) or not _UNIT.fullmatch(unit_key):
             raise ValueError("Invalid verified trial unit")
         rows=[row for row in rows if row[1]==unit_key]
-        if not rows:
+        if not rows and unit_key!="season":
             raise ValueError("Requested verified trial unit not found")
     if not rows:
         return {"tvdb_id":tvdb_id,"anidb_id":anidb_id,
