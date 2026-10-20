@@ -37,6 +37,78 @@ def mappings(xml_bytes, anidb_id):
     return out
 
 
+
+def resolve_episode(xml_bytes, anidb_id, tvdb_id, anidb_episode, *, anidb_season=1):
+    """Return a unique explicit/default Anime-Lists AniDB-number -> TVDB location.
+
+    This does NOT return an AniDB episode database ID. Ambiguous or unsupported
+    rules fail closed, including split/merged episodes and absolute seasons.
+    """
+    if (type(anidb_episode) is not int or anidb_episode <= 0 or
+            type(anidb_season) is not int or anidb_season not in (0, 1)):
+        return None
+    root=ET.fromstring(xml_bytes)
+    if root.tag != "anime-list":
+        raise ValueError("Unexpected Anime-Lists XML root")
+    records=[x for x in root.findall("anime") if x.get("anidbid")==str(anidb_id)]
+    if len(records)!=1 or records[0].get("tvdbid")!=str(tvdb_id):
+        return None
+    node=records[0]
+    rules=[]
+    for item in node.findall("mapping-list/mapping"):
+        if item.get("anidbseason")!=str(anidb_season):
+            continue
+        season=item.get("tvdbseason")
+        if season is None or not season.isdecimal():
+            return None
+        target_season=int(season)
+        text=(item.text or "").strip()
+        if text:
+            for token in text.strip(";").split(";"):
+                if not token:
+                    continue
+                source,sep,target=token.partition("-")
+                if not sep or not source.isdecimal():
+                    return None
+                if int(source)==anidb_episode:
+                    if not target.isdecimal() or int(target)<=0:
+                        return None
+                    rules.append((2,target_season,int(target)))
+        start=item.get("start")
+        end=item.get("end")
+        if start is None and end is None:
+            continue
+        if not start or not end or not start.isdecimal() or not end.isdecimal():
+            return None
+        if int(start)<=anidb_episode<=int(end):
+            offset=item.get("offset") or "0"
+            if not offset.lstrip("-").isdecimal():
+                return None
+            target=anidb_episode+int(offset)
+            if target<=0:
+                return None
+            rules.append((1,target_season,target))
+    if not rules:
+        if anidb_season!=1:
+            return None
+        season=node.get("defaulttvdbseason")
+        offset=node.get("episodeoffset") or "0"
+        if not season or not season.isdecimal() or not offset.lstrip("-").isdecimal():
+            return None
+        target=anidb_episode+int(offset)
+        if target<=0:
+            return None
+        rules=[(0,int(season),target)]
+    precedence=max(r[0] for r in rules)
+    targets={(season,episode) for priority,season,episode in rules if priority==precedence}
+    if len(targets)!=1:
+        return None
+    season,episode=targets.pop()
+    return {"tvdb_season":season,"tvdb_episode":episode,
+            "anidb_season":anidb_season,"anidb_episode_number":anidb_episode,
+            "mapping_source":"Anime-Lists"}
+
+
 def evaluate(report, xml_bytes):
     report = dict(report)
     ids = sorted({str(p['anidb_id']) for p in report.get('crosscheck_v3', [])})
