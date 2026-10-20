@@ -113,7 +113,7 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(diagnostics["389597"]["matching_anidb_ids"],["456"])
         self.assertNotIn("approval",result)
 
-    def test_anime_lists_and_shoko_exact_episode_enable_verification(self):
+    def test_anime_lists_and_direct_anidb_episode_enable_verification(self):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
         xml=b'<anime-list><anime anidbid="456" tvdbid="123" defaulttvdbseason="2" episodeoffset="1"/></anime-list>'
@@ -133,7 +133,7 @@ class TriageTests(unittest.TestCase):
                              "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
             self.assertNotIn("approval",missing)
             resolved=investigate("[Group] Example - 02",settings,{"tvdb_api_key":"key"},None,
-                shoko_resolve=lambda aid,eid: 9876 if (aid,eid)==(456,777) else None,
+                anidb_resolve=lambda aid,epno: 9876 if (aid,epno)==(456,2) else None,
                 **kwargs)
         self.assertEqual(resolved["decision"],"AUTO_VERIFIED")
         self.assertEqual(resolved["approval"],
