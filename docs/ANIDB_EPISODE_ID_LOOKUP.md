@@ -82,3 +82,40 @@ you click Keep** does Sonarr import trial media into the permanent library.
 The post-Keep Shoko monitor then reuses the persisted episode ID to help
 recover an unrecognized file. `shoko.auto_link_verified` remains disabled
 unless explicitly enabled by the user.
+
+## Diagnosing an identity ParseError safely
+
+If identity triage records `METADATA_UNAVAILABLE_IDENTITY_RESOLUTION`,
+older releases do not say which parser or endpoint failed. New builds
+log a structured warning for malformed XML, with a **fixed, known source
+endpoint** (no client name or query parameters), HTTP status where available,
+content type where available, response length, SHA-256 prefix, and a short
+redacted printable preview. Example (illustrative, not an actual server result):
+
+```text
+upstream_xml_problem source=ANIDB_EPISODE_HTTP endpoint=http://api.anidb.net:9001/httpapi http_status=200 content_type=text/html bytes=38 sha256_12=... preview='<html>Unavailable</html>' reason=ValueError
+Identity metadata retry notification=1 source=ANIDB_EPISODE_HTTP error_type=InvalidXMLResponse
+```
+
+The source may instead be `ANIDB_TITLES`, `ANIDB_TITLES_CACHE`,
+`ANIME_LISTS`, or `ANIME_LISTS_MAPPING`. The endpoint shown is
+a hardcoded public address, not the full request URL. HTTP status and
+content type are `unknown` when the error is from an existing cache
+or the upstream response does not expose them.
+
+To inspect relevant log lines without making another AniDB request:
+
+```bash
+sudo journalctl -u anime-discovery --since '15 minutes ago' --no-pager |
+  grep -E 'upstream_xml_problem|Identity metadata retry|identity notification='
+```
+
+This command only reads systemd logs. **Do not attach a raw HTTP request
+with an AniDB client identifier or a TVDB API bearer token.** The
+diagnostic preview is deliberately bounded and redacted.
+
+An HTTP server error, invalid payload, bad XML, or invalid response root
+from the AniDB episode API is a temporary metadata-source failure:
+the worker retries with cooldown, remains `IDENTIFYING`, and does not
+send an NTFY review notification. A valid AniDB XML document with no
+matching episode remains a separate, unresolved-identity case.

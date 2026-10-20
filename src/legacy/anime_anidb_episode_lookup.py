@@ -11,9 +11,11 @@ import re
 import sqlite3
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from anime_xml_response_diagnostics import InvalidXMLResponse,log_bad_xml
 
 API_URL = "http://api.anidb.net:9001/httpapi"
 MAX_BYTES = 4 * 1024 * 1024
@@ -140,9 +142,31 @@ def lookup_episode_id(aid, epno, *, client, clientver, metadata_path,
         request = urllib.request.Request(API_URL + "?" + args,
             headers={"User-Agent":"AnimeDiscovery/1.0","Accept":"application/xml"})
         try:
-            with opener(request, timeout=30) as response:
-                raw = response.read(MAX_BYTES+1)
-            episodes = parse_catalog(raw, aid)
+            status=None
+            content_type=None
+            try:
+                with opener(request, timeout=30) as response:
+                    status=getattr(response,"status",None)
+                    content_type=(response.headers.get("Content-Type")
+                                  if getattr(response,"headers",None) else None)
+                    raw=response.read(MAX_BYTES+1)
+            except urllib.error.HTTPError as failure:
+                raw=failure.read(160)
+                log_bad_xml("ANIDB_EPISODE_HTTP",raw,status=failure.code,
+                            content_type=failure.headers.get("Content-Type"),
+                            reason="HTTP_ERROR")
+                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP","HTTP_ERROR") from None
+            if status is not None and status!=200:
+                log_bad_xml("ANIDB_EPISODE_HTTP",raw,status=status,
+                            content_type=content_type,reason="HTTP_STATUS")
+                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP","HTTP_STATUS")
+            try:
+                episodes=parse_catalog(raw,aid)
+            except (ET.ParseError,ValueError) as failure:
+                log_bad_xml("ANIDB_EPISODE_HTTP",raw,status=status,
+                            content_type=content_type,reason=type(failure).__name__)
+                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP",
+                                          type(failure).__name__) from None
         except Exception:
             # Slow subsequent requests after server errors, timeouts or invalid XML.
             db.execute("BEGIN IMMEDIATE")
