@@ -78,8 +78,10 @@ def validate_config(settings,secrets,*,directory=None):
         if alias.strip().casefold() in seen:
             raise ValueError("Duplicate series alias")
         seen.add(alias.strip().casefold())
-        if not isinstance(mapping,dict) or set(mapping)-{"tvdb_id","anidb_id","season"}:
+        if not isinstance(mapping,dict) or set(mapping)-{"tvdb_id","anidb_id","season","verify_each_episode"}:
             raise ValueError("Invalid mapping for "+alias)
+        if "verify_each_episode" in mapping and type(mapping["verify_each_episode"]) is not bool:
+            raise ValueError("verify_each_episode must be boolean for "+alias)
         for key in ("tvdb_id","anidb_id"):
             value = mapping.get(key)
             if type(value) not in (str,int) or not str(value).isdigit() or int(value)<=0:
