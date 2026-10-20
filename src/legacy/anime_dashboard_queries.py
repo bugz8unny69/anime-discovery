@@ -70,7 +70,9 @@ def all_jobs(db, *,page=1,size=20):
                 batch_action=(batch.get("action","") if isinstance(batch,dict) else "")
                 if not isinstance(batch_action,str):
                     batch_action=""
-                identity_checks[nid]=(decision,safe_codes[:3],scope=="season_pack",
+                is_pack=(scope=="season_pack" or
+                         (isinstance(batch,dict) and batch.get("decision")=="BLOCKED"))
+                identity_checks[nid]=(decision,safe_codes[:3],is_pack,
                                       batch_action[:240])
             except (TypeError,ValueError,AttributeError):
                 identity_checks[nid]=("UNKNOWN",[],False,"")
