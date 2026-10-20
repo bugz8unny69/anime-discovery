@@ -73,18 +73,35 @@ class TriageTests(unittest.TestCase):
         with patch("anime_unified_identity_monitor.anidb_matches",
                    return_value=(anidb,False)):
             result=investigate("[Group] Example - 02",settings,secrets,None,
-                search=lambda aliases,key:([{"tvdb_id":"123"}],[]),
+                search=lambda aliases,key:([{"tvdb_id":"123","name":"Example"}],[]),
                 login=lambda key:"session",fetch=fetch)
             self.assertEqual(result["decision"],"AUTO_VERIFIED")
             self.assertEqual(result["approval"]["episode"],2)
             self.assertNotIn("secret-never-in-report",str(result))
             settings["identity"]["episode_map"]={}
             missing=investigate("[Group] Example - 02",settings,secrets,None,
-                search=lambda aliases,key:([{"tvdb_id":"123"}],[]),
+                search=lambda aliases,key:([{"tvdb_id":"123","name":"Example"}],[]),
                 login=lambda key:"session",fetch=fetch)
             self.assertEqual(missing["decision"],
                              "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
             self.assertNotIn("approval",missing)
+
+    def test_title_threshold_rejects_low_score_even_with_crossref(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import investigate
+        settings={"tvdb":{"enabled":True},"identity":{"match_threshold_pct":90,
+            "episode_map":{"123:1:2":{"anidb_episode_id":9876,"verified":True}}}}
+        rows=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(rows,False)):
+            def query(aliases,key):
+                return ([{"tvdb_id":"123","name":"Totally Different Show"}],[])
+            result=investigate("[Group] Example - 02",settings,{"tvdb_api_key":"hidden"},None,
+                search=query,login=lambda key:"session",fetch=lambda *a,**k:self.fail("Should not fetch rejected title"))
+        self.assertEqual(result["decision"],"NEEDS_REVIEW")
+        self.assertIn("ALL_TVDB_TITLES_BELOW_THRESHOLD",result["issues"])
+        self.assertFalse(result["candidate_scores"][0]["passed"])
+        self.assertEqual(result["candidate_scores"][0]["threshold_pct"],90)
+        self.assertNotIn("hidden",str(result))
 
     def test_historical_untrusted_enters_identity_triage_before_ntfy(self):
         other=self.db.execute("""INSERT INTO notifications
