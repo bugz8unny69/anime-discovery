@@ -86,6 +86,33 @@ class TriageTests(unittest.TestCase):
                              "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
             self.assertNotIn("approval",missing)
 
+    def test_live_action_collision_rejected_and_remote_ids_diagnosed(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import investigate
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
+        rows=[{"anidb_id":"456","titles":["Solo Leveling"],
+               "matched_titles":["Solo Leveling"]}]
+        candidates=[{"tvdb_id":"389597","name":"Solo Leveling"},
+                    {"tvdb_id":"465668","name":"Solo Leveling"}]
+        def fetch(url,bearer=None):
+            if "/389597/" in url:
+                return {"data":{"id":389597,"genres":[{"name":"Animation"}],
+                                "remoteIds":[{"sourceName":"AniDB","id":"456"}]}}
+            return {"data":{"id":465668,"seriesType":{"name":"Live Action"},
+                            "remoteIds":[{"sourceName":"AniDB","id":"456"}]}}
+        with patch("anime_unified_identity_monitor.anidb_matches",
+                   return_value=(rows,False)):
+            result=investigate("[Group] Solo Leveling - 01",settings,
+                {"tvdb_api_key":"hidden"},None,
+                search=lambda *_:(candidates,[]),login=lambda _:"token",fetch=fetch)
+        self.assertEqual(result["matching_pairs"],
+                         [{"tvdb_id":"389597","anidb_id":"456"}])
+        diagnostics={r["tvdb_id"]:r for r in result["crossref_diagnostics"]}
+        self.assertEqual(diagnostics["465668"]["reason"],
+                         "REJECTED_UNSUITABLE_TVDB_MEDIA_TYPE")
+        self.assertEqual(diagnostics["389597"]["matching_anidb_ids"],["456"])
+        self.assertNotIn("approval",result)
+
     def test_title_threshold_rejects_low_score_even_with_crossref(self):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
