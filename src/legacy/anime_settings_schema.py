@@ -98,3 +98,25 @@ def defaults():
 
 def dashboard_sections():
     return {name:cfg for name,cfg in SCHEMA.items() if cfg.get("dashboard")}
+
+
+def validate_scalar_fields(settings):
+    """Apply schema types and numeric/choice bounds before cross-field checks."""
+    for section,cfg in SCHEMA.items():
+        for name,spec in cfg["fields"].items():
+            value=settings[section][name]
+            kind=spec["type"]
+            valid=({"boolean":lambda x:type(x) is bool,
+                    "integer":lambda x:type(x) is int,
+                    "string":lambda x:type(x) is str,
+                    "object":lambda x:isinstance(x,dict)}[kind])(value)
+            if not valid:
+                raise ValueError("Invalid type for "+section+"."+name)
+            if kind=="integer":
+                if spec["min"] is not None and value<spec["min"]:
+                    raise ValueError("Value below minimum for "+section+"."+name)
+                if spec["max"] is not None and value>spec["max"]:
+                    raise ValueError("Value above maximum for "+section+"."+name)
+            choices=spec.get("choices")
+            if choices is not None and value not in choices:
+                raise ValueError("Unsupported choice for "+section+"."+name)
