@@ -59,8 +59,11 @@ def ensure_series(settings, secrets, *, tvdb_id, title, opener=urlopen):
         series.pop("id")
     series.update({"tvdbId":tvdb,"qualityProfileId":profile_id,
                    "rootFolderPath":sonarr["root_folder"],
-                   "seasonFolder":True,"monitored":True,"seriesType":"anime",
-                   "addOptions":{"searchForMissingEpisodes":False}})
+                   "seasonFolder":True,"monitored":True,
+                   "monitorNewItems":"all","seriesType":"anime",
+                   # Keep is the user's decision to follow this show from
+                   # now on. Do not start an unbounded historical search.
+                   "addOptions":{"monitor":"all","searchForMissingEpisodes":False}})
     result=_request(url,key,"POST","series",series,opener=opener)
     if not isinstance(result,dict) or not isinstance(result.get("id"),int):
         raise RuntimeError("Sonarr did not confirm series admission")
