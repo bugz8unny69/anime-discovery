@@ -137,6 +137,29 @@ class VerifiedSeasonMemoryTests(unittest.TestCase):
             {"decision":"NEEDS_REVIEW","matching_pairs":[]},XML,
             approved={"tvdb_id":384541,"anidb_id":15610,"season":1}))
 
+    def test_season2_release_cannot_be_misidentified_as_anidb_season1(self):
+        # Title search alone discovers the original series; a season
+        # mismatch is a hard stop even when TVDB has S01E06 available.
+        def fetch(url,bearer=None):
+            if url.endswith("/extended"):
+                return {"data":{"id":384541,"genres":[{"name":"Animation"}],
+                                "remoteIds":[{"sourceName":"AniDB","id":"15610"}]}}
+            return {"data":{"episodes":[{"id":111,
+                "seasonNumber":1,"number":6}]},"links":{"next":None}}
+        rows=[{"anidb_id":"15610","matched_titles":[NAME],"titles":[NAME]}]
+        with patch("anime_unified_identity_monitor.anidb_matches",
+                   return_value=(rows,False)):
+            report=investigate("[NewUploader] Cyberpunk Edgerunners S02E06",
+                {"tvdb":{"enabled":True},"anidb":{"enabled":True},
+                 "identity":{"episode_map":{}}},
+                {"tvdb_api_key":"test"},None,
+                search=lambda *_:([{"tvdb_id":"384541","name":NAME}],[]),
+                login=lambda *_:"token",fetch=fetch,mapping_xml=XML,
+                anidb_resolve=lambda *args:self.fail("Season conflict must stop mapping"))
+        self.assertNotEqual(report["decision"],"AUTO_VERIFIED")
+        self.assertIn("RELEASE_SEASON_PROVIDER_MISMATCH",report["issues"])
+        self.assertNotIn("approval",report)
+
     def test_qualified_recognized_names_keep_two_anidb_productions_separate(self):
         aliases={NAME+" [S01]":{"tvdb_id":384541,"anidb_id":15610,"season":1},
                  NAME+" [S02]":{"tvdb_id":384541,"anidb_id":19445,"season":2}}
