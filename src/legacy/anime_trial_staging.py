@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from anime_trial_metadata import write_episode_nfo,write_series_nfo
 
-def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id):
+def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id, english_title=None):
     source=Path(source)
     root=Path(trial_root)
     if source.is_symlink() or not source.is_file() or source.stat().st_size<=0:
@@ -65,8 +65,8 @@ def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, serie
         os.link(tmp,dest)
         os.unlink(tmp)
         try:
-            write_series_nfo(folder,title=title,tvdb_id=tvdb_id)
-            write_episode_nfo(dest,title=title,season=season,episode=episode,tvdb_id=tvdb_id)
+            write_series_nfo(folder,title=title,tvdb_id=tvdb_id,english_title=english_title)
+            write_episode_nfo(dest,title=title,season=season,episode=episode,tvdb_id=tvdb_id,english_title=english_title)
         except Exception:
             # NFO is optional convenience metadata. Preserve playable media.
             # A later metadata repair can be performed without restaging.
