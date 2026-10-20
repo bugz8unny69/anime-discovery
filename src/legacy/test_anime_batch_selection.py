@@ -72,6 +72,69 @@ class BatchSelectionTests(unittest.TestCase):
             plan_gated_first_six([video(0,"Anime S01E01.mkv")],
                                  season=1,probe_verified="yes")
 
+
+    def test_common_group_episode_one_formats(self):
+        for filename in (
+            "[Group] Anime [01][Dual Audio].mkv",
+            "[Group] Anime (01) [1080p].mkv",
+            "Anime 2x01.mkv",
+            "Anime S02 - 01 [HEVC].mkv",
+            "[Group] Anime 第01話.mkv",
+            "Season 02/01.mkv",
+            "S02/Anime - 01.mkv",
+            "Anime - 01v2 [1080p].mkv",
+        ):
+            with self.subTest(filename=filename):
+                result = plan_gated_first_six([video(0, filename)],season=2)
+                self.assertEqual(result["wanted_episodes"],{1:0})
+
+    def test_unknown_file_number_not_assumed_e01_from_order(self):
+        for filename in (
+            "Anime 01.mkv", "Anime Special.mkv",
+            "Anime [Dual Audio].mkv", "Anime - 1080p.mkv"
+        ):
+            with self.subTest(filename=filename):
+                with self.assertRaises(SelectionNeedsReview):
+                    plan_gated_first_six([video(0, filename)], season=2)
+
+    def test_ranged_episodes_are_not_accepted_as_single_e01(self):
+        for filename in (
+            "Anime - 01-02.mkv", "Anime - 01+02.mkv",
+            "Anime - 01 to 02.mkv", "Anime S02E01-02.mkv",
+            "Anime S02E01E02.mkv", "Anime [01][02].mkv",
+            "Anime 2x01-02.mkv",
+        ):
+            with self.subTest(filename=filename):
+                with self.assertRaises(SelectionNeedsReview):
+                    plan_gated_first_six([video(0, filename)], season=2)
+
+    def test_conflicting_season_hints_never_select_e01(self):
+        for filename in (
+            "Anime S01 - 01.mkv",
+            "Season 01/Anime S02E01.mkv",
+            "Season 02/Anime 1x01.mkv",
+            "S01/Anime [01].mkv",
+        ):
+            with self.subTest(filename=filename):
+                with self.assertRaises(SelectionNeedsReview):
+                    plan_gated_first_six([video(0, filename)], season=2)
+
+    def test_absolute_13_not_assumed_to_be_season_two_e01(self):
+        files=[video(i, "Anime - %02d.mkv" % (i + 13))
+               for i in range(12)]
+        with self.assertRaisesRegex(SelectionNeedsReview,"E01"):
+            plan_gated_first_six(files,season=2)
+
+    def test_group_format_all_first_six_then_skips_later_episodes(self):
+        files=[video(i,"[Group] Anime [%02d] [1080p].mkv"%(i+1))
+               for i in range(12)]
+        plan=plan_gated_first_six(files,season=2)
+        self.assertEqual(plan["wanted_indices"],[0])
+        self.assertEqual(plan["skip_indices"],list(range(1,12)))
+        after=plan_gated_first_six(files,season=2,probe_verified=True)
+        self.assertEqual(after["wanted_indices"],list(range(6)))
+        self.assertEqual(after["skip_indices"],list(range(6,12)))
+
     def test_single_episode_preserved(self):
         result = plan_first_six([video(0, "Example Show S01E01.mkv")], season=1)
         self.assertEqual(result["wanted_episodes"], {1: 0})
