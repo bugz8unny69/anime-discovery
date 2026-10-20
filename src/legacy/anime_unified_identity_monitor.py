@@ -78,9 +78,12 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     report["issues"].extend(errors)
     if errors:
         raise RuntimeError("TVDB search incomplete")
+    if len(candidates)>10:
+        report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
+        return report
     token=login(secrets["tvdb_api_key"])
     aid_set={str(x["anidb_id"]) for x in rows}
-    for candidate in candidates[:20]:
+    for candidate in candidates[:10]:
         tid=str(candidate["tvdb_id"])
         detail=fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {}
         if str(detail.get("id"))!=tid:
@@ -129,7 +132,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("EXACT_IDENTITY_NOT_VERIFIED")
     return report
 
-def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
+def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     now=int(time.time() if now is None else now)
     ensure_schema(db)
     # Historical unmatched records need the same evidence check, not an
@@ -143,6 +146,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
         WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)
         ORDER BY n.id LIMIT ?""",(now,limit)).fetchall()
     done=0
+    pending_retries=0
     for nid,title,attempts in selected:
         attempts+=1
         try:
@@ -162,6 +166,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
             decision="LOOKUP_RETRY" if attempts<3 else "NEEDS_REVIEW"
             report={"decision":decision,"issues":["LOOKUP_"+type(exc).__name__]}
             retry=attempts<3
+            pending_retries+=int(retry)
             LOG.warning("Identity triage retry notification=%s error_type=%s",nid,type(exc).__name__)
         # Never expose API keys or release payloads in stored diagnostics.
         safe=json.dumps(report,sort_keys=True)[:16000]
@@ -177,7 +182,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
             if not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
         done+=1
-    return {"processed":done,"pending_retries":sum(1 for _,_,a in selected if a<3)}
+    return {"processed":done,"pending_retries":pending_retries}
 
 def main():
     while True:
