@@ -192,6 +192,29 @@ check the actual \`app/version\` and \`app/webapiVersion\` read-only,
 and verify \`pausedUP\` transitions and file-priority effects on a
 disposable isolated 4.5.2 instance. Never use existing torrents as tests.
 
+## Completed development slice: normal submit, poll, pause
+
+`anime_qb_manifest_intake.submit_poll_pause()` now composes the existing
+idempotent `submit_once()` ownership-fenced qBittorrent submission with a
+short active metadata polling window (defaults to 10 attempts at one-second
+intervals). When `torrents/files` first becomes available, it pauses only
+the exact owned torrent, confirms the stopped state and checks that file
+names/indices/sizes/priorities remain unchanged. It returns the stopped
+manifest without selecting or resuming payload files.
+
+If metadata stays unavailable for that window, the torrent is paused and
+the call returns `DEFERRED`. A subsequent invocation reconciles the *same*
+infohash and may briefly resume **only if it is still proven owned, stopped,
+and its file inventory is empty**. This prevents a long uncontrolled active
+download while metadata is missing and avoids adding the same magnet twice.
+
+This is a reusable isolated source module with offline fake-qB tests; it is
+not yet registered in `anime-discovery-worker.py`. The existing production
+single-episode path remains unchanged. Connecting this stage to an unattended
+series-level batch job, selecting E01 only and later unlocking E02–E06 are
+follow-on integration work. A live qBittorrent 4.5.2 smoke test and VM
+deployment are also outstanding.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
