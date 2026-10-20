@@ -185,7 +185,7 @@ def inspect_registered_episodes(settings,secrets,*,sonarr_id,plan,opener=None):
              sum(x["status"]=="NEEDS_REVIEW" for x in result))
     return result
 
-def plan_staged_imports(db,series_id,*,trial_root):
+def plan_staged_imports(db,series_id,*,trial_root,skip_missing=False):
     root=Path(trial_root).resolve(strict=True)
     rows=db.execute("""SELECT d.notification_id,d.season,d.episode,r.staged_path
         FROM episode_dispatch d JOIN torrent_recovery_records r
@@ -198,6 +198,8 @@ def plan_staged_imports(db,series_id,*,trial_root):
     seen=set()
     for nid,season,episode,filename in rows:
         file=Path(filename)
+        if skip_missing and not file.exists() and not file.is_symlink():
+            continue
         path=file.resolve(strict=True)
         if not path.is_file() or not path.is_relative_to(root) or path==root:
             raise ValueError("Staged file outside trusted trial root")
