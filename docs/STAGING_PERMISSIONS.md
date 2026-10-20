@@ -17,11 +17,28 @@ Configure via **Settings → Staged media permissions**:
   must have that group in its supplementary list, or the storage must
   permit the change.
 
-The new publisher ensures mode `0640` on staged files and NFOs.
-Named series and season folders are group-traversable when a group
-is configured. Mode and owner assignment happens *before* the file is
-published from the temporary staging inode. Permission errors abort
-staging instead of falsely marking acquisition `DONE`.
+The permission policy now has **two independent four-digit octal settings**:
+
+- **Directory mode** (default `2770`): applies to the staged series
+  and season folders. Mode `2770` grants group **read/write/traverse**
+  and enables setgid inheritance, so shared services such as Bazarr can
+  create sidecar subtitles in a season directory when the NAS ACL permits.
+  Mode `2775` adds traversal and reading for other users.
+- **File mode** (default `0640`): applies to staged MKVs and generated
+  NFO files. Group read permission allows Jellyfin to open videos without
+  granting permission to modify them. Use `0660` only for workflows that
+  really need to edit existing media in place.
+
+Directories require owner rwx; files require owner rw. Four octal digits
+are mandatory; unsafe special bits are rejected except directory setgid.
+These are explicit settings, not an attempt to inspect or clone a NAS ACL.
+
+The publisher copies media into a private temporary file, verifies its
+checksum, then applies the configured file ownership/mode **before** the
+file becomes visible via the final hard link. It verifies effective
+ownership/mode after changing it. Both directory modes and NFO files
+are handled explicitly. A permission failure is surfaced instead of
+silently completing the acquisition.
 
 The root trial mount and its ACLs must still grant appropriate traversal;
 NFSv4 server ACLs can override local POSIX expectations. A successful
