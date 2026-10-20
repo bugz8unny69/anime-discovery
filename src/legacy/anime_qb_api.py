@@ -54,6 +54,37 @@ class QBittorrentAPI:
             raise ValueError("Torrent save path unavailable")
         return matched[0] if matched else None
 
+    def torrent_identity(self, infohash):
+        """Exact-hash read of category/tags without requiring a ready save path."""
+        infohash=_hash(infohash)
+        records=json.loads(self._request("torrents/info?"+urlencode({"hashes":infohash})))
+        if not isinstance(records,list):
+            raise ValueError("Invalid qBittorrent torrent list")
+        matched=[item for item in records if isinstance(item,dict)
+                 and str(item.get("hash","")).lower()==infohash]
+        if len(matched)>1:
+            raise ValueError("Duplicate qBittorrent torrent record")
+        return matched[0] if matched else None
+
+    def ensure_category(self,category):
+        """Create only our missing fixed category, without changing other categories."""
+        if category!="anime-discovery":
+            raise ValueError("Unsupported Anime Discovery category")
+        existing=json.loads(self._request("torrents/categories"))
+        if not isinstance(existing,dict):
+            raise ValueError("Invalid qBittorrent category inventory")
+        if category in existing:
+            return
+        # A concurrent administrator/category creator might win the race.
+        # Let a non-200 response fail rather than silently submit untagged.
+        response=self._request("torrents/createCategory",
+                               {"category":category,"savePath":""})
+        if response.strip() not in (b"",b"Ok."):
+            raise RuntimeError("qBittorrent category creation unconfirmed")
+        verify=json.loads(self._request("torrents/categories"))
+        if not isinstance(verify,dict) or category not in verify:
+            raise RuntimeError("qBittorrent category creation not visible")
+
     def contains_hash(self, infohash):
         infohash=_hash(infohash)
         records=json.loads(self._request("torrents/info?"+urlencode({"hashes":infohash})))
@@ -70,10 +101,22 @@ class QBittorrentAPI:
             raise ValueError("Invalid qBittorrent torrent file inventory")
         return records
 
-    def add_magnet(self, magnet_uri):
+    def add_magnet(self, magnet_uri, *, category=None, tag=None):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
             raise ValueError("Invalid magnet")
-        response=self._request("torrents/add",{"urls":magnet_uri})
+        if category is not None and category!="anime-discovery":
+            raise ValueError("Unsupported Anime Discovery category")
+        if tag is not None:
+            import re
+            if category!="anime-discovery" or not re.fullmatch(r"ad-[0-9a-f]{32}",tag):
+                raise ValueError("Invalid Anime Discovery ownership marker")
+        fields={"urls":magnet_uri}
+        if category is not None:
+            self.ensure_category(category)
+            fields["category"]=category
+        if tag is not None:
+            fields["tags"]=tag
+        response=self._request("torrents/add",fields)
         if response.strip()!=b"Ok.":
             raise RuntimeError("Torrent add not acknowledged")
 
