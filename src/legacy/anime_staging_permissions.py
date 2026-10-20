@@ -17,9 +17,13 @@ def _identity(value, *, group):
         return None
     if not isinstance(value,str) or not _PRINCIPAL.fullmatch(value):
         raise ValueError("Invalid staged "+("group" if group else "owner"))
+    if value.isdecimal():
+        number=int(value)
+        if number>4294967294:
+            raise ValueError("Staged numeric owner/group out of range")
+        return number
     try:
-        return (grp.getgrgid(int(value)).gr_gid if group else pwd.getpwuid(int(value)).pw_uid) if value.isdecimal() else (
-            grp.getgrnam(value).gr_gid if group else pwd.getpwnam(value).pw_uid)
+        return grp.getgrnam(value).gr_gid if group else pwd.getpwnam(value).pw_uid
     except (KeyError,OverflowError) as exc:
         raise ValueError("Configured staged owner/group does not exist") from exc
 
