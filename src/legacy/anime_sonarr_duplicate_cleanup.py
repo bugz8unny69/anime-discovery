@@ -77,7 +77,7 @@ def review(db,series_id,settings,secrets,*,opener=None,audio_probe=confirmed_jp_
     if db.in_transaction:raise ValueError("Autocommit database required")
     if type(series_id) is not int or series_id<=0:raise ValueError("Invalid series ID")
     snapshot=check_series(db,series_id,settings,secrets,opener=opener)
-    plan=plan_staged_imports(db,series_id,trial_root=settings["storage"]["trial_root"])
+    plan=plan_staged_imports(db,series_id,trial_root=settings["storage"]["trial_root"],skip_missing=True)
     if len(plan)>100:raise ValueError("Review too large")
     by_key={(e["season"],e["episode"]):e for e in snapshot["episodes"]}
     ids=(_sonarr_destination_map(settings,secrets,snapshot["sonarr_id"],opener=opener)
