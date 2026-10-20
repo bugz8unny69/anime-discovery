@@ -111,10 +111,9 @@ class DuplicateCleanupTests(unittest.TestCase):
         nid,path=self.paths[0]
         path.unlink()
         path.symlink_to(outside)
-        report=review(self.db,self.sid,self.settings,self.secrets,
-                      opener=self.opener,audio_probe=lambda p:True)
-        self.assertEqual(report["eligible"],1)
+        with self.assertRaises(ValueError):
+            review(self.db,self.sid,self.settings,self.secrets,
+                   opener=self.opener,audio_probe=lambda p:True)
         self.assertTrue(outside.exists())
-        self.assertEqual(report["episodes"][0]["status"],"NEEDS_REVIEW")
 
 if __name__=="__main__":unittest.main()
