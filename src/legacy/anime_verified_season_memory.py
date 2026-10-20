@@ -112,6 +112,61 @@ def known_for_release(db,release):
     tvdb,anidb,season,title=matches[0]
     return {"tvdb_id":tvdb,"anidb_id":anidb,"season":season,"title":title}
 
+def _backfill_existing_verified(db,tvdb_id):
+    """Rebuild identity memory from independently verified historical evidence.
+
+    Manual approvals are deliberately excluded. A reconstructed identity is
+    still only a hint and needs today's Anime-Lists mapping on reuse.
+    """
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
+        return
+    rows=db.execute("""SELECT n.release_name,c.evidence_json,d.season,v.anidb_id
+        FROM episode_dispatch d JOIN notifications n ON n.id=d.notification_id
+        JOIN verified_series_identity v ON v.notification_id=d.notification_id
+        JOIN unified_identity_checks c ON c.notification_id=d.notification_id
+        WHERE v.tvdb_id=? AND c.decision='AUTO_VERIFIED'
+          AND v.mapping_source='verified_identity_mapping'
+          AND v.episode_identity_verified=1 AND v.eligible_for_acquisition=1""",
+        (str(tvdb_id),)).fetchall()
+    for release,evidence,season,aid in rows:
+        try:
+            report=json.loads(evidence)
+            approval=report.get("approval") or {}
+            pairs=report.get("matching_pairs") or []
+            if (report.get("decision")!="AUTO_VERIFIED"
+                    or type(season) is not int or season<1
+                    or str(approval.get("tvdb_id"))!=str(tvdb_id)
+                    or str(approval.get("anidb_id"))!=str(aid)
+                    or approval.get("season")!=season
+                    or len(pairs)!=1
+                    or str(pairs[0].get("tvdb_id"))!=str(tvdb_id)
+                    or str(pairs[0].get("anidb_id"))!=str(aid)):
+                continue
+            titles,_=release_title(release)
+            if titles:
+                remember(db,title=titles[0],tvdb_id=tvdb_id,anidb_id=aid,
+                         season=season,evidence_sha256=hashlib.sha256(
+                             evidence.encode("utf-8")).hexdigest())
+        except (ValueError,TypeError,KeyError,IndexError):
+            LOG.warning("event=VERIFIED_SEASON_BACKFILL_SKIPPED reason=CONFLICT_OR_INVALID_PROOF tvdb=%s",
+                        tvdb_id)
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_batch_authorizations'").fetchone():
+        rows=db.execute("""SELECT a.title,a.anidb_id,a.season,a.xml_sha256
+            FROM anime_batch_authorizations a JOIN notifications n
+            ON n.id=a.notification_id
+            JOIN unified_identity_checks c ON c.notification_id=a.notification_id
+            WHERE a.tvdb_id=? AND n.status='APPROVED_BATCH'
+              AND c.decision='BATCH_VERIFIED'""",(str(tvdb_id),)).fetchall()
+        for title,aid,season,digest in rows:
+            try:
+                # A batch authorization was already crosschecked against
+                # provider evidence. Never synthesize an ID from the title.
+                remember(db,title=title,tvdb_id=tvdb_id,anidb_id=aid,
+                         season=season,evidence_sha256=digest)
+            except (ValueError,TypeError):
+                LOG.warning("event=VERIFIED_BATCH_BACKFILL_SKIPPED reason=CONFLICT_OR_INVALID_PROOF tvdb=%s",tvdb_id)
+
+
 def for_series(db,series_id):
     """Return only independently verified stored/legacy identity records."""
     ensure_schema(db)
@@ -120,6 +175,7 @@ def for_series(db,series_id):
     if not series:
         raise ValueError("TVDB series not found")
     tid=series[0]
+    _backfill_existing_verified(db,tid)
     remembered=db.execute("""SELECT season,anidb_id,display_title
         FROM verified_season_identities WHERE tvdb_id=? ORDER BY season""",(tid,)).fetchall()
     return [{"season":season,"anidb_id":aid,"title":title,"tvdb_id":tid}
