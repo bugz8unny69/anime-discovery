@@ -69,7 +69,7 @@ def all_jobs(db, *,page=1,size=20):
                 identity_checks[nid]=("UNKNOWN",[])
     rows=db.execute("""SELECT n.id,n.source,n.release_name,n.received_at,n.status,
         d.season,d.episode,d.state,
-        j.state,j.last_error,r.staged_path,
+        j.id,j.state,j.attempts,j.available_at,j.lease_until,j.last_error,r.staged_path,
         COALESCE(s.title,'')
         FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
