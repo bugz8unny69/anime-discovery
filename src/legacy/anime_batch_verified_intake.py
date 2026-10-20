@@ -164,6 +164,12 @@ def authorize_verified_batch(db, notification_id, report, settings, xml_bytes):
     if db.in_transaction:
         raise ValueError("Autocommit required for trusted batch authorization")
     ensure_schema(db)
+    # This authorization is exclusively for an Autobrr pack that intake has
+    # classified and saved. Ordinary unmatched *single* episodes must not
+    # receive misleading batch missing-magnet diagnostics.
+    if not db.execute("SELECT 1 FROM anime_batch_pending WHERE notification_id=?",
+                      (notification_id,)).fetchone():
+        return False
     result=verified_pack_candidate(db,notification_id,report,settings,xml_bytes)
     if result is None:
         return False
