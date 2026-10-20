@@ -40,6 +40,9 @@ def validate_config(settings,secrets,*,directory=None):
             raise ValueError("Invalid keys in "+section)
         result[section]={**defaults,**value}
     validate_scalar_fields(result)
+    from anime_staging_permissions import parse_mode
+    parse_mode(result["storage"]["staged_directory_mode"],directory=True)
+    parse_mode(result["storage"]["staged_file_mode"],directory=False)
     if not isinstance(result["daemon"]["concurrency"],int) or not 1<=result["daemon"]["concurrency"]<=32:
         raise ValueError("daemon.concurrency must be 1..32")
     if not isinstance(result["daemon"]["lease_seconds"],int) or result["daemon"]["lease_seconds"]<30:
