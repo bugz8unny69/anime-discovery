@@ -145,6 +145,26 @@ class VerifiedSeasonMemoryTests(unittest.TestCase):
         self.assertIsNone(resolve_release("[GroupB] Cyberpunk Edgerunners S03E02",aliases))
         self.assertIsNone(resolve_release("[GroupB] Cyberpunk Edgerunners - 1001",aliases))
 
+    def test_legacy_trusted_verification_backfills_existing_staged_series(self):
+        from anime_unified_identity_monitor import ensure_schema
+        from anime_webhook_processing import approve
+        ensure_schema(self.db)
+        nid=self.db.execute("""INSERT INTO notifications
+            (source,release_name,source_guid,info_hash,received_at,status)
+            VALUES ('autobrr',?,'preupgrade-06',?,1,'IDENTIFYING')""",
+            ("[PriorGroup] Cyberpunk Edgerunners S01E06","b"*40)).lastrowid
+        result=approve(self.db,nid,{"tvdb_id":384541,"anidb_id":15610,
+            "season":1,"episode":6},source="verified_identity_mapping")
+        report={"decision":"AUTO_VERIFIED",
+            "approval":{"tvdb_id":384541,"anidb_id":15610,"season":1,"episode":6},
+            "matching_pairs":[{"tvdb_id":"384541","anidb_id":"15610"}]}
+        self.db.execute("""INSERT INTO unified_identity_checks
+            (notification_id,checked_at,attempts,next_at,decision,evidence_json)
+            VALUES (?,1,1,0,'AUTO_VERIFIED',?)""",(nid,json.dumps(report)))
+        self.assertEqual(for_series(self.db,self.sid)[0]["anidb_id"],"15610")
+        self.assertIsNotNone(known_for_release(
+            self.db,"[NewGroup] Cyberpunk Edgerunners S01E03"))
+
     def test_auto_remembered_alias_never_bypasses_episode_verification(self):
         from anime_webhook_processing import receive
         self.save(2,19445)
