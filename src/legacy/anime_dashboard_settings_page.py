@@ -141,6 +141,16 @@ for(const form of forms){
     }catch(error){setStatus(error.message);}
   });
 }
+document.getElementById('anidb-public')?.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const checkbox=event.currentTarget.querySelector('input[name=enabled]');
+  const output=document.getElementById('anidb-status');
+  try{
+    const result=await post('/api/settings',{settings:{anidb:{enabled:checkbox.checked}}});
+    dirty=false;
+    output.textContent=result.restart_required?'Saved. Restart required.':'Saved.';
+  }catch(error){output.textContent=error.message}
+});
 window.addEventListener('beforeunload',event=>{
   if(dirty){event.preventDefault();event.returnValue='';}
 });
