@@ -109,12 +109,14 @@ def validate_config(settings,secrets,*,directory=None):
             not isinstance(anidb["client"],str) or
             type(anidb["clientver"]) is not int or anidb["clientver"]<1):
         raise ValueError("Invalid AniDB HTTP configuration")
-    if anidb["http_api_url"]:
-        from urllib.parse import urlsplit
-        url=urlsplit(anidb["http_api_url"])
-        if (url.scheme!="https" or not url.hostname or url.username or url.password
-                or url.query or url.fragment or url.path.rstrip("/")!="/httpapi"):
-            raise ValueError("AniDB HTTP gateway must be HTTPS /httpapi")
+    # Backward-compatible setting: the only accepted explicit URL is AniDB's
+    # official endpoint. An empty URL also selects that endpoint.
+    if anidb["http_api_url"] not in ("", "http://api.anidb.net:9001/httpapi"):
+        raise ValueError("Use the official AniDB HTTP API endpoint; no gateway needed")
+    if anidb["client"] and not __import__("re").fullmatch(r"[A-Za-z0-9_-]{3,32}",anidb["client"]):
+        raise ValueError("AniDB HTTP client identifier invalid")
+    if anidb["clientver"]>999999:
+        raise ValueError("AniDB HTTP client version invalid")
     sonarr=result["sonarr"]
     if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int or not isinstance(sonarr["quality_profile_name"],str):
         raise ValueError("Invalid Sonarr settings")
