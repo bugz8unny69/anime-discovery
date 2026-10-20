@@ -41,3 +41,50 @@ def delete_unmatched(db, notification_id):
     except BaseException:
         db.rollback()
         raise
+
+
+def recheck_unmatched_identity(db, notification_id):
+    """Explicitly re-run trusted provider triage for a terminal intake review.
+
+    Cannot turn an already dispatched/authorized notification into a new
+    acquisition. No media, torrent, or historical evidence is removed. The
+    existing identity monitor performs the work on its next iteration.
+    """
+    try:
+        nid=int(notification_id)
+    except (ValueError,TypeError):
+        raise ValueError("Valid notification ID required") from None
+    if nid<=0 or db.in_transaction:
+        raise ValueError("Identity recheck requires positive ID and autocommit")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row=db.execute("SELECT status FROM notifications WHERE id=?",(nid,)).fetchone()
+        if not row or row[0]!="NEEDS_REVIEW":
+            raise ValueError("Only terminal unapproved identity reviews can be rechecked")
+        for table in ("daemon_jobs","episode_dispatch","verified_series_identity",
+                      "anime_batch_authorizations"):
+            present=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                               (table,)).fetchone()
+            if not present:
+                continue
+            column="id" if table=="daemon_jobs" else "notification_id"
+            if table=="daemon_jobs":
+                exists=db.execute("SELECT 1 FROM daemon_jobs WHERE subject_key=?",
+                                  (str(nid),)).fetchone()
+            else:
+                exists=db.execute("SELECT 1 FROM "+table+" WHERE "+column+"=?",
+                                  (nid,)).fetchone()
+            if exists:
+                raise ValueError("Identity review already has authorized or dispatched work")
+        changed=db.execute("""UPDATE notifications SET status='IDENTIFYING'
+                             WHERE id=? AND status='NEEDS_REVIEW'""",(nid,)).rowcount
+        if changed!=1:
+            raise ValueError("Identity review state changed")
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
+            db.execute("UPDATE unified_identity_checks SET next_at=0 WHERE notification_id=?",(nid,))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return {"notification_id":nid,"status":"IDENTIFYING","queued":False,
+            "message":"Identity recheck scheduled; acquisition remains blocked until provider verification"}
