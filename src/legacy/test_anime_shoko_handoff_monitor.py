@@ -79,6 +79,20 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(result["errors"],1)
         with sqlite3.connect(self.path) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM shoko_handoff").fetchone()[0],0)
+    def test_enabled_before_any_keep_schema_is_idle_not_operational_error(self):
+        from anime_fresh_database import initialize
+        fresh=Path(self.temp.name)/"fresh.db"
+        initialize(fresh)
+        self.settings["daemon"]["database_path"]=str(fresh)
+        def forbidden(*args,**kwargs):
+            self.fail("No post-Keep work may run before Keep tables exist")
+        self.assertEqual(check_once(self.settings,self.secrets,
+            copy_verifier=forbidden,inspector=forbidden),
+            {"processed":0,"awaiting_keep":True})
+        with sqlite3.connect(fresh) as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='sonarr_keep'").fetchone())
+            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='shoko_handoff'").fetchone())
+
     def test_disabled(self):
         self.settings["shoko"]["enabled"]=False
         self.assertEqual(check_once(self.settings,self.secrets),{"processed":0,"disabled":True})
