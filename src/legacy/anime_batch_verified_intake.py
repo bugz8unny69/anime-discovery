@@ -35,65 +35,106 @@ def ensure_schema(db):
 
 
 def verified_pack_candidate(db, notification_id, report, settings, xml_bytes):
-    """Return pinned identity info or None; never infer ID from release text."""
-    if not isinstance(report, dict) or not isinstance(settings, dict):
+    """Authorize only a genuinely pinned, independently cross-checked batch.
+
+    A failed candidate now records the first precise *authorization* blocker
+    in identity evidence. The old broad manifest/episode-missing issues are
+    expected for packs; they must not hide the actual unfulfilled precondition.
+    """
+    if not isinstance(report,dict) or not isinstance(settings,dict):
         return None
+
+    def blocked(reason, action):
+        report["batch_authorization"]={"decision":"BLOCKED",
+                                        "reason":reason,"action":action}
+        report["issues"]=list(report.get("issues") or [])
+        if reason not in report["issues"]:
+            report["issues"].append(reason)
+        report.setdefault("workflow",[]).append(
+            {"step":"Batch authorization","decision":"BLOCKED",
+             "reason":reason,"action":action})
+        LOG.warning("event=BATCH_AUTHORIZATION_BLOCKED notification=%s reason=%s",
+                    notification_id,reason)
+        return None
+
     if not isinstance(xml_bytes,bytes) or not xml_bytes:
-        return None
+        return blocked("BATCH_ANIME_LISTS_UNAVAILABLE",
+                       "Refresh the trusted Anime-Lists cache before verifying a pack")
     row=db.execute("""SELECT n.release_name,n.info_hash,n.source,p.magnet_uri
         FROM notifications n JOIN anime_batch_pending p ON p.notification_id=n.id
         WHERE n.id=?""",(notification_id,)).fetchone()
-    if not row or row[2] != "autobrr":
-        return None
-    title,infohash,_source,_magnet=row
+    if not row:
+        return blocked("BATCH_PENDING_MAGNET_MISSING",
+                       "Autobrr season packs require an intake record with a trusted magnet")
+    title,infohash,source,_magnet=row
+    if source!="autobrr":
+        return blocked("BATCH_NOT_AUTOBRR",
+                       "Batch intake is authorized only for Autobrr notifications")
     hint=release_scope_hint(title)
+    if hint["kind"]!="season_pack":
+        return blocked("BATCH_RELEASE_SCOPE_UNSUPPORTED",
+                       "Release title must explicitly identify a season pack")
     season=hint.get("season_hint")
-    if hint["kind"]!="season_pack" or type(season) is not int or season<=0:
-        return None
+    if type(season) is not int or season<=0:
+        return blocked("BATCH_SEASON_HINT_REQUIRED",
+                       "Release name must contain an unambiguous S01 or Season 01; never assume season 1 from a batch label")
     names,_=release_title(title)
     if not names:
-        return None
+        return blocked("BATCH_SERIES_TITLE_UNRESOLVED",
+                       "Cannot extract the anime title from the Autobrr release name")
     aliases=settings.get("identity",{}).get("series_map",{})
     if not isinstance(aliases,dict):
-        return None
-    matches=[(alias,identity) for alias,identity in aliases.items()
-             if norm(alias)==norm(names[0])
-             and isinstance(identity,dict) and identity.get("season",1)==season]
+        return blocked("BATCH_PINNED_ALIASES_INVALID",
+                       "Fix identity.series_map in Recognized names")
+    title_matches=[(alias,identity) for alias,identity in aliases.items()
+                   if norm(alias)==norm(names[0]) and isinstance(identity,dict)]
+    matches=[(alias,identity) for alias,identity in title_matches
+             if identity.get("season",1)==season]
+    if not matches:
+        code=("BATCH_PINNED_SEASON_MISMATCH" if title_matches
+              else "BATCH_PINNED_ALIAS_MISSING")
+        return blocked(code,
+                       "In Recognized names, pin this release title to its verified TVDB and AniDB IDs and the season shown in the release")
     if len(matches)!=1:
-        return None
+        return blocked("BATCH_PINNED_ALIAS_AMBIGUOUS",
+                       "Resolve multiple aliases for the same normalized title and season")
     alias,identity=matches[0]
     try:
         tvdb=str(int(identity["tvdb_id"]))
         anidb=str(int(identity["anidb_id"]))
-    except (KeyError, ValueError, TypeError):
-        return None
+    except (KeyError,ValueError,TypeError):
+        return blocked("BATCH_PINNED_IDS_INVALID",
+                       "Recognized names must contain valid TVDB and AniDB numeric IDs")
     if tvdb=="0" or anidb=="0":
-        return None
+        return blocked("BATCH_PINNED_IDS_INVALID",
+                       "Recognized names must contain positive TVDB and AniDB IDs")
     pairs=report.get("matching_pairs")
     if (not isinstance(pairs,list) or len(pairs)!=1 or
             str(pairs[0].get("tvdb_id"))!=tvdb or
             str(pairs[0].get("anidb_id"))!=anidb):
-        return None
-    # A genuine episode-missing season pack has precisely these expected
-    # issues; no title ambiguity, conflicting provider identity or unsupported
-    # media type may be present.
+        return blocked("BATCH_PINNED_PROVIDER_PAIR_MISMATCH",
+                       "Recognized names IDs must agree with the unique independently verified TVDB/AniDB pair")
     issues=set(report.get("issues") or [])
     expected={"BATCH_FILE_MANIFEST_REQUIRED","EPISODE_NUMBER_UNRESOLVED",
               "EXACT_IDENTITY_NOT_VERIFIED"}
     if not {"BATCH_FILE_MANIFEST_REQUIRED","EPISODE_NUMBER_UNRESOLVED"}.issubset(issues) or issues-expected:
-        return None
+        return blocked("BATCH_OTHER_IDENTITY_ISSUES",
+                       "Resolve conflicting provider, media type or episode evidence before downloading")
     diagnostic=[r for r in report.get("crossref_diagnostics",[])
                 if str(r.get("tvdb_id"))==tvdb]
     if (len(diagnostic)!=1 or diagnostic[0].get("media_type")!="ANIMATION"
             or anidb not in [str(n) for n in diagnostic[0].get("matching_anidb_ids",[])]):
-        return None
+        return blocked("BATCH_ANIMATION_CROSSREF_UNVERIFIED",
+                       "Exact animated-media classification and provider ID match are required")
     # Authenticate a unique actual pair from the independent XML source.
     try:
         mapped=mappings(xml_bytes,anidb)
     except Exception:
-        return None
+        return blocked("BATCH_ANIME_LISTS_MAPPING_UNREADABLE",
+                       "Anime-Lists mapping cannot be read or validated")
     if len(mapped)!=1 or mapped[0].get("tvdbid")!=tvdb:
-        return None
+        return blocked("BATCH_ANIME_LISTS_PAIR_NOT_UNIQUE",
+                       "Exactly one independent Anime-Lists TVDB/AniDB mapping is required")
     unit_key,mode,start="season","SEASON",1
     part=re.search(r"(?i)(?<![a-z0-9])(?:Part|Cour)[ ._-]*([2-9])(?!\d)",title)
     if part:
@@ -102,8 +143,14 @@ def verified_pack_candidate(db, notification_id, report, settings, xml_bytes):
         part_no=int(part.group(1))
         target=resolve_episode(xml_bytes,int(anidb),int(tvdb),1)
         if not target or target["tvdb_season"]!=season or target["tvdb_episode"]<=1:
-            return None
+            return blocked("BATCH_PART_BOUNDARY_UNVERIFIED",
+                           "Part/Cour reset requires independent provider-confirmed episode boundary")
         unit_key,mode,start="part:"+str(part_no),"PART",target["tvdb_episode"]
+    report["batch_authorization"]={"decision":"ELIGIBLE",
+                                    "reason":"PINNED_PROVIDER_CROSSREF"}
+    report.setdefault("workflow",[]).append(
+        {"step":"Batch authorization","decision":"ELIGIBLE",
+         "reason":"PINNED_PROVIDER_CROSSREF"})
     return {"tvdb_id":tvdb,"anidb_id":anidb,"season":season,
             "title":alias,"unit_key":unit_key,"mode":mode,"start":start,
             "infohash":infohash.lower(),
