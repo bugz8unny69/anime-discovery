@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
     "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
     "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
-    "anidb": {"enabled": True},
+    "anidb": {"enabled": True, "http_api_url": "", "client": "", "clientver": 1},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60, "import_folder_id": 0}
 }
@@ -104,6 +104,17 @@ def validate_config(settings,secrets,*,directory=None):
             raise ValueError("Invalid TVDB episode identity key")
         if not isinstance(item,dict) or set(item)!={"anidb_episode_id","verified"} or type(item["anidb_episode_id"]) is not int or item["anidb_episode_id"]<=0 or item["verified"] is not True:
             raise ValueError("Exact AniDB episode mapping requires verified=true")
+    anidb=result["anidb"]
+    if (not isinstance(anidb["http_api_url"],str) or
+            not isinstance(anidb["client"],str) or
+            type(anidb["clientver"]) is not int or anidb["clientver"]<1):
+        raise ValueError("Invalid AniDB HTTP configuration")
+    if anidb["http_api_url"]:
+        from urllib.parse import urlsplit
+        url=urlsplit(anidb["http_api_url"])
+        if (url.scheme!="https" or not url.hostname or url.username or url.password
+                or url.query or url.fragment or url.path.rstrip("/")!="/httpapi"):
+            raise ValueError("AniDB HTTP gateway must be HTTPS /httpapi")
     sonarr=result["sonarr"]
     if type(sonarr["enabled"]) is not bool or not isinstance(sonarr["base_url"],str) or not isinstance(sonarr["root_folder"],str) or type(sonarr["quality_profile_id"]) is not int or not isinstance(sonarr["quality_profile_name"],str):
         raise ValueError("Invalid Sonarr settings")
