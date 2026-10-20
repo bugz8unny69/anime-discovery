@@ -49,12 +49,20 @@ def remember_verified_season(db, config_dir, series_id, season):
     key=row["title"]+" [S%02d]"%season
     old=load_config(config_dir)["settings"]["identity"]["series_map"].get(key)
     required={"tvdb_id":int(row["tvdb_id"]),
-              "anidb_id":int(row["anidb_id"]),"season":season}
+              "anidb_id":int(row["anidb_id"]),"season":season,
+              "verify_each_episode":True}
     if old is not None:
         if (str(old.get("tvdb_id"))!=str(required["tvdb_id"])
                 or str(old.get("anidb_id"))!=str(required["anidb_id"])
-                or old.get("season",1)!=season):
+                or old.get("season",1)!=season
+                or old.get("verify_each_episode") is not True):
             raise ValueError("Conflicting Recognized Names mapping; no overwrite")
         return {"series_id":sid,"season":season,"alias":key,"already_exists":True}
-    result=add_alias(config_dir,key,**required)
-    return {**result,"series_id":sid,"already_exists":False}
+    settings=load_config(config_dir)["settings"]
+    mappings=dict(settings["identity"]["series_map"])
+    for candidate in mappings:
+        if candidate.casefold()==key.casefold():
+            raise ValueError("Conflicting case-insensitive Recognized Names alias")
+    mappings[key]=required
+    set_setting(config_dir,"identity.series_map",mappings)
+    return {"alias":key,**required,"series_id":sid,"already_exists":False}
