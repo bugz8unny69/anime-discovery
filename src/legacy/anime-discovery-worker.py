@@ -46,7 +46,8 @@ def runtime_handlers(db_path, initial_config):
         # Storage and DB locations are not dashboard-editable. Fail closed if
         # an administrator changes them without restarting infrastructure.
         if (settings["daemon"]["database_path"]!=str(db_path) or
-            settings["storage"]!=storage):
+            any(settings["storage"][key]!=storage[key]
+                for key in ("download_root","trial_root"))):
             return "BLOCKED"
         qb=settings["qbittorrent"]
         def qb_factory():
