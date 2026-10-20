@@ -133,6 +133,9 @@ def stage_completed_batch_file(db, infohash, qb, *, window, stopped_manifest,
         db.execute("""INSERT OR IGNORE INTO anime_batch_staged VALUES (?,?,?,?,?,?,?,?,?)""",
                    (window["tvdb_id"],window["anidb_id"],window["season"],
                     window["unit_key"],episode,*evidence))
+        _publish_sonarr_record(db,series_id=row[0],window=window,episode=episode,
+                               infohash=infohash,sha256=status["sha256"],
+                               staged_path=expected,title=title)
         db.execute("""INSERT OR IGNORE INTO episodes(series_id,season,episode,status)
                       VALUES (?,?,?,'STAGED')""",(row[0],window["season"],episode))
         db.execute("""UPDATE episodes SET status='STAGED'
