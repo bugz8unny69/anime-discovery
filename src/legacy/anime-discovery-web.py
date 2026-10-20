@@ -209,6 +209,9 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         if len(ids)!=1:
                             raise ValueError("Specify one series ID")
                         detail=inspect_series(db,int(ids[0]))
+                        from anime_verified_season_memory import for_series
+                        detail["remembered_seasons"]=(for_series(db,int(ids[0]))
+                            if config_dir is not None else [])
                         return self.send(200,self.with_csrf(detail_page(detail)))
                     if path=="/recognized":
                         return self.send(200,self.with_csrf(recognized_page(aliases(),config_dir is not None)))
@@ -412,7 +415,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,OSError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
-            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime"):
+            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-remember"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = getattr(self,"_cached_form",None) or self.form()
@@ -437,6 +440,13 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                                                values["anidb_id"], values.get("season",1))
                         else:
                             result = remove_alias(config_dir, values["alias"])
+                    elif route == "/series-remember":
+                        if config_dir is None:
+                            raise ValueError("Verified alias editor requires settings directory")
+                        from anime_series_aliases import remember_verified_season
+                        result=remember_verified_season(
+                            db,config_dir,values.get("series_id"),
+                            values.get("season"))
                     elif route == "/series-action":
                         result = (keep_series(db, int(values["series_id"]), load_config(config_dir)["settings"], load_config(config_dir)["secrets"]) if values["action"]=="keep" and config_dir is not None else series_action(db, int(values["series_id"]), str(values["action"])))
                     elif route == "/series-bulk":
@@ -447,7 +457,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 # NTFY review notifications are exclusively sent by the
                 # finalized-identity monitor after verified persisted evidence.
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
-                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
+                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/series?id="+str(result["series_id"]) if route=="/series-remember" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized")))
                     self.send_response(303)
                     self.send_header("Location", destination)
                     self.send_header("Content-Length", "0")
