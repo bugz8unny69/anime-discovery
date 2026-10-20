@@ -98,7 +98,7 @@ def all_jobs(db, *,page=1,size=20):
             status="BLOCKED"
         elif job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
             status="NEEDS REVIEW"
-        elif job=="DONE":
+        elif job=="DONE" or (dispatch=="DONE" and not job):
             status="COMPLETED"
         elif dispatch=="CLAIMED":
             status="QUEUED"
