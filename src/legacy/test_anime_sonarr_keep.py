@@ -124,4 +124,57 @@ class KeepTests(unittest.TestCase):
         self.assertEqual(calls[0][0],"GET")
         self.assertEqual(calls[0][2],"not-a-live-key")
 
+
+    def test_existing_sonarr_season_uses_managed_review_not_import(self):
+        from unittest.mock import patch
+        from anime_series_lifecycle import inspect
+        existing={"sonarr_id":124,"already_exists":True}
+        observed=[{"season":1,"episode":1,"status":"REGISTERED",
+                   "sonarr_episode_id":701,"sonarr_episode_file_id":901}]
+        with patch("anime_sonarr.ensure_series",return_value=existing), \
+             patch("anime_sonarr_import.inspect_registered_episodes",
+                   return_value=observed), \
+             patch("anime_sonarr_import.request_import",
+                   side_effect=AssertionError("Duplicate import forbidden")):
+            result=keep(self.db,self.sid,self.settings,self.secrets)
+        self.assertTrue(result["already_managed"])
+        self.assertFalse(result["import_pending"])
+        self.assertIsNone(result["command_id"])
+        self.assertEqual(self.db.execute("SELECT status FROM series WHERE id=?",
+                                        (self.sid,)).fetchone()[0],"SONARR_MANAGED_REVIEW")
+        self.assertIsNone(self.db.execute(
+            "SELECT submitted_command_id FROM sonarr_import_manifest").fetchone()[0])
+        self.assertEqual(inspect(self.db,self.sid)["cleanup_notices"][0]["ownership"],
+                         "UNCERTAIN")
+
+    def test_existing_sonarr_partial_season_imports_only_missing(self):
+        from unittest.mock import patch
+        nid=self.db.execute("""INSERT INTO notifications
+            (source,release_name,source_guid,info_hash,received_at)
+            VALUES ('autobrr','Example E02','second','b',0)""").lastrowid
+        self.db.execute("""INSERT INTO episode_dispatch
+            (notification_id,series_id,season,episode,state)
+            VALUES (?,?,1,2,'DONE')""",(nid,self.sid))
+        path=Path(self.tmp.name)/"episode2.mkv"
+        path.write_bytes(b"second")
+        self.db.execute("""INSERT INTO torrent_recovery_records
+            (notification_id,infohash,magnet_uri,staged_path,sha256,recorded_at)
+            VALUES (?,'b','magnet',?,'hash',0)""",(nid,str(path)))
+        observed=[{"season":1,"episode":1,"status":"REGISTERED"},
+                  {"season":1,"episode":2,"status":"MISSING"}]
+        captured=[]
+        def submit(*args,**kwargs):
+            captured.extend(kwargs["plan"])
+            return {"command_id":512}
+        with patch("anime_sonarr.ensure_series",
+                   return_value={"sonarr_id":124,"already_exists":True}), \
+             patch("anime_sonarr_import.inspect_registered_episodes",
+                   return_value=observed), \
+             patch("anime_sonarr_import.request_import",side_effect=submit):
+            result=keep(self.db,self.sid,self.settings,self.secrets)
+        self.assertEqual([(e["season"],e["episode"]) for e in captured],[(1,2)])
+        self.assertTrue(result["import_pending"])
+        self.assertEqual(json.loads(self.db.execute(
+            "SELECT manifest_json FROM sonarr_import_manifest").fetchone()[0])[0]["episode"],2)
+
 if __name__=="__main__": unittest.main()
