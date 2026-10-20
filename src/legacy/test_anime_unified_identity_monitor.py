@@ -56,6 +56,36 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=1001,sender=self.sender)["sent"],0)
         self.assertEqual(check_once(self.db,{}, {},now=1002,probe=lambda *_:report)["processed"],0)
 
+    def test_public_titles_crossref_requires_exact_verified_episode_map(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import investigate
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{
+            "123:1:2":{"anidb_episode_id":9876,"verified":True}}}}
+        secrets={"tvdb_api_key":"secret-never-in-report"}
+        anidb=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
+        def fetch(url,bearer=None):
+            self.assertEqual(bearer,"session")
+            if "/extended" in url:
+                return {"data":{"id":123,"remoteIds":[
+                    {"sourceName":"AniDB","id":"456"}]}}
+            return {"data":{"episodes":[{"id":777,"seasonNumber":1,"number":2}]},
+                    "links":{"next":None}}
+        with patch("anime_unified_identity_monitor.anidb_matches",
+                   return_value=(anidb,False)):
+            result=investigate("[Group] Example - 02",settings,secrets,None,
+                search=lambda aliases,key:([{"tvdb_id":"123"}],[]),
+                login=lambda key:"session",fetch=fetch)
+            self.assertEqual(result["decision"],"AUTO_VERIFIED")
+            self.assertEqual(result["approval"]["episode"],2)
+            self.assertNotIn("secret-never-in-report",str(result))
+            settings["identity"]["episode_map"]={}
+            missing=investigate("[Group] Example - 02",settings,secrets,None,
+                search=lambda aliases,key:([{"tvdb_id":"123"}],[]),
+                login=lambda key:"session",fetch=fetch)
+            self.assertEqual(missing["decision"],
+                             "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+            self.assertNotIn("approval",missing)
+
     def test_unique_verified_series_still_requires_episode_mapping(self):
         self.assertEqual(check_once(self.db,{}, {},now=2000,probe=lambda *_:{
             "decision":"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED",
