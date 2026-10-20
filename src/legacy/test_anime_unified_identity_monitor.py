@@ -113,6 +113,33 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(diagnostics["389597"]["matching_anidb_ids"],["456"])
         self.assertNotIn("approval",result)
 
+    def test_anime_lists_and_shoko_exact_episode_enable_verification(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import investigate
+        xml=b'<anime-list><anime anidbid="456" tvdbid="123" defaulttvdbseason="2" episodeoffset="1"/></anime-list>'
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
+        rows=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
+        def fetch(url,bearer=None):
+            if "/extended" in url:
+                return {"data":{"id":123,"genres":[{"name":"Animation"}],
+                                "remoteIds":[]}}
+            return {"data":{"episodes":[{"id":777,"seasonNumber":2,"number":3}]},
+                    "links":{"next":None}}
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(rows,False)):
+            kwargs=dict(search=lambda *_:([{"tvdb_id":"123","name":"Example"}],[]),
+                login=lambda _:"token",fetch=fetch,mapping_xml=xml)
+            missing=investigate("[Group] Example - 02",settings,{"tvdb_api_key":"key"},None,**kwargs)
+            self.assertEqual(missing["decision"],
+                             "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+            self.assertNotIn("approval",missing)
+            resolved=investigate("[Group] Example - 02",settings,{"tvdb_api_key":"key"},None,
+                shoko_resolve=lambda aid,eid: 9876 if (aid,eid)==(456,777) else None,
+                **kwargs)
+        self.assertEqual(resolved["decision"],"AUTO_VERIFIED")
+        self.assertEqual(resolved["approval"],
+                         {"tvdb_id":123,"anidb_id":456,"season":2,"episode":3})
+        self.assertEqual(resolved["verified_anidb_episode_id"],9876)
+
     def test_title_threshold_rejects_low_score_even_with_crossref(self):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
