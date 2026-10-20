@@ -74,13 +74,16 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
             if webhook:
                 # Autobrr's JSON webhook action can supply a credential in its URL.
                 # Retain the existing bearer-header mechanism for other senders.
+                expected=current_webhook_token()
+                if not expected:
+                    return False
                 header=self.headers.get("Authorization","")
-                if hmac.compare_digest(header,"Bearer "+current_webhook_token()):
+                if hmac.compare_digest(header,"Bearer "+expected):
                     return True
                 candidates=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
                 supplied=candidates.get("token",[])
                 return (len(supplied)==1 and
-                        hmac.compare_digest(supplied[0],current_webhook_token()))
+                        hmac.compare_digest(supplied[0],expected))
             return dashboard_auth.valid_session(self.cookie_session())
 
         def csrf_token(self):
