@@ -7,6 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 from anime_sonarr import _request
+from anime_qb_ownership import OWNED, ownership
 
 def _digest(path):
     h=hashlib.sha256()
@@ -87,6 +88,10 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
     if len(rows)!=len(ids):
         raise RuntimeError("Missing torrent provenance")
     hashes={str(infohash).lower() for _,infohash,_ in rows}
+    # Legacy releases, externally preexisting torrents, and uncertain add
+    # outcomes must not be deleted. The category alone is never enough.
+    owned_hashes={h for h in hashes if ownership(db,h)==OWNED}
+    preserved_hashes=hashes-owned_hashes
     digests={nid:digest for nid,_,digest in rows
              if isinstance(digest,str) and len(digest)==64 and all(c in "0123456789abcdef" for c in digest.lower())}
     destinations=confirm_sonarr_copies(settings,secrets,sonarr_id=sonarr_id,
@@ -105,7 +110,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
             logging.getLogger(__name__).exception(
                 "Shoko handoff queue failed for series %d",series_id)
     # Never delete a torrent referenced by another series or an unimported release.
-    for infohash in hashes:
+    for infohash in owned_hashes:
         referenced=db.execute("""SELECT r.notification_id FROM torrent_recovery_records r
             WHERE lower(r.infohash)=?""",(infohash,)).fetchall()
         if any(nid not in ids for (nid,) in referenced):
@@ -157,4 +162,5 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         db.rollback()
         raise
     return {"complete":True,"sonarr_id":sonarr_id,"imported_files":len(destinations),
-            "source_files_removed":len(plan),"torrents_reconciled":len(hashes)}
+            "source_files_removed":len(plan),"torrents_reconciled":len(owned_hashes),
+            "torrents_preserved":len(preserved_hashes)}
