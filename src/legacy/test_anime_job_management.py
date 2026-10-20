@@ -32,10 +32,11 @@ class ManageTests(unittest.TestCase):
 
     def test_retry_now_preserves_error_payload_and_counts(self):
         self.deferred()
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         initial_payload=self.db.execute(
             "SELECT payload_json FROM daemon_jobs").fetchone()[0]
         result=manage(self.db,self.job_id,"retry",
-                      expected_state="DEFERRED",expected_attempts=1,now=102)
+                      expected_state="NEEDS_REVIEW",expected_attempts=1,now=102)
         self.assertEqual(result["state"],"READY")
         self.assertEqual(self.row(),("READY",0,1,"IdentityNotReady",None,None))
         self.assertEqual(self.db.execute("SELECT payload_json FROM daemon_jobs").fetchone()[0],
@@ -52,6 +53,7 @@ class ManageTests(unittest.TestCase):
 
     def test_cancel_defers_no_more_and_never_calls_external_clients(self):
         self.deferred()
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         result=manage(self.db,self.job_id,"cancel",
                       expected_state="DEFERRED",expected_attempts=1,now=102)
         self.assertEqual(result["state"],"BLOCKED")
@@ -65,16 +67,27 @@ class ManageTests(unittest.TestCase):
             manage(self.db,self.job_id,"retry",
                    expected_state="DEFERRED",expected_attempts=1)
 
-    def test_cancel_ready_and_needs_review(self):
-        manage(self.db,self.job_id,"cancel",
-               expected_state="READY",expected_attempts=0)
+    def test_cancel_is_only_available_in_needs_review(self):
+        for state,attempts in (("READY",0),("DEFERRED",1)):
+            if state=="DEFERRED":
+                self.deferred()
+            for action in ("cancel","retry"):
+                with self.assertRaises(ValueError):
+                    manage(self.db,self.job_id,action,
+                        expected_state=state,expected_attempts=attempts)
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
+        manage(self.db,self.job_id,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=1)
         self.assertIsNone(claim(self.db,now=999))
-        enqueue(self.db,"series_gap_search","other","{}")
-        sid=self.db.execute("SELECT id FROM daemon_jobs WHERE kind='series_gap_search'").fetchone()[0]
-        entry=claim(self.db,now=100)
-        finish(self.db,sid,entry["lease_token"],"NEEDS_REVIEW",now=101)
-        manage(self.db,sid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=1)
-        self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs WHERE id=?",(sid,)).fetchone()[0],"BLOCKED")
+        archived=self.db.execute(
+            "SELECT original_subject_key FROM daemon_job_archived_subjects WHERE job_id=?",
+            (self.job_id,)).fetchone()
+        self.assertEqual(archived,("1",))
+        enqueue(self.db,"claimed_acquisition","1",'{"notification_id":1}')
+        latest=self.db.execute("""SELECT id,state FROM daemon_jobs
+            WHERE kind='claimed_acquisition' AND subject_key='1'""").fetchone()
+        self.assertNotEqual(latest[0],self.job_id)
+        self.assertEqual(latest[1],"READY")
+        self.assertEqual(self.row()[0],"BLOCKED")
 
     def test_explicit_admin_retry_of_batch_needs_review_is_audited(self):
         enqueue(self.db,"verified_batch_acquisition","pack","{}")
@@ -107,6 +120,7 @@ class ManageTests(unittest.TestCase):
 
     def test_second_connection_rejects_stale_dashboard_action(self):
         self.deferred()
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         with sqlite3.connect(self.path,isolation_level=None) as other:
             manage(other,self.job_id,"retry",
                    expected_state="DEFERRED",expected_attempts=1)
@@ -119,6 +133,7 @@ class ManageTests(unittest.TestCase):
 
     def test_forged_inputs_cannot_modify_jobs(self):
         self.deferred()
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         for bad in (None,True,1.0,"1",-2):
             with self.subTest(id=bad),self.assertRaises(ValueError):
                 manage(self.db,bad,"retry",
@@ -136,7 +151,7 @@ class ManageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             manage(self.db,self.job_id,"retry",
                    expected_state="DEFERRED",expected_attempts=True)
-        self.assertEqual(self.row()[0],"DEFERRED")
+        self.assertEqual(self.row()[0],"NEEDS_REVIEW")
         self.assertEqual(latest_events(self.db),{})
 
     def test_unrecognized_kind_cannot_be_administered(self):
