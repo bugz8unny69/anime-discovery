@@ -47,10 +47,12 @@ def check_series(db,series_id,settings,secrets,*,opener=None):
         sonarr_id=found[0]["id"]
         monitored=found[0].get("monitored")
         if type(monitored) is not bool:monitored=None
-        episodes=inspect_registered_episodes(settings,secrets,sonarr_id=sonarr_id,
-                                              plan=plan,opener=opener)
+        if plan:
+            episodes=inspect_registered_episodes(settings,secrets,sonarr_id=sonarr_id,
+                                                  plan=plan,opener=opener)
     states=[e["status"] for e in episodes]
-    status=("SONARR_SERIES_MISSING" if not found else
+    status=("STAGING_CLEARED" if not plan else
+            "SONARR_SERIES_MISSING" if not found else
             "ALREADY_MANAGED" if states and all(s=="REGISTERED" for s in states) else
             "PARTIALLY_MANAGED" if "REGISTERED" in states and "MISSING" in states
             and "NEEDS_REVIEW" not in states else
