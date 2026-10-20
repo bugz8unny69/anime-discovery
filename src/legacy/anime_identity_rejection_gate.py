@@ -24,7 +24,7 @@ def resolve_notification(db: sqlite3.Connection, notification_id: int) -> int:
     ).fetchone()
     if notification is None:
         raise IdentityNotReady("Notification not found")
-    if notification[0] not in ("UNTRUSTED", "queued_untrusted", "NEEDS_REVIEW", "IDENTIFYING"):
+    if notification[0] not in ("UNTRUSTED", "queued_untrusted", "NEEDS_REVIEW", "IDENTIFYING", "APPROVED"):
         raise IdentityNotReady("Notification not eligible for identity resolution")
     evidence = db.execute(
         "SELECT tvdb_id,episode_identity_verified,eligible_for_acquisition "
