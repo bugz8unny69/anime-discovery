@@ -499,3 +499,51 @@ if(resetForm)resetForm.addEventListener("submit",function(event){
 });
 </script>"""
     return out+tail()
+
+
+def sonarr_cleanup_review_page(title,review):
+    """Human review screen; no DELETE on GET, confirmation is CSRF protected."""
+    out=shell(title+" — review cleanup","Series")
+    out+='<h1>Review redundant Anime-Trial cleanup</h1>'
+    out+='<p><a href="/series?id='+str(review["series_id"])+'">Back to series</a></p>'
+    out+='<p>Sonarr registered episode files have been checked against their canonical IDs and their actual Japanese and English audio tracks. Different releases may not be byte-identical. This action never deletes the permanent Sonarr library.</p>'
+    out+='<section class="panel"><h2>Trial episodes</h2>'
+    out+='<table><tr><th>Season</th><th>Episode</th><th>Cleanup eligibility</th><th>Bytes</th></tr>'
+    for item in review["episodes"]:
+        reason=(item.get("reason") or "")
+        status=("Eligible (JP+EN verified)" if item["status"]=="REGISTERED"
+                else "Retain — "+item["status"]+(" ("+reason+")" if reason else ""))
+        out+='<tr><td>'+escape(item["season"])+'</td><td>'+escape(item["episode"])+'</td><td>'+escape(status)+'</td><td>'+escape(item.get("size") or "-")+'</td></tr>'
+    out+='</table><p>'+str(review["eligible"])+' eligible staged file(s), '+str(review["bytes_eligible"])+' bytes.</p></section>'
+    out+='<section class="panel"><h2>Original qBittorrent data</h2><ul>'
+    for record in review["torrents"]:
+        out+='<li><code>'+escape(record["infohash"])+'</code>: '+escape(record["ownership"])+'</li>'
+    out+='</ul><p>Only torrents with independently verified Anime Discovery ownership and a safe complete file manifest can be removed. EXTERNAL, UNCERTAIN or shared torrents are preserved. Their cleanup is manual.</p></section>'
+    if review["eligible"]:
+        out+='<section class="panel"><h2>Confirm selected eligible cleanup</h2>'
+        out+='<p>After a fresh safety recheck, eligible Anime-Trial video files will be deleted. Fully verified Anime Discovery-owned torrents will be removed with their files. Other torrents are preserved. This cannot be undone.</p>'
+        out+='<form method="post" action="/series-confirm-sonarr-cleanup">'
+        out+='<input type="hidden" name="series_id" value="'+str(review["series_id"])+'">'
+        out+='<label><input type="checkbox" name="confirm" value="DELETE_VERIFIED_DUPLICATES" required> I authorize deletion of eligible redundant staged files and proven-owned torrents only.</label>'
+        out+='<button type="submit">Confirm deletion of verified duplicates</button></form></section>'
+    else:
+        out+='<section class="panel"><p>No episodes are currently eligible for safe cleanup.</p></section>'
+    return out+tail()
+
+
+def sonarr_cleanup_result_page(series_id,result):
+    out=shell("Duplicate cleanup result","Series")
+    out+='<h1>Duplicate cleanup outcome</h1>'
+    out+='<p>Audit #'+escape(result["audit_id"])+'</p>'
+    out+='<p>Staged episodes removed: '+escape(len(result["removed_notification_ids"]))+'</p>'
+    out+='<p>Owned torrents removed: '+escape(len(result["removed_owned_torrents"]))+'</p>'
+    out+='<h2>Preserved torrents</h2><ul>'
+    for item in result["preserved_torrents"]:
+        out+='<li><code>'+escape(item["infohash"])+'</code> — '+escape(item["ownership"])+'</li>'
+    out+='</ul>'
+    if result["errors"]:
+        out+='<h2>Items retained for review</h2><ul>'
+        for error in result["errors"]:out+='<li>'+escape(error)+'</li>'
+        out+='</ul>'
+    out+='<p><a href="/series?id='+str(series_id)+'">Return to series</a></p>'
+    return out+tail()
