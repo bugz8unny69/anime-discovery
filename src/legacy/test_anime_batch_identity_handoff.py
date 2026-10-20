@@ -56,6 +56,26 @@ class HandoffTests(unittest.TestCase):
                         self.db,nid,report,self.settings,XML))
                     self.assertEqual(report["batch_authorization"]["decision"],"ELIGIBLE")
 
+    def test_replayed_original_webhook_restores_intake_without_auto_download(self):
+        from anime_notification_management import recheck_unmatched_identity
+        infohash="c"*40
+        payload={"source":"nyaa","source_guid":"replay-existing-pack",
+                 "release_name":RELEASE,"info_hash":infohash,
+                 "magnet_uri":"magnet:?xt=urn:btih:"+infohash}
+        first=receive(self.db,payload)
+        nid=first["notification_id"]
+        self.db.execute("DELETE FROM anime_batch_pending WHERE notification_id=?",(nid,))
+        self.db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",(nid,))
+        again=receive(self.db,payload)
+        self.assertTrue(again["duplicate"])
+        self.assertEqual(again["notification_id"],nid)
+        self.assertEqual(again["identity_status"],"NEEDS_REVIEW")
+        self.assertIsNotNone(self.db.execute(
+            "SELECT 1 FROM anime_batch_pending WHERE notification_id=?",(nid,)).fetchone())
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM anime_batch_authorizations WHERE notification_id=?",(nid,)).fetchone())
+        self.assertEqual(recheck_unmatched_identity(self.db,nid)["status"],"IDENTIFYING")
+
     def test_legacy_indexer_pack_without_pending_has_actionable_blocker(self):
         from anime_batch_verified_intake import authorize_verified_batch
         import copy
