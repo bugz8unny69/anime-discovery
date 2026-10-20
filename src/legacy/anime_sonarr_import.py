@@ -50,12 +50,11 @@ def plan_staged_imports(db,series_id,*,trial_root):
     return plan
 
 def _reprocess_verified_identity(cfg, key, sonarr_id, item, candidate, episode_id, kwargs):
-    """Ask Sonarr to re-evaluate its *exact* discovered file with trusted IDs.
+    """Submit canonical IDs in the first identity assignment for every file.
 
-    A staged S01E01.mkv may not contain enough title information for Sonarr
-    to auto-match. POST /manualimport reprocesses a preview; it does NOT
-    import anything. Only the later explicit ManualImport command can copy.
-    Sonarr must independently confirm quality, languages and no rejections.
+    POST /manualimport reprocesses a preview; it does NOT import anything.
+    Only the later explicit ManualImport command can copy. Never trust a
+    filename parser's guessed series/episode IDs, even when they agree.
     """
     quality=candidate.get("quality")
     languages=candidate.get("languages")
@@ -152,19 +151,15 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
                 "Review its manual-import inventory.")
             _candidate_review(reason,sonarr_id=sonarr_id,item=item,
                               count=len(candidates),message=message)
-        candidate=same_path[0]
-        parsed_series=candidate.get("series")
-        parsed_episodes=candidate.get("episodes") or []
-        parser_confirmed=(isinstance(parsed_series,dict) and
-            parsed_series.get("id")==sonarr_id and
-            isinstance(parsed_episodes,list) and len(parsed_episodes)==1 and
-            isinstance(parsed_episodes[0],dict) and
-            parsed_episodes[0].get("id")==eid)
-        if not parser_confirmed:
-            # Do NOT reject a title-less S01E01.mkv just because Sonarr's
-            # filename parser was unable to supply the known series/episode.
-            candidate=_reprocess_verified_identity(
-                cfg,key,sonarr_id,item,candidate,eid,kwargs)
+        # Never use a filename parser's prediction as our episode identity
+        # gate, even when it happens to match. For every unique staged file,
+        # supply the already-verified Sonarr series and canonical episode IDs
+        # on the FIRST identity assignment request. The preceding GET only
+        # enumerates existing files and obtains quality/language metadata.
+        # GET manualimport?seriesId=... cannot replace this: Sonarr switches
+        # that request to the series library instead of Anime-Trial.
+        candidate=_reprocess_verified_identity(
+            cfg,key,sonarr_id,item,same_path[0],eid,kwargs)
         if candidate.get("rejections"):
             _candidate_review(
                 "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,
