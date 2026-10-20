@@ -8,7 +8,7 @@ Only waiting jobs may be changed. Active leases are never seized.
 import sqlite3
 import time
 
-MANAGEABLE_KINDS=("claimed_acquisition","series_gap_search")
+MANAGEABLE_KINDS=("claimed_acquisition","series_gap_search","verified_batch_acquisition")
 
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_admin_events (
@@ -39,7 +39,7 @@ def latest_events(db):
 def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None):
     """Compare-and-swap an idle job; preserve the attempt and error history.
 
-    - retry: DEFERRED -> READY, available immediately
+    - retry: DEFERRED/NEEDS_REVIEW -> READY, only by explicit administrator action
     - cancel: READY/DEFERRED/NEEDS_REVIEW -> BLOCKED, with audit event
     Neither changes payload, identity, qBittorrent, dispatch, or media.
     """
@@ -68,8 +68,8 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
             raise ValueError("Unsupported job kind")
         if state!=expected_state or attempts!=expected_attempts:
             raise ValueError("Job changed; refresh and try again")
-        if operation=="retry" and state!="DEFERRED":
-            raise ValueError("Only deferred jobs can be retried now")
+        if operation=="retry" and state not in ("DEFERRED","NEEDS_REVIEW"):
+            raise ValueError("Only deferred or reviewed jobs can be manually retried")
         if operation=="cancel" and state not in ("READY","DEFERRED","NEEDS_REVIEW"):
             raise ValueError("Only waiting jobs can be canceled")
         new_state="READY" if operation=="retry" else "BLOCKED"
