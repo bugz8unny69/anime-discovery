@@ -295,4 +295,66 @@ class RejectionTests(unittest.TestCase):
                 opener=opener)
         self.assertEqual(calls,["GET","GET","POST"])
 
+
+class ReadOnlyReconciliationTests(unittest.TestCase):
+    def classify(self, episodes, files, plan=None):
+        import json
+        from anime_sonarr_import import inspect_registered_episodes
+        calls=[]
+        class Reply:
+            def __init__(self, value): self.value=value
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self): return json.dumps(self.value).encode()
+        def opener(req,timeout):
+            calls.append((req.get_method(),req.full_url))
+            if "episodefile?seriesId=" in req.full_url: return Reply(files)
+            if "episode?seriesId=" in req.full_url: return Reply(episodes)
+            raise AssertionError("Read-only reconciliation must not write")
+        plan=plan if plan is not None else [
+            {"season":1,"episode":1},{"season":1,"episode":2}]
+        result=inspect_registered_episodes(
+            {"sonarr":{"base_url":"https://sonarr.example"}},
+            {"sonarr_api_key":"dummy"},sonarr_id=124,plan=plan,opener=opener)
+        self.assertEqual([method for method,_ in calls],["GET","GET"])
+        return result
+
+    def test_seerr_existing_full_season_is_registered_not_imported(self):
+        episodes=[
+            {"id":701,"seasonNumber":1,"episodeNumber":1,"hasFile":True,"episodeFileId":901},
+            {"id":702,"seasonNumber":1,"episodeNumber":2,"hasFile":True,"episodeFileId":902}]
+        files=[{"id":901,"seriesId":124,"size":1000,"path":"/library/E01.mkv"},
+               {"id":902,"seriesId":124,"size":1000,"path":"/library/E02.mkv"}]
+        result=self.classify(episodes,files)
+        self.assertEqual([x["status"] for x in result],["REGISTERED","REGISTERED"])
+        self.assertNotIn("cleanup_authorized",result[0])
+
+    def test_partial_inventory_reports_only_canonical_missing_episode(self):
+        episodes=[
+            {"id":701,"seasonNumber":1,"episodeNumber":1,"hasFile":True,"episodeFileId":901},
+            {"id":702,"seasonNumber":1,"episodeNumber":2,"hasFile":False,"episodeFileId":0}]
+        files=[{"id":901,"seriesId":124,"size":1000,"path":"/library/E01.mkv"}]
+        self.assertEqual([x["status"] for x in self.classify(episodes,files)],
+                         ["REGISTERED","MISSING"])
+
+    def test_invalid_file_link_and_ambiguous_episode_hold_for_review(self):
+        episodes=[
+            {"id":701,"seasonNumber":1,"episodeNumber":1,"hasFile":True,"episodeFileId":901},
+            {"id":702,"seasonNumber":1,"episodeNumber":2,"hasFile":True,"episodeFileId":902},
+            {"id":703,"seasonNumber":1,"episodeNumber":2,"hasFile":True,"episodeFileId":902}]
+        files=[{"id":901,"seriesId":999,"size":1000,"path":"/library/E01.mkv"},
+               {"id":902,"seriesId":124,"size":1000,"path":"/library/E02.mkv"}]
+        self.assertEqual([x["status"] for x in self.classify(episodes,files)],
+                         ["NEEDS_REVIEW","NEEDS_REVIEW"])
+
+    def test_broken_or_duplicate_manifest_fails_before_sonarr_call(self):
+        from anime_sonarr_import import inspect_registered_episodes
+        settings={"sonarr":{"base_url":"https://sonarr.example"}}
+        secret={"sonarr_api_key":"dummy"}
+        for plan in ([{"season":1,"episode":1}]*2,
+                     [{"season":True,"episode":1}],[]):
+            with self.assertRaises(ValueError):
+                inspect_registered_episodes(settings,secret,sonarr_id=124,plan=plan,
+                    opener=lambda *args: self.fail("should not request Sonarr"))
+
 if __name__=="__main__":unittest.main()
