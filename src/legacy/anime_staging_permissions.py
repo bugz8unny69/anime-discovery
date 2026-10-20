@@ -36,29 +36,40 @@ def resolve_policy(owner="",group=""):
         raise PermissionError("Configured staged group is not assigned to the service account")
     return uid,gid
 
-def apply_directory(path, *, gid=None):
+def parse_mode(value, *, directory):
+    """Four-digit POSIX octal; only setgid is accepted for directories."""
+    if not isinstance(value,str) or not re.fullmatch(r"[0-7]{4}",value):
+        raise ValueError("Staging mode must be four octal digits")
+    mode=int(value,8)
+    if directory:
+        if mode & ~0o2777 or mode & 0o700 != 0o700:
+            raise ValueError("Directory mode requires owner rwx; only setgid special bit is allowed")
+    else:
+        if mode & ~0o777 or mode & 0o600 != 0o600:
+            raise ValueError("File mode requires owner read/write; special bits are forbidden")
+    return mode
+
+def apply_directory(path, *, gid=None, mode="2770"):
     if path.is_symlink() or not path.is_dir():
         raise ValueError("Unsafe staged directory")
-    # Do not remove existing owner/group/other permissions. Ensure that
-    # the configured media group can traverse series and season folders.
-    if gid is not None:
-        if path.stat().st_gid!=gid:
-            os.chown(path,-1,gid)
-        current=stat.S_IMODE(path.stat().st_mode)
-        os.chmod(path,current|0o070)
-        if path.stat().st_gid!=gid or not (stat.S_IMODE(path.stat().st_mode)&0o050)==0o050:
-            raise PermissionError("Staged directory is not accessible to configured group")
+    target=parse_mode(mode,directory=True)
+    if gid is not None and path.stat().st_gid!=gid:
+        os.chown(path,-1,gid)
+    os.chmod(path,target)
+    st=path.stat()
+    if (gid is not None and st.st_gid!=gid) or stat.S_IMODE(st.st_mode)!=target:
+        raise PermissionError("Staged directory owner/group/mode does not match settings")
 
-def apply_file(path, *, uid=None,gid=None):
+def apply_file(path, *, uid=None,gid=None,mode="0640"):
     if path.is_symlink() or not path.is_file():
         raise ValueError("Unsafe staged media file")
+    target=parse_mode(mode,directory=False)
     if uid is not None or gid is not None:
         os.chown(path,uid if uid is not None else -1,
                  gid if gid is not None else -1)
-    # Always provide owner read/write and group read, never world access.
-    os.chmod(path,0o640)
-    current=path.stat()
-    if ((uid is not None and current.st_uid!=uid) or
-            (gid is not None and current.st_gid!=gid) or
-            stat.S_IMODE(current.st_mode)&0o640 != 0o640):
-        raise PermissionError("Cannot publish staged file without required permissions")
+    os.chmod(path,target)
+    st=path.stat()
+    if ((uid is not None and st.st_uid!=uid) or
+            (gid is not None and st.st_gid!=gid) or
+            stat.S_IMODE(st.st_mode)!=target):
+        raise PermissionError("Staged file owner/group/mode does not match settings")
