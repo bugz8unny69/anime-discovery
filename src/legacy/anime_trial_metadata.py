@@ -26,7 +26,14 @@ def _write_xml(path, root):
             os.unlink(name)
 
 
-def write_episode_nfo(video_path, *, title, season, episode, tvdb_id, episode_title=None):
+def _display_title(title, english_title):
+    """Only an explicitly supplied English title may override the canonical title."""
+    if isinstance(english_title, str) and english_title.strip():
+        return english_title.strip()
+    return title
+
+
+def write_episode_nfo(video_path, *, title, season, episode, tvdb_id, episode_title=None, english_title=None):
     video=Path(video_path)
     if not video.is_file() or video.is_symlink():
         raise ValueError("Expected existing regular video file")
@@ -36,7 +43,7 @@ def write_episode_nfo(video_path, *, title, season, episode, tvdb_id, episode_ti
         raise ValueError("Missing verified series metadata")
     root=ET.Element("episodedetails")
     ET.SubElement(root,"title").text=episode_title or f"Episode {episode}"
-    ET.SubElement(root,"showtitle").text=title
+    ET.SubElement(root,"showtitle").text=_display_title(title,english_title)
     ET.SubElement(root,"season").text=str(season)
     ET.SubElement(root,"episode").text=str(episode)
     ET.SubElement(root,"uniqueid",{"type":"tvdb","default":"true"}).text=str(tvdb_id)
@@ -45,14 +52,14 @@ def write_episode_nfo(video_path, *, title, season, episode, tvdb_id, episode_ti
     return dest
 
 
-def write_series_nfo(series_directory, *, title, tvdb_id, anidb_id=None):
+def write_series_nfo(series_directory, *, title, tvdb_id, anidb_id=None, english_title=None):
     folder=Path(series_directory)
     if not folder.is_dir() or folder.is_symlink():
         raise ValueError("Expected existing series directory")
     if not title or not title.strip() or not str(tvdb_id).isdigit():
         raise ValueError("Missing verified series identity")
     root=ET.Element("tvshow")
-    ET.SubElement(root,"title").text=title
+    ET.SubElement(root,"title").text=_display_title(title,english_title)
     ET.SubElement(root,"uniqueid",{"type":"tvdb","default":"true"}).text=str(tvdb_id)
     if anidb_id is not None:
         if not str(anidb_id).isdigit():
