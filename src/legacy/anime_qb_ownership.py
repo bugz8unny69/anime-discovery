@@ -98,3 +98,32 @@ def confirm_marker(db,infohash,qb):
                   WHERE infohash=? AND status='UNCERTAIN' AND marker=?""",
                (int(time.time()),infohash,marker))
     return True
+
+def owned_now(db,infohash,qb):
+    """Recheck the marker immediately before destructive cleanup.
+
+    An earlier proof is insufficient if the torrent was deleted and later
+    replaced, recategorized or retagged by another client.
+    """
+    infohash=normalize(infohash)
+    if ownership(db,infohash)!=OWNED:
+        return False
+    row=db.execute("SELECT marker FROM qb_torrent_ownership WHERE infohash=?",
+                   (infohash,)).fetchone()
+    marker=row[0] if row else None
+    if not marker:
+        return False
+    try:
+        current=qb.torrent_identity(infohash)
+    except (OSError,ValueError,RuntimeError):
+        current=None
+    if current is not None:
+        tags=current.get("tags","")
+        labels={part.strip() for part in tags.split(",")} if isinstance(tags,str) else set()
+        if current.get("category")==CATEGORY and marker in labels:
+            return True
+    # Degrade an old ownership decision to uncertain, never promote an
+    # externally discovered source. Even a qB outage leaves files untouched.
+    db.execute("""UPDATE qb_torrent_ownership SET status='UNCERTAIN',updated_at=?
+        WHERE infohash=? AND status='OWNED'""",(int(time.time()),infohash))
+    return False
