@@ -114,13 +114,18 @@ def review(db,series_id,settings,secrets,*,opener=None,audio_probe=confirmed_jp_
         review_items.append({"notification_id":item["notification_id"],
             "season":item["season"],"episode":item["episode"],"path":item["path"],
             "size":metadata.st_size if metadata else None,
+            "source_dev":metadata.st_dev if metadata else None,
+            "source_inode":metadata.st_ino if metadata else None,
+            "source_mtime_ns":metadata.st_mtime_ns if metadata else None,
             "status":status,"reason":reason,
             "episode_file_id":state.get("sonarr_episode_file_id") if state else None})
     preserved=ownership_for_series(db,series_id)
     # Bind operator confirmation to the precise files inspected on the page.
     # Never expand a past authorization to newly staged or replaced files.
     selection=[{"notification_id":x["notification_id"],"path":x["path"],
-                "size":x["size"],"episode_file_id":x["episode_file_id"]}
+                "size":x["size"],"episode_file_id":x["episode_file_id"],
+                "dev":x["source_dev"],"inode":x["source_inode"],
+                "mtime_ns":x["source_mtime_ns"]}
                for x in review_items if x["status"]=="REGISTERED"]
     selection.sort(key=lambda item:item["notification_id"])
     fingerprint=hashlib.sha256(json.dumps(selection,sort_keys=True,
