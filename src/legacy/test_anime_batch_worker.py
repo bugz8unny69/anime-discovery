@@ -33,6 +33,12 @@ class SourceQB(AbsoluteQB):
         self.done=set()
         self.sizes=[1000]*12
 
+    def add_magnet(self, uri, *, category, tag, save_path=None):
+        self.received_save_path=save_path
+        if save_path is not None:
+            assert save_path==str(self.source_root)
+        return super().add_magnet(uri,category=category,tag=tag)
+
     def torrent_identity(self, infohash):
         raw=super().torrent_identity(infohash)
         return {**raw,"save_path":str(self.source_root)} if raw else None
