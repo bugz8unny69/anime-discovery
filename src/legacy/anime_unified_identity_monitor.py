@@ -4,6 +4,7 @@ Network evidence is observational; only configured exact mappings can
 authorize a download through the existing webhook approval gate.
 """
 import gzip
+from difflib import SequenceMatcher
 import io
 import json
 import logging
@@ -12,7 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 from anime_flat_config import load_config
-from anime_identification_probe import release_title,anidb_matches,tvdb_candidates
+from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids
 
@@ -59,10 +60,35 @@ def ensure_titles(path,*,now=None,downloader=None):
         tmp.unlink(missing_ok=True)
     return path
 
+def candidate_score(aliases,names):
+    """Highest normalized title similarity, recorded for review only."""
+    normalized=[norm(x) for x in aliases if isinstance(x,str) and norm(x)]
+    options=[norm(x) for x in names if isinstance(x,str) and norm(x)]
+    if not normalized or not options:
+        return 0
+    return round(100*max(SequenceMatcher(None,a,b,autojunk=False).ratio()
+                         for a in normalized for b in options))
+
+def title_diagnostics(aliases,candidates,threshold):
+    rows=[]
+    for row in candidates:
+        names=[row.get("name") or "",row.get("matched_query") or ""]
+        # matched_query is a search input, not candidate evidence; never score it.
+        names=names[:1]+[x for x in row.get("aliases",[]) if isinstance(x,str)]
+        score=candidate_score(aliases,names)
+        rows.append({"tvdb_id":str(row["tvdb_id"]),"name":str(row.get("name") or "")[:180],
+                     "score_pct":score,"threshold_pct":threshold,
+                     "passed":score>=threshold,
+                     "reason":"TITLE_SCORE_PASSED" if score>=threshold else "BELOW_TITLE_THRESHOLD"})
+    return rows
+
 def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json):
     aliases,episode=release_title(name)
-    report={"episode_candidate":episode,"anidb_candidates":[],
-            "tvdb_candidates":[],"matching_pairs":[],
+    threshold=settings.get("identity",{}).get("match_threshold_pct",90)
+    report={"title_queries":aliases[:5],"threshold_pct":threshold,
+            "episode_candidate":episode,"anidb_candidates":[],
+            "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
+            "matching_pairs":[],"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
@@ -70,7 +96,11 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("ANIDB_PUBLIC_SOURCE_DISABLED")
         return report
     rows,truncated=anidb_matches(catalog,aliases,limit=10)
+    report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
+                                "mode":"exact normalized title","truncated":bool(truncated)})
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
+    if not rows:
+        report["issues"].append("NO_ANIDB_EXACT_TITLE_MATCH")
     if truncated:
         report["issues"].append("AMBIGUOUS_ANIDB_TITLES")
     if not settings["tvdb"]["enabled"] or not secrets.get("tvdb_api_key"):
@@ -78,22 +108,42 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         return report
     candidates,errors=search(aliases,secrets["tvdb_api_key"])
     report["tvdb_candidates"]=[str(c["tvdb_id"]) for c in candidates]
+    report["tvdb_results_count"]=len(candidates)
+    report["candidate_scores"]=title_diagnostics(aliases,candidates,threshold)
+    report["workflow"].append({"step":"TVDB search","returned":len(candidates),
+                                "threshold_pct":threshold})
     report["issues"].extend(errors)
+    if not candidates:
+        report["issues"].append("NO_TVDB_SEARCH_RESULTS")
     if errors:
         raise RuntimeError("TVDB search incomplete")
     if len(candidates)>10:
         report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
         return report
     token=login(secrets["tvdb_api_key"])
+    accepted={r["tvdb_id"] for r in report["candidate_scores"] if r["passed"]}
+    report["workflow"].append({"step":"Title score filter","passed":len(accepted),
+                                "rejected":len(candidates)-len(accepted)})
+    if not accepted:
+        report["issues"].append("ALL_TVDB_TITLES_BELOW_THRESHOLD")
+        return report
     aid_set={str(x["anidb_id"]) for x in rows}
     for candidate in candidates[:10]:
         tid=str(candidate["tvdb_id"])
+        if tid not in accepted:
+            continue
         detail=fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {}
         if str(detail.get("id"))!=tid:
             raise ValueError("TVDB ID response mismatch")
         match=aid_set.intersection(explicit_anidb_ids(detail))
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
+    report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
+                                "matching_pairs":len(report["matching_pairs"])})
+    if not report["matching_pairs"]:
+        report["issues"].append("NO_EXPLICIT_TVDB_ANIDB_CROSSREF")
+    elif len(report["matching_pairs"])>1:
+        report["issues"].append("MULTIPLE_TVDB_ANIDB_CROSSREFS")
     if len(report["matching_pairs"])==1 and episode and not report["issues"]:
         pair=report["matching_pairs"][0]
         tid=pair["tvdb_id"]
@@ -129,6 +179,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                 report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
         else:
             report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
+            report["workflow"].append({"step":"Verified episode map", "passed":False})
         if report["decision"]!="AUTO_VERIFIED":
             report["decision"]="SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED"
     else:
@@ -173,8 +224,30 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             retry=attempts<3
             pending_retries+=int(retry)
             LOG.warning("Identity triage retry notification=%s error_type=%s",nid,type(exc).__name__)
+        LOG.info("identity notification=%s attempt=%s decision=%s threshold=%s anidb_matches=%s tvdb_candidates=%s issues=%s",
+                 nid,attempts,decision,report.get("threshold_pct","n/a"),
+                 len(report.get("anidb_candidates",[])),
+                 report.get("tvdb_results_count","n/a"),
+                 ",".join(report.get("issues",[])[:8]))
+        for candidate in report.get("candidate_scores",[])[:10]:
+            LOG.info("identity notification=%s tvdb_candidate=%s score=%s threshold=%s result=%s",
+                     nid,candidate["tvdb_id"],candidate["score_pct"],
+                     candidate["threshold_pct"],candidate["reason"])
+        for step in report.get("workflow",[])[:12]:
+            LOG.info("identity notification=%s step=%s details=%s",
+                     nid,step.get("step"),json.dumps({k:v for k,v in step.items() if k!="step"},sort_keys=True))
         # Never expose API keys or release payloads in stored diagnostics.
-        safe=json.dumps(report,sort_keys=True)[:16000]
+        safe=json.dumps(report,sort_keys=True)
+        if len(safe)>16000:
+            compact={"decision":decision,"issues":report.get("issues",[])[:8],
+                     "threshold_pct":report.get("threshold_pct"),
+                     "tvdb_results_count":report.get("tvdb_results_count"),
+                     "candidate_scores":report.get("candidate_scores",[])[:5],
+                     "workflow":report.get("workflow",[])[:5]}
+            safe=json.dumps(compact,sort_keys=True)
+            if len(safe)>16000:
+                safe=json.dumps({"decision":decision,"issues":["TRACE_TRUNCATED"]})
+
         with db:
             db.execute("""INSERT INTO unified_identity_checks
                 (notification_id,checked_at,attempts,next_at,decision,evidence_json)
@@ -190,6 +263,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     return {"processed":done,"pending_retries":pending_retries}
 
 def main():
+    logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     while True:
         try:
             cfg=load_config()

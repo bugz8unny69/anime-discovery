@@ -12,7 +12,7 @@ DEFAULT_SETTINGS = {
     "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
     "web": {"host": "0.0.0.0", "port": 8765},
     "storage": {"download_root": "", "trial_root": ""},
-    "identity": {"reuse_verified_cache": True, "series_map": {}, "episode_map": {}},
+    "identity": {"reuse_verified_cache": True, "series_map": {}, "episode_map": {}, "match_threshold_pct": 90},
     "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
     "prowlarr": {"enabled": False, "base_url": ""},
     "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
@@ -73,6 +73,9 @@ def validate_config(settings,secrets,*,directory=None):
                          ("shoko","enabled"),("shoko","auto_link_verified"),("anidb","enabled")):
         if type(result[section][key]) is not bool:
             raise ValueError("Invalid boolean setting: "+section+"."+key)
+    threshold=result["identity"]["match_threshold_pct"]
+    if type(threshold) is not int or not 50<=threshold<=100:
+        raise ValueError("identity.match_threshold_pct must be an integer from 50 to 100")
     series_map = result["identity"]["series_map"]
     if not isinstance(series_map,dict) or len(series_map)>500:
         raise ValueError("identity.series_map must be a mapping with at most 500 aliases")

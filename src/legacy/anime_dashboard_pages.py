@@ -177,6 +177,12 @@ five seconds. Items waiting for episode identity have not entered the worker que
 <button type="submit">Approve &amp; queue</button>
 <button type="button" class="secondary" id="resolve-cancel">Cancel</button>
 </form></dialog>'''
+    out+='''<dialog id="match-trace-dialog" style="background:#172335;color:#e8edf7;border:1px solid #52708f;border-radius:14px;padding:24px;width:min(760px,95vw);max-height:85vh;overflow:auto">
+<h2>Identification workflow</h2>
+<p id="match-trace-summary" class="muted"></p>
+<div id="match-trace-body"></div>
+<button type="button" class="secondary" id="match-trace-close">Close</button>
+</dialog>'''
     out+='<script>const initial='+json.dumps(result,separators=(",",":")).replace("<","\\u003c")+';'
     out+=r'''
 const tbody=document.getElementById("job-rows"),blank=document.getElementById("no-jobs");
@@ -227,8 +233,46 @@ if(job.can_delete){
     }catch(error){alert(error.message)}
   });actions.appendChild(btn);
 }
+if(typeof job.id==="number" && job.status!=="COMPLETED"){
+  let btn=document.createElement("button");btn.type="button";btn.className="secondary";
+  btn.textContent="Matching details";btn.addEventListener("click",()=>openTrace(job.id));
+  actions.appendChild(btn);
+}
 tr.appendChild(actions);tbody.appendChild(tr)}}
 document.getElementById("resolve-cancel").addEventListener("click",()=>document.getElementById("resolve-dialog").close());
+document.getElementById("match-trace-close").addEventListener("click",()=>document.getElementById("match-trace-dialog").close());
+function traceLine(parent,text){
+  const p=document.createElement("p");p.textContent=text;parent.appendChild(p);
+}
+async function openTrace(notificationId){
+  const dialog=document.getElementById("match-trace-dialog");
+  const summary=document.getElementById("match-trace-summary");
+  const body=document.getElementById("match-trace-body");
+  summary.textContent="Notification #"+notificationId;body.replaceChildren();
+  dialog.showModal();
+  try{
+    const response=await fetch("/api/identity-trace?notification_id="+encodeURIComponent(notificationId),{cache:"no-store"});
+    const data=await response.json();if(!response.ok)throw Error(data.error||"Trace unavailable");
+    if(!data.available){traceLine(body,data.message);return}
+    const ev=data.evidence||{};
+    traceLine(body,"Decision: "+data.decision+" · Attempt "+data.attempts+
+      " · Title threshold "+(ev.threshold_pct??"not recorded")+"%");
+    traceLine(body,"Searched: "+(ev.title_queries||[]).join(" | "));
+    traceLine(body,"Episode candidate: "+(ev.episode_candidate??"not parsed"));
+    traceLine(body,"AniDB exact title candidates: "+(ev.anidb_candidates||[]).length);
+    traceLine(body,"TVDB responses considered: "+(ev.tvdb_results_count??"not recorded"));
+    for(const candidate of ev.candidate_scores||[]){
+      traceLine(body,"TVDB #"+candidate.tvdb_id+" · "+candidate.name+
+        " · score "+candidate.score_pct+"% / "+candidate.threshold_pct+"% · "+candidate.reason);
+    }
+    for(const step of ev.workflow||[]){
+      traceLine(body,step.step+": "+JSON.stringify(Object.fromEntries(
+        Object.entries(step).filter(([key])=>key!=="step"))));
+    }
+    traceLine(body,"Verified cross-reference pairs: "+(ev.matching_pairs||[]).length);
+    traceLine(body,"Reasons: "+((ev.issues||[]).join(", ")||"No reason codes recorded"));
+  }catch(error){traceLine(body,"Could not load matching details: "+error.message)}
+}
 update(initial);
 async function refresh(){if(document.hidden)return;
 try{let response=await fetch("/api/jobs"+location.search,{cache:"no-store"});

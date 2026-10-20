@@ -337,6 +337,53 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
                                            (nid,)).fetchone())
 
+    def test_identity_trace_requires_session_and_shows_scores(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder)
+            (folder/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (folder/"secrets.json").write_text(json.dumps({"web_token":"hidden-secret"}))
+            os.chmod(folder/"secrets.json",0o600)
+            with sqlite3.connect(self.db) as db:
+                nid=db.execute("""INSERT INTO notifications
+                    (source,release_name,source_guid,info_hash,received_at,status)
+                    VALUES ('nyaa','Some anime - 02','trace-key',?,1,'NEEDS_REVIEW')""",
+                    ("c"*40,)).lastrowid
+                from anime_unified_identity_monitor import ensure_schema
+                ensure_schema(db)
+                evidence={"threshold_pct":90,"title_queries":["Some anime"],
+                          "tvdb_results_count":1,"candidate_scores":[
+                          {"tvdb_id":"123","name":"Different title","score_pct":31,
+                           "threshold_pct":90,"passed":False,"reason":"BELOW_TITLE_THRESHOLD"}],
+                          "issues":["ALL_TVDB_TITLES_BELOW_THRESHOLD"]}
+                db.execute("""INSERT INTO unified_identity_checks
+                    (notification_id,checked_at,attempts,next_at,decision,evidence_json)
+                    VALUES (?,1,1,0,'NEEDS_REVIEW',?)""",(nid,json.dumps(evidence)))
+                db.commit()
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=folder))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            try:
+                url="/api/identity-trace?notification_id="+str(nid)
+                client.request("GET",url)
+                response=client.getresponse()
+                self.assertEqual(response.status,401)
+                response.read()
+                client.request("GET",url,headers={"Cookie":"ad_session="+self.session})
+                response=client.getresponse()
+                self.assertEqual(response.status,200)
+                data=json.loads(response.read())
+                self.assertEqual(data["evidence"]["candidate_scores"][0]["score_pct"],31)
+                self.assertNotIn("hidden-secret",json.dumps(data))
+            finally:
+                client.close()
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_session_mutations_require_csrf(self):
         client=http.client.HTTPConnection("127.0.0.1",self.port,timeout=3)
         try:
