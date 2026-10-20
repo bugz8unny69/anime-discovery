@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from anime_flat_config import DEFAULT_SETTINGS
-from anime_dashboard_settings_page import settings_page
+from anime_dashboard_settings_page import settings_page, render_field
+from anime_settings_schema import SCHEMA, field, defaults
 import anime_dashboard_auth as auth
 
 class DashboardSettingsTests(unittest.TestCase):
@@ -36,5 +37,46 @@ class DashboardSettingsTests(unittest.TestCase):
             self.assertNotIn("other-private-value",html)
             self.assertIn("Refresh",html)
             self.assertIn("Save &amp; Apply",html)
+
+    def test_anidb_client_and_version_are_generated_without_credentials(self):
+        with tempfile.TemporaryDirectory() as name:
+            folder=Path(name)
+            settings=defaults()
+            settings["anidb"]["client"]="registeredclient"
+            settings["anidb"]["clientver"]=3
+            (folder/"settings.json").write_text(json.dumps(settings))
+            (folder/"secrets.json").write_text("{}")
+            with patch.object(auth,"AUTH_FILE",folder/"auth.json"):
+                page=settings_page(folder)
+        form=page.split('id="anidb-public"',1)[1].split("</form>",1)[0]
+        self.assertIn('name="client" value="registeredclient"',form)
+        self.assertIn('name="clientver" value="3"',form)
+        self.assertIn("HTTP API Client Name",form)
+        self.assertNotIn('name="http_api_url"',form)
+        self.assertNotIn('name="credential"',form)
+        self.assertNotIn("Test Connection",form)
+        self.assertNotIn('name="anidb_api_key"',form)
+
+    def test_new_schema_field_needs_no_renderer_or_default_updates(self):
+        new=field("safe-default",label="Future Preference")
+        self.assertIn('name="future_preference"',render_field("future_preference",new,"safe-default"))
+        with patch.dict(SCHEMA["anidb"]["fields"],{"future_preference":new}):
+            self.assertEqual(defaults()["anidb"]["future_preference"],"safe-default")
+            with patch("anime_dashboard_settings_page.snapshot",
+                       return_value={"settings":defaults(),"credential_status":{}}):
+                page=settings_page(Path("/unused-in-patched-snapshot"))
+            self.assertIn('name="future_preference" value="safe-default"',page)
+            self.assertIn("Future Preference",page)
+
+    def test_complex_or_hidden_schema_fields_are_not_rendered(self):
+        self.assertEqual(render_field("episode_map",SCHEMA["identity"]["fields"]["episode_map"],{}),"")
+        self.assertEqual(render_field("http_api_url",SCHEMA["anidb"]["fields"]["http_api_url"],""),"")
+        with self.assertRaises(ValueError):
+            field({},visible=True)
+
+    def test_rendered_values_are_html_escaped(self):
+        spec=field("",label="User Supplied")
+        self.assertIn('&lt;script&gt;',render_field("test",spec,'<script>'))
+        self.assertNotIn('value="<script>"',render_field("test",spec,'<script>'))
 
 if __name__=="__main__": unittest.main()
