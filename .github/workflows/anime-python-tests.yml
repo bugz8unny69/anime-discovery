@@ -42,6 +42,7 @@ jobs:
             test_anime_qb_manifest_intake \
             test_anime_qb_e01_probe \
             test_anime_qb_size_gate \
+            test_anime_batch_completion \
             test_anime_batch_selection \
             test_anime_trial_policy \
             test_anime_trial_size_policy \
