@@ -17,13 +17,15 @@ def manifest():
 
 
 class FakeQB:
-    def __init__(self, *, ready_after=1, externally_owned=False):
+    def __init__(self, *, ready_after=1, externally_owned=False, visibility_delay=0):
         self.records = {}
         self.adds = 0
         self.stops = 0
         self.resumes = 0
         self.file_polls = 0
         self.ready_after = ready_after
+        self.visibility_delay = visibility_delay
+        self.contains_checks = 0
         self.externally_owned = externally_owned
         self.change_after_stop = False
         if externally_owned:
@@ -31,7 +33,9 @@ class FakeQB:
                                   "tags": "", "state": "downloading"}
 
     def contains_hash(self, infohash):
-        return infohash in self.records
+        self.contains_checks += 1
+        return (infohash in self.records and
+                self.contains_checks > self.visibility_delay)
 
     def torrent_identity(self, infohash):
         return self.records.get(infohash)
@@ -82,6 +86,14 @@ class ManifestIntakeTests(unittest.TestCase):
         self.assertEqual(qb.resumes, 0)
         self.assertEqual(qb.records[HASH]["state"], "pausedDL")
         self.assertGreaterEqual(qb.file_polls, 3)
+
+    def test_delayed_torrent_visibility_reconciles_without_duplicate_add(self):
+        qb = FakeQB(ready_after=0, visibility_delay=4)
+        result = self.run_intake(qb, attempts=6)
+        self.assertEqual(result["state"], "MANIFEST_READY")
+        self.assertEqual(qb.adds, 1)
+        self.assertEqual(qb.stops, 1)
+        self.assertGreater(qb.contains_checks, 4)
 
     def test_existing_external_torrent_is_never_paused(self):
         qb = FakeQB(externally_owned=True, ready_after=0)
