@@ -128,7 +128,8 @@ def authorize_manifest_sizes(db, *, window, infohash, episode_files, limits=None
         raise ValueError("Verified trial window required")
     expected = window_for(db, tvdb_id=window.get("tvdb_id"),
                           anidb_id=window.get("anidb_id"),
-                          season=window.get("season"))
+                          season=window.get("season"),
+                          unit_key=window.get("unit_key"))
     if expected != window:
         raise PermissionError("Trial window does not match persisted identity")
     first = window["start"]
