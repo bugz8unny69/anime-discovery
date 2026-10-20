@@ -162,3 +162,44 @@ def plan_first_six(files, *, season, already_satisfied=()):
         "out_of_window_episodes": sorted(ep for ep in episodes if ep > 6),
         "file_names_by_index": dict(sorted(names.items())),
     }
+
+
+def plan_gated_first_six(files, *, season, probe_verified=False, already_satisfied=()):
+    """Return a two-phase E01-first plan; no torrent or storage mutation.
+
+    Phase 1 fetches ONLY E01, withholding E02-E06 until the worker has
+    durably recorded that this exact E01 file passed actual ffprobe
+    Japanese+English validation. Phase 2 returns all still-needed E01-E06.
+    'probe_verified' must come from independently verified durable evidence,
+    never a release name, torrent status or a caller-controlled webhook.
+    """
+    if type(probe_verified) is not bool:
+        raise ValueError("probe_verified must be boolean")
+    # Validate all file paths and per-episode uniqueness before choosing
+    # either phase. Don't silently omit ambiguous E07+ files.
+    plan = plan_first_six(files, season=season, already_satisfied=already_satisfied)
+    if 1 not in plan["wanted_episodes"] and 1 not in plan["already_satisfied"]:
+        raise SelectionNeedsReview("E01 not available or previously verified; cannot authorize batch probe")
+    if not probe_verified:
+        if 1 in plan["already_satisfied"]:
+            # A separately verified E01 still requires the caller to explicitly
+            # attest durable probe verification before unlocking other files.
+            wanted = {}
+        else:
+            wanted = {1: plan["wanted_episodes"][1]}
+        phase = "PROBE_E01"
+    else:
+        wanted = plan["wanted_episodes"]
+        phase = "UNLOCK_E02_E06"
+    included = set(wanted.values())
+    all_indices = set(plan["wanted_indices"]) | set(plan["skip_indices"])
+    return {
+        "phase": phase,
+        "season": season,
+        "wanted_episodes": wanted,
+        "wanted_indices": sorted(included),
+        "skip_indices": sorted(all_indices - included),
+        "already_satisfied": plan["already_satisfied"],
+        "out_of_window_episodes": plan["out_of_window_episodes"],
+        "file_names_by_index": plan["file_names_by_index"],
+    }
