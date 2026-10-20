@@ -22,6 +22,17 @@ class GateTests(unittest.TestCase):
         self.assertEqual(resolve_notification(self.db,7),4)
         self.assertFalse(acquisition_authorized(self.db,7))
 
+    def test_approved_notification_uses_verified_series_binding(self):
+        self.db.execute("UPDATE notifications SET status='APPROVED' WHERE id=7")
+        self.assertEqual(resolve_notification(self.db,7),4)
+        self.assertFalse(acquisition_authorized(self.db,7))
+
+    def test_approved_status_without_evidence_still_fails(self):
+        self.db.execute("UPDATE notifications SET status='APPROVED' WHERE id=7")
+        self.db.execute("DELETE FROM verified_series_identity")
+        with self.assertRaises(IdentityNotReady):
+            resolve_notification(self.db,7)
+
     def test_rejection_persists_across_hashes(self):
         self.db.execute("INSERT INTO series_rejection_blocks VALUES(4)")
         with self.assertRaises(SeriesBlocked):
