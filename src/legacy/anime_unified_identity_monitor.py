@@ -149,6 +149,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
                 from anime_webhook_processing import approve
                 approve(db,nid,report["approval"],source="verified_identity_mapping")
                 # approve() atomically records proof and queues the job.
+                db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
             retry=False
         except Exception as exc:
             decision="LOOKUP_RETRY" if attempts<3 else "NEEDS_REVIEW"
