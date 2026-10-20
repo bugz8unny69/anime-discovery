@@ -69,7 +69,7 @@ def _reprocess_verified_identity(cfg, key, sonarr_id, item, candidate, episode_i
         "quality":quality,"languages":languages,
         "releaseGroup":candidate.get("releaseGroup") or "",
         "indexerFlags":candidate.get("indexerFlags") or 0,
-        "releaseType":candidate.get("releaseType") or "unknown"
+        "releaseType":candidate.get("releaseType", 0) if candidate.get("releaseType") is not None else 0
     }]
     processed=_request(cfg["base_url"],key,"POST","manualimport",payload,**kwargs)
     if not isinstance(processed,list) or len(processed)!=1 or not isinstance(processed[0],dict):
