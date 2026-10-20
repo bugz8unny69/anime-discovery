@@ -100,14 +100,25 @@ def keep_review_page(series_id, error):
     back=("/series?id="+valid_id if valid_id else "/")
     reason=getattr(error,"reason",None)
     detail=str(error)[:400]
-    out=shell("Keep needs attention","Series")
-    out+='<h1>Keep needs attention</h1>'
+    already=(reason=="SONARR_EPISODE_ALREADY_PRESENT")
+    out=shell("Existing Sonarr episode" if already else "Keep needs attention","Series")
+    out+='<h1>'+("Episode already registered in Sonarr" if already
+                  else "Keep needs attention")+'</h1>'
     out+='<section class="panel" role="alert">'
-    out+='<h2>Sonarr has not confirmed this import</h2>'
+    out+='<h2>'+("Sonarr has an existing episode file" if already
+                   else "Sonarr has not confirmed this import")+'</h2>'
     out+='<p>'+escape(detail)+'</p>'
     if reason:
         out+='<p class="muted">Diagnostic reason: <code>'+escape(reason)+'</code></p>'
-    out+='''<p><strong>Check these Sonarr settings:</strong></p>
+    if already:
+        out+='''<p>Sonarr's API reports an already registered episode file. This does
+not prove it is identical to the Anime-Trial video, that it has Japanese and
+English audio, or that the staged video was imported. Anime Discovery has
+preserved the staged source and has not marked Keep complete.</p>
+<p>Review the existing episode in Sonarr before choosing to replace it or
+retain it. No Sonarr library file or torrent has been removed.</p>'''
+    else:
+        out+='''<p><strong>Check these Sonarr settings:</strong></p>
 <ol>
 <li>In Sonarr, <strong>Settings → Media Management → Root Folders</strong>
 must point to the permanent anime library, not Anime-Trial.</li>
