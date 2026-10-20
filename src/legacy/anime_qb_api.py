@@ -129,7 +129,7 @@ class QBittorrentAPI:
         tags = str(detail.get("tags") or "").split(",")
         if not any(re.fullmatch(r"ad-[0-9a-f]{32}",tag.strip()) for tag in tags):
             raise PermissionError("Owned torrent marker missing")
-        if detail.get("state") not in ("stoppedDL", "pausedDL"):
+        if detail.get("state") not in ("stoppedDL", "pausedDL", "stoppedUP", "pausedUP"):
             raise RuntimeError("Torrent must remain stopped before selection")
         before = self.torrent_files(infohash)
         indices_by_file = {}
@@ -166,7 +166,7 @@ class QBittorrentAPI:
             raise RuntimeError("File priority verification failed; torrent must remain stopped")
         detail_after = self.torrent_identity(infohash)
         if (not detail_after or detail_after.get("state")
-                not in ("stoppedDL", "pausedDL")):
+                not in ("stoppedDL", "pausedDL", "stoppedUP", "pausedUP")):
             raise RuntimeError("Torrent became active during priority selection")
         return {"wanted_indices": sorted(wanted), "skip_indices": sorted(skipped)}
 
