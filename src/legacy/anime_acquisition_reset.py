@@ -163,6 +163,7 @@ def reset_acquisitions(db, series_id, *, trial_root):
         # Unknown additional job references must be reviewed before destroying
         # a job. Known audit references are explicitly cleaned below.
         job_ids=[r[0] for r in rows]
+        next_job_id=db.execute("SELECT COALESCE(MAX(id),0)+1 FROM daemon_jobs").fetchone()[0]
         for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
             if table=="daemon_job_admin_events" or not re.fullmatch(r"[a-zA-Z_][a-zA-Z_0-9]*",table):
                 continue
@@ -209,10 +210,11 @@ def reset_acquisitions(db, series_id, *, trial_root):
             approved_dispatch(db,nid)
             db.execute("""UPDATE episodes SET status='ACQUIRING'
                 WHERE series_id=? AND season=? AND episode=?""",(series_id,season,ep))
-            fresh=db.execute("""INSERT INTO daemon_jobs
-                (kind,subject_key,payload_json,state,available_at,attempts)
-                VALUES ('claimed_acquisition',?,?,'READY',0,0)""",
-                (str(nid),payload)).lastrowid
+            fresh=next_job_id+len(fresh_ids)
+            db.execute("""INSERT INTO daemon_jobs
+                (id,kind,subject_key,payload_json,state,available_at,attempts)
+                VALUES (?,'claimed_acquisition',?,?,'READY',0,0)""",
+                (fresh,str(nid),payload))
             fresh_ids.append(fresh)
         db.execute("""INSERT INTO series_acquisition_resets
             (series_id,created_at,notification_ids_json,old_job_ids_json,
