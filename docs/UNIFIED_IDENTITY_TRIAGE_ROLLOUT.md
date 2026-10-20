@@ -13,7 +13,7 @@ This integration performs a bounded first-pass lookup for unmatched Autobrr rele
 
 ## AniDB credentials
 
-Public AniDB title data needs **no API key**. There is currently no AniDB API secret or independent AniDB enable setting to configure. The dashboard explains this and does not create a fake control. TVDB must be enabled with a valid API key to resolve cross-references.
+Public AniDB title data needs **no API key**. The dashboard exposes a functional `anidb.enabled` control, enabled by default. Turning it off prevents the unified identity worker from contacting the public AniDB catalog. There is no AniDB API secret to configure. TVDB must be enabled with a valid API key to resolve cross-references.
 
 ## Operational notes
 
