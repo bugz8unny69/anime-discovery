@@ -145,6 +145,44 @@ class VerifiedSeasonMemoryTests(unittest.TestCase):
         self.assertIsNone(resolve_release("[GroupB] Cyberpunk Edgerunners S03E02",aliases))
         self.assertIsNone(resolve_release("[GroupB] Cyberpunk Edgerunners - 1001",aliases))
 
+    def test_auto_remembered_alias_never_bypasses_episode_verification(self):
+        from anime_webhook_processing import receive
+        self.save(2,19445)
+        from anime_series_aliases import remember_verified_season
+        from anime_flat_config import DEFAULT_SETTINGS,load_config
+        import os
+        directory=self.root/"one-click"
+        directory.mkdir()
+        (directory/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+        (directory/"secrets.json").write_text("{}")
+        os.chmod(directory/"secrets.json",0o600)
+        remember_verified_season(self.db,directory,self.sid,2)
+        aliases=load_config(directory)["settings"]["identity"]["series_map"]
+        self.assertEqual(aliases[NAME+" [S02]"]["verify_each_episode"],True)
+        incoming=receive(self.db,{"source":"autobrr","source_guid":"groupB-06",
+            "release_name":"[DifferentUploader] Cyberpunk Edgerunners S02E06",
+            "info_hash":"f"*40},series_map=aliases)
+        self.assertEqual(incoming["identity_status"],"IDENTIFYING")
+        self.assertFalse(incoming.get("queued",False))
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM episode_dispatch WHERE notification_id=?",
+            (incoming["notification_id"],)).fetchone())
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM daemon_jobs WHERE subject_key=?",
+            (str(incoming["notification_id"]),)).fetchone())
+
+    def test_series_detail_shows_only_server_proven_seasons(self):
+        from anime_dashboard_pages import detail_page
+        from anime_series_lifecycle import inspect
+        self.save(2,19445)
+        info=inspect(self.db,self.sid)
+        info["remembered_seasons"]=for_series(self.db,self.sid)
+        html=detail_page(info)
+        self.assertIn('action="/series-remember"',html)
+        self.assertIn("Add Season 2 to Recognized Names",html)
+        self.assertIn('name="season" value="2"',html)
+        self.assertNotIn("Add Season 1 to Recognized Names",html)
+
     def test_server_side_button_never_allows_browser_to_replace_ids(self):
         from anime_series_aliases import remember_verified_season
         from anime_flat_config import DEFAULT_SETTINGS
