@@ -12,7 +12,8 @@ from anime_series_naming import resolve_series_name
 from anime_flat_config import load_config
 
 
-def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None):
+def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None,
+                             staged_owner="", staged_group=""):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -56,7 +57,8 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
                 qb=qb_factory(), download_root=download_root,
                 trial_root=trial_root, title=series_name,
-                tvdb_id=payload['tvdb_id'],english_title=series_name)
+                tvdb_id=payload['tvdb_id'],english_title=series_name,
+                staged_owner=staged_owner,staged_group=staged_group)
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],
                     payload['notification_id'],series_title=series_name)
