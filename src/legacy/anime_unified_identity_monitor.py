@@ -4,6 +4,7 @@ Network evidence is observational; only configured exact mappings can
 authorize a download through the existing webhook approval gate.
 """
 import gzip
+from difflib import SequenceMatcher
 import io
 import json
 import logging
@@ -12,7 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 from anime_flat_config import load_config
-from anime_identification_probe import release_title,anidb_matches,tvdb_candidates
+from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids
 
@@ -59,10 +60,35 @@ def ensure_titles(path,*,now=None,downloader=None):
         tmp.unlink(missing_ok=True)
     return path
 
+def candidate_score(aliases,names):
+    """Highest normalized title similarity, recorded for review only."""
+    normalized=[norm(x) for x in aliases if isinstance(x,str) and norm(x)]
+    options=[norm(x) for x in names if isinstance(x,str) and norm(x)]
+    if not normalized or not options:
+        return 0
+    return round(100*max(SequenceMatcher(None,a,b,autojunk=False).ratio()
+                         for a in normalized for b in options))
+
+def title_diagnostics(aliases,candidates,threshold):
+    rows=[]
+    for row in candidates:
+        names=[row.get("name") or "",row.get("matched_query") or ""]
+        # matched_query is a search input, not candidate evidence; never score it.
+        names=names[:1]+[x for x in row.get("aliases",[]) if isinstance(x,str)]
+        score=candidate_score(aliases,names)
+        rows.append({"tvdb_id":str(row["tvdb_id"]),"name":str(row.get("name") or "")[:180],
+                     "score_pct":score,"threshold_pct":threshold,
+                     "passed":score>=threshold,
+                     "reason":"TITLE_SCORE_PASSED" if score>=threshold else "BELOW_TITLE_THRESHOLD"})
+    return rows
+
 def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json):
     aliases,episode=release_title(name)
-    report={"episode_candidate":episode,"anidb_candidates":[],
-            "tvdb_candidates":[],"matching_pairs":[],
+    threshold=settings.get("identity",{}).get("match_threshold_pct",90)
+    report={"title_queries":aliases[:5],"threshold_pct":threshold,
+            "episode_candidate":episode,"anidb_candidates":[],
+            "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
+            "matching_pairs":[],"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
@@ -70,6 +96,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("ANIDB_PUBLIC_SOURCE_DISABLED")
         return report
     rows,truncated=anidb_matches(catalog,aliases,limit=10)
+    report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
+                                "mode":"exact normalized title","truncated":bool(truncated)})
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
     if truncated:
         report["issues"].append("AMBIGUOUS_ANIDB_TITLES")
@@ -78,6 +106,10 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         return report
     candidates,errors=search(aliases,secrets["tvdb_api_key"])
     report["tvdb_candidates"]=[str(c["tvdb_id"]) for c in candidates]
+    report["tvdb_results_count"]=len(candidates)
+    report["candidate_scores"]=title_diagnostics(aliases,candidates,threshold)
+    report["workflow"].append({"step":"TVDB search","returned":len(candidates),
+                                "threshold_pct":threshold})
     report["issues"].extend(errors)
     if errors:
         raise RuntimeError("TVDB search incomplete")
@@ -85,15 +117,25 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
         return report
     token=login(secrets["tvdb_api_key"])
+    accepted={r["tvdb_id"] for r in report["candidate_scores"] if r["passed"]}
+    report["workflow"].append({"step":"Title score filter","passed":len(accepted),
+                                "rejected":len(candidates)-len(accepted)})
+    if not accepted:
+        report["issues"].append("ALL_TVDB_TITLES_BELOW_THRESHOLD")
+        return report
     aid_set={str(x["anidb_id"]) for x in rows}
     for candidate in candidates[:10]:
         tid=str(candidate["tvdb_id"])
+        if tid not in accepted:
+            continue
         detail=fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {}
         if str(detail.get("id"))!=tid:
             raise ValueError("TVDB ID response mismatch")
         match=aid_set.intersection(explicit_anidb_ids(detail))
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
+    report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
+                                "matching_pairs":len(report["matching_pairs"])})
     if len(report["matching_pairs"])==1 and episode and not report["issues"]:
         pair=report["matching_pairs"][0]
         tid=pair["tvdb_id"]
@@ -129,6 +171,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                 report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
         else:
             report["issues"].append("VERIFIED_EPISODE_MAPPING_MISSING")
+            report["workflow"].append({"step":"Verified episode map", "passed":False})
         if report["decision"]!="AUTO_VERIFIED":
             report["decision"]="SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED"
     else:
