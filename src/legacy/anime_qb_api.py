@@ -102,6 +102,105 @@ class QBittorrentAPI:
         return records
 
 
+
+    def web_api_version(self):
+        """Read the server's API capability, not its Debian package version."""
+        import re
+        raw = self._request("app/webapiVersion")
+        try:
+            value = raw.decode("ascii").strip()
+        except (AttributeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("Invalid qBittorrent Web API version") from exc
+        match = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?", value)
+        if not match:
+            raise RuntimeError("Unrecognized qBittorrent Web API version")
+        parts = tuple(int(match.group(i) or 0) for i in (1, 2, 3))
+        # Version 2.8.2 provides stable per-file indexes; old APIs cannot
+        # safely execute our explicit indexed file-selection workflow.
+        if not ((2, 8, 2) <= parts < (3, 0, 0)):
+            raise RuntimeError("Unsupported qBittorrent Web API")
+        return parts
+
+    def _lifecycle_endpoints(self):
+        """Web API <2.11: pause/resume; API >=2.11: stop/start."""
+        return (("torrents/stop", "torrents/start")
+                if self.web_api_version() >= (2, 11, 0)
+                else ("torrents/pause", "torrents/resume"))
+
+    def _owned_torrent(self, infohash):
+        import re
+        record = self.torrent_identity(infohash)
+        if not record or record.get("category") != "anime-discovery":
+            raise PermissionError("Not an Anime Discovery torrent")
+        if not any(re.fullmatch(r"ad-[0-9a-f]{32}",tag.strip())
+                   for tag in str(record.get("tags") or "").split(",")):
+            raise PermissionError("Anime Discovery ownership marker missing")
+        # Database-side token and provenance comparison are also mandatory
+        # for the future acquisition worker; this adapter cannot prove them.
+        return record
+
+    def stop_owned_torrent(self, infohash):
+        """Stop exactly one marker-tagged torrent. Never act on all torrents.
+
+        The worker must also verify the durable database ownership record.
+        """
+        if not self.allow_writes:
+            raise PermissionError("qBittorrent writes disabled")
+        infohash = _hash(infohash)
+        self._owned_torrent(infohash)
+        endpoint, _ = self._lifecycle_endpoints()
+        response = self._request(endpoint, {"hashes": infohash})
+        if response.strip() not in (b"", b"Ok."):
+            raise RuntimeError("qBittorrent stop not acknowledged")
+        after = self._owned_torrent(infohash)
+        if after.get("state") not in (
+                "pausedDL", "pausedUP", "stoppedDL", "stoppedUP"):
+            raise RuntimeError("qBittorrent stop not yet confirmed")
+        return after["state"]
+
+    def start_selected_torrent(self, infohash, *, wanted_indices, skip_indices):
+        """Start only after stopped-state and full priority readback.
+
+        No live worker invokes this method yet. E01-first eligibility and
+        durable JP+EN proof for later episodes must be checked by the worker.
+        """
+        if not self.allow_writes:
+            raise PermissionError("qBittorrent writes disabled")
+        infohash = _hash(infohash)
+        if (not isinstance(wanted_indices, (list, tuple))
+                or not wanted_indices
+                or not isinstance(skip_indices, (list, tuple))
+                or any(type(i) is not int or i < 0
+                       for i in [*wanted_indices, *skip_indices])):
+            raise ValueError("Invalid wanted or skipped indices")
+        wanted, skipped = set(wanted_indices), set(skip_indices)
+        if (len(wanted) != len(wanted_indices)
+                or len(skipped) != len(skip_indices) or wanted & skipped):
+            raise ValueError("Duplicate or overlapping file indices")
+        torrent = self._owned_torrent(infohash)
+        if torrent.get("state") not in (
+                "pausedDL", "pausedUP", "stoppedDL", "stoppedUP"):
+            raise RuntimeError("Torrent is not stopped")
+        files = self.torrent_files(infohash)
+        priorities = {}
+        for file in files:
+            idx, priority = file.get("index"), file.get("priority")
+            if (type(idx) is not int or idx < 0
+                    or idx in priorities or type(priority) is not int):
+                raise RuntimeError("Incomplete torrent file manifest")
+            priorities[idx] = priority
+        if not priorities or set(priorities) != wanted | skipped:
+            raise RuntimeError("Torrent file list differs from approved selection")
+        if any(priorities[i] != (1 if i in wanted else 0) for i in priorities):
+            raise RuntimeError("Torrent file priorities differ from approved selection")
+        _, endpoint = self._lifecycle_endpoints()
+        response = self._request(endpoint, {"hashes": infohash})
+        if response.strip() not in (b"", b"Ok."):
+            raise RuntimeError("qBittorrent start not acknowledged")
+        # Async state changes; acknowledgment means command accepted, not
+        # completed transfer. Worker monitors exact file progress afterward.
+        return True
+
     def apply_stopped_file_selection(self, infohash, *, wanted_indices, skip_indices):
         """Set and read back all file priorities on an owned, STOPPED torrent.
 
@@ -170,7 +269,7 @@ class QBittorrentAPI:
             raise RuntimeError("Torrent became active during priority selection")
         return {"wanted_indices": sorted(wanted), "skip_indices": sorted(skipped)}
 
-    def add_magnet(self, magnet_uri, *, category=None, tag=None):
+    def add_magnet(self, magnet_uri, *, category=None, tag=None, stopped=False):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
             raise ValueError("Invalid magnet")
         if category is not None and category!="anime-discovery":
@@ -179,7 +278,15 @@ class QBittorrentAPI:
             import re
             if category!="anime-discovery" or not re.fullmatch(r"ad-[0-9a-f]{32}",tag):
                 raise ValueError("Invalid Anime Discovery ownership marker")
+        if type(stopped) is not bool:
+            raise ValueError("stopped must be boolean")
+        # On qBittorrent 4.5.2 this maps to paused=true; Web API >=2.11
+        # renamed the request field to stopped=true.
+        stop_key = ("stopped" if self.web_api_version() >= (2, 11, 0)
+                    else "paused") if stopped else None
         fields={"urls":magnet_uri}
+        if stop_key:
+            fields[stop_key] = "true"
         if category is not None:
             self.ensure_category(category)
             fields["category"]=category
