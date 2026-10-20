@@ -8,9 +8,10 @@ Episode numbers and file sizes are still verified after qB metadata arrives.
 import hashlib
 import json
 import logging
+import re
 
 from anime_batch_selection import release_scope_hint
-from anime_identity_mapping_v4 import mappings
+from anime_identity_mapping_v4 import mappings, resolve_episode
 from anime_identification_probe import release_title, norm
 from anime_trial_policy import record_verified_window, window_for
 
@@ -93,8 +94,19 @@ def verified_pack_candidate(db, notification_id, report, settings, xml_bytes):
         return None
     if len(mapped)!=1 or mapped[0].get("tvdbid")!=tvdb:
         return None
+    unit_key,mode,start="season","SEASON",1
+    part=re.search(r"(?i)(?<![a-z0-9])(?:Part|Cour)[ ._-]*([2-9])(?!\d)",title)
+    if part:
+        # Part 2 of the same provider season can begin at canonical E13,
+        # but ONLY when an explicit AniDB episode-1 -> TVDB boundary agrees.
+        part_no=int(part.group(1))
+        target=resolve_episode(xml_bytes,int(anidb),int(tvdb),1)
+        if not target or target["tvdb_season"]!=season or target["tvdb_episode"]<=1:
+            return None
+        unit_key,mode,start="part:"+str(part_no),"PART",target["tvdb_episode"]
     return {"tvdb_id":tvdb,"anidb_id":anidb,"season":season,
-            "title":alias,"unit_key":"season","infohash":infohash.lower(),
+            "title":alias,"unit_key":unit_key,"mode":mode,"start":start,
+            "infohash":infohash.lower(),
             "xml_sha256":hashlib.sha256(xml_bytes).hexdigest()}
 
 
@@ -109,8 +121,8 @@ def authorize_verified_batch(db, notification_id, report, settings, xml_bytes):
     evidence="anime-lists:"+result["xml_sha256"][:32]
     record_verified_window(db,tvdb_id=result["tvdb_id"],
                            anidb_id=result["anidb_id"],season=result["season"],
-                           unit_key=result["unit_key"],mode="SEASON",
-                           start_episode=1,evidence_ref=evidence)
+                           unit_key=result["unit_key"],mode=result["mode"],
+                           start_episode=result["start"],evidence_ref=evidence)
     db.execute("BEGIN IMMEDIATE")
     try:
         previous=db.execute("""SELECT tvdb_id,anidb_id,season,unit_key,title,
