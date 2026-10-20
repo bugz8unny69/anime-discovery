@@ -28,6 +28,7 @@ jobs:
             test_anime_action_reconcile \
             test_anime_acquisition_gate \
             test_anime_daemon_leases \
+            test_anime_job_management \
             test_anime_media_pipeline \
             test_anime_source_cleanup \
             test_anime_safe_handlers \
