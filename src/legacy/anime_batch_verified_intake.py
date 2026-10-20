@@ -71,9 +71,8 @@ def verified_pack_candidate(db, notification_id, report, settings, xml_bytes):
         return blocked("BATCH_PENDING_MAGNET_MISSING",
                        "Autobrr season packs require an intake record with a trusted magnet")
     title,infohash,source,_magnet=row
-    if source!="autobrr":
-        return blocked("BATCH_NOT_AUTOBRR",
-                       "Batch intake is authorized only for Autobrr notifications")
+    # source names the originating indexer/feed (e.g. nyaa), not the
+    # authenticated Autobrr transport. The pending intake is the gate.
     hint=release_scope_hint(title)
     if hint["kind"]!="season_pack":
         return blocked("BATCH_RELEASE_SCOPE_UNSUPPORTED",
@@ -202,6 +201,19 @@ def authorize_verified_batch(db, notification_id, report, settings, xml_bytes):
     # receive misleading batch missing-magnet diagnostics.
     if not db.execute("SELECT 1 FROM anime_batch_pending WHERE notification_id=?",
                       (notification_id,)).fetchone():
+        # The old implementation silently skipped legitimate indexer-labelled
+        # packs, hiding the actual blocker behind episode-missing diagnostics.
+        row=db.execute("SELECT release_name FROM notifications WHERE id=?",
+                       (notification_id,)).fetchone()
+        if row and release_scope_hint(row[0])["kind"]=="season_pack":
+            report["batch_authorization"]={"decision":"BLOCKED",
+                "reason":"BATCH_PENDING_MAGNET_MISSING",
+                "action":"Resubmit the original authenticated webhook with its validated magnet and recheck identity"}
+            report["issues"]=["BATCH_PENDING_MAGNET_MISSING"]+[
+                issue for issue in report.get("issues",[])
+                if issue!="BATCH_PENDING_MAGNET_MISSING"]
+            report.setdefault("workflow",[]).append({"step":"Batch authorization",
+                "decision":"BLOCKED","reason":"BATCH_PENDING_MAGNET_MISSING"})
         return False
     result=verified_pack_candidate(db,notification_id,report,settings,xml_bytes)
     if result is None:

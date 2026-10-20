@@ -38,6 +38,59 @@ class HandoffTests(unittest.TestCase):
                    return_value=report):
             return check_once(self.db,self.settings,{},now=2000)
 
+    def test_indexer_label_does_not_override_authenticated_batch_intake(self):
+        for label in ("nyaa","AnimePlease"):
+            with self.subTest(source=label):
+                guid="indexer-"+label
+                intake=receive(self.db,{"source":label,"source_guid":guid,
+                    "release_name":RELEASE,"info_hash":("a" if label=="nyaa" else "b")*40})
+                nid=intake["notification_id"]
+                self.assertIsNotNone(self.db.execute(
+                    "SELECT notification_id FROM anime_batch_pending WHERE notification_id=?",
+                    (nid,)).fetchone())
+                if label=="nyaa":
+                    from anime_batch_verified_intake import authorize_verified_batch
+                    import copy
+                    report=copy.deepcopy(REPORT)
+                    self.assertTrue(authorize_verified_batch(
+                        self.db,nid,report,self.settings,XML))
+                    self.assertEqual(report["batch_authorization"]["decision"],"ELIGIBLE")
+
+    def test_replayed_original_webhook_restores_intake_without_auto_download(self):
+        from anime_notification_management import recheck_unmatched_identity
+        infohash="c"*40
+        payload={"source":"nyaa","source_guid":"replay-existing-pack",
+                 "release_name":RELEASE,"info_hash":infohash,
+                 "magnet_uri":"magnet:?xt=urn:btih:"+infohash}
+        first=receive(self.db,payload)
+        nid=first["notification_id"]
+        self.db.execute("DELETE FROM anime_batch_pending WHERE notification_id=?",(nid,))
+        self.db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=?",(nid,))
+        again=receive(self.db,payload)
+        self.assertTrue(again["duplicate"])
+        self.assertEqual(again["notification_id"],nid)
+        self.assertEqual(again["identity_status"],"NEEDS_REVIEW")
+        self.assertIsNotNone(self.db.execute(
+            "SELECT 1 FROM anime_batch_pending WHERE notification_id=?",(nid,)).fetchone())
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM anime_batch_authorizations WHERE notification_id=?",(nid,)).fetchone())
+        self.assertEqual(recheck_unmatched_identity(self.db,nid)["status"],"IDENTIFYING")
+
+    def test_legacy_indexer_pack_without_pending_has_actionable_blocker(self):
+        from anime_batch_verified_intake import authorize_verified_batch
+        import copy
+        intake=receive(self.db,{"source":"nyaa","source_guid":"legacy-pack",
+            "release_name":RELEASE,"info_hash":"c"*40})
+        nid=intake["notification_id"]
+        self.db.execute("DELETE FROM anime_batch_pending WHERE notification_id=?",(nid,))
+        report=copy.deepcopy(REPORT)
+        self.assertFalse(authorize_verified_batch(self.db,nid,report,self.settings,XML))
+        self.assertEqual(report["issues"][0],"BATCH_PENDING_MAGNET_MISSING")
+        self.assertEqual(report["batch_authorization"]["decision"],"BLOCKED")
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM anime_batch_authorizations WHERE notification_id=?",
+            (nid,)).fetchone())
+
     def test_independently_verified_pack_gets_job_without_qb_submission(self):
         output=self.run_identity(REPORT.copy())
         self.assertEqual(output["processed"],1)

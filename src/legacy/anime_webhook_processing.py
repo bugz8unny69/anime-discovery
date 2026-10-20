@@ -197,11 +197,12 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
             # Existing alias/identity matching failed to establish an exact
             # episode, so fail closed and require review.
             db.execute("UPDATE notifications SET status='IDENTIFYING' WHERE id=? AND status IN ('UNTRUSTED','RECEIVED') AND NOT EXISTS (SELECT 1 FROM episode_dispatch WHERE notification_id=?)",(nid,nid))
-            # Persist the original Autobrr magnet securely as part of intake;
+            # The authenticated Autobrr transport is established by /webhook,
+            # not by the indexer/feed label in the payload. Persist the magnet;
             # the identity monitor, not this untrusted webhook, decides
             # whether an actual batch acquisition is allowed.
             hint=release_scope_hint(name)
-            if source=="autobrr" and hint["kind"]=="season_pack":
+            if hint["kind"]=="season_pack":
                 from anime_batch_verified_intake import ensure_schema as batch_schema
                 batch_schema(db)
                 magnet=_magnet(values.get("magnet_uri") or values.get("magnet"),infohash)
