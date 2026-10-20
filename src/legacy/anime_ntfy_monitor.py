@@ -27,10 +27,19 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
     now=int(time.time()) if now is None else int(now)
     ensure_schema(db)
     interval=max(3600,settings["ntfy"]["reminder_hours"]*3600)
+    # Only a committed, final identity result may trigger a review alert.
+    # Legacy/unmatched review rows without triage evidence are not eligible.
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
+        return {"sent":0,"pending":0}
     rows=db.execute("""SELECT n.id,n.release_name FROM notifications n
         LEFT JOIN episode_dispatch d ON d.notification_id=n.id
+        JOIN unified_identity_checks c ON c.notification_id=n.id
         LEFT JOIN ntfy_delivery sent ON sent.notification_id=n.id
         WHERE d.notification_id IS NULL AND n.status='NEEDS_REVIEW'
+          AND c.decision IN ('NEEDS_REVIEW',
+              'SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED')
+          AND c.next_at=0
+          AND c.checked_at>=n.received_at
           AND (sent.sent_at IS NULL OR sent.sent_at<=?)
         ORDER BY n.id ASC LIMIT 50""",(now-interval,)).fetchall()
     sent=0

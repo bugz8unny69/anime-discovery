@@ -125,10 +125,13 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertEqual(check_once(db,cfg,{},now=1000,sender=sender)["sent"],0)
             self.assertEqual(sent,[])
             from anime_unified_identity_monitor import check_once as check_identity
-            check_identity(db,{}, {},now=1001,probe=lambda *_:{"decision":"NEEDS_REVIEW","issues":["UNVERIFIED"]})
-            self.assertEqual(check_once(db,cfg,{},now=1002,sender=sender)["sent"],1)
+            # The finalized check must not predate the webhook receipt.
+            received=db.execute("SELECT received_at FROM notifications WHERE id=?",(nid,)).fetchone()[0]
+            check_identity(db,{}, {},now=received+1,
+                probe=lambda *_:{"decision":"NEEDS_REVIEW","issues":["UNVERIFIED"]})
+            self.assertEqual(check_once(db,cfg,{},now=received+2,sender=sender)["sent"],1)
             self.assertEqual(sent,[nid])
-            self.assertEqual(check_once(db,cfg,{},now=1003,sender=sender)["sent"],0)
+            self.assertEqual(check_once(db,cfg,{},now=received+3,sender=sender)["sent"],0)
 
     def test_unmatched_webhook_explains_no_worker_job(self):
         from anime_dashboard_queries import all_jobs
