@@ -95,8 +95,11 @@ class DuplicateCleanupTests(unittest.TestCase):
 
     def test_confirm_cleans_verified_trial_files_but_preserves_external_torrents(self):
         qb=FakeQB()
+        token=review(self.db,self.sid,self.settings,self.secrets,
+                     opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
         result=confirm(self.db,self.sid,self.settings,self.secrets,
-                       approved=True,qb=qb,opener=self.opener,audio_probe=lambda p:True)
+                       approved=True,expected_review_fingerprint=token,
+                       qb=qb,opener=self.opener,audio_probe=lambda p:True)
         self.assertEqual(len(result["removed_notification_ids"]),2)
         self.assertEqual(qb.removed,[])
         self.assertEqual(len(result["preserved_torrents"]),2)
@@ -104,6 +107,44 @@ class DuplicateCleanupTests(unittest.TestCase):
         self.assertTrue(all((self.dest/("E%02d.mkv"%i)).exists() for i in (1,2)))
         self.assertEqual(self.db.execute(
             "SELECT result FROM sonarr_duplicate_cleanup_audit").fetchone()[0],"COMPLETED")
+
+
+    def test_changed_review_cannot_expand_cleanup_selection(self):
+        token=review(self.db,self.sid,self.settings,self.secrets,
+                     opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
+        self.paths[1][1].write_bytes(b"newly modified file")
+        with self.assertRaises(RuntimeError):
+            confirm(self.db,self.sid,self.settings,self.secrets,
+                    approved=True,expected_review_fingerprint=token,
+                    qb=FakeQB(),opener=self.opener,audio_probe=lambda p:True)
+        self.assertTrue(all(path.exists() for _,path in self.paths))
+
+    def test_owned_torrent_removed_with_files_only_when_exact_media_proven(self):
+        from anime_qb_ownership import ensure_schema,OWNED,CATEGORY
+        ensure_schema(self.db)
+        infohash="a"*40
+        marker="ad-"+"1"*32
+        self.db.execute("""INSERT INTO qb_torrent_ownership
+            (infohash,status,marker,category,updated_at)
+            VALUES (?,?,?,?,1)""",(infohash,OWNED,marker,CATEGORY))
+        (self.down/"OwnedE01.mkv").write_bytes(self.paths[0][1].read_bytes())
+        class OwnedQB(FakeQB):
+            def torrent_identity(self,h):
+                return {"category":CATEGORY,"tags":marker,"hash":h}
+            def torrent_details(self,h):
+                return {"hash":h,"save_path":str(self_down)}
+            def torrent_files(self,h):
+                return [{"name":"OwnedE01.mkv","priority":1,"progress":1}]
+        self_down=self.down
+        qb=OwnedQB()
+        token=review(self.db,self.sid,self.settings,self.secrets,
+                     opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
+        result=confirm(self.db,self.sid,self.settings,self.secrets,approved=True,
+            expected_review_fingerprint=token,qb=qb,
+            opener=self.opener,audio_probe=lambda p:True)
+        self.assertEqual(qb.removed,[(infohash,True)])
+        self.assertEqual(result["removed_owned_torrents"],[infohash])
+        self.assertTrue(any(x["infohash"]=="b"*40 for x in result["preserved_torrents"]))
 
     def test_symlink_staged_file_refused(self):
         outside=self.base/"outside.mkv"
