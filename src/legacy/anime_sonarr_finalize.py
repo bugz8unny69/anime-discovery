@@ -148,6 +148,17 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
                 raise RuntimeError("Unsafe qB file name")
             if relative.suffix.lower() not in supported:
                 continue
+            # A season pack can contain E07+ videos with qB priority zero.
+            # They were intentionally excluded from the six-episode trial;
+            # only *selected and fully completed* video files are compared
+            # with Sonarr's verified copies during safe source cleanup.
+            priority=entry.get("priority",1)
+            if type(priority) is not int or priority<0:
+                raise RuntimeError("Invalid qB source file priority")
+            if priority==0:
+                continue
+            if "progress" in entry and entry["progress"]!=1:
+                raise RuntimeError("Selected qB source not fully downloaded")
             original=Path(record["save_path"])/relative
             if original.is_symlink() or not original.is_file() or not _inside(original,download_root):
                 raise RuntimeError("qB source outside isolated download root")
