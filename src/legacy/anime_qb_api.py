@@ -291,7 +291,7 @@ class QBittorrentAPI:
             raise RuntimeError("Torrent became active during priority selection")
         return {"wanted_indices": sorted(wanted), "skip_indices": sorted(skipped)}
 
-    def add_magnet(self, magnet_uri, *, category=None, tag=None, stopped=False):
+    def add_magnet(self, magnet_uri, *, category=None, tag=None, stopped=False, save_path=None):
         if not isinstance(magnet_uri,str) or not magnet_uri.startswith("magnet:?"):
             raise ValueError("Invalid magnet")
         if category is not None and category!="anime-discovery":
@@ -307,6 +307,12 @@ class QBittorrentAPI:
         stop_key = ("stopped" if self.web_api_version() >= (2, 11, 0)
                     else "paused") if stopped else None
         fields={"urls":magnet_uri}
+        if save_path is not None:
+            from pathlib import Path
+            if (not isinstance(save_path,str) or not Path(save_path).is_absolute()
+                    or ".." in Path(save_path).parts):
+                raise ValueError("Invalid absolute qBittorrent save path")
+            fields["savepath"]=save_path
         if stop_key:
             fields[stop_key] = "true"
         if category is not None:
