@@ -109,7 +109,7 @@ def step(db, job, qb, *, download_root, trial_root, settings, runner=None):
     if not row or row[8]!="APPROVED_BATCH":
         raise BatchNeedsReview("BATCH_IDENTITY_NOT_AUTHORIZED")
     tvdb,anidb,season,unit,title,xml_sha,infohash,magnet,_=row
-    window=window_for(db,tvdb_id=tvdb,anidb_id=anidb,season=season)
+    window=window_for(db,tvdb_id=tvdb,anidb_id=anidb,season=season,unit_key=unit)
     if window["unit_key"]!=unit or not window.get("evidence_ref"):
         raise BatchNeedsReview("PERSISTED_BATCH_WINDOW_MISSING")
     limits=size_limits(settings["trial"])
