@@ -109,6 +109,54 @@ class DuplicateCleanupTests(unittest.TestCase):
             "SELECT result FROM sonarr_duplicate_cleanup_audit").fetchone()[0],"COMPLETED")
 
 
+    def test_confirm_prunes_only_empty_directories_not_trial_root(self):
+        nested=self.trial/"Solo Leveling"/"Season 01"
+        nested.mkdir(parents=True)
+        for _,path in self.paths:
+            path.rename(nested/path.name)
+        # The manifest is not inferred from folders: point persisted staged
+        # file identities to their new test location.
+        updated=[]
+        for nid,path in self.paths:
+            new=nested/path.name
+            self.db.execute("UPDATE torrent_recovery_records SET staged_path=? "
+                            "WHERE notification_id=?",(str(new),nid))
+            updated.append((nid,new))
+        self.paths=updated
+        token=review(self.db,self.sid,self.settings,self.secrets,
+                     opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]
+        outcome=confirm(self.db,self.sid,self.settings,self.secrets,approved=True,
+            expected_review_fingerprint=token,qb=FakeQB(),
+            opener=self.opener,audio_probe=lambda p:True)
+        self.assertFalse(nested.exists())
+        self.assertFalse(nested.parent.exists())
+        self.assertTrue(self.trial.is_dir())
+        self.assertEqual(len(outcome["removed_directories"]),2)
+
+    def test_prune_keeps_nonempty_directory_and_unrelated_sidecar(self):
+        from anime_sonarr_duplicate_cleanup import _prune_empty_staging_parents
+        nested=self.trial/"Show"/"Season 01"
+        nested.mkdir(parents=True)
+        episode=nested/"E01.mkv"
+        episode.write_bytes(b"test")
+        sidecar=nested/"E01.nfo"
+        sidecar.write_text("keep this")
+        episode.unlink()
+        self.assertEqual(_prune_empty_staging_parents(episode,self.trial),[])
+        self.assertTrue(sidecar.is_file())
+        self.assertTrue(nested.is_dir())
+
+    def test_prune_does_not_follow_replaced_symlink(self):
+        from anime_sonarr_duplicate_cleanup import _prune_empty_staging_parents
+        outside=self.base/"outside"
+        outside.mkdir()
+        nested=self.trial/"Series"
+        nested.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(OSError):
+            _prune_empty_staging_parents(nested/"Season"/"E01.mkv",self.trial)
+        self.assertTrue(outside.is_dir())
+        self.assertTrue(nested.is_symlink())
+
     def test_changed_review_cannot_expand_cleanup_selection(self):
         token=review(self.db,self.sid,self.settings,self.secrets,
                      opener=self.opener,audio_probe=lambda p:True)["review_fingerprint"]

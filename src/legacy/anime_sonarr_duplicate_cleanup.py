@@ -212,6 +212,40 @@ def _unlink_verified(path,root,expected):
     finally:
         os.close(fd)
 
+def _prune_empty_staging_parents(path, root):
+    """Remove only empty parents of an unlinked file, never the trial root.
+
+    Open every ancestor relative to an anchored root with O_NOFOLLOW. This
+    avoids following replaced symlinks and stops safely on nonempty folders.
+    """
+    import errno
+    base=Path(root).resolve(strict=True)
+    relative=Path(path).relative_to(base)
+    parents=relative.parts[:-1]
+    removed=[]
+    if not parents:
+        return removed
+    for depth in range(len(parents),0,-1):
+        rootfd=os.open(base,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        descriptors=[rootfd]
+        try:
+            for component in parents[:depth-1]:
+                descriptors.append(os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,
+                                           dir_fd=descriptors[-1]))
+            target=parents[depth-1]
+            try:
+                os.rmdir(target,dir_fd=descriptors[-1])
+            except OSError as exc:
+                if exc.errno in (errno.ENOTEMPTY,errno.EEXIST,errno.ENOENT):
+                    break
+                raise
+            removed.append(str(base.joinpath(*parents[:depth])))
+        finally:
+            for fd in reversed(descriptors):
+                os.close(fd)
+    return removed
+
+
 def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_fingerprint=None,qb=None,opener=None,
             audio_probe=confirmed_jp_en):
     """Explicit operator approval, independent fresh proof, durable audit."""
@@ -258,6 +292,7 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
         raise
     audit_id=cursor.lastrowid
     removed=[]
+    directories_removed=[]
     torrent_removed=[]
     errors=[]
     # Revalidate the complete current Sonarr/audio picture BEFORE touching qB.
@@ -299,9 +334,15 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
                 raise RuntimeError("Stale Sonarr proof")
             _unlink_verified(entry["path"],settings["storage"]["trial_root"],metadata)
             removed.append(entry["notification_id"])
+            try:
+                directories_removed.extend(_prune_empty_staging_parents(
+                    entry["path"],settings["storage"]["trial_root"]))
+            except Exception as exc:
+                errors.append("Empty directory pruning "+str(entry["notification_id"])+": "+type(exc).__name__)
         except Exception as exc:
             errors.append("Trial episode "+str(entry["notification_id"])+": "+type(exc).__name__)
-    outcome={"removed_notification_ids":removed,"removed_owned_torrents":torrent_removed,
+    outcome={"removed_notification_ids":removed,"removed_directories":directories_removed,
+             "removed_owned_torrents":torrent_removed,
              "preserved_torrents":preserved,"errors":errors}
     db.execute("""UPDATE sonarr_duplicate_cleanup_audit SET result=?,item_json=?,reason=?
         WHERE id=?""",("PARTIAL" if errors else "COMPLETED",
