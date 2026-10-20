@@ -18,6 +18,10 @@ class FakeQB:
     def __init__(self,record=None):
         self.record=record
         self.deleted=[]
+    def torrent_identity(self,infohash):
+        if self.record is None:
+            return None
+        return {"hash":infohash,"category":"anime-discovery","tags":"ad-"+"1"*32}
     def torrent_details(self,infohash):
         return self.record
     def torrent_files(self,infohash):
@@ -124,6 +128,22 @@ class FinalizationTests(unittest.TestCase):
         self.assertTrue(result["complete"])
         self.assertEqual(result["torrents_preserved"],1)
         self.assertEqual(qb.deleted,[])
+
+    def test_lost_ownership_marker_preserves_torrent_and_updates_keep_notice(self):
+        self.mark_owned()
+        qb=FakeQB({"save_path":str(self.download)})
+        qb.torrent_identity=lambda infohash:{"hash":infohash,
+            "category":"anime-discovery","tags":"some-other-tag"}
+        result=finalize_import(self.db,self.sid,self.settings,self.secrets,qb=qb,opener=self.opener)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["torrents_preserved"],1)
+        self.assertEqual(qb.deleted,[])
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM qb_torrent_ownership WHERE infohash=?",(HASH,)).fetchone()[0],
+            "UNCERTAIN")
+        self.assertEqual(self.db.execute(
+            "SELECT ownership FROM sonarr_keep_cleanup_notice WHERE series_id=?",(self.sid,)).fetchone()[0],
+            "UNCERTAIN")
 
     def test_torrent_removed_only_after_destination_verification(self):
         self.mark_owned()
