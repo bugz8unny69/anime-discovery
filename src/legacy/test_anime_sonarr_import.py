@@ -89,6 +89,12 @@ class KeepCandidateDiagnosisTests(unittest.TestCase):
         self.assertEqual(self.call_import([None,{"path":self.PATH,
                 "series":None,"episodes":None}]),"QUALITY_LANGUAGE_UNRESOLVED")
 
+    def test_preparsed_correct_identity_still_requires_explicit_reprocess(self):
+        self.assertEqual(self.call_import([{"path":self.PATH,
+                "series":{"id":124},"episodes":[{"id":2443}],
+                "quality":{"quality":{"id":9}},"languages":[{"id":8}]}]),
+                "SONARR_REPROCESS_UNCONFIRMED")
+
 
 class VerifiedOverrideTests(unittest.TestCase):
     def test_explicit_sonarr_identity_reprocesses_name_only_stage_and_copies(self):
@@ -171,18 +177,27 @@ class RejectionTests(unittest.TestCase):
                 return json.dumps(self.data).encode()
         calls=[]
         def opener(req,timeout):
+            import json
             calls.append(req.get_method())
             if "episode?seriesId" in req.full_url:
                 return Reply([{"id":2443,"seasonNumber":1,"episodeNumber":1}])
-            return Reply([{"path":"/mnt/media/Anime-Trial/Solo Leveling/Season 01/Solo Leveling - S01E01.mkv",
-                "series":{"id":124},"episodes":[{"id":2443}],
-                "quality":{"quality":{"id":9}},"languages":[{"id":8}],
-                "rejections":[{"type":"permanent","reason":"Not an upgrade"}]}])
+            if "manualimport?folder=" in req.full_url:
+                return Reply([{"path":"/mnt/media/Anime-Trial/Solo Leveling/Season 01/Solo Leveling - S01E01.mkv",
+                    "series":{"id":124},"episodes":[{"id":2443}],
+                    "quality":{"quality":{"id":9}},"languages":[{"id":8}],
+                    "rejections":[{"type":"permanent","reason":"Not an upgrade"}]}])
+            if req.full_url.endswith("/manualimport"):
+                payload=json.loads(req.data)
+                self.assertEqual(payload[0]["seriesId"],124)
+                self.assertEqual(payload[0]["episodeIds"],[2443])
+                return Reply([{**payload[0],"episodeIds":None,"episodes":[{"id":2443}],
+                    "rejections":[{"type":"permanent","reason":"Not an upgrade"}]}])
+            raise AssertionError("Rejected reprocess must never send a copy command")
         with self.assertRaises(RuntimeError):
             request_import({"sonarr":{"base_url":"https://sonarr.example"}},
                 {"sonarr_api_key":"test"},sonarr_id=124,
                 plan=[{"season":1,"episode":1,"path":"/mnt/media/Anime-Trial/Solo Leveling/Season 01/Solo Leveling - S01E01.mkv"}],
                 opener=opener)
-        self.assertEqual(calls,["GET","GET"])
+        self.assertEqual(calls,["GET","GET","POST"])
 
 if __name__=="__main__":unittest.main()
