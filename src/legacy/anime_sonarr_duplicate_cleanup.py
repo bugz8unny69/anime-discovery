@@ -361,6 +361,7 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
         return {"audit_id":audit_id,"removed_notification_ids":[],
                 "removed_owned_torrents":[],"preserved_torrents":preserved,
                 "errors":errors}
+    tvdb_id=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()[0]
     # Irreversible operations are outside the SQLite lock, audited individually.
     for h in owned:
         try:
@@ -388,11 +389,11 @@ def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_finge
             try:
                 nfo=Path(entry["path"]).with_suffix(".nfo")
                 if _remove_verified_nfo(nfo,settings["storage"]["trial_root"],
-                        tvdb_id=before_delete["tvdb_id"],season=entry["season"],
+                        tvdb_id=tvdb_id,season=entry["season"],
                         episode=entry["episode"]):
                     metadata_removed.append(str(nfo))
                 if _remove_orphan_series_nfo(entry["path"],settings["storage"]["trial_root"],
-                        tvdb_id=before_delete["tvdb_id"]):
+                        tvdb_id=tvdb_id):
                     metadata_removed.append(str(Path(entry["path"]).parent.parent/"tvshow.nfo"))
                 directories_removed.extend(_prune_empty_staging_parents(
                     entry["path"],settings["storage"]["trial_root"]))
