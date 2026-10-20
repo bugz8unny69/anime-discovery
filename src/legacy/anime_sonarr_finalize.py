@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 from anime_sonarr import _request
-from anime_qb_ownership import OWNED, ownership
+from anime_qb_ownership import OWNED, ownership, owned_now
 
 def _digest(path):
     h=hashlib.sha256()
@@ -90,8 +90,16 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
     hashes={str(infohash).lower() for _,infohash,_ in rows}
     # Legacy releases, externally preexisting torrents, and uncertain add
     # outcomes must not be deleted. The category alone is never enough.
-    owned_hashes={h for h in hashes if ownership(db,h)==OWNED}
+    owned_hashes={h for h in hashes if ownership(db,h)==OWNED
+                  and owned_now(db,h,qb)}
     preserved_hashes=hashes-owned_hashes
+    if preserved_hashes:
+        from anime_series_lifecycle import ensure_cleanup_notice_schema
+        from time import time
+        ensure_cleanup_notice_schema(db)
+        db.executemany("""INSERT OR IGNORE INTO sonarr_keep_cleanup_notice
+            (series_id,infohash,ownership,created_at) VALUES (?,?,?,?)""",
+            [(series_id,h,ownership(db,h),int(time())) for h in preserved_hashes])
     digests={nid:digest for nid,_,digest in rows
              if isinstance(digest,str) and len(digest)==64 and all(c in "0123456789abcdef" for c in digest.lower())}
     destinations=confirm_sonarr_copies(settings,secrets,sonarr_id=sonarr_id,
