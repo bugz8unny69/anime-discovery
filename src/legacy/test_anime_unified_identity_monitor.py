@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from anime_fresh_database import initialize
-from anime_unified_identity_monitor import check_once
+from anime_unified_identity_monitor import check_once, investigate
 from anime_ntfy_monitor import check_once as alerts
 
 class TriageTests(unittest.TestCase):
@@ -21,6 +21,26 @@ class TriageTests(unittest.TestCase):
         self.settings={"ntfy":{"enabled":True,"reminder_hours":1}}
         self.notified=[]
         self.sender=lambda s,k,n,t:self.notified.append(n) or True
+
+    def test_batch_and_special_have_actionable_review_reasons(self):
+        # No remote sources or database mutation; actual incident-style names.
+        catalog=Path(self.tmp.name)/"titles.xml"
+        catalog.write_text("<animetitles></animetitles>",encoding="utf-8")
+        settings={"identity":{},"anidb":{"enabled":True},"tvdb":{"enabled":False}}
+        batch=investigate(
+            "[Trix] Cyberpunk Edgerunners S02 1080p NF WEB-DL "
+            "Opus2.0 AV1 (Dual-Audio, Multi-Subs) (Season S2) (Batch)",
+            settings,{},catalog)
+        self.assertEqual(batch["release_scope_hint"]["season_hint"],2)
+        self.assertIn("BATCH_FILE_MANIFEST_REQUIRED",batch["issues"])
+        self.assertNotEqual(batch["decision"],"AUTO_VERIFIED")
+        special=investigate(
+            "[Anime Time] KonoSuba - God's Blessing On This "
+            "Wonderful World - S00E05 - Movie Legend Of Crimson "
+            "(Fixed Subs Fonts) [BD] [Dual Audio][1080p]",
+            settings,{},catalog)
+        self.assertIn("SEASON_ZERO_SPECIAL_OUTSIDE_TRIAL_SCOPE",special["issues"])
+        self.assertNotEqual(special["decision"],"AUTO_VERIFIED")
 
     def test_invalid_xml_is_metadata_retry_not_user_review_even_after_three_attempts(self):
         import xml.etree.ElementTree as ET
