@@ -44,7 +44,7 @@ def schedule(db,*,title,tvdb_id,anidb_id,season=1,up_to=None,origin="manual"):
         raise ValueError("Verified TVDB and AniDB identity required")
     if type(season) is not int or not 1<=season<=100:
         raise ValueError("Invalid anime season")
-    if up_to is not None and (type(up_to) is not int or not 1<=up_to<=500):
+    if up_to is not None and (type(up_to) is not int or not 1<=up_to<=9999):
         raise ValueError("Invalid latest episode")
     existing=db.execute("SELECT id,status FROM series WHERE source='tvdb' AND external_id=?",
                         (str(int(tvdb_id)),)).fetchone()
