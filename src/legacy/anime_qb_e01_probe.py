@@ -56,8 +56,13 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest):
     skipped = plan["skip_indices"]
 
     if current.get("state") not in STOPPED:
-        # A repeat call after a completed prior start should not issue a
-        # second start or pause; ensure only E01 is currently wanted.
+        # A repeat call after a prior start should not reset priorities.
+        # Only recognized transfer/seeding states qualify: never treat
+        # an error, checking or metadata state as a healthy E01 probe.
+        if current.get("state") not in (
+                "downloading", "stalledDL", "queuedDL", "forcedDL",
+                "uploading", "stalledUP", "queuedUP", "forcedUP"):
+            raise RuntimeError("Torrent is not in a recognized E01 transfer state")
         priorities = {row["index"]: row.get("priority") for row in current_files}
         if (len(priorities) == len(current_files)
                 and all(priorities.get(i) == (1 if i == idx else 0)
