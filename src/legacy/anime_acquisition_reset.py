@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from anime_acquisition_gate import approved_dispatch
+from anime_identity_rejection_gate import resolve_notification
 
 _HASH=re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _VIDEO={".mkv",".mp4",".m4v",".avi"}
@@ -150,6 +151,8 @@ def reset_acquisitions(db, series_id, *, trial_root):
         paths=[]
         for jid,state,token,payload,nid,season,ep,dispatch,infohash,tvdb,rhash,staged,digest in rows:
             _validate_record(nid,state,dispatch,token,payload,infohash,tvdb,rhash,staged,digest)
+            if resolve_notification(db,nid)!=series_id:
+                raise ValueError("Notification no longer resolves to requested series")
             approval=db.execute("""SELECT decision,season,episode FROM episode_approval_queue
                 WHERE notification_id=?""",(nid,)).fetchone()
             evidence=db.execute("""SELECT verified FROM episode_verification_v16
