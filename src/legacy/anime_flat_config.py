@@ -70,7 +70,7 @@ def validate_config(settings,secrets,*,directory=None):
     if result["qbittorrent"]["manage_download_limit"] is not False:
         raise ValueError("qBittorrent owns its download limit")
     for section, key in (("identity","reuse_verified_cache"),("jellyfin","write_trial_nfo"),("jellyfin","enabled"),
-                         ("shoko","enabled"),("shoko","auto_link_verified")):
+                         ("shoko","enabled"),("shoko","auto_link_verified"),("anidb","enabled")):
         if type(result[section][key]) is not bool:
             raise ValueError("Invalid boolean setting: "+section+"."+key)
     series_map = result["identity"]["series_map"]
