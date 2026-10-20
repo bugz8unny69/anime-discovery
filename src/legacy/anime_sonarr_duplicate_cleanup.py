@@ -242,6 +242,21 @@ def confirm(db,series_id,settings,secrets,*,approved=False,qb=None,opener=None,
     removed=[]
     torrent_removed=[]
     errors=[]
+    # Revalidate the complete current Sonarr/audio picture BEFORE touching qB.
+    try:
+        before_delete=review(db,series_id,settings,secrets,opener=opener,
+                             audio_probe=audio_probe)
+        still_valid={e["notification_id"] for e in before_delete["episodes"]
+                     if e["status"]=="REGISTERED"}
+        if not all(item["notification_id"] in still_valid for item,_ in verified):
+            raise RuntimeError("Sonarr proof changed before cleanup")
+    except Exception as exc:
+        errors.append("Pre-deletion Sonarr verification: "+type(exc).__name__)
+        db.execute("""UPDATE sonarr_duplicate_cleanup_audit
+            SET result='SAFE_HOLD',reason='SONARR_PROOF_STALE' WHERE id=?""",(audit_id,))
+        return {"audit_id":audit_id,"removed_notification_ids":[],
+                "removed_owned_torrents":[],"preserved_torrents":preserved,
+                "errors":errors}
     # Irreversible operations are outside the SQLite lock, audited individually.
     for h in owned:
         try:
