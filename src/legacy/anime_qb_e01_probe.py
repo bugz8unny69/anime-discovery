@@ -9,10 +9,12 @@ must supply durable evidence before doing either operation.
 """
 import logging
 from anime_batch_selection import (plan_gated_first_six,plan_verified_trial,
-                                   SelectionNeedsReview)
+                                   plan_first_six,SelectionNeedsReview)
 from anime_qb_manifest_intake import _validated_manifest, STOPPED
 from anime_qb_ownership import OWNED, owned_now, ownership
 from anime_trial_policy import window_for
+from anime_trial_size_policy import (authorize_manifest_sizes, decide_trial_size,
+                                     size_limits, TrialSizeRejected)
 
 LOG=logging.getLogger("anime_discovery.trial")
 
@@ -23,7 +25,8 @@ def _inventory(files):
 
 
 def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
-                    verified_window=None, verified_episode_map=None):
+                    verified_window=None, verified_episode_map=None,
+                    size_settings=None):
     """Revalidate ownership and file identity, set E01-only, then resume.
 
     stopped_manifest must come from a successful submit_poll_pause() result.
@@ -45,6 +48,8 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
     try:
         if verified_window is None and verified_episode_map is None:
             plan=plan_gated_first_six(original_files,season=season)
+            # Inspect every eligible file even though ONLY E01 is selected.
+            full_plan=plan_first_six(original_files,season=season)
         else:
             # Never unlock an absolute/part/ongoing numbering mode just
             # because a caller supplies an offset or a filename.
@@ -59,6 +64,11 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
             plan=plan_verified_trial(original_files,season=season,
                                      start_episode=trial_episode,
                                      episode_map=verified_episode_map)
+            # A pure dry planning phase, not ffprobe approval or actual unlock.
+            full_plan=plan_verified_trial(original_files,season=season,
+                                          start_episode=trial_episode,
+                                          episode_map=verified_episode_map,
+                                          probe_verified=True)
         if len(plan["wanted_indices"])!=1:
             raise SelectionNeedsReview("Cannot safely select unique first trial episode")
         idx=plan["wanted_indices"][0]
@@ -81,6 +91,32 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
         raise PermissionError("Torrent ownership changed during selection")
     wanted = plan["wanted_indices"]
     skipped = plan["skip_indices"]
+
+    # qB supplied exact per-file byte sizes AFTER a stable stopped manifest.
+    # Count only canonical trial episodes, not the full torrent or unrelated
+    # seasons/attachments. All six known => combined limit overrides the
+    # individual cap. Partial pack => individual AND running total caps.
+    size_by_index = {idx: size for idx, _name, size in original}
+    eligible_files = {
+        ep: {"index": ix, "size": size_by_index[ix]}
+        for ep, ix in full_plan["wanted_episodes"].items()
+    }
+    limits = size_limits(size_settings)
+    if verified_window is not None:
+        authorize_manifest_sizes(db, window=verified_window, infohash=infohash,
+                                 episode_files=eligible_files, limits=limits)
+    else:
+        # Legacy callers do not supply durable series identity, so a per-pack
+        # safety check is possible but no cross-release reservation can be made.
+        verdict = decide_trial_size(
+            {ep: row["size"] for ep, row in eligible_files.items()},
+            start_episode=trial_episode, limits=limits)
+        LOG.info("event=TRIAL_SIZE_DECISION action=ELIGIBLE reason=%s "
+                 "season=%d known_total_bytes=%d known_count=%d "
+                 "individual_limit_mb=%d trial_limit_mb=%d torrent=%s",
+                 verdict["reason"], season, verdict["trial_total_bytes"],
+                 verdict["known_episode_count"], limits["max_episode_mb"],
+                 limits["max_six_episode_mb"], infohash[:12])
 
     if current.get("state") not in STOPPED:
         # A repeat call after a prior start should not reset priorities.
