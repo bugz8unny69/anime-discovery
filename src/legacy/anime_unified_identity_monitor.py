@@ -118,7 +118,7 @@ def title_diagnostics(aliases,candidates,threshold):
                      "reason":reason})
     return rows
 
-def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,shoko_resolve=None):
+def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,anidb_resolve=None):
     aliases,episode=release_title(name)
     threshold=settings.get("identity",{}).get("match_threshold_pct",90)
     report={"title_queries":aliases[:5],"threshold_pct":threshold,
@@ -236,10 +236,12 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             report["issues"].append("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED")
         else:
             tvdb_ep_id=seen[0]["id"]
-            if episode_id is None and rule and shoko_resolve is not None:
-                episode_id=shoko_resolve(int(pair["anidb_id"]),tvdb_ep_id)
+            if episode_id is None and rule and anidb_resolve is not None:
+                episode_id=anidb_resolve(int(pair["anidb_id"]),
+                                          rule["anidb_episode_number"])
                 if type(episode_id) is not int or episode_id<=0:
                     episode_id=None
+            # Shoko is only involved after Keep, never during trial triage.
             if episode_id is not None:
                 report["decision"]="AUTO_VERIFIED"
                 report["approval"]={"tvdb_id":int(tid),
@@ -281,14 +283,16 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
                 mapping_xml=ensure_anime_lists(
                     Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml")
-                resolver=None
-                if settings.get("shoko",{}).get("enabled") and secrets.get("shoko_api_key"):
-                    from anime_episode_crossref import resolve_anidb_episode
-                    resolver=lambda aid,teid: resolve_anidb_episode(
-                        settings["shoko"]["base_url"],secrets["shoko_api_key"],
-                        anidb_series_id=aid,tvdb_episode_id=teid)
+                aid_cfg=settings.get("anidb",{})
+                direct=None
+                if aid_cfg.get("http_api_url") and aid_cfg.get("client"):
+                    from anime_anidb_episode_lookup import lookup_episode_id
+                    direct=lambda aid,ep: lookup_episode_id(
+                        aid,ep,endpoint=aid_cfg["http_api_url"],
+                        client=aid_cfg["client"],clientver=aid_cfg["clientver"],
+                        cache_dir=Path(settings["daemon"]["database_path"]).parent/"anidb-episode-cache")
                 report=investigate(title,settings,secrets,catalog,
-                                   mapping_xml=mapping_xml,shoko_resolve=resolver)
+                                   mapping_xml=mapping_xml,anidb_resolve=direct)
             decision=report["decision"]
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
