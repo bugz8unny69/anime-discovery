@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 import time
+from anime_config_wakeup import wait_for_change
 from anime_flat_config import load_config
 from anime_sonarr_finalize import confirm_sonarr_copies
 from anime_shoko_handoff_state import ensure_schema, enqueue_verified_copies, reconcile_one
@@ -191,7 +192,7 @@ def main():
             check_once(cfg["settings"],cfg["secrets"])
         except Exception as exc:
             LOG.warning("Shoko monitor deferred (%s)",type(exc).__name__)
-        time.sleep(60)
+        wait_for_change(60)
 
 if __name__=="__main__":
     main()
