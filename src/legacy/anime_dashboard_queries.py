@@ -81,6 +81,9 @@ def all_jobs(db, *,page=1,size=20):
                                       batch_action[:240])
             except (TypeError,ValueError,AttributeError):
                 identity_checks[nid]=("UNKNOWN",[],False,"")
+    batch_stages={}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_batch_executions'").fetchone():
+        batch_stages=dict(db.execute("SELECT notification_id,state FROM anime_batch_executions"))
     rows=db.execute("""SELECT n.id,n.source,n.release_name,n.received_at,n.status,
         d.season,d.episode,d.state,
         j.id,j.state,j.attempts,j.available_at,j.lease_until,j.last_error,r.staged_path,
@@ -95,6 +98,8 @@ def all_jobs(db, *,page=1,size=20):
         ORDER BY n.id DESC""").fetchall()
     result=[]
     for nid,source,release,received,nstatus,season,episode,dispatch,job_id,job,attempts,retry_at,lease_until,error,stage,title in rows:
+        batch_stage=batch_stages.get(nid)
+        batch_active=bool(batch_stage in ("PROBE","UNLOCKED") and job in ("DEFERRED","LEASED","READY"))
         event=events.get(job_id)
         canceled=job=="BLOCKED" and event is not None and event["action"]=="cancel"
         if canceled:
@@ -106,7 +111,7 @@ def all_jobs(db, *,page=1,size=20):
         elif job=="READY":
             status="QUEUED"
         elif job=="DEFERRED":
-            status="WAITING FOR DOWNLOAD"
+            status="DOWNLOADING" if batch_active else "WAITING FOR DOWNLOAD"
         elif job=="BLOCKED":
             status="BLOCKED"
         elif job=="NEEDS_REVIEW" or dispatch=="NEEDS_REVIEW":
@@ -140,6 +145,10 @@ def all_jobs(db, *,page=1,size=20):
             explanation="Acquisition worker has leased this job."
         elif status=="COMPLETED":
             explanation="Acquisition job completed."
+        elif batch_active:
+            explanation=("Downloading verified episodes; waiting for episode file completion. "
+                         "Live qBittorrent progress is not available in this view; "
+                         "this status does not confirm that transfer speed is nonzero.")
         elif status=="CANCELED":
             explanation="Canceled by an administrator. The job will not be retried; no torrent or media was deleted."
         else:
@@ -153,6 +162,8 @@ def all_jobs(db, *,page=1,size=20):
                         "next_retry_at":retry_at if job=="DEFERRED" else None,
                         "lease_until":lease_until if job=="LEASED" else None,
                         "last_error":error or None,
+                        "batch_download_active":batch_active,
+                        "batch_stage":batch_stage,
                         "can_retry":job in ("DEFERRED","NEEDS_REVIEW"),
                         "can_cancel":job in ("READY","DEFERRED","NEEDS_REVIEW"),
                         "last_admin_action":event,
