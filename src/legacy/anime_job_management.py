@@ -20,7 +20,10 @@ def ensure_schema(db):
         previous_error TEXT,
         created_at REAL NOT NULL
     )""")
-    db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_archived_subjects (\n        job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),\n        kind TEXT NOT NULL, original_subject_key TEXT NOT NULL)""")\n    db.execute("""CREATE INDEX IF NOT EXISTS daemon_job_admin_events_latest
+    db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_archived_subjects (
+        job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),
+        kind TEXT NOT NULL, original_subject_key TEXT NOT NULL)""")
+    db.execute("""CREATE INDEX IF NOT EXISTS daemon_job_admin_events_latest
         ON daemon_job_admin_events(job_id,id)""")
 
 def latest_events(db):
