@@ -30,6 +30,37 @@ class KeepTests(unittest.TestCase):
         self.assertEqual(result["sonarr_id"],22)
         self.assertEqual(self.db.execute("SELECT status FROM series WHERE id=?",(self.sid,)).fetchone()[0],"SONARR_IMPORT_PENDING")
         self.assertEqual(self.db.execute("SELECT tvdb_id FROM sonarr_keep").fetchone()[0],"123")
+    def test_keep_warns_and_persists_notice_for_unowned_torrent(self):
+        from anime_series_lifecycle import inspect
+        from anime_dashboard_pages import detail_page
+        outcome=keep(self.db,self.sid,self.settings,self.secrets,
+                     sonarr_client=lambda *a,**k:{"sonarr_id":22})
+        self.assertEqual(outcome["torrents_preserved"],1)
+        self.assertIn("preserved",outcome["cleanup_notice"])
+        result=inspect(self.db,self.sid)
+        self.assertEqual(result["cleanup_notices"][0]["ownership"],"UNCERTAIN")
+        page=detail_page(result)
+        self.assertIn("Original qBittorrent files preserved",page)
+        self.assertIn("remove these torrents and their files manually",page)
+        self.assertIn('role="status"',page)
+        # Still visible on reload; this is not a one-time flash.
+        self.assertIn("Original qBittorrent files preserved",
+                      detail_page(inspect(self.db,self.sid)))
+
+    def test_keep_does_not_warn_for_proven_ownership(self):
+        from anime_qb_ownership import ensure_schema,OWNED,CATEGORY
+        from anime_series_lifecycle import inspect
+        from anime_dashboard_pages import detail_page
+        ensure_schema(self.db)
+        self.db.execute("""INSERT INTO qb_torrent_ownership
+            VALUES (?,?,?,?,1)""",("hash",OWNED,"ad-"+"1"*32,CATEGORY))
+        outcome=keep(self.db,self.sid,self.settings,self.secrets,
+                     sonarr_client=lambda *a,**k:{"sonarr_id":22})
+        self.assertEqual(outcome["torrents_preserved"],0)
+        self.assertIsNone(outcome["cleanup_notice"])
+        self.assertNotIn("Original qBittorrent files preserved",
+                         detail_page(inspect(self.db,self.sid)))
+
     def test_failed_sonarr_does_not_keep(self):
         def unavailable(*a,**kw):
             raise RuntimeError("offline")
