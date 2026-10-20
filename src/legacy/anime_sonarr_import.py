@@ -112,6 +112,79 @@ def _rejected_with_inventory(cfg,key,sonarr_id,item,episode,plan_episodes,
                  ". Review Wanted > Manual Import before retrying Keep."))
 
 
+
+
+def inspect_registered_episodes(settings,secrets,*,sonarr_id,plan,opener=None):
+    """Read-only, fail-closed classification of precisely staged Sonarr episodes.
+
+    Registered means a canonical episode is linked to a positive-size Sonarr
+    episodefile record. It does NOT prove on-disk accessibility, JP/EN audio,
+    copy equivalence, successful import or permission to delete trial media.
+    """
+    if type(sonarr_id) is not int or sonarr_id<=0:
+        raise ValueError("Invalid Sonarr series ID")
+    if not isinstance(plan,list) or not plan or len(plan)>100:
+        raise ValueError("Invalid bounded trial manifest")
+    keys=[]
+    for item in plan:
+        if not isinstance(item,dict):
+            raise ValueError("Invalid staged item")
+        season,number=item.get("season"),item.get("episode")
+        if type(season) is not int or type(number) is not int or season<0 or number<=0:
+            raise ValueError("Invalid staged episode")
+        keys.append((season,number))
+    if len(set(keys))!=len(keys):
+        raise ValueError("Duplicate staged episode")
+    cfg=settings["sonarr"]
+    kwargs={} if opener is None else {"opener":opener}
+    episodes=_request(cfg["base_url"],secrets["sonarr_api_key"],"GET",
+                      "episode?seriesId="+str(sonarr_id),**kwargs)
+    files=_request(cfg["base_url"],secrets["sonarr_api_key"],"GET",
+                   "episodefile?seriesId="+str(sonarr_id),**kwargs)
+    if not isinstance(episodes,list) or not isinstance(files,list):
+        raise RuntimeError("Invalid Sonarr inventory")
+    by_number={}
+    for episode in episodes:
+        if not isinstance(episode,dict):
+            raise RuntimeError("Malformed Sonarr episode")
+        key=(episode.get("seasonNumber"),episode.get("episodeNumber"))
+        if key in keys:
+            by_number.setdefault(key,[]).append(episode)
+    by_id={}
+    for file in files:
+        if not isinstance(file,dict):
+            raise RuntimeError("Malformed Sonarr episode file")
+        fid=file.get("id")
+        if type(fid) is int and fid>0:
+            by_id.setdefault(fid,[]).append(file)
+    result=[]
+    for item,key in zip(plan,keys):
+        matched=by_number.get(key,[])
+        status="NEEDS_REVIEW"
+        eid=None
+        fid=None
+        if len(matched)==1 and type(matched[0].get("id")) is int and matched[0]["id"]>0:
+            ep=matched[0]
+            eid=ep["id"]
+            candidate=ep.get("episodeFileId")
+            if ep.get("hasFile") is False and candidate in (None,0):
+                status="MISSING"
+            elif ep.get("hasFile") is True and type(candidate) is int and candidate>0:
+                linked=by_id.get(candidate,[])
+                if (len(linked)==1 and linked[0].get("seriesId")==sonarr_id
+                        and type(linked[0].get("size")) is int and linked[0]["size"]>0
+                        and isinstance(linked[0].get("path"),str)
+                        and bool(linked[0]["path"].strip())):
+                    status="REGISTERED"
+                    fid=candidate
+        result.append({"season":key[0],"episode":key[1],"sonarr_episode_id":eid,
+                       "sonarr_episode_file_id":fid,"status":status})
+    LOG.info("event=SONARR_RECONCILIATION sonarr_id=%d checked=%d registered=%d missing=%d review=%d",
+             sonarr_id,len(result),sum(x["status"]=="REGISTERED" for x in result),
+             sum(x["status"]=="MISSING" for x in result),
+             sum(x["status"]=="NEEDS_REVIEW" for x in result))
+    return result
+
 def plan_staged_imports(db,series_id,*,trial_root):
     root=Path(trial_root).resolve(strict=True)
     rows=db.execute("""SELECT d.notification_id,d.season,d.episode,r.staged_path
