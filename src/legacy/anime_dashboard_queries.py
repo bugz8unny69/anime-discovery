@@ -153,7 +153,7 @@ def all_jobs(db, *,page=1,size=20):
             explanation="Canceled by an administrator. The job will not be retried; no torrent or media was deleted."
         else:
             explanation=error or ("Current job state: "+status.lower())
-        if error=="QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT":
+        if status!="CANCELED" and error=="QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT":
             explanation=("qBittorrent's save_path is outside Anime Discovery's configured "
                          "download_root. Compare the exact torrent save_path with "
                          "settings.storage.download_root in the worker's filesystem namespace. "
@@ -175,8 +175,8 @@ def all_jobs(db, *,page=1,size=20):
                         "last_error":error or None,
                         "batch_download_active":batch_active,
                         "batch_stage":batch_stage,
-                        "can_retry":job in ("DEFERRED","NEEDS_REVIEW"),
-                        "can_cancel":job in ("READY","DEFERRED","NEEDS_REVIEW"),
+                        "can_retry":job=="NEEDS_REVIEW",
+                        "can_cancel":job=="NEEDS_REVIEW",
                         "last_admin_action":event,
                         "source":source,"release":release,
                        "received_at":received,"status":status,
@@ -186,6 +186,23 @@ def all_jobs(db, *,page=1,size=20):
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "", "activity_detail":explanation,
                        "staged":bool(stage and Path(stage).is_file())})
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='daemon_job_archived_subjects'").fetchone():
+        history=db.execute("""SELECT a.job_id,n.id,n.source,n.release_name,n.received_at,
+            j.attempts,j.last_error,j.kind
+            FROM daemon_job_archived_subjects a
+            JOIN daemon_jobs j ON j.id=a.job_id
+            JOIN notifications n ON a.original_subject_key=CAST(n.id AS TEXT)
+            WHERE j.state='BLOCKED'
+              AND a.kind IN ('verified_batch_acquisition','claimed_acquisition')
+            ORDER BY a.job_id DESC""").fetchall()
+        for jid,nid,source,release,received,attempts,old_error,kind in history:
+            result.append({"id":nid,"job_id":jid,"job_state":"BLOCKED",
+                "attempts":attempts,"last_error":old_error,
+                "source":source,"release":release,"received_at":received,
+                "status":"CANCELED","message":"","activity_detail":"Canceled by administrator.",
+                "can_retry":False,"can_cancel":False,"can_resolve":False,
+                "can_recheck":False,"can_delete":False,"season":None,"episode":None,
+                "series_title":"","staged":False})
     searches=db.execute("""SELECT id,subject_key,payload_json,state,attempts,
         available_at,lease_until,last_error
         FROM daemon_jobs WHERE kind='series_gap_search' ORDER BY id DESC""").fetchall()
@@ -198,14 +215,14 @@ def all_jobs(db, *,page=1,size=20):
                     "NEEDS_REVIEW":"NEEDS REVIEW"}.get(state,state)
         if canceled:
             job_status="CANCELED"
-        explanation=("Canceled by an administrator. No torrent or media was deleted."
+        explanation=("Canceled by administrator."
                      if canceled else error or ("Search job: "+job_status.lower()))
         result.append({"id":"search-"+str(jid),"job_id":jid,"job_state":state,
                         "attempts":attempts,"next_retry_at":retry_at if state=="DEFERRED" else None,
                         "lease_until":lease_until if state=="LEASED" else None,
                         "last_error":error or None,"last_admin_action":event,
-                        "can_retry":state=="DEFERRED",
-                        "can_cancel":state in ("READY","DEFERRED","NEEDS_REVIEW"),
+                        "can_retry":state=="NEEDS_REVIEW",
+                        "can_cancel":state=="NEEDS_REVIEW",
                         "activity_detail":explanation,"source":request["origin"],
                        "release":request["title"]+" (one-time search)",
                        "received_at":0,"status":job_status,"season":request["season"],
