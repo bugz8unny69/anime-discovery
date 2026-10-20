@@ -119,3 +119,36 @@ from the AniDB episode API is a temporary metadata-source failure:
 the worker retries with cooldown, remains `IDENTIFYING`, and does not
 send an NTFY review notification. A valid AniDB XML document with no
 matching episode remains a separate, unresolved-identity case.
+
+## HTTP compression (October 2026 fix)
+
+AniDB's HTTP API may return a gzip- or deflate-compressed payload while the
+`Content-Type` is `text/xml` and the HTTP status is `200`. Python's
+`urllib.request` does **not** transparently decompress `Content-Encoding`.
+Prior builds tried to parse the compressed bytes as XML and logged
+`ParseError` (often with unreadable binary preview).
+
+The episode client now sends `Accept-Encoding: gzip, deflate`, decodes
+supported encodings **before** parsing, and recognizes gzip/zlib signatures if
+`Content-Encoding` is missing. It permits old uncompressed XML replies too.
+Both downloaded and decompressed XML are size-limited. Only a validated
+`<anime id="...">` episode catalog enters `anime-metadata.db`.
+
+A short compressed response can be an AniDB `<error>` XML document. These
+are not successful catalog lookups, even with HTTP 200. The diagnostic line
+shows `content_encoding`, `encoded_bytes`, decoded `bytes`, a short
+redacted preview of the **decoded** error, and `reason=ANIDB_ERROR_<code>`
+(if AniDB supplies a code). Failed responses are not cached, and AniDB request
+cooldowns still apply. NTFY is not sent for transient metadata failures.
+
+After deployment, inspect only safe log lines:
+
+```bash
+sudo journalctl -u anime-discovery --since '15 minutes ago' --no-pager |
+  grep -E 'upstream_xml_problem|AniDB episode catalog validated|Identity metadata retry|identity notification='
+```
+
+If a compressed upstream `<error>` response appears, use the **code** and
+redacted message to diagnose client registration, rate limits, or API status.
+Do not publish your full request URL or credential values. No additional
+gateway or manual API request is needed for this change.

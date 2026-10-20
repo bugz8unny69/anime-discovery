@@ -7,7 +7,11 @@ One request fetches an entire anime's episode catalog. No Shoko dependency.
 The global SQLite request reservation prevents parallel Anime Discovery
 processes from exceeding conservative AniDB HTTP request spacing.
 """
+import gzip
+import io
+import logging
 import re
+import zlib
 import sqlite3
 import time
 import urllib.parse
@@ -23,6 +27,7 @@ MIN_REQUEST_GAP = 10
 MISSING_REFRESH_SECONDS = 86400
 ERROR_BACKOFF_SECONDS = 600
 MAX_EPISODES = 10000
+LOG = logging.getLogger(__name__)
 
 
 class AniDBLookupDeferred(Exception):
@@ -31,6 +36,56 @@ class AniDBLookupDeferred(Exception):
         self.retry_after_seconds = max(1, int(retry_after_seconds))
         super().__init__("AniDB request cooldown active")
 
+
+
+def decode_episode_xml(payload, *, encoding=None):
+    """Decode HTTP content coding before XML parse; bound decompressed bytes.
+
+    AniDB's HTTP API can send gzip-compressed XML with Content-Type text/xml.
+    urllib.request does not transparently decode HTTP Content-Encoding.
+    For legacy/misconfigured upstreams, recognize gzip or zlib magic even
+    when Content-Encoding is absent. Never silently accept unknown encodings.
+    """
+    if not isinstance(payload, bytes) or not payload or len(payload) > MAX_BYTES:
+        raise ValueError("Invalid AniDB HTTP response size")
+    codec=(encoding or "").strip().lower()
+    if codec in ("", "identity"):
+        if payload.startswith(b"\x1f\x8b"):
+            codec="gzip"
+        elif (len(payload)>=2 and payload[0]&15==8 and
+              (payload[0]*256+payload[1])%31==0):
+            codec="deflate"
+        else:
+            return payload,"identity"
+    try:
+        if codec in ("gzip","x-gzip"):
+            with gzip.GzipFile(fileobj=io.BytesIO(payload)) as stream:
+                plain=stream.read(MAX_BYTES+1)
+            codec="gzip"
+        elif codec=="deflate":
+            decoder=zlib.decompressobj()
+            plain=decoder.decompress(payload,MAX_BYTES+1)
+            if decoder.unconsumed_tail or not decoder.eof or decoder.unused_data:
+                raise ValueError("Invalid or oversized deflate response")
+        else:
+            raise ValueError("Unsupported AniDB response encoding")
+    except (OSError,EOFError,zlib.error) as exc:
+        raise ValueError("Malformed compressed AniDB HTTP response") from None
+    if not plain or len(plain)>MAX_BYTES:
+        raise ValueError("Invalid or oversized decompressed AniDB response")
+    return plain,codec
+
+
+def _anidb_error_code(xml_bytes):
+    """Extract bounded public AniDB error code, never return response text."""
+    try:
+        root=ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return None
+    if root.tag!="error":
+        return None
+    code=root.get("code") or "UNKNOWN"
+    return code if re.fullmatch(r"[A-Za-z0-9_-]{1,16}",code) else "UNKNOWN"
 
 def parse_catalog(xml_bytes, aid):
     """Return verified regular episode-number/eid pairs from one AniDB anime."""
@@ -140,15 +195,18 @@ def lookup_episode_id(aid, epno, *, client, clientver, metadata_path,
         args = urllib.parse.urlencode({"request":"anime", "aid":aid, "protover":1,
                                        "client":client, "clientver":clientver})
         request = urllib.request.Request(API_URL + "?" + args,
-            headers={"User-Agent":"AnimeDiscovery/1.0","Accept":"application/xml"})
+            headers={"User-Agent":"AnimeDiscovery/1.0","Accept":"application/xml",
+                     "Accept-Encoding":"gzip, deflate"})
         try:
             status=None
             content_type=None
+            content_encoding=None
             try:
                 with opener(request, timeout=30) as response:
                     status=getattr(response,"status",None)
-                    content_type=(response.headers.get("Content-Type")
-                                  if getattr(response,"headers",None) else None)
+                    headers=getattr(response,"headers",None)
+                    content_type=headers.get("Content-Type") if headers else None
+                    content_encoding=headers.get("Content-Encoding") if headers else None
                     raw=response.read(MAX_BYTES+1)
             except urllib.error.HTTPError as failure:
                 raw=failure.read(160)
@@ -161,12 +219,26 @@ def lookup_episode_id(aid, epno, *, client, clientver, metadata_path,
                             content_type=content_type,reason="HTTP_STATUS")
                 raise InvalidXMLResponse("ANIDB_EPISODE_HTTP","HTTP_STATUS")
             try:
-                episodes=parse_catalog(raw,aid)
-            except (ET.ParseError,ValueError) as failure:
+                plain,codec=decode_episode_xml(raw,encoding=content_encoding)
+            except ValueError as failure:
                 log_bad_xml("ANIDB_EPISODE_HTTP",raw,status=status,
-                            content_type=content_type,reason=type(failure).__name__)
-                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP",
-                                          type(failure).__name__) from None
+                            content_type=content_type,
+                            content_encoding=content_encoding,
+                            reason="DECODE_"+type(failure).__name__)
+                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP","DECODE_FAILED") from None
+            try:
+                episodes=parse_catalog(plain,aid)
+            except (ET.ParseError,ValueError) as failure:
+                api_error=_anidb_error_code(plain)
+                kind=("ANIDB_ERROR_"+api_error if api_error
+                      else type(failure).__name__)
+                log_bad_xml("ANIDB_EPISODE_HTTP",plain,status=status,
+                            content_type=content_type,content_encoding=codec,
+                            encoded_bytes=len(raw),reason=kind)
+                raise InvalidXMLResponse("ANIDB_EPISODE_HTTP",kind) from None
+            LOG.info("AniDB episode catalog validated anidb_id=%s regular_episodes=%s "
+                     "content_encoding=%s compressed_bytes=%s decoded_bytes=%s",
+                     aid,len(episodes),codec,len(raw),len(plain))
         except Exception:
             # Slow subsequent requests after server errors, timeouts or invalid XML.
             db.execute("BEGIN IMMEDIATE")
