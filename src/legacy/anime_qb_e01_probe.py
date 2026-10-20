@@ -57,7 +57,7 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
                 raise ValueError("Durable provider-confirmed window required")
             stored=window_for(db,tvdb_id=verified_window.get("tvdb_id"),
                               anidb_id=verified_window.get("anidb_id"),
-                              season=season)
+                              season=season,unit_key=verified_window.get("unit_key"))
             if stored!=verified_window or not stored.get("evidence_ref"):
                 raise PermissionError("Trial window evidence not durably verified")
             trial_episode=stored["start"]
