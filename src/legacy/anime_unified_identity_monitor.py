@@ -162,7 +162,7 @@ def title_diagnostics(aliases,candidates,threshold):
                      "reason":reason})
     return rows
 
-def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,anidb_resolve=None):
+def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,anidb_resolve=None,trusted_season=None):
     aliases,episode=release_title(name)
     threshold=settings.get("identity",{}).get("match_threshold_pct",90)
     report={"title_queries":aliases[:5],"threshold_pct":threshold,
@@ -185,12 +185,35 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if not settings.get("anidb",{}).get("enabled",True):
         report["issues"].append("ANIDB_PUBLIC_SOURCE_DISABLED")
         return report
-    try:
-        rows,truncated=anidb_matches(catalog,aliases,limit=10)
-    except ET.ParseError:
-        log_bad_xml("ANIDB_TITLES_CACHE",Path(catalog).read_bytes(),
-                    reason="ITERPARSE_FAILURE")
-        raise InvalidXMLResponse("ANIDB_TITLES_CACHE","ITERPARSE_FAILURE") from None
+    # A cached name is a discovery accelerator, never a verified episode.
+    # Trust it only with exact normalized title, explicitly numbered season,
+    # and still-current unique Anime-Lists season mapping. Subsequent TVDB
+    # metadata, episode mapping and AniDB episode ID checks remain mandatory.
+    known=None
+    if trusted_season:
+        from anime_verified_season_memory import proven_season_mapping
+        if (aliases and norm(aliases[0])==norm(trusted_season.get("title",""))
+                and hint.get("season_hint")==trusted_season.get("season")
+                and hint.get("kind")=="single_episode"
+                and proven_season_mapping(mapping_xml,
+                    trusted_season["tvdb_id"],trusted_season["season"],
+                    trusted_season["anidb_id"])):
+            known=trusted_season
+    if known:
+        rows=[{"anidb_id":known["anidb_id"],
+               "matched_titles":[known["title"]],"titles":[known["title"]]}]
+        truncated=False
+        report["workflow"].append({"step":"Verified season cache",
+            "source":"independent_prior_verification",
+            "tvdb_id":known["tvdb_id"],"anidb_id":known["anidb_id"],
+            "season":known["season"],"provider_revalidation":True})
+    else:
+        try:
+            rows,truncated=anidb_matches(catalog,aliases,limit=10)
+        except ET.ParseError:
+            log_bad_xml("ANIDB_TITLES_CACHE",Path(catalog).read_bytes(),
+                        reason="ITERPARSE_FAILURE")
+            raise InvalidXMLResponse("ANIDB_TITLES_CACHE","ITERPARSE_FAILURE") from None
     report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
                                 "mode":"exact normalized title","truncated":bool(truncated)})
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
@@ -201,7 +224,11 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if not settings["tvdb"]["enabled"] or not secrets.get("tvdb_api_key"):
         report["issues"].append("TVDB_DISABLED_OR_KEY_MISSING")
         return report
-    candidates,errors=search(aliases,secrets["tvdb_api_key"])
+    if known:
+        candidates=[{"tvdb_id":str(known["tvdb_id"]),"name":known["title"]}]
+        errors=[]
+    else:
+        candidates,errors=search(aliases,secrets["tvdb_api_key"])
     report["tvdb_candidates"]=[str(c["tvdb_id"]) for c in candidates]
     report["tvdb_results_count"]=len(candidates)
     report["candidate_scores"]=title_diagnostics(aliases,candidates,threshold)
@@ -365,10 +392,29 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             elif not settings.get("anidb",{}).get("enabled",True):
                 report={"decision":"NEEDS_REVIEW","issues":["ANIDB_PUBLIC_SOURCE_DISABLED"]}
             else:
-                catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
+                from anime_verified_season_memory import known_for_release
+                known=(known_for_release(db,title)
+                       if settings.get("identity",{}).get("reuse_verified_cache",True)
+                       else None)
+                # No AniDB title-catalog search for a verified exact-series
+                # cache hit. A cache hint still cannot approve an episode:
+                # Anime-Lists and live TVDB/AniDB evidence remain required.
+                if known is None:
+                    catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
+                else:
+                    catalog=None
                 stage="ANIME_LISTS"
                 mapping_xml=ensure_anime_lists(
                     Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml")
+                if known:
+                    from anime_verified_season_memory import proven_season_mapping
+                    if not proven_season_mapping(mapping_xml,known["tvdb_id"],
+                                                known["season"],known["anidb_id"]):
+                        LOG.warning("event=VERIFIED_SEASON_CACHE_CONFLICT notification=%d "
+                                    "reason=ANIME_LISTS_SEASON_MAPPING_CHANGED",nid)
+                        # No silent fallback to a different AniDB identity.
+                        known=None
+                        catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
                 aid_cfg=settings.get("anidb",{})
                 direct=None
                 if aid_cfg.get("client"):
@@ -379,7 +425,8 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                         metadata_path=Path(settings["daemon"]["database_path"]).parent/"anime-metadata.db")
                 stage="IDENTITY_RESOLUTION"
                 report=investigate(title,settings,secrets,catalog,
-                                   mapping_xml=mapping_xml,anidb_resolve=direct)
+                                   mapping_xml=mapping_xml,anidb_resolve=direct,
+                                   trusted_season=known)
             decision=report["decision"]
             # The release name alone never authorizes season-pack acquisition.
             # Only this network-backed identity worker can promote a pending
@@ -411,6 +458,16 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 approve(db,nid,report["approval"],source="verified_identity_mapping")
                 # approve() atomically records proof and queues the job.
                 db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
+                # Cache series/season proof for ANY verified episode number,
+                # not just episode 1 or episodes inside the trial window.
+                if mapping_xml is not None:
+                    from anime_verified_season_memory import remember_from_report
+                    try:
+                        remember_from_report(db,title,report,mapping_xml,
+                                             approved=report["approval"])
+                    except ValueError as exc:
+                        LOG.warning("event=VERIFIED_SEASON_CACHE_REVIEW notification=%d "
+                                    "reason=%s",nid,type(exc).__name__)
             retry=False
         except Exception as exc:
             import xml.etree.ElementTree as ET
@@ -477,6 +534,13 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 db.execute("UPDATE notifications SET status='APPROVED_BATCH' WHERE id=? AND status='IDENTIFYING'",(nid,))
             elif not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
+        if decision=="BATCH_VERIFIED" and mapping_xml is not None:
+            from anime_verified_season_memory import remember_from_authorized_batch
+            try:
+                remember_from_authorized_batch(db,nid,mapping_xml)
+            except ValueError as exc:
+                LOG.warning("event=VERIFIED_BATCH_CACHE_REVIEW notification=%d reason=%s",
+                            nid,type(exc).__name__)
         LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
                  nid,attempts,decision,retry)
         done+=1
