@@ -67,9 +67,12 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
             "manualimport?folder="+quote(str(Path(item["path"]).parent),safe=""),**kwargs)
         if not isinstance(candidates,list):
             raise RuntimeError("Invalid Sonarr manual import candidates")
-        matches_file=[c for c in candidates if c.get("path")==item["path"]
-                      and c.get("series",{}).get("id")==sonarr_id
-                      and any(e.get("id")==matches[0]["id"] for e in c.get("episodes",[]))]
+        matches_file=[c for c in candidates if isinstance(c,dict)
+                      and c.get("path")==item["path"]
+                      and isinstance(c.get("series"),dict)
+                      and c["series"].get("id")==sonarr_id
+                      and any(isinstance(e,dict) and e.get("id")==matches[0]["id"]
+                              for e in (c.get("episodes") or []))]
         if len(matches_file)!=1:
             # Distinguish Sonarr filesystem visibility from its identity
             # parsing. Neither case may be fixed by guessing an episode or
@@ -98,7 +101,7 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
                          "identity in Sonarr and inspect Wanted > Manual Import.")
             elif not any(any(isinstance(e,dict) and
                              e.get("id")==matches[0]["id"]
-                             for e in c.get("episodes",[]))
+                             for e in (c.get("episodes") or []))
                          for c in same_series):
                 reason="EPISODE_IDENTITY_MISMATCH"
                 message=("Sonarr sees the staged file and series, but its "
