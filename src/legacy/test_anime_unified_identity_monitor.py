@@ -86,6 +86,25 @@ class TriageTests(unittest.TestCase):
                              "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
             self.assertNotIn("approval",missing)
 
+    def test_historical_untrusted_enters_identity_triage_before_ntfy(self):
+        other=self.db.execute("""INSERT INTO notifications
+            (source,release_name,source_guid,info_hash,received_at)
+            VALUES ('nyaa','Historical unknown','old-guid',?,1)""",
+            ("b"*40,)).lastrowid
+        self.assertEqual(alerts(self.db,self.settings,{},now=500,sender=self.sender)["sent"],0)
+        check_once(self.db,{}, {},now=501,limit=2,
+            probe=lambda *_:{"decision":"NEEDS_REVIEW","issues":["UNVERIFIED"]})
+        self.assertEqual(self.db.execute("SELECT status FROM notifications WHERE id=?",
+            (other,)).fetchone()[0],"NEEDS_REVIEW")
+        self.assertEqual(alerts(self.db,self.settings,{},now=502,sender=self.sender)["sent"],2)
+
+    def test_disabled_public_anidb_does_not_require_a_cache_or_api_key(self):
+        config={"anidb":{"enabled":False}}
+        result=check_once(self.db,config,{},now=600)
+        self.assertEqual(result["processed"],1)
+        self.assertEqual(self.db.execute("SELECT status FROM notifications").fetchone()[0],
+                         "NEEDS_REVIEW")
+
     def test_unique_verified_series_still_requires_episode_mapping(self):
         self.assertEqual(check_once(self.db,{}, {},now=2000,probe=lambda *_:{
             "decision":"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED",
