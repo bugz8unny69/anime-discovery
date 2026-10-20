@@ -282,6 +282,21 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     SECURITY_LOG.warning("CSRF rejected route=%s reason=mismatch",route)
                     return self.send(403,"Invalid CSRF token","text/plain")
             route = urlsplit(self.path).path
+            if route=="/series-reset-acquisitions":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    if (not str(values.get("series_id","")).isdigit() or
+                        values.get("reset_confirm")!="RESET"):
+                        raise ValueError("Explicit reset confirmation required")
+                    from anime_acquisition_reset import reset_acquisitions
+                    config=load_config(config_dir) if config_dir else load_config()
+                    with self.database() as db:
+                        outcome=reset_acquisitions(db,int(values["series_id"]),
+                          trial_root=config["settings"]["storage"]["trial_root"])
+                    SECURITY_LOG.info("Reset acquisitions for series %d",outcome["series_id"])
+                    return self.redirect("/jobs")
+                except (ValueError,TypeError,sqlite3.Error,OSError) as exc:
+                    return self.send(409,str(exc),"text/plain")
             if route=="/api/manage-job":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()
