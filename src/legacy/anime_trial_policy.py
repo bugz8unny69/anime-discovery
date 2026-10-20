@@ -100,7 +100,7 @@ def record_verified_window(db, *, tvdb_id, anidb_id, season, unit_key,
             "end":end_episode,"evidence_ref":evidence_ref}
 
 
-def window_for(db, *, tvdb_id, anidb_id, season):
+def window_for(db, *, tvdb_id, anidb_id, season, unit_key=None):
     """Use an existing unique verified window, else regular-season E01-E06.
 
     Multiple units inside a provider season (e.g., Part 1 and Part 2)
@@ -112,6 +112,12 @@ def window_for(db, *, tvdb_id, anidb_id, season):
     rows=db.execute("""SELECT anidb_id,unit_key,mode,start_episode,end_episode,evidence_ref
         FROM anime_trial_windows WHERE tvdb_id=? AND season=?""",
         (tvdb_id,season)).fetchall()
+    if unit_key is not None:
+        if not isinstance(unit_key,str) or not _UNIT.fullmatch(unit_key):
+            raise ValueError("Invalid verified trial unit")
+        rows=[row for row in rows if row[1]==unit_key]
+        if not rows:
+            raise ValueError("Requested verified trial unit not found")
     if not rows:
         return {"tvdb_id":tvdb_id,"anidb_id":anidb_id,
                 "season":season,"unit_key":"season","mode":"SEASON",
