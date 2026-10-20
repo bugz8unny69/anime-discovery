@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
     "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
     "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
+    "anidb": {"enabled": True},
     "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
               "poll_seconds": 60, "import_folder_id": 0}
 }
