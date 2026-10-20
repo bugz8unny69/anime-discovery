@@ -262,44 +262,76 @@ guesswork; TVDB/AniDB episode numbering can differ. Only a verified
 provider episode map may authorize such a conversion (not implemented).
 Never choose the first alphabetical filename as E01.
 
-To meet unattended-operation expectations, if a candidate manifest cannot
-uniquely identify the first episode, **do not download/select any file**;
-mark that release candidate ineligible and try a different release with
-an unambiguous E01. Candidate rejection and alternate search are still
-to be wired into the automatic batch worker. The current isolated planner
-raises `SelectionNeedsReview`; it does not yet perform alternate search.
-Genuinely conflicting identity evidence remains operator-review territory.
+If the supplied torrent's manifest cannot uniquely identify the first
+trial episode, **pause and retain that same torrent** and journal the
+mapping failure. Do not seek a replacement release from the qB stage.
+Provider evidence may resolve the numbering; unsupported mapping fails
+closed without guessing or downloading additional files.
 
-## Completed development slice: alternate verified-season batch candidates
+## Approved architecture: upstream discovery and immutable trial windows
 
-`anime_batch_fallback.py` now offers two **source-only** building blocks:
+**Autobrr owns release discovery.** Anime Discovery must NEVER search for
+another release because a torrent already submitted to qBittorrent has
+unclear episode numbers. The unapproved alternate-pack fallback module
+and its tests have been removed.
 
-- `batch_candidates()`: rank up to five deduplicated Prowlarr season packs
-  by seeders. Release titles must normalize **exactly** to the independently
-  verified series name, with an explicit matching season hint. Reject unrelated
-  title fragments, specials, single-episode results and invalid BTIH magnets.
-  Ranking is *not* permission to trust a TVDB/AniDB identity.
-- `try_batch_candidates()`: use the existing normal-add/manifest-poll/pause
-  intake; if the file list cannot uniquely identify E01, remember that hash
-  as `UNMAPPABLE` in SQLite and try the next eligible candidate. A delayed
-  manifest, qBittorrent error, unknown ownership or uncertain API result
-  **stops the loop** instead of spawning competing downloads. Once a probe
-  starts, remember the chosen hash and do not download another candidate
-  on restart. No torrent is automatically deleted.
+Upstream gap search now bounds all candidates to the eligible six-episode
+trial. For a new regular season, E07 or E12 is a discovery trigger, not
+an acquisition: it is saved as `EXCLUDED_TRIAL_WINDOW` and Prowlarr
+backfills only the missing E01–E06. An incoming E02 plus E06 backfills
+E01 and E03–E05. The qBittorrent file-selection worker NEVER searches.
 
-It returns `PROBE_DOWNLOADING`, `PROBE_ALREADY_SELECTED`, `DEFERRED`,
-`NEEDS_REVIEW` or `NO_MAPPABLE_BATCH` as appropriate. It does **not**
-implement a production job/lease, verified batch-identity persistence,
-automatic periodic search, media completion, ffprobe or E02-E06 unlock.
-The caller must pass **independently verified** series IDs/title/season;
-a dictionary supplied by untrusted webhook data is not sufficient.
-Do not call this module from a live handler until that boundary is in
-place and a single job owns the series/season. Existing single-episode
-Prowlarr discovery remains unchanged.
+`anime_trial_policy.py` persists immutable six-episode windows:
+- `SEASON`: canonical E01–E06, even if release numbers are E13–E18.
+- `PART`: first six of a *verified new cour*, e.g. E13–E18.
+- `ONGOING`: first newly verified eligible episode such as E1001,
+  then E1002–E1006 as they arrive, never earlier historical episodes.
 
-A rejected pack remains stopped, with files/torrent retained under normal
-ownership controls. Implement safe owned-torrent cleanup or scheduled
-housekeeping later before enabling high-volume unattended fallback.
+The verified boundary requires independent provider evidence, not file
+ordering, a Part 2 label, an upload date or a calculated season offset.
+Multiple part windows in one TVDB season remain ambiguous until the
+upstream verifier binds the incoming release to a specific trusted unit.
+This binding is NOT live-integrated yet.
+
+`anime_batch_selection.plan_verified_trial()` uses a supplied exact
+release-number-to-canonical-number mapping to identify the first wanted
+file and skip all other files. The existing
+`anime_identity_mapping_v4.resolve_episode()` can be reused via
+`anime_verified_episode_map.from_anime_lists()` where the upstream
+identity verifier has independently established AniDB episode numbering.
+The returned mapping includes a source fingerprint. Incomplete or
+conflicting mappings fail closed. `anime_qb_e01_probe.start_e01_probe()`
+now supports a durably recorded trial window and a trusted mapping,
+while keeping its original season-relative E01 path.
+
+## Journal diagnostics
+
+The live process entry points configure INFO logging and the systemd
+unit routes stdout and stderr to journald. Structured events provide
+searchable details without a new service:
+
+- `WINDOW_LOCKED reason=VERIFIED_BOUNDARY`
+- `EPISODE_ELIGIBILITY reason=INSIDE_TRIAL_WINDOW/OUTSIDE_TRIAL_WINDOW`
+- `TRIGGER_SKIPPED reason=OUTSIDE_TRIAL_WINDOW`
+- `BACKFILL_SKIPPED reason=ALREADY_RESERVED`
+- `BACKFILL_DECISION reason=QUEUED/DUPLICATE_OR_SKIPPED`
+- `TORRENT_MANIFEST_READY`, `TORRENT_INTAKE_DEFERRED`
+- `TORRENT_SELECTED`, `TORRENT_SELECTION_REJECTED`
+
+Each event includes relevant TVDB ID, season, episode and bounds, or a
+short hash/file index. Never emit magnet links, credentials or full
+untrusted release filenames into logs.
+
+After reviewed VM deployment:
+
+    journalctl -u anime-discovery.service -f -o cat
+    journalctl -u anime-discovery.service --since "1 hour ago" -o cat | grep 'event='
+
+**Still outstanding:** Provider-verified season/part/ongoing classification
+and its trusted window-recording call, complete registered batch worker,
+persistent per-file JP+EN ffprobe and unlock, production smoke tests.
+The draft PR has not been merged or deployed, and no live qB torrent
+or queue has been modified.
 
 ## Planner
 
