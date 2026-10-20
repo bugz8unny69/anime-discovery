@@ -157,7 +157,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                       "TVDB_ANIDB_ID_CONFLICT" if provider_ids else
                       "TVDB_ANIDB_REMOTE_ID_MISSING")})
         if media_type in ("LIVE_ACTION","CONFLICTING_MEDIA_TYPE"):
-            report["issues"].append("REVIEW_UNSUITABLE_TVDB_MEDIA_TYPE")
+            report["crossref_diagnostics"][-1]["reason"]="REJECTED_UNSUITABLE_TVDB_MEDIA_TYPE"
             continue
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
