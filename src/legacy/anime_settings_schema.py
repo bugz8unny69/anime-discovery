@@ -120,3 +120,14 @@ def validate_scalar_fields(settings):
             choices=spec.get("choices")
             if choices is not None and value not in choices:
                 raise ValueError("Unsupported choice for "+section+"."+name)
+
+
+def auto_applied_field(section, key):
+    """Whether a field is consumed by the live dashboard/worker/monitor paths.
+
+    Infrastructure-only fields stay restart-required. New dashboard fields
+    are live only in sections whose consumers re-read the configuration.
+    """
+    cfg=SCHEMA[section]
+    spec=cfg["fields"][key]
+    return bool(cfg.get("dashboard") and spec.get("visible"))

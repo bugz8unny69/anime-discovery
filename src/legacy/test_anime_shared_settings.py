@@ -31,6 +31,18 @@ class SharedSettingsTests(unittest.TestCase):
         self.assertFalse(data["runtime_applied"])
         self.assertEqual(snapshot(self.path)["settings"]["web"]["port"],9999)
 
+    def test_dashboard_settings_apply_automatically_without_service_restart(self):
+        report=apply_settings(self.path,{"anidb":{"client":"registeredclient","clientver":1}})
+        self.assertTrue(report["saved"])
+        self.assertFalse(report["restart_required"])
+        self.assertEqual(report["apply_mode"],"automatic")
+        self.assertFalse(report["runtime_applied"])
+        report=apply_settings(self.path,{"jellyfin":{"write_trial_nfo":False,"enabled":False,"base_url":"https://jellyfin.test"}})
+        # Internal and hidden switches are intentionally restart-classified.
+        self.assertTrue(report["restart_required"])
+        report=apply_settings(self.path,{"sonarr":{"quality_profile_name":"Dubbed"}})
+        self.assertFalse(report["restart_required"])
+
     def test_invalid_batch_never_changes_file(self):
         before=(self.path/"settings.json").read_bytes()
         with self.assertRaises(ValueError):

@@ -2,6 +2,7 @@
 import logging
 import sqlite3
 import time
+from anime_config_wakeup import wait_for_change
 from anime_flat_config import load_config
 from anime_qb_api import QBittorrentAPI
 from anime_sonarr_finalize import finalize_import
@@ -46,7 +47,7 @@ def main():
             check_once(config["settings"],config["secrets"])
         except Exception as exc:
             LOG.warning("Sonarr Keep monitor iteration deferred (%s)",type(exc).__name__)
-        time.sleep(60)
+        wait_for_change(60)
 
 if __name__=="__main__":
     main()

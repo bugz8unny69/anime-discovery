@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from anime_flat_config import DEFAULT_SETTINGS, ALLOWED_SECRET_KEYS, load_config, validate_config
+from anime_settings_schema import auto_applied_field
 
 def snapshot(directory):
     current=load_config(directory)
@@ -13,7 +14,7 @@ def snapshot(directory):
             "credential_status":{key:bool(current["secrets"].get(key) or
                 (key=="admin_password" and read())) for key in sorted(ALLOWED_SECRET_KEYS)},
             "source":"persisted",
-            "restart_required":"unknown until new changes are saved"}
+            "apply_mode":"automatically reloads dashboard settings"}
 
 def apply_settings(directory,changes):
     """Atomic single-file persistence, no implicit daemon restart or reload."""
@@ -63,5 +64,7 @@ def apply_settings(directory,changes):
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)
-        return {"saved":True,"changed":sorted(touched),"restart_required":True,
+        restart_required=any(not auto_applied_field(*name.split(".",1)) for name in touched)
+        return {"saved":True,"changed":sorted(touched),"restart_required":restart_required,
+                "apply_mode":"restart_required" if restart_required else "automatic",
                 "runtime_applied":False}

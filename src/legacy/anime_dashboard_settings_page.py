@@ -60,7 +60,7 @@ def settings_page(directory):
 .integration .actions button{min-width:130px}
 .integration .form-status{color:#a8bad1;min-height:1.5em}
 @media(max-width:620px){.integration .setting-field{grid-template-columns:1fr;gap:6px}.integration .setting-field small{grid-column:1}}
-</style><h1>Settings</h1><p class="muted">Settings are generated from the configuration schema. Save &amp; Apply reports when a restart is required.</p>'''
+</style><h1>Settings</h1><p class="muted">Changes are saved immediately and automatically used for new operations.</p>'''
     sections=dashboard_sections()
     # Autobrr owns an incoming webhook token, not a settings.json section.
     panels=list(sections.items())+[("autobrr",{
@@ -93,11 +93,10 @@ def settings_page(directory):
         if cfg.get("test_connection"):
             out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button>'
         out+='</div><p class="form-status" role="status" aria-live="polite"></p></form></details>'
-    out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Refresh discards unsaved edits. Complex and internal settings stay in their specialized editors or CLI.</p></section>'
     out+="""<script>
-let dirty=false;
 const csrf=document.querySelector('input[name="_csrf"]')?.value;
 const forms=document.querySelectorAll('form.integration');
+function anyDirty(){return [...forms].some(form=>form.dataset.dirty==='true');}
 function fieldsOf(form){
   const fields={};
   for(const input of form.querySelectorAll('input:not([name=credential]):not([name=_csrf]),select')){
@@ -123,9 +122,9 @@ for(const form of forms){
   const service=form.dataset.name;
   form.addEventListener('input',event=>{
     if(secret&&event.target===secret)changedSecret=true;
-    dirty=true;
+    form.dataset.dirty='true';
   });
-  form.addEventListener('change',()=>{dirty=true});
+  form.addEventListener('change',()=>{form.dataset.dirty='true';});
   form.querySelector('.toggle-secret')?.addEventListener('click',async()=>{
     if(secret.type==='text'){secret.type='password';return;}
     if(!secret.value&&form.dataset.stored==='true'){
@@ -152,8 +151,10 @@ for(const form of forms){
         ?await post('/api/settings',{settings:{[service]:draft}})
         :{restart_required:false};
       if(secret){secret.value='';secret.type='password';}
-      dirty=false;
-      setStatus(result.restart_required?'Saved. Service restart required.':'Saved.');
+      form.dataset.dirty='false';
+      setStatus(result.restart_required
+        ?'Saved. This infrastructure setting requires a service restart.'
+        :'Saved and applied automatically for new operations.');
     }catch(error){setStatus(error.message);}
   });
   form.querySelector('.test-connection')?.addEventListener('click',async()=>{
@@ -167,11 +168,8 @@ for(const form of forms){
   });
 }
 window.addEventListener('beforeunload',event=>{
-  if(dirty){event.preventDefault();event.returnValue='';}
+  if(anyDirty()){event.preventDefault();event.returnValue='';}
 });
-document.getElementById('refresh').addEventListener('click',()=>{
-  if(dirty&&!confirm('Discard unsaved changes?'))return;
-  dirty=false;location.reload();
-});
+
 </script>"""
     return out+tail()

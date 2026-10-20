@@ -58,6 +58,8 @@ jobs:
             test_anime_admin_cli \
             test_anime_admin_secret_editor \
             test_anime_shared_settings \
+            test_anime_config_wakeup \
+            test_anime_live_settings_apply \
             test_anime_dashboard_settings_page \
             test_anime_admin_setup \
             test_anime_integration_connection \

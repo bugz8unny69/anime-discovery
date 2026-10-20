@@ -33,6 +33,20 @@ button should not consume the API's scarce request budget. Register your
 AniDB HTTP API client outside Anime Discovery, then enter the client name
 and version in the AniDB section of the dashboard.
 
-Saving is atomic, validates the full settings file, and reports whether a
-service restart is required. Saving does **not** restart background workers
-automatically. The original Keep→Sonarr→Shoko pipeline is unchanged.
+Saving validates the entire file and persists it atomically. Dashboard-visible
+settings and changed credentials are loaded automatically: the web server reads
+the current webhook token on each request, acquisition workers refresh valid
+settings between jobs, and identity/NTFY/Sonarr/Shoko monitors wake when the
+settings or secrets file changes (typically within a second). Jobs already
+running complete with their originally claimed configuration; no running
+download is canceled merely because a setting was edited.
+
+The dashboard keeps **Save & Apply** on each integration, removes the redundant
+Refresh button, and displays a confirmation that changes apply to new work.
+Infrastructure options such as the web listening port, daemon concurrency, or
+storage paths are not dashboard-editable and may still require a controlled
+restart when changed through the CLI. The backend explicitly reports
+`restart_required` for these fields.
+
+The original manual Keep→Sonarr→Shoko boundary is unchanged. Enabling Sonarr
+or Shoko does not bypass Keep: their monitors remain idle while disabled.

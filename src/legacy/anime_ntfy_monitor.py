@@ -1,6 +1,7 @@
 """Unified-database review reminder scheduler; never mutates acquisition state."""
 import sqlite3
 import time
+from anime_config_wakeup import wait_for_change
 import logging
 LOG=logging.getLogger(__name__)
 from pathlib import Path
@@ -62,7 +63,7 @@ def main():
                     check_once(db,settings,secrets)
         except Exception as exc:
             LOG.warning("NTFY monitor iteration failed (%s)",type(exc).__name__)
-        time.sleep(60)
+        wait_for_change(60)
 
 if __name__=="__main__":
     main()

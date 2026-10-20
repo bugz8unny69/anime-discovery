@@ -32,6 +32,15 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
             return load_config(config_dir)["settings"]["identity"]["series_map"]
         return series_map or {}
 
+    def current_webhook_token():
+        if config_dir is None:
+            return token
+        try:
+            return load_config(config_dir)["secrets"].get("web_token","")
+        except (OSError,ValueError):
+            # Never fall back to an obsolete token on broken configuration.
+            return ""
+
     class Handler(BaseHTTPRequestHandler):
         login_attempts = {}
         def log_request(self,code="-",size="-"):
@@ -65,13 +74,16 @@ def app(db_path, token, series_map=None, config_dir=None, *, admin_password=None
             if webhook:
                 # Autobrr's JSON webhook action can supply a credential in its URL.
                 # Retain the existing bearer-header mechanism for other senders.
+                expected=current_webhook_token()
+                if not expected:
+                    return False
                 header=self.headers.get("Authorization","")
-                if hmac.compare_digest(header,"Bearer "+token):
+                if hmac.compare_digest(header,"Bearer "+expected):
                     return True
                 candidates=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
                 supplied=candidates.get("token",[])
                 return (len(supplied)==1 and
-                        hmac.compare_digest(supplied[0],token))
+                        hmac.compare_digest(supplied[0],expected))
             return dashboard_auth.valid_session(self.cookie_session())
 
         def csrf_token(self):
@@ -239,7 +251,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(400,json.dumps({"error":"Invalid webhook payload"}),"application/json")
                 supplied=values.get("token")
                 body_ok=(type(supplied) is str and bool(supplied) and
-                         hmac.compare_digest(supplied,token))
+                         hmac.compare_digest(supplied,current_webhook_token()))
                 if not body_ok and not self.authorized(webhook=True):
                     SECURITY_LOG.warning("Webhook authentication rejected route=/webhook")
                     return self.send(401,json.dumps({"error":"Authentication required"}),"application/json")
