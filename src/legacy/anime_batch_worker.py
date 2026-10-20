@@ -19,7 +19,7 @@ from anime_qb_e01_probe import start_e01_probe
 from anime_trial_policy import window_for
 from anime_trial_size_policy import size_limits
 from anime_verified_episode_map import from_anime_lists
-from anime_identity_mapping_v4 import mappings
+from anime_identity_mapping_v4 import mappings, resolve_episode
 
 LOG = logging.getLogger("anime_discovery.trial")
 
@@ -33,7 +33,8 @@ def ensure_schema(db):
     )""")
 
 
-def _episode_mapping(files, *, season, tvdb_id, anidb_id, xml_bytes):
+def _episode_mapping(files, *, season, tvdb_id, anidb_id, xml_bytes,
+                     start_episode=1, mode="SEASON"):
     """Prefer source-bound Anime-Lists mapping; never infer from file order."""
     import re
     release_numbers=[]
@@ -51,10 +52,25 @@ def _episode_mapping(files, *, season, tvdb_id, anidb_id, xml_bytes):
     try:
         mapped=from_anime_lists(xml_bytes,anidb_id=anidb_id,tvdb_id=tvdb_id,
                                 season=season,release_episodes=release_numbers)["episode_map"]
-        if 1 in mapped.values():
+        if start_episode in mapped.values():
             return mapped
     except ValueError:
         pass
+    if mode=="PART" and start_episode>1 and start_episode in release_numbers:
+        # Alternative convention: files are numbered by their canonical
+        # episode (13,14,...), although AniDB's new cour restarts at 1.
+        # Verify *every* absolute number through the authoritative provider
+        # mapping. This is not a lowest-file heuristic or guessed offset.
+        direct={}
+        for number in release_numbers:
+            relative=number-start_episode+1
+            if relative<1:
+                raise BatchNeedsReview("PART_ABSOLUTE_NUMBER_OUTSIDE_BOUNDARY")
+            resolved=resolve_episode(xml_bytes,int(anidb_id),int(tvdb_id),relative)
+            if not resolved or (resolved["tvdb_season"],resolved["tvdb_episode"])!=(season,number):
+                raise BatchNeedsReview("PART_ABSOLUTE_NUMBER_UNVERIFIED")
+            direct[number]=number
+        return direct
     # Explicit S02E01-style naming is direct canonical numbering. Only
     # accept when the independent provider record confirms this season.
     rows=mappings(xml_bytes,anidb_id)
@@ -133,7 +149,8 @@ def step(db, job, qb, *, download_root, trial_root, settings, runner=None):
             raise BatchNeedsReview("PROVIDER_CACHE_CHANGED")
         try:
             episode_map=_episode_mapping(acquired["files"],season=season,
-                tvdb_id=tvdb,anidb_id=anidb,xml_bytes=xml)
+                tvdb_id=tvdb,anidb_id=anidb,xml_bytes=xml,
+                start_episode=window["start"],mode=window["mode"])
             probe=plan_verified_trial(acquired["files"],season=season,
                 start_episode=window["start"],episode_map=episode_map)
         except (ValueError, SelectionNeedsReview) as exc:
