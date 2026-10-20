@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 DEFAULT_CONFIG_DIR = Path("/etc/anime-discovery")
-from anime_settings_schema import defaults
+from anime_settings_schema import defaults, validate_scalar_fields
 
 DEFAULT_SETTINGS = defaults()
 ALLOWED_SECRET_KEYS = {"shoko_api_key", "sonarr_api_key", "ntfy_token", "tvdb_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
@@ -39,6 +39,7 @@ def validate_config(settings,secrets,*,directory=None):
         if not isinstance(value,dict) or set(value)-set(defaults):
             raise ValueError("Invalid keys in "+section)
         result[section]={**defaults,**value}
+    validate_scalar_fields(result)
     if not isinstance(result["daemon"]["concurrency"],int) or not 1<=result["daemon"]["concurrency"]<=32:
         raise ValueError("daemon.concurrency must be 1..32")
     if not isinstance(result["daemon"]["lease_seconds"],int) or result["daemon"]["lease_seconds"]<30:
