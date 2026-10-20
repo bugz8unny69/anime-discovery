@@ -72,13 +72,15 @@ download of a batch with unmapped episode files.
 ### Next integration steps for zero-touch flow
 
 - Persist a **series-level identity decision** independently of episode
-  mapping so batches can proceed to *stopped* torrent metadata inspection.
+  mapping so batches can add an owned magnet normally, collect its file list, and immediately pause before applying file priorities.
   Introduce durable states such as `WAITING_FILE_MANIFEST` and
   `EXCLUDED_OUT_OF_SCOPE` rather than reusing the single-episode approval.
-- For a verified multi-file batch, automatically fetch torrent metadata
-  while stopped, plan E01-E06 for the discovered season, set and verify
-  all file priorities, then resume the approved files only. Never auto-resume
-  if metadata, indices, ownership, or readback are incomplete.
+- For a verified multi-file batch, add the torrent in the Anime Discovery
+  category with its ownership marker and let it start. Poll `torrents/files`
+  about once per second; as soon as the manifest is available, pause that
+  exact torrent. Plan E01 first, set and verify all file priorities, then
+  resume. Never proceed if the manifest, indices, ownership, or priority
+  readback cannot be verified.
 - The new `QBittorrentAPI.apply_stopped_file_selection()` is currently
   **not wired to the worker**; it rejects running/unowned torrents and
   checks that selected/skipped indices cover every file. Tests only, no
@@ -114,13 +116,16 @@ webhook, release title, or a 100% torrent-progress indicator.
 
 **Critical implementation constraints:**
 
-- **Metadata bootstrap:** A magnet may not supply a file manifest until
-  it connects to peers. Simply adding it stopped and waiting does not
-  guarantee metadata arrival. Prefer a validated .torrent source or an
-  isolated metadata-only retrieval path that cannot request payload pieces.
-  Do not temporarily start a default-priority, fully selected magnet to
-  fetch metadata. Inspect all indices and names *before* permitting media
-  transfer.
+- **Metadata bootstrap (simple by design):** Add the verified, tagged
+  magnet normally (running) to qBittorrent. Poll the file inventory every
+  ~1 second. Once a complete usable file list exists, immediately pause
+  that exact torrent, wait for its stopped state, then select E01 and set
+  all other file priorities to zero. This initial discovery window can
+  download some real video pieces, not just torrent metadata. That small
+  temporary over-download is acceptable to the operator; there is no
+  guaranteed byte ceiling or assumption it will always be negligible.
+  If metadata is slow or empty, retry polling later without creating
+  duplicate torrents. Do not build a separate metadata-only downloader.
 - **Phase 1:** With the complete verified manifest, set only E01 priority=1
   and all other files priority=0, read back priorities, then authorize a
   guarded torrent start. A BitTorrent piece can straddle file boundaries,
@@ -139,11 +144,11 @@ webhook, release title, or a 100% torrent-progress indicator.
   search for a trusted single-episode E01 candidate; do not substitute
   random E02/E03 as equivalent identity evidence. A failed language probe
   must not unlock anything. Never duplicate acquisition or stage partials.
-- **State/recovery:** Persist `MANIFEST_READY`, `PROBE_DOWNLOADING`,
-  `PROBE_VERIFIED`, `REMAINING_SELECTED`, and individual file completion
-  under one owned torrent; all transitions idempotent across crashes. Jobs
-  may retry metadata or wait for peers without user clicks; fundamentally
-  contradictory identity/file data must fail closed without guessing.
+- **Simple recovery:** Persist the torrent hash, the verified identity,
+  whether E01 passed audio verification, and completed trial episodes.
+  After a restart inspect qBittorrent's existing torrent instead of adding
+  a duplicate. Poll delayed metadata without requesting user intervention;
+  contradictory identity/file data still fails closed.
 
 
 ## Installed qBittorrent compatibility target (Debian 12)
@@ -174,13 +179,13 @@ verify durable DB-owned provenance in addition to matching tag/category,
 hold the relevant lease, preserve selected-E01 audio evidence, and only
 resume once the complete manifest is validated.
 
-**Unresolved safety boundary:** A paused magnet can remain unable to
-discover a file list until a peer session obtains torrent metadata.
-The 4.5.2 adapter alone does not provide a metadata-only payload-safe
-download mode. The worker must obtain a verified .torrent manifest or
-implement an isolated metadata-only fetch that cannot download file
-payloads. It must never resume a default-selected magnet just to obtain
-its file list.
+**Metadata bootstrap policy:** No special metadata-only service is needed.
+Add the torrent normally after identity verification, poll for the file list,
+and immediately pause the torrent before selecting files. Some payload pieces
+may download during discovery; that is an accepted, bounded-by-response-time
+tradeoff, not a guarantee of only a few bytes. If a torrent finishes unusually
+quickly, still pause it and apply file selection before continuing; do not
+assume that unselected content was never downloaded.
 
 Testing is currently synthetic/fake Web API transport. Before deploying,
 check the actual \`app/version\` and \`app/webapiVersion\` read-only,
@@ -200,11 +205,12 @@ unsafe paths, and incomplete manifests. No guessing from the `Batch` tag.
 
 ## Required before integration
 
-1. **Torrent intake:** New magnets must be added stopped/paused, preserving
-   ownership fencing. Magnet metadata can arrive asynchronously; keep the
-   torrent stopped while polling for its manifest. Do NOT apply this flow to
-   an already-running or non-owned torrent. On timeout or empty manifest,
-   Needs Review; do not resume a full pack.
+1. **Torrent intake:** Add new, verified magnets running with Anime Discovery
+   category and durable ownership marker. Poll every ~1 second for the file
+   list, then pause the exact torrent immediately when it appears. Allow
+   limited incidental payload while fetching metadata. Never change an
+   unowned or pre-existing torrent. If metadata is delayed, retry the
+   existing hash later without creating duplicates.
 2. **Atomicity:** Before resuming, set unwanted file priorities to zero and
    verify every file index's effective priority with a fresh manifest.
    qBittorrent Web API uses `torrents/filePrio` with `hash`, `id`,
@@ -231,9 +237,11 @@ unsafe paths, and incomplete manifests. No guessing from the `Batch` tag.
 ## Safe operational validation
 
 Use a disposable torrent with 12 tiny media-like test filenames or a
-controlled local torrent client fixture; verify that E01-E06 are selected,
-E07-E12 have priority zero, and no data transfers until priorities are
-verified. Separately use actual ffprobe-readable fixture media to check
+controlled local torrent client fixture; verify that E01 is selected
+first and E02-E12 have priority zero during the E01 probe. After E01 passes,
+E02-E06 unlock and E07+ remain priority zero. Observe and accept incidental
+payload transferred in the short metadata discovery window; ensure no
+further unwanted files are downloaded after reprioritization. Separately use actual ffprobe-readable fixture media to check
 Japanese+English streams and mixed-audio failures. Verify the qBittorrent
 client version/behavior before any production trial. Check retries and
 restart idempotency. No live job should be retried until this integration
