@@ -74,6 +74,48 @@ class MonitorTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT status FROM notifications WHERE id=?",
                     (nid,)).fetchone()[0],"UNTRUSTED")
 
+    def test_terminal_acquisition_review_notifies_once_then_reminds(self):
+        from anime_async_daemon import enqueue,claim,finish
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"db.sqlite"
+            initialize(path)
+            with sqlite3.connect(path,isolation_level=None) as db:
+                enqueue(db,"claimed_acquisition","episode-101","{}")
+                job=claim(db,now=100)
+                finish(db,job["id"],job["lease_token"],"NEEDS_REVIEW",
+                       reason="TRIAL_TOTAL_EXCEEDED",now=100)
+                received=[]
+                settings={"ntfy":{"enabled":True,"reminder_hours":2}}
+                def send(_settings,_secrets,job_id,title):
+                    received.append((job_id,title))
+                    return True
+                self.assertEqual(check_once(db,settings,{},now=500,
+                                            sender=send)["sent"],1)
+                self.assertIn("TRIAL_TOTAL_EXCEEDED",received[0][1])
+                self.assertEqual(check_once(db,settings,{},now=501,
+                                            sender=send)["sent"],0)
+                self.assertEqual(check_once(db,settings,{},now=7701,
+                                            sender=send)["sent"],1)
+                db.execute("UPDATE daemon_jobs SET state='DONE' WHERE id=?",(job["id"],))
+                self.assertEqual(check_once(db,settings,{},now=20000,
+                                            sender=send)["sent"],0)
+
+    def test_failed_ntfy_job_delivery_is_retried(self):
+        from anime_async_daemon import enqueue,claim,finish
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"db.sqlite"
+            initialize(path)
+            with sqlite3.connect(path,isolation_level=None) as db:
+                enqueue(db,"claimed_acquisition","episode-102","{}")
+                job=claim(db,now=100)
+                finish(db,job["id"],job["lease_token"],"NEEDS_REVIEW",
+                       reason="EPISODE_SIZE_EXCEEDED",now=100)
+                settings={"ntfy":{"enabled":True,"reminder_hours":1}}
+                self.assertEqual(check_once(db,settings,{},now=500,
+                                            sender=lambda *_:False)["sent"],0)
+                self.assertEqual(check_once(db,settings,{},now=501,
+                                            sender=lambda *_:True)["sent"],1)
+
     def test_disabled_no_schema_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/"db.sqlite"
