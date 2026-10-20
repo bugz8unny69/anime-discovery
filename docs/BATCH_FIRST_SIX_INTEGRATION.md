@@ -94,6 +94,57 @@ download of a batch with unmapped episode files.
   requiring user approval for an ordinary six-episode trial. A separate
   deliberate movie/special workflow can be added later if desired.
 
+
+## E01-first gated acquisition (2026-10-20 refinement)
+
+Operator's preferred bandwidth-saving sequence: **first E01 only**, use
+the *completed* E01 file as the Japanese+English ffprobe gate, and only if
+it passes allow **E02-E06 (five more)** from the same pack. All later files
+remain unwanted. Verification of the sample episode does not prove the
+remaining episodes have identical audio; each selected file still needs its
+own post-completion ffprobe and idempotent staging. One torrent can contain
+ten/twelve episode videos while only six are wanted.
+
+A pure `plan_gated_first_six()` function now models the probe and unlock
+phases. It does NOT act on qBittorrent, mark the probe verified, authorize a
+resume, or persist the gate; the actual worker integration remains to be
+built. Probe authorization must come from durable (torrent hash, file index,
+series identity, episode) evidence and a successful ffprobe check, not a
+webhook, release title, or a 100% torrent-progress indicator.
+
+**Critical implementation constraints:**
+
+- **Metadata bootstrap:** A magnet may not supply a file manifest until
+  it connects to peers. Simply adding it stopped and waiting does not
+  guarantee metadata arrival. Prefer a validated .torrent source or an
+  isolated metadata-only retrieval path that cannot request payload pieces.
+  Do not temporarily start a default-priority, fully selected magnet to
+  fetch metadata. Inspect all indices and names *before* permitting media
+  transfer.
+- **Phase 1:** With the complete verified manifest, set only E01 priority=1
+  and all other files priority=0, read back priorities, then authorize a
+  guarded torrent start. A BitTorrent piece can straddle file boundaries,
+  so negligible shared-piece data from skipped neighbors is possible.
+- **Phase 2:** Once the selected E01 index reaches 100% and the on-disk
+  file is complete and stable, ffprobe Japanese+English; bind the result to
+  exact torrent/file provenance in the database. Stop the torrent, widen
+  wanted indices to E01-E06, read back priorities, then start again.
+  qBittorrent may report `stoppedUP`/`pausedUP` after E01 finishes,
+  because only E01 was selected. Adapter now recognizes stopped upload
+  states, but this priority transition is **only tested with fake transport**.
+  Verify the installed qBittorrent/libtorrent version accepts new wanted
+  priorities after subset completion; if it does not, devise a safe
+  alternative and do not start or download extra files.
+- **Fail closed:** No E01 in pack and no other verified E01 available:
+  search for a trusted single-episode E01 candidate; do not substitute
+  random E02/E03 as equivalent identity evidence. A failed language probe
+  must not unlock anything. Never duplicate acquisition or stage partials.
+- **State/recovery:** Persist `MANIFEST_READY`, `PROBE_DOWNLOADING`,
+  `PROBE_VERIFIED`, `REMAINING_SELECTED`, and individual file completion
+  under one owned torrent; all transitions idempotent across crashes. Jobs
+  may retry metadata or wait for peers without user clicks; fundamentally
+  contradictory identity/file data must fail closed without guessing.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
