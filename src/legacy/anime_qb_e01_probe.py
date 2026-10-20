@@ -108,9 +108,19 @@ def start_e01_probe(db, infohash, qb, *, season, stopped_manifest,
     else:
         # Legacy callers do not supply durable series identity, so a per-pack
         # safety check is possible but no cross-release reservation can be made.
-        verdict = decide_trial_size(
-            {ep: row["size"] for ep, row in eligible_files.items()},
-            start_episode=trial_episode, limits=limits)
+        try:
+            verdict = decide_trial_size(
+                {ep: row["size"] for ep, row in eligible_files.items()},
+                start_episode=trial_episode, limits=limits)
+        except TrialSizeRejected as exc:
+            LOG.warning("event=TRIAL_SIZE_DECISION action=NEEDS_REVIEW reason=%s "
+                        "season=%d episode=%s individual_limit_mb=%d "
+                        "trial_limit_mb=%d torrent=%s",
+                        exc.reason, season,
+                        exc.episode if exc.episode is not None else "-",
+                        limits["max_episode_mb"], limits["max_six_episode_mb"],
+                        infohash[:12])
+            raise
         LOG.info("event=TRIAL_SIZE_DECISION action=ELIGIBLE reason=%s "
                  "season=%d known_total_bytes=%d known_count=%d "
                  "individual_limit_mb=%d trial_limit_mb=%d torrent=%s",
