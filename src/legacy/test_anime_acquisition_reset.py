@@ -106,6 +106,11 @@ class AcquisitionResetTests(unittest.TestCase):
 
     def test_missing_old_media_allows_repair_after_manual_cleanup(self):
         self.paths[0].unlink()
+        from anime_dashboard_queries import staged_series
+        listing=staged_series(self.db)["items"]
+        self.assertEqual(len(listing),1)
+        self.assertEqual(listing[0]["staged_episodes"],1)
+        self.assertEqual(listing[0]["missing_staged_episodes"],1)
         result=reset_acquisitions(self.db,self.sid,trial_root=self.trial)
         self.assertEqual(result["removed_staged_files"],1)
         self.assertEqual(self.db.execute("SELECT count(*) FROM daemon_jobs WHERE state='READY'").fetchone()[0],2)
