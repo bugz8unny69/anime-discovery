@@ -158,6 +158,28 @@ class QBittorrentAPI:
             raise RuntimeError("qBittorrent stop not yet confirmed")
         return after["state"]
 
+    def resume_owned_metadata(self, infohash):
+        """Retry an owned stopped magnet ONLY while it has no file metadata.
+
+        This is an intentionally bounded pre-selection discovery window.
+        A caller MUST confirm the DB ownership marker before calling.
+        Once a file list exists, use start_selected_torrent instead.
+        """
+        if not self.allow_writes:
+            raise PermissionError("qBittorrent writes disabled")
+        infohash = _hash(infohash)
+        record = self._owned_torrent(infohash)
+        if record.get("state") not in (
+                "stoppedDL", "stoppedUP", "pausedDL", "pausedUP"):
+            raise RuntimeError("Metadata retry requires stopped torrent")
+        if self.torrent_files(infohash):
+            raise RuntimeError("Refusing unselected resume: file metadata is available")
+        _, endpoint = self._lifecycle_endpoints()
+        response = self._request(endpoint, {"hashes": infohash})
+        if response.strip() not in (b"", b"Ok."):
+            raise RuntimeError("Metadata retry not acknowledged")
+        return True
+
     def start_selected_torrent(self, infohash, *, wanted_indices, skip_indices):
         """Start only after stopped-state and full priority readback.
 
