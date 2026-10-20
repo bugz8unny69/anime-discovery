@@ -23,6 +23,8 @@ class DashboardSettingsTests(unittest.TestCase):
             self.assertIn('data-key="web_token" data-stored="true"',html)
             self.assertIn("API Key",html)
             self.assertIn("AniDB",html)
+            self.assertIn('id="anidb-public"',html)
+            self.assertNotIn("anidb_api_key",html)
             self.assertIn("no API key required",html)
             self.assertIn("Save &amp; Apply",html)
             self.assertIn("Test Connection",html)
