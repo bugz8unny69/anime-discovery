@@ -50,6 +50,51 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM anime_batch_authorizations").fetchone()[0],1)
 
+    def assert_blocked_reason(self, expected):
+        from anime_dashboard_queries import all_jobs
+        import json
+        evidence=json.loads(self.db.execute(
+            "SELECT evidence_json FROM unified_identity_checks WHERE notification_id=?",
+            (self.nid,)).fetchone()[0])
+        self.assertEqual(evidence["batch_authorization"]["reason"],expected)
+        self.assertEqual(evidence["issues"][0],expected)
+        self.assertIn("Batch authorization",
+                      [s["step"] for s in evidence["workflow"]])
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "NEEDS_REVIEW")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0],0)
+        detail=all_jobs(self.db)["items"][0]["activity_detail"]
+        self.assertIn(expected,detail)
+        self.assertIn("Season-pack verification requires review",detail)
+        self.assertNotIn("approve notification",detail)
+
+    def test_missing_explicit_season_is_actionable_not_generic_episode_error(self):
+        # A release such as "Cyberpunk Edgerunners (Batch)" proves packaging,
+        # not the TVDB season. Do not default an unlabeled pack to S01.
+        self.db.execute("UPDATE notifications SET release_name=? WHERE id=?",
+                        ("Example Show (Batch)",self.nid))
+        self.run_identity(REPORT.copy())
+        self.assert_blocked_reason("BATCH_SEASON_HINT_REQUIRED")
+
+    def test_absent_recognized_alias_is_actionable_not_silent(self):
+        self.settings["identity"]={"series_map":{}}
+        self.run_identity(REPORT.copy())
+        self.assert_blocked_reason("BATCH_PINNED_ALIAS_MISSING")
+
+    def test_recognized_alias_with_wrong_season_is_distinguished(self):
+        self.settings["identity"]={"series_map":{"Example Show":{
+            "tvdb_id":123,"anidb_id":456,"season":1}}}
+        self.run_identity(REPORT.copy())
+        self.assert_blocked_reason("BATCH_PINNED_SEASON_MISMATCH")
+
+    def test_series_pair_really_verified_but_pinned_ids_conflict(self):
+        self.settings["identity"]={"series_map":{"Example Show":{
+            "tvdb_id":999,"anidb_id":456,"season":2}}}
+        self.run_identity(REPORT.copy())
+        self.assert_blocked_reason("BATCH_PINNED_PROVIDER_PAIR_MISMATCH")
+
     def test_provider_pair_conflict_creates_review_not_batch_job(self):
         report={**REPORT,"matching_pairs":[{"tvdb_id":"999","anidb_id":"456"}]}
         self.run_identity(report)
