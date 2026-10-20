@@ -251,14 +251,19 @@ def confirm(db,series_id,settings,secrets,*,approved=False,qb=None,opener=None,
             torrent_removed.append(h)
         except Exception as exc:
             errors.append("Torrent "+h[:12]+": "+type(exc).__name__)
+    try:
+        # Review the full manifest once more before the first staged unlink:
+        # further reviews would fail after our own first intentional deletion.
+        fresh=review(db,series_id,settings,secrets,opener=opener,audio_probe=audio_probe)
+        refreshed={e["notification_id"]:e for e in fresh["episodes"]}
+    except Exception as exc:
+        refreshed={}
+        errors.append("Final Sonarr inventory: "+type(exc).__name__)
     for entry,metadata in verified:
         try:
-            # Fresh Sonarr/audio check again before unlink (not just old UI state).
-            fresh=review(db,series_id,settings,secrets,opener=opener,audio_probe=audio_probe)
-            matching=[e for e in fresh["episodes"]
-                      if e["notification_id"]==entry["notification_id"]
-                      and e["status"]=="REGISTERED"]
-            if len(matching)!=1:raise RuntimeError("Stale Sonarr proof")
+            matching=refreshed.get(entry["notification_id"])
+            if not matching or matching["status"]!="REGISTERED":
+                raise RuntimeError("Stale Sonarr proof")
             _unlink_verified(entry["path"],settings["storage"]["trial_root"],metadata)
             removed.append(entry["notification_id"])
         except Exception as exc:
