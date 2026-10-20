@@ -367,6 +367,14 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report=investigate(title,settings,secrets,catalog,
                                    mapping_xml=mapping_xml,anidb_resolve=direct)
             decision=report["decision"]
+            # The release name alone never authorizes season-pack acquisition.
+            # Only this network-backed identity worker can promote a pending
+            # Autobrr batch after a pinned alias and independent pair agree.
+            if not probe and mapping_xml is not None and decision!="AUTO_VERIFIED":
+                from anime_batch_verified_intake import authorize_verified_batch
+                if authorize_verified_batch(db,nid,report,settings,mapping_xml):
+                    decision="BATCH_VERIFIED"
+                    report["decision"]=decision
             if decision=="AUTO_VERIFIED":
                 from anime_webhook_processing import approve
                 rule=report.get("episode_mapping")
@@ -451,7 +459,9 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 next_at=excluded.next_at,decision=excluded.decision,
                 evidence_json=excluded.evidence_json""",
                 (nid,now,attempts,now+(retry_delay if retry_delay is not None else min(3600,60*2**attempts)) if retry else 0,decision,safe))
-            if not retry and decision!="AUTO_VERIFIED":
+            if decision=="BATCH_VERIFIED":
+                db.execute("UPDATE notifications SET status='APPROVED_BATCH' WHERE id=? AND status='IDENTIFYING'",(nid,))
+            elif not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
         LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
                  nid,attempts,decision,retry)
