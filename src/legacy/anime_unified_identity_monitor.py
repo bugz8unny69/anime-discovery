@@ -212,18 +212,20 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("NO_TVDB_SEARCH_RESULTS")
     if errors:
         raise RuntimeError("TVDB search incomplete")
-    if len(candidates)>10:
-        report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
-        return report
-    token=login(secrets["tvdb_api_key"])
+    # Search results must pass the title threshold before being counted as
+    # genuinely ambiguous. Low-scoring noise cannot suppress a valid match.
     accepted={r["tvdb_id"] for r in report["candidate_scores"] if r["passed"]}
     report["workflow"].append({"step":"Title score filter","passed":len(accepted),
                                 "rejected":len(candidates)-len(accepted)})
     if not accepted:
         report["issues"].append("ALL_TVDB_TITLES_BELOW_THRESHOLD")
         return report
+    if len(accepted)>10:
+        report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
+        return report
+    token=login(secrets["tvdb_api_key"])
     aid_set={str(x["anidb_id"]) for x in rows}
-    for candidate in candidates[:10]:
+    for candidate in candidates:
         tid=str(candidate["tvdb_id"])
         if tid not in accepted:
             continue
