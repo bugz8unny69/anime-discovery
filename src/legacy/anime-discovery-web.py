@@ -159,6 +159,24 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
             path=route.path
             if path=="/health":
                 return self.send(200,'{"status":"running"}',"application/json")
+            if path=="/api/identity-trace":
+                try:
+                    params=parse_qs(route.query)
+                    ids=params.get("notification_id",[])
+                    if len(ids)!=1 or not ids[0].isdigit() or int(ids[0])<1:
+                        raise ValueError("A valid notification ID is required")
+                    with self.database() as db:
+                        if db.execute("SELECT 1 FROM notifications WHERE id=?",(int(ids[0]),)).fetchone() is None:
+                            return self.send(404,json.dumps({"error":"Notification not found"}),"application/json")
+                        exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone()
+                        entry=(db.execute("SELECT checked_at,attempts,decision,evidence_json FROM unified_identity_checks WHERE notification_id=?",(int(ids[0]),)).fetchone() if exists else None)
+                    if not entry:
+                        return self.send(200,json.dumps({"available":False,"message":"No identity check recorded yet"}),"application/json")
+                    checked,attempts,decision,document=entry
+                    return self.send(200,json.dumps({"available":True,"checked_at":checked,
+                        "attempts":attempts,"decision":decision,"evidence":json.loads(document)}),"application/json")
+                except (ValueError,TypeError,sqlite3.Error,json.JSONDecodeError) as exc:
+                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
             if path=="/api/settings":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 from anime_shared_settings import snapshot
