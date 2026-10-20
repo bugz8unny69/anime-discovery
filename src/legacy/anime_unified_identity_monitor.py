@@ -437,6 +437,17 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                     decision="BATCH_VERIFIED"
                     report["decision"]=decision
             if decision=="AUTO_VERIFIED":
+                # A valid independent identity remains reusable even if
+                # acquisition later declines the episode (e.g. E1001 outside
+                # the currently verified trial window). Identity != download.
+                if mapping_xml is not None:
+                    from anime_verified_season_memory import remember_from_report
+                    try:
+                        remember_from_report(db,title,report,mapping_xml,
+                                             approved=report["approval"])
+                    except ValueError as exc:
+                        LOG.warning("event=VERIFIED_SEASON_CACHE_REVIEW notification=%d "
+                                    "reason=%s",nid,type(exc).__name__)
                 from anime_webhook_processing import approve
                 rule=report.get("episode_mapping")
                 if rule and type(report.get("verified_anidb_episode_id")) is int:
@@ -458,16 +469,6 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 approve(db,nid,report["approval"],source="verified_identity_mapping")
                 # approve() atomically records proof and queues the job.
                 db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
-                # Cache series/season proof for ANY verified episode number,
-                # not just episode 1 or episodes inside the trial window.
-                if mapping_xml is not None:
-                    from anime_verified_season_memory import remember_from_report
-                    try:
-                        remember_from_report(db,title,report,mapping_xml,
-                                             approved=report["approval"])
-                    except ValueError as exc:
-                        LOG.warning("event=VERIFIED_SEASON_CACHE_REVIEW notification=%d "
-                                    "reason=%s",nid,type(exc).__name__)
             retry=False
         except Exception as exc:
             import xml.etree.ElementTree as ET
