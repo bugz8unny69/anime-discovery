@@ -28,6 +28,32 @@ def check_once(settings,secrets,*,qb_factory=None):
             JOIN sonarr_import_manifest m ON m.series_id=s.id
             WHERE s.status='SONARR_IMPORT_PENDING'
               AND m.submitted_command_id IS NOT NULL ORDER BY s.id LIMIT 20""").fetchall()
+        # Reuse this existing monitor for bounded, read-only six-hour checks.
+        # Never treat an unavailable Sonarr as permission to delete anything.
+        from anime_sonarr_reconciliation import ensure_schema, check_series
+        ensure_schema(db)
+        interval=21600
+        stale=int(time.time())-interval
+        candidates=db.execute("""SELECT DISTINCT s.id FROM series s
+            JOIN episode_dispatch d ON d.series_id=s.id AND d.state='DONE'
+            JOIN torrent_recovery_records r ON r.notification_id=d.notification_id
+            LEFT JOIN sonarr_reconciliation rc ON rc.series_id=s.id
+            WHERE s.source='tvdb' AND s.status NOT IN ('REJECTED')
+              AND (rc.checked_at IS NULL OR rc.checked_at<=?)
+            ORDER BY COALESCE(rc.checked_at,0),s.id LIMIT 5""",(stale,)).fetchall()
+        for (sid,) in candidates:
+            try:
+                check_series(db,sid,settings,secrets)
+            except Exception as exc:
+                # Retry at the next cadence, never block normal import finalization.
+                LOG.warning("event=SONARR_RECONCILIATION_DEFERRED series_id=%d error_type=%s",
+                            sid,type(exc).__name__)
+                db.execute("""INSERT INTO sonarr_reconciliation
+                    (series_id,checked_at,result,inventory_json,error_reason)
+                    VALUES (?,?,'UNAVAILABLE','[]',?)
+                    ON CONFLICT(series_id) DO UPDATE SET checked_at=excluded.checked_at,
+                    result=excluded.result,error_reason=excluded.error_reason,
+                    inventory_json='[]'""",(sid,int(time.time()),type(exc).__name__))
         complete=0
         errors=0
         for (sid,) in pending:
