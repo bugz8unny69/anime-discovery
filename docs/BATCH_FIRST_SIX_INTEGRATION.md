@@ -21,6 +21,32 @@ These findings are source-audit observations, NOT diagnoses of the two live
 queued items. Their database rows/logs and torrent hash ownership must be
 examined before mutation.
 
+
+## Production observations supplied 2026-10-20 (read-only screenshot)
+
+The Anime Discovery Jobs/Acquisition Activity page shows two `NEEDS_REVIEW`
+**notifications**, not two acquisition jobs. The dashboard explicitly says
+"No acquisition job was created" for each. Neither qBittorrent ownership nor
+live torrent existence was checked.
+
+- **Notification #4:** `[Trix] Cyberpunk Edgerunners S02 ... (Season S2) (Batch)`.
+  The release suggests a season-2 pack but provides no single episode number.
+  Identity report: `EPISODE_NUMBER_UNRESOLVED`,
+  `NO_ANIDB_EXACT_TITLE_MATCH`, `AMBIGUOUS_TVDB_CANDIDATES`.
+  Needs confirmed TVDB/AniDB series identity, a safe stopped torrent
+  manifest, and per-file episode verification. Do not manually approve as a
+  single episode: that could download the complete torrent under the old path.
+- **Notification #3:** `[Anime Time] KonoSuba ... S00E05 - Movie Legend Of
+  Crimson ...`. This is explicitly season zero, not S01E05. Identity
+  report: `EPISODE_NUMBER_UNRESOLVED`, `NO_ANIDB_EXACT_TITLE_MATCH`,
+  `NO_TVDB_SEARCH_RESULTS`. Keep outside ordinary E01-E06 trial sampling;
+  a separate explicit specials/movie policy would be needed.
+
+The `release_scope_hint` diagnostics are *non-authorizing*. Old notifications
+already in terminal Needs Review will not automatically be re-evaluated merely
+because this feature branch is merged. Design a reviewed, idempotent re-triage
+action that preserves notification ID and avoids torrent resubmission.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
