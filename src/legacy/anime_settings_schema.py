@@ -72,10 +72,11 @@ SCHEMA = {
         "enabled":field(False),
         "base_url":field("",label="Base URL")}},
     "sonarr": {"dashboard":True,"title":"Sonarr","credential":"sonarr_api_key",
-               "test_connection":True,"fields":{
+               "description":"Keep imports from Anime-Trial into Sonarr's permanent library. Root folder is the destination, NOT the Anime-Trial staging path. Sonarr also needs read access to the staged media at the identical absolute path seen by Anime Discovery; check shared NFS or container mounts and Wanted > Manual Import.","test_connection":True,"fields":{
         "enabled":field(False),
         "base_url":field("",label="Base URL"),
-        "root_folder":field("",label="Root folder"),
+        "root_folder":field("",label="Permanent anime library root",
+            help_text="Destination registered in Sonarr > Settings > Media Management > Root Folders. Do not enter Anime-Trial here."),
         "quality_profile_id":field(0,label="Quality profile ID",minimum=0),
         "quality_profile_name":field("Anime",label="Quality profile name")}},
     "ntfy": {"dashboard":True,"title":"NTFY","credential":"ntfy_token",

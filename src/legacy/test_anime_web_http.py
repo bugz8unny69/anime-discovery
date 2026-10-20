@@ -57,6 +57,54 @@ class DashboardHTTPTests(unittest.TestCase):
         finally:
             client.close()
 
+    def test_browser_keep_failure_renders_guidance_not_raw_json(self):
+        import os
+        from anime_flat_config import DEFAULT_SETTINGS
+        from anime_sonarr_import import SonarrImportNeedsReview
+        with tempfile.TemporaryDirectory() as directory:
+            directory=Path(directory)
+            (directory/"settings.json").write_text(json.dumps(DEFAULT_SETTINGS))
+            (directory/"secrets.json").write_text(json.dumps({"web_token":"web-secret"}))
+            os.chmod(directory/"secrets.json",0o600)
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                web.app(self.db,"secret-token",config_dir=directory))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            try:
+                client=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+                headers={"Cookie":"ad_session="+self.session,
+                         "Content-Type":"application/x-www-form-urlencoded"}
+                body=urllib.parse.urlencode({"series_id":"7","action":"keep",
+                                              "_csrf":self.csrf})
+                with patch.object(web,"keep_series",side_effect=SonarrImportNeedsReview(
+                         "EPISODE_IDENTITY_MISMATCH","Sonarr episode mapping disagrees")):
+                    client.request("POST","/series-action",body,headers)
+                    response=client.getresponse()
+                    page=response.read().decode()
+                    self.assertEqual(response.status,409)
+                    self.assertIn("text/html",response.getheader("Content-Type"))
+                    self.assertIn("Keep needs attention",page)
+                    self.assertIn("Root Folders",page)
+                    self.assertIn("Wanted",page)
+                    self.assertIn("/series?id=7",page)
+                    self.assertIn("EPISODE_IDENTITY_MISMATCH",page)
+                    self.assertNotIn('{"error":',page)
+                    # An API caller using JSON keeps the machine-readable error.
+                    client.request("POST","/series-action",
+                        json.dumps({"series_id":"7","action":"keep"}),{
+                        "Cookie":"ad_session="+self.session,
+                        "X-CSRF-Token":self.csrf,"Content-Type":"application/json"})
+                    response=client.getresponse()
+                    self.assertEqual(response.status,400)
+                    self.assertIn("application/json",response.getheader("Content-Type"))
+                    self.assertIn("Sonarr episode mapping disagrees",
+                                  json.loads(response.read())["error"])
+                client.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(2)
+
     def test_autobrr_json_body_authentication(self):
         payload={"source":"nyaa","release_name":"Example","source_guid":"g-body",
                  "info_hash":HASH,"token":"secret-token"}

@@ -71,6 +71,39 @@ class KeepTests(unittest.TestCase):
         self.db.execute("UPDATE series SET status='REJECTED' WHERE id=?",(self.sid,))
         with self.assertRaises(ValueError):
             keep(self.db,self.sid,self.settings,self.secrets,sonarr_client=lambda *a,**k:self.fail("called"))
+    def test_new_keep_adds_monitored_series_without_historical_search(self):
+        class Response:
+            def __init__(self, data): self.data=data
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+            def read(self): return json.dumps(self.data).encode()
+        requests=[]
+        def opener(req,timeout):
+            payload=json.loads(req.data) if req.data else None
+            requests.append((req.get_method(),req.full_url,payload))
+            if req.full_url.endswith("/qualityprofile"):
+                return Response([{"id":4,"name":"Anime"}])
+            if req.full_url.endswith("/rootfolder"):
+                return Response([{"path":"/mnt/media/Anime"}])
+            if req.full_url.endswith("/series") and req.get_method()=="GET":
+                return Response([])
+            if "/series/lookup?" in req.full_url:
+                return Response([{"tvdbId":123,"title":"Example","seasons":[
+                    {"seasonNumber":1,"monitored":True}]}])
+            if req.full_url.endswith("/series") and req.get_method()=="POST":
+                self.assertEqual(payload["tvdbId"],123)
+                self.assertTrue(payload["monitored"])
+                self.assertEqual(payload["monitorNewItems"],"all")
+                self.assertEqual(payload["addOptions"]["monitor"],"all")
+                self.assertFalse(payload["addOptions"]["searchForMissingEpisodes"])
+                self.assertEqual(payload["rootFolderPath"],"/mnt/media/Anime")
+                return Response({"id":76})
+            raise AssertionError("Unexpected Sonarr request")
+        result=ensure_series(self.settings,self.secrets,tvdb_id="123",
+                             title="Example",opener=opener)
+        self.assertEqual(result,{"sonarr_id":76,"already_exists":False})
+        self.assertEqual(sum(r[0]=="POST" for r in requests),1)
+
     def test_sonarr_existing_id_no_duplicate_post(self):
         class Response:
             def __init__(self,data): self.data=data
