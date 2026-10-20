@@ -53,4 +53,5 @@ def configure_credentials(directory, *, prompt=getpass.getpass):
             if os.path.exists(tmp):
                 os.unlink(tmp)
         fcntl.flock(handle,fcntl.LOCK_UN)
-    return {"credentials_updated":True,"restart_required":bool(webhook)}
+    return {"credentials_updated":True,"restart_required":False,
+            "apply_mode":"automatic"}
