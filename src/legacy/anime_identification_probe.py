@@ -14,21 +14,67 @@ from pathlib import Path
 from anime_config_runtime import data_path, get
 from anime_identity_verify import TITLES_URL, TVDB_URL, tvdb_token, request_json
 
-EP = re.compile(r'\s+-\s+(\d{1,3})(?!\d)|\b(?:ep|episode)[ ._-]*(\d{1,3})\b', re.I)
+EP = re.compile(
+    r'(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<season_ep>\d{1,3})(?!\d)'
+    r'|\s+-\s+(?P<dash_ep>\d{1,3})(?:v\d+)?(?!\d)'
+    r'|\b(?:ep|episode)[ ._-]*(?P<word_ep>\d{1,3})\b', re.I)
 PREFIX = re.compile(r'^\s*(?:\[[^]]+\]\s*)+')
+SEASON_TOKEN = re.compile(r'(?<![A-Za-z0-9])S\d{1,2}(?![A-Za-z0-9])', re.I)
+SEASON_WORD = re.compile(r'\bSeason[ ._-]*S?\d{1,2}\b', re.I)
+RELEASE_TECH = re.compile(
+    r'(?<![A-Za-z0-9])(?:\d{3,4}p|4K|UHD|WEB[ ._-]?DL|WEBRip|BluRay|'
+    r'BDRip|BDMV|HEVC|AV1|x264|x265|H264|H265)(?![A-Za-z0-9])', re.I)
+META_GROUP = re.compile(r'\(([^()]*)\)')
 TRAIL = re.compile(r'\s*(?:\[[^]]+\]\s*)+$')
+METADATA_ONLY = re.compile(
+    r'^(?:Batch|Season[ ._-]*S?\d{1,2}|Complete(?:[ ._-]*Season)?|'
+    r'Dual[ ._-]*Audio(?:,\s*Multi[ ._-]*Subs)?|'
+    r'Multi[ ._-]*Subs|Multi[ ._-]*Audio|'
+    r'\d{3,4}p|4K|AV1|HEVC|x26[45]|'
+    r'BD|BDRip|WEB[ ._-]?DL)$', re.I)
+
 
 def release_title(raw):
+    """Return series-title search aliases and an advisory episode number.
+
+    Extract release labels *before* querying AniDB/TVDB. Episode and season
+    hints from a filename are NOT canonical identity or download authority.
+    In particular do not search standalone "(Batch)" or "(Season S2)" tags.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return [], None
     value = PREFIX.sub('', raw).strip()
-    m = EP.search(value)
-    episode = next((int(x) for x in m.groups() if x), None) if m else None
-    title = value[:m.start()].strip() if m else TRAIL.sub('', value).strip()
-    title = re.sub(r'\s*\([^)]*(?:dual[ -]?audio|multi[ -]?audio)[^)]*\)', '', title, flags=re.I).strip()
-    aliases = [title]
-    for part in re.findall(r'\(([^()]*)\)', title):
-        if part and not re.search(r'\b(?:dual|audio|1080p|720p|dub|sub)\b', part, re.I):
-            aliases.append(part.strip())
-    aliases.append(re.sub(r'\s*\([^()]*\)', '', title).strip())
+    episode_match = EP.search(value)
+    episode = (next((int(x) for x in (
+        episode_match.group('season_ep'), episode_match.group('dash_ep'),
+        episode_match.group('word_ep')) if x is not None), None)
+        if episode_match else None)
+    # An explicit episode token is the safest title boundary. A season token
+    # or video encode/quality marker is a weaker boundary for season packs.
+    boundaries = [m.start() for m in (episode_match,
+                                     SEASON_TOKEN.search(value),
+                                     SEASON_WORD.search(value),
+                                     RELEASE_TECH.search(value)) if m]
+    title = (value[:min(boundaries)] if boundaries else value).strip(' ._-')
+    title = TRAIL.sub('', title).strip()
+    # Metadata-only parentheticals may occur even when no season token exists.
+    parts = [part.strip() for part in META_GROUP.findall(title)]
+    safe_parts = [part for part in parts
+                  if not METADATA_ONLY.fullmatch(part)]
+    title = META_GROUP.sub(lambda m: '' if METADATA_ONLY.fullmatch(m.group(1).strip())
+                           else m.group(0), title).strip(' ._-')
+    title = re.sub(r'[._]+', ' ', title)
+    title = re.sub(r'\s+', ' ', title).strip()
+    without_parentheses = META_GROUP.sub('', title)
+    without_parentheses = re.sub(r'\s+', ' ', without_parentheses).strip(' ._-')
+    # Provider queries never use an isolated packaging tag. Parenthetical
+    # alternate names remain optional query aliases only when title-like.
+    aliases = [title, without_parentheses]
+    for part in safe_parts:
+        if (len(part) >= 4 and not re.fullmatch(r'\d{4}', part)
+                and not RELEASE_TECH.search(part)
+                and not SEASON_WORD.search(part)):
+            aliases.append(part)
     return list(dict.fromkeys(x for x in aliases if x)), episode
 
 def norm(s):
