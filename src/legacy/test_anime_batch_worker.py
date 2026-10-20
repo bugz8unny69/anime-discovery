@@ -139,6 +139,21 @@ class VerifiedBatchTests(unittest.TestCase):
         self.assertEqual(self.qb.start_calls,1)
         self.assertEqual(self.qb.priorities[1],0)
 
+    def test_verified_part_two_supports_reset_and_absolute_numbering(self):
+        from anime_trial_policy import window_for
+        xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
+             b'defaulttvdbseason="1" episodeoffset="12" /></anime-list>')
+        reset=[{"index":i,"name":"Season 01/Example Show S01 Part 2 - %02d.mkv"%(i+1)}
+               for i in range(12)]
+        absolute=[{"index":i,"name":"Season 01/Example Show S01 Part 2 - %02d.mkv"%(i+13)}
+                  for i in range(12)]
+        self.assertEqual(_episode_mapping(reset,season=1,tvdb_id=123,
+            anidb_id=456,xml_bytes=xml,start_episode=13,mode="PART"),
+            {i:i+12 for i in range(1,13)})
+        self.assertEqual(_episode_mapping(absolute,season=1,tvdb_id=123,
+            anidb_id=456,xml_bytes=xml,start_episode=13,mode="PART"),
+            {i:i for i in range(13,25)})
+
     def test_relative_labels_and_absolute_provider_numbers_both_work(self):
         import copy
         files=[{"index":i,"name":"Season 02/Show S02E%02d.mkv"%(i+1)}
