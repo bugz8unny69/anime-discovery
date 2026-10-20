@@ -45,6 +45,7 @@ jobs:
             test_anime_dispatch_recovery_audit \
             test_anime_completed_snapshot \
             test_anime_staging_integrity \
+            test_anime_staging_permissions \
             test_anime_claimed_pipeline \
             test_anime_acquisition_handler \
             test_anime_acquisition_finalize \

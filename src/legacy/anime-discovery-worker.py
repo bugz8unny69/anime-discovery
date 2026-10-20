@@ -46,7 +46,8 @@ def runtime_handlers(db_path, initial_config):
         # Storage and DB locations are not dashboard-editable. Fail closed if
         # an administrator changes them without restarting infrastructure.
         if (settings["daemon"]["database_path"]!=str(db_path) or
-            settings["storage"]!=storage):
+            any(settings["storage"][key]!=storage[key]
+                for key in ("download_root","trial_root"))):
             return "BLOCKED"
         qb=settings["qbittorrent"]
         def qb_factory():
@@ -60,7 +61,9 @@ def runtime_handlers(db_path, initial_config):
         live=acquisition_handlers(db_path,qb_factory,
             download_root=download_root,trial_root=trial_root,
             enabled=True,cleanup_source=qb["cleanup_source"],
-            jellyfin_refresh=jellyfin_refresh)
+            jellyfin_refresh=jellyfin_refresh,
+            staged_owner=settings["storage"].get("staged_owner",""),
+            staged_group=settings["storage"].get("staged_group",""))
         return await live["claimed_acquisition"](job)
 
     async def gap_search(job):
