@@ -8,21 +8,9 @@ import os
 from pathlib import Path
 
 DEFAULT_CONFIG_DIR = Path("/etc/anime-discovery")
-DEFAULT_SETTINGS = {
-    "daemon": {"concurrency": 4, "lease_seconds": 300, "database_path": "/var/lib/anime-discovery/anime-discovery.db"},
-    "web": {"host": "0.0.0.0", "port": 8765},
-    "storage": {"download_root": "", "trial_root": ""},
-    "identity": {"reuse_verified_cache": True, "series_map": {}, "episode_map": {}, "match_threshold_pct": 90},
-    "qbittorrent": {"priority_mode": "normal", "manage_download_limit": False, "base_url": "http://127.0.0.1:8080", "username": "", "cleanup_source": True},
-    "prowlarr": {"enabled": False, "base_url": ""},
-    "jellyfin": {"write_trial_nfo": True, "enabled": False, "base_url": ""},
-    "sonarr": {"enabled": False, "base_url": "", "root_folder": "", "quality_profile_id": 0, "quality_profile_name": "Anime"},
-    "ntfy": {"enabled": False, "server": "", "topic": "", "reminder_hours": 24, "dashboard_url": ""},
-    "tvdb": {"enabled": False, "base_url": "https://api4.thetvdb.com/v4"},
-    "anidb": {"enabled": True, "http_api_url": "", "client": "", "clientver": 1},
-    "shoko": {"enabled": False, "base_url": "", "auto_link_verified": False,
-              "poll_seconds": 60, "import_folder_id": 0}
-}
+from anime_settings_schema import defaults, validate_scalar_fields
+
+DEFAULT_SETTINGS = defaults()
 ALLOWED_SECRET_KEYS = {"shoko_api_key", "sonarr_api_key", "ntfy_token", "tvdb_api_key", "qbittorrent_password", "jellyfin_api_key", "web_token", "admin_password", "prowlarr_api_key"}
 
 def _read_object(path):
@@ -51,6 +39,7 @@ def validate_config(settings,secrets,*,directory=None):
         if not isinstance(value,dict) or set(value)-set(defaults):
             raise ValueError("Invalid keys in "+section)
         result[section]={**defaults,**value}
+    validate_scalar_fields(result)
     if not isinstance(result["daemon"]["concurrency"],int) or not 1<=result["daemon"]["concurrency"]<=32:
         raise ValueError("daemon.concurrency must be 1..32")
     if not isinstance(result["daemon"]["lease_seconds"],int) or result["daemon"]["lease_seconds"]<30:

@@ -1,21 +1,47 @@
-"""Integration settings page. Controls only for persisted, supported fields."""
-import html
-import json
-from anime_shared_settings import snapshot
+"""Schema-driven configuration dashboard: scalar settings render automatically.
 
-FIELDS={
- "jellyfin":["enabled","base_url"],
- "sonarr":["enabled","base_url","root_folder","quality_profile_name","quality_profile_id"],
- "shoko":["enabled","base_url","import_folder_id","poll_seconds","auto_link_verified"],
- "autobrr":[],
- "tvdb":["enabled","base_url"],
- "ntfy":["enabled","server","topic","dashboard_url","reminder_hours"],
-}
-SECRETS={"jellyfin":"jellyfin_api_key","sonarr":"sonarr_api_key",
-         "shoko":"shoko_api_key","autobrr":"web_token","ntfy":"ntfy_token",
-         "tvdb":"tvdb_api_key"}
+The shared settings schema owns defaults, labels, visibility, UI input types,
+and per-section credential/test integration. All writes still go through the
+existing atomic, validated /api/settings endpoint.
+"""
+import html
+from anime_shared_settings import snapshot
+from anime_settings_schema import dashboard_sections
+
 def esc(value):
     return html.escape(str(value),quote=True)
+
+
+def render_field(field_name, spec, value):
+    """Render an allowlisted schema field; never render arbitrary config keys."""
+    if not spec["visible"]:
+        return ""
+    kind=spec["type"]
+    if kind not in ("boolean","integer","string"):
+        raise ValueError("Complex setting must have a custom editor")
+    label=spec["label"] or field_name.replace("_"," ").title()
+    field=esc(field_name)
+    out='<label class="setting-field"><span>'+esc(label)+'</span>'
+    choices=spec.get("choices")
+    if choices is not None:
+        out+='<select name="'+field+'">'
+        for choice in choices:
+            out+='<option value="'+esc(choice)+'"'+(" selected" if value==choice else "")+'>'+esc(choice)+'</option>'
+        out+='</select>'
+    elif kind=="boolean":
+        out+='<input type="checkbox" name="'+field+'"'+(" checked" if value else "")+'>'
+    else:
+        typ="number" if kind=="integer" else "text"
+        attrs=(' step="1"' if kind=="integer" else "")
+        if spec["min"] is not None:
+            attrs+=' min="'+esc(spec["min"])+'"'
+        if spec["max"] is not None:
+            attrs+=' max="'+esc(spec["max"])+'"'
+        out+='<input type="'+typ+'" name="'+field+'" value="'+esc(value)+'"'+attrs+(' required' if kind=="integer" else '')+'>'
+    if spec.get("help"):
+        out+='<small class="muted">'+esc(spec["help"])+'</small>'
+    return out+'</label>'
+
 
 def settings_page(directory):
     from anime_dashboard_pages import shell,tail
@@ -25,55 +51,56 @@ def settings_page(directory):
     out+='''<style>
 .integration{display:flex;flex-direction:column;gap:17px;margin-top:20px;max-width:780px}
 .integration .setting-field{display:grid;grid-template-columns:minmax(130px,180px) minmax(0,1fr);align-items:center;gap:16px}
-.integration .setting-field input:not([type=checkbox]){width:100%;min-width:0}
+.integration .setting-field input:not([type=checkbox]),.integration .setting-field select{width:100%;min-width:0}
+.integration .setting-field small{grid-column:2}
 .integration .key-control{display:flex;align-items:stretch;min-width:0}
 .integration .key-control input{border-radius:8px 0 0 8px;flex:1}
 .integration .key-control button{border-radius:0 8px 8px 0;min-width:48px;padding:8px;white-space:nowrap}
 .integration .actions{position:static;box-shadow:none;padding:0;background:transparent;border:0;margin-top:8px;justify-content:flex-start}
 .integration .actions button{min-width:130px}
 .integration .form-status{color:#a8bad1;min-height:1.5em}
-@media(max-width:620px){.integration .setting-field{grid-template-columns:1fr;gap:6px}}
-</style><h1>Settings</h1><p class="muted">Edit connection details, test them before saving, then apply when ready.</p>'''
-    for name,fields in FIELDS.items():
-        title=name.title() if name!="ntfy" else "NTFY"
-        key=SECRETS[name]
-        term=("Access Token" if name=="ntfy" else "Webhook Token" if name=="autobrr" else "API Key")
-        present=bool(data["credential_status"].get(key))
+@media(max-width:620px){.integration .setting-field{grid-template-columns:1fr;gap:6px}.integration .setting-field small{grid-column:1}}
+</style><h1>Settings</h1><p class="muted">Settings are generated from the configuration schema. Save &amp; Apply reports when a restart is required.</p>'''
+    sections=dashboard_sections()
+    # Autobrr owns an incoming webhook token, not a settings.json section.
+    panels=list(sections.items())+[("autobrr",{
+        "title":"Autobrr","credential":"web_token",
+        "credential_label":"Webhook Token","test_connection":True,
+        "fields":{},"description":"Incoming webhooks use this token; send a test event from Autobrr."
+    })]
+    for name,cfg in panels:
+        secret_key=cfg.get("credential")
+        present=bool(data["credential_status"].get(secret_key)) if secret_key else False
+        title=cfg.get("title",name.title())
         out+='<details class="panel"><summary><strong>'+esc(title)+'</strong></summary>'
-        out+='<form class="integration" data-name="'+esc(name)+'" data-key="'+esc(key)+'" data-stored="'+("true" if present else "false")+'">'
-        for field in fields:
-            value=settings[name][field]
-            kind=("checkbox" if type(value) is bool else "number" if type(value) is int else "text")
-            out+='<label class="setting-field"><span>'+esc(field.replace("_"," ").title())+'</span>'
-            if kind=="checkbox":
-                out+='<input type="checkbox" name="'+field+'"'+(" checked" if value else "")+'>'
-            else:
-                out+='<input type="'+kind+'" name="'+field+'" value="'+esc(value)+'">'
-            out+='</label>'
-        out+='<label class="setting-field"><span>'+term+'</span><span class="key-control">'
-        out+='<input type="password" name="credential" autocomplete="new-password" spellcheck="false" placeholder="'+("Saved "+term+" ••••••••" if present else "Enter "+term)+'" aria-label="'+term+'">'
-        out+='<button type="button" class="toggle-secret" aria-label="Show or hide '+term+'" title="Show or hide '+term+'">👁</button></span></label>'
+        form_id=(' id="anidb-public"' if name=="anidb" else
+                 ' id="identity-score-form"' if name=="identity" else "")
+        out+='<form class="integration"'+form_id+' data-name="'+esc(name)+'"'
+        if secret_key:
+            out+=' data-key="'+esc(secret_key)+'" data-stored="'+("true" if present else "false")+'"'
+        out+='>'
+        if cfg.get("description"):
+            out+='<p class="muted">'+esc(cfg["description"])+'</p>'
+        for key,spec in cfg["fields"].items():
+            if spec["visible"]:
+                out+=render_field(key,spec,settings[name][key])
+        if secret_key:
+            term=cfg.get("credential_label","API Key")
+            out+='<label class="setting-field"><span>'+esc(term)+'</span><span class="key-control">'
+            out+='<input type="password" name="credential" autocomplete="new-password" spellcheck="false" placeholder="'+("Saved "+esc(term)+" ••••••••" if present else "Enter "+esc(term))+'" aria-label="'+esc(term)+'">'
+            out+='<button type="button" class="toggle-secret" aria-label="Show or hide '+esc(term)+'" title="Show or hide '+esc(term)+'">👁</button></span></label>'
         out+='<div class="actions"><button type="submit">Save &amp; Apply</button>'
-        out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button></div>'
-        out+='<p class="form-status" role="status" aria-live="polite"></p></form></details>'
-    out+='<section class="panel"><h2>Identity matching</h2>'
-    out+='<p class="muted">TVDB candidate title similarity only. Passing this score never bypasses the exact TVDB/AniDB episode verification gate.</p>'
-    out+='<form id="identity-score-form" class="forms">'
-    out+='<label>Minimum title match score (%) <input type="number" name="match_threshold_pct" min="50" max="100" step="1" value="'+str(settings["identity"]["match_threshold_pct"])+'" required></label>'
-    out+='<button type="submit">Save threshold</button><p id="identity-score-result" role="status"></p></form></section>'
-    out+='<section class="panel"><h2>AniDB</h2>'
-    out+='<form id="anidb-public"><label class="setting-field"><span>Enabled</span>'
-    out+='<input type="checkbox" name="enabled"'+(' checked' if settings["anidb"]["enabled"] else '')+'></label>'
-    out+='<p class="muted">Public AniDB title catalog; no API key required. Verified TVDB episode mappings are still required for automatic acquisition.</p>'
-    out+='<button type="submit">Save &amp; Apply</button><p role="status" id="anidb-status"></p></form></section>'
-    out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Save &amp; Apply reports when a restart is required. Refresh discards unsaved edits.</p></section>'
+        if cfg.get("test_connection"):
+            out+='<button type="button" class="test-connection">'+("Test Notification" if name=="ntfy" else "Test Connection")+'</button>'
+        out+='</div><p class="form-status" role="status" aria-live="polite"></p></form></details>'
+    out+='<section class="panel"><h2>System</h2><button id="refresh" type="button">Refresh</button><p class="muted">Refresh discards unsaved edits. Complex and internal settings stay in their specialized editors or CLI.</p></section>'
     out+="""<script>
 let dirty=false;
 const csrf=document.querySelector('input[name="_csrf"]')?.value;
 const forms=document.querySelectorAll('form.integration');
 function fieldsOf(form){
   const fields={};
-  for(const input of form.querySelectorAll('input:not([name=credential]):not([name=_csrf])')){
+  for(const input of form.querySelectorAll('input:not([name=credential]):not([name=_csrf]),select')){
     fields[input.name]=input.type==='checkbox'?input.checked:
       input.type==='number'?Number(input.value):input.value;
   }
@@ -91,25 +118,20 @@ for(const form of forms){
   const secret=form.querySelector('input[name=credential]');
   const status=form.querySelector('.form-status');
   const setStatus=(message)=>{status.textContent=message};
-  let loadedSaved=false;
   let changedSecret=false;
   const key=form.dataset.key;
   const service=form.dataset.name;
   form.addEventListener('input',event=>{
-    if(event.target===secret)changedSecret=true;
+    if(secret&&event.target===secret)changedSecret=true;
     dirty=true;
   });
   form.addEventListener('change',()=>{dirty=true});
-  form.querySelector('.toggle-secret').addEventListener('click',async()=>{
-    if(secret.type==='text'){
-      secret.type='password';
-      return;
-    }
+  form.querySelector('.toggle-secret')?.addEventListener('click',async()=>{
+    if(secret.type==='text'){secret.type='password';return;}
     if(!secret.value&&form.dataset.stored==='true'){
       try{
         const payload=await post('/api/credential-reveal',{key});
         secret.value=payload.value;
-        loadedSaved=true;
         changedSecret=false;
       }catch(error){setStatus(error.message);return;}
     }
@@ -120,51 +142,30 @@ for(const form of forms){
     setStatus('Saving…');
     try{
       const draft=fieldsOf(form);
-      // No secret written when merely revealing the existing stored value.
-      if(changedSecret&&secret.value){
+      // Viewing a saved secret must not result in a credential update.
+      if(secret&&changedSecret&&secret.value){
         await post('/api/credentials',{key,value:secret.value,clear:false});
         form.dataset.stored='true';
         changedSecret=false;
-        loadedSaved=false;
       }
       const result=Object.keys(draft).length
         ?await post('/api/settings',{settings:{[service]:draft}})
         :{restart_required:false};
-      secret.value='';
-      secret.type='password';
+      if(secret){secret.value='';secret.type='password';}
       dirty=false;
       setStatus(result.restart_required?'Saved. Service restart required.':'Saved.');
     }catch(error){setStatus(error.message);}
   });
-  form.querySelector('.test-connection').addEventListener('click',async()=>{
+  form.querySelector('.test-connection')?.addEventListener('click',async()=>{
     setStatus('Testing…');
     try{
       const result=await post('/api/test-connection',{
-        service,settings:fieldsOf(form),credential:secret.value||null
+        service,settings:fieldsOf(form),credential:secret?.value||null
       });
       setStatus(result.message||'Test completed');
     }catch(error){setStatus(error.message);}
   });
 }
-document.getElementById('identity-score-form')?.addEventListener('submit',async event=>{
-  event.preventDefault();
-  const field=event.currentTarget.querySelector('input[name=match_threshold_pct]');
-  const output=document.getElementById('identity-score-result');
-  try{
-    const result=await post('/api/settings',{settings:{identity:{match_threshold_pct:Number(field.value)}}});
-    output.textContent=result.restart_required?'Saved. Worker restarts or next settings reload will use the new threshold.':'Saved.';
-  }catch(error){output.textContent=error.message;}
-});
-document.getElementById('anidb-public')?.addEventListener('submit',async event=>{
-  event.preventDefault();
-  const checkbox=event.currentTarget.querySelector('input[name=enabled]');
-  const output=document.getElementById('anidb-status');
-  try{
-    const result=await post('/api/settings',{settings:{anidb:{enabled:checkbox.checked}}});
-    dirty=false;
-    output.textContent=result.restart_required?'Saved. Restart required.':'Saved.';
-  }catch(error){output.textContent=error.message}
-});
 window.addEventListener('beforeunload',event=>{
   if(dirty){event.preventDefault();event.returnValue='';}
 });
