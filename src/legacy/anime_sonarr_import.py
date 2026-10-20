@@ -61,7 +61,12 @@ def request_import(settings,secrets,*,sonarr_id,plan,opener=None):
     for item in plan:
         matches=[e for e in episodes if e.get("seasonNumber")==item["season"] and e.get("episodeNumber")==item["episode"]]
         if len(matches)!=1 or type(matches[0].get("id")) is not int:
-            raise RuntimeError("Sonarr episode identity not unique")
+            _candidate_review(
+                "SONARR_EPISODE_NOT_FOUND" if not matches else "SONARR_EPISODE_AMBIGUOUS",
+                sonarr_id=sonarr_id,item=item,count=0,
+                message=("The expected season/episode is absent or ambiguous in Sonarr's "
+                         "episode inventory. Check the series TVDB identity, season "
+                         "numbering, and Sonarr episode refresh before retrying Keep."))
         # Sonarr must have access to these exact staged files through a shared mount.
         candidates=_request(cfg["base_url"],key,"GET",
             "manualimport?folder="+quote(str(Path(item["path"]).parent),safe=""),**kwargs)
