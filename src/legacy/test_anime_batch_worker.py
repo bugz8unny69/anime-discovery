@@ -129,6 +129,26 @@ class VerifiedBatchTests(unittest.TestCase):
         self.assertEqual(self.step(),"DONE")
         self.assertEqual(self.qb.start_calls,2)
 
+    def test_outside_download_root_is_safe_review_not_identity_failure(self):
+        from anime_dashboard_queries import all_jobs
+        self.approve()
+        self.assertEqual(self.step(),"DEFERRED")
+        self.qb.completed(0)
+        self.qb.source_root=self.root/"external-download"
+        with self.assertRaisesRegex(ValueError,"qBittorrent save path outside download root"):
+            self.step()
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_batch_staged'"
+        ).fetchone())
+        self.db.execute("""UPDATE daemon_jobs SET state='NEEDS_REVIEW',
+            last_error='QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT'
+            WHERE id=?""",(self.job["id"],))
+        row=next(x for x in all_jobs(self.db)["items"] if x["id"]==self.nid)
+        self.assertIn("save_path",row["activity_detail"])
+        self.assertIn("storage.download_root",row["activity_detail"])
+        self.assertNotIn("BATCH_FILE_MANIFEST_REQUIRED",row["activity_detail"])
+        self.assertNotIn("EXACT_IDENTITY_NOT_VERIFIED",row["activity_detail"])
+
     def test_bad_audio_blocks_unlock(self):
         self.approve()
         self.assertEqual(self.step(),"DEFERRED")
