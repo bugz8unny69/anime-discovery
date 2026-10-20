@@ -412,7 +412,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,OSError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
-            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime"):
+            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-check-sonarr"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = getattr(self,"_cached_form",None) or self.form()
@@ -437,6 +437,13 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                                                values["anidb_id"], values.get("season",1))
                         else:
                             result = remove_alias(config_dir, values["alias"])
+                    elif route == "/series-check-sonarr":
+                        if config_dir is None: raise ValueError("Sonarr configuration required")
+                        from anime_sonarr_reconciliation import check_series
+                        config=load_config(config_dir)
+                        sid=int(values["series_id"])
+                        result=check_series(db,sid,config["settings"],config["secrets"])
+                        result["series_id"]=sid
                     elif route == "/series-action":
                         result = (keep_series(db, int(values["series_id"]), load_config(config_dir)["settings"], load_config(config_dir)["secrets"]) if values["action"]=="keep" and config_dir is not None else series_action(db, int(values["series_id"]), str(values["action"])))
                     elif route == "/series-bulk":
@@ -447,7 +454,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 # NTFY review notifications are exclusively sent by the
                 # finalized-identity monitor after verified persisted evidence.
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
-                    destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
+                    destination = "/series?id=" + str(result["series_id"]) if route in ("/series-action","/series-check-sonarr") else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
                     self.send_response(303)
                     self.send_header("Location", destination)
                     self.send_header("Content-Length", "0")
