@@ -170,9 +170,16 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 # Keep the source as-is and create an actionable terminal job
                 # review, rather than spinning forever in DEFERRED.
                 from anime_trial_size_policy import TrialSizeRejected
+                from anime_batch_completion import BatchNeedsReview
                 if isinstance(exc, TrialSizeRejected):
                     outcome="NEEDS_REVIEW"
                     reason=exc.reason
+                elif isinstance(exc, BatchNeedsReview):
+                    import re
+                    outcome="NEEDS_REVIEW"
+                    reason=re.sub(r"[^A-Z0-9_]+","_",str(exc).upper()).strip("_")[:70]
+                    if not reason:
+                        reason="BATCH_NEEDS_REVIEW"
                 else:
                     outcome="DEFERRED"
                     reason=type(exc).__name__
