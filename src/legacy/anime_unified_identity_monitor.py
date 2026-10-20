@@ -132,6 +132,12 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
 def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
     now=int(time.time() if now is None else now)
     ensure_schema(db)
+    # Historical unmatched records need the same evidence check, not an
+    # immediate notification from the NTFY monitor.
+    db.execute("""UPDATE notifications SET status='IDENTIFYING'
+        WHERE status IN ('UNTRUSTED','RECEIVED') AND NOT EXISTS
+        (SELECT 1 FROM episode_dispatch d WHERE d.notification_id=notifications.id)""")
+    db.commit()
     selected=db.execute("""SELECT n.id,n.release_name,COALESCE(c.attempts,0)
         FROM notifications n LEFT JOIN unified_identity_checks c ON c.notification_id=n.id
         WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)
