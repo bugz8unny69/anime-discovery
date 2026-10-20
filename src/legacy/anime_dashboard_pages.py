@@ -179,7 +179,10 @@ staged in Anime-Trial. Completed series stay visible if trial files are missing 
         if item.get("missing_staged_episodes"):
             count+=" ("+str(item["missing_staged_episodes"])+" missing)"
         out+='<td>'+count+'</td><td>'+escape(item["latest_episode"] or "—")+'</td>'
-        out+='<td><span class="status">'+escape(item["status"])+'</span></td></tr>'
+        out+='<td><span class="status">'+escape(item["status"])+'</span>'
+        if item.get("sonarr_reconciliation") in ("ALREADY_MANAGED","PARTIALLY_MANAGED"):
+            out+='<div><a href="/series-review-sonarr-cleanup?id='+str(sid)+'">Sonarr duplicates — review cleanup</a></div>'
+        out+='</td></tr>'
     if not result["items"]:
         out+='<tr><td colspan="6" class="empty">No series have reached Anime-Trial yet. Watch Jobs for incoming episodes.</td></tr>'
     out+='''</tbody></table><input type="hidden" name="return_size" value="'''+str(result["page_size"])+'''">
