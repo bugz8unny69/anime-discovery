@@ -44,7 +44,8 @@ def ensure_titles(path,*,now=None,downloader=None):
         raise ValueError("Invalid or oversized public AniDB catalog")
     # Validate the downloaded catalog before replacing a known-good cache.
     import xml.etree.ElementTree as ET
-    content=gzip.decompress(payload) if payload.startswith(b"\x1f\x8b") else payload
+    content=(gzip.GzipFile(fileobj=io.BytesIO(payload)).read(MAX_TITLES*4+1)
+             if payload.startswith(b"\x1f\x8b") else payload)
     if len(content)>MAX_TITLES*4:
         raise ValueError("Decompressed AniDB catalog too large")
     if ET.fromstring(content).tag!="animetitles":
