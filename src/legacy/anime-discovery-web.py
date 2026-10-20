@@ -225,6 +225,9 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         if len(ids)!=1:
                             raise ValueError("Specify one series ID")
                         detail=inspect_series(db,int(ids[0]))
+                        from anime_verified_season_memory import for_series
+                        detail["remembered_seasons"]=(for_series(db,int(ids[0]))
+                            if config_dir is not None else [])
                         return self.send(200,self.with_csrf(detail_page(detail)))
                     if path=="/recognized":
                         return self.send(200,self.with_csrf(recognized_page(aliases(),config_dir is not None)))
@@ -329,6 +332,17 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,sqlite3.Error) as exc:
                     return self.send(409,json.dumps({"error":str(exc)}),"application/json")
+            if route=="/api/recheck-identity":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    from anime_notification_management import recheck_unmatched_identity
+                    with self.database() as db:
+                        outcome=recheck_unmatched_identity(db,values.get("notification_id"))
+                    SECURITY_LOG.info("Authenticated identity recheck notification=%d",
+                                      outcome["notification_id"])
+                    return self.send(200,json.dumps(outcome),"application/json")
+                except (ValueError,TypeError,sqlite3.Error) as exc:
+                    return self.send(409,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/delete-notification":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()
@@ -428,7 +442,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(200,json.dumps(outcome),"application/json")
                 except (ValueError,TypeError,OSError) as exc:
                     return self.send(400,json.dumps({"error":str(exc)}),"application/json")
-            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-check-sonarr", "/series-confirm-sonarr-cleanup"):
+            if route not in ("/webhook", "/approve", "/series-action", "/series-bulk", "/alias", "/alias-remove", "/request-anime", "/series-remember", "/series-check-sonarr", "/series-confirm-sonarr-cleanup"):
                 return self.send(404, "Not found", "text/plain")
             try:
                 values = getattr(self,"_cached_form",None) or self.form()
@@ -453,6 +467,13 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                                                values["anidb_id"], values.get("season",1))
                         else:
                             result = remove_alias(config_dir, values["alias"])
+                    elif route == "/series-remember":
+                        if config_dir is None:
+                            raise ValueError("Verified alias editor requires settings directory")
+                        from anime_series_aliases import remember_verified_season
+                        result=remember_verified_season(
+                            db,config_dir,values.get("series_id"),
+                            values.get("season"))
                     elif route == "/series-confirm-sonarr-cleanup":
                         if config_dir is None:raise ValueError("Sonarr configuration required")
                         if values.get("confirm")!="DELETE_VERIFIED_DUPLICATES":
@@ -485,7 +506,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 # NTFY review notifications are exclusively sent by the
                 # finalized-identity monitor after verified persisted evidence.
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
-                    destination = "/series?id=" + str(result["series_id"]) if route in ("/series-action","/series-check-sonarr") else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
+                    destination = "/series?id=" + str(result["series_id"]) if route in ("/series-action","/series-check-sonarr") else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/series?id="+str(result["series_id"]) if route=="/series-remember" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized")))
                     self.send_response(303)
                     self.send_header("Location", destination)
                     self.send_header("Content-Length", "0")

@@ -15,9 +15,9 @@ from anime_config_runtime import data_path, get
 from anime_identity_verify import TITLES_URL, TVDB_URL, tvdb_token, request_json
 
 EP = re.compile(
-    r'(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<season_ep>\d{1,3})(?!\d)'
-    r'|\s+-\s+(?P<dash_ep>\d{1,3})(?:v\d+)?(?!\d)'
-    r'|\b(?:ep|episode)[ ._-]*(?P<word_ep>\d{1,3})\b', re.I)
+    r'(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<season_ep>\d{1,4})(?!\d)'
+    r'|\s+-\s+(?P<dash_ep>\d{1,4})(?:v\d+)?(?!\d)'
+    r'|\b(?:ep|episode)[ ._-]*(?P<word_ep>\d{1,4})\b', re.I)
 PREFIX = re.compile(r'^\s*(?:\[[^]]+\]\s*)+')
 SEASON_TOKEN = re.compile(r'(?<![A-Za-z0-9])S\d{1,2}(?![A-Za-z0-9])', re.I)
 SEASON_WORD = re.compile(r'\bSeason[ ._-]*S?\d{1,2}\b', re.I)

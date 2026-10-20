@@ -97,6 +97,7 @@ jobs:
             test_anime_ntfy_monitor \
             test_anime_notification_management \
             test_anime_unified_identity_monitor \
+            test_anime_verified_season_memory \
             test_anime_anidb_episode_lookup \
             test_anime_xml_cache_integrity \
             test_anime_xml_response_diagnostics \

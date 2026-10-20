@@ -303,6 +303,25 @@ if(job.can_resolve){
     document.getElementById("resolve-dialog").showModal();
   });actions.appendChild(btn);
 }
+if(job.can_recheck){
+  let btn=document.createElement("button");btn.type="button";
+  btn.className="secondary";btn.textContent="Recheck identity";
+  btn.addEventListener("click",async()=>{
+    if(!confirm("Recheck verified provider identity for notification #"+job.id+"? No torrent will be submitted without successful verification."))return;
+    btn.disabled=true;
+    try{
+      const csrf=document.querySelector('input[name="_csrf"]')?.value;
+      const response=await fetch("/api/recheck-identity",{method:"POST",
+        credentials:"same-origin",
+        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+        body:JSON.stringify({notification_id:job.id})});
+      const outcome=await response.json();
+      if(!response.ok)throw Error(outcome.error||"Identity recheck failed");
+      await refresh();
+    }catch(error){alert(error.message);btn.disabled=false}
+  });
+  actions.appendChild(btn);actions.appendChild(document.createTextNode(" "));
+}
 if(job.can_delete){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent="Delete";
   btn.addEventListener("click",async()=>{
@@ -484,6 +503,18 @@ def detail_page(detail):
     for nid,release,season,episode,state,job,path in detail["releases"]:
         out+='<tr>'+''.join('<td>'+escape(v)+'</td>' for v in (release,season,episode,state,job,path))+'</tr>'
     out+='</table></section>'
+    remembered=detail.get("remembered_seasons") or []
+    if remembered:
+        out+='<section class="panel"><h2>Remember verified anime</h2>'
+        out+='<p class="muted">Add the independently verified title, TVDB series, season and season-specific AniDB production to Recognized Names. No episode number, release group or acquisition permission is saved.</p>'
+        for row in remembered:
+            out+='<form method="post" action="/series-remember" class="forms">'
+            out+='<input type="hidden" name="series_id" value="'+str(series[0])+'">'
+            out+='<input type="hidden" name="season" value="'+str(row["season"])+'">'
+            out+='<button type="submit" class="secondary">Add Season '+escape(row["season"])+' to Recognized Names</button>'
+            out+='<small class="muted"> '+escape(row["title"])+' · TVDB '+escape(row["tvdb_id"])+' · AniDB '+escape(row["anidb_id"])+'</small>'
+            out+='</form>'
+        out+='</section>'
     out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
     if series[3] in ("KEPT","SONARR_IMPORT_PENDING","SONARR_MANAGED_REVIEW"):
@@ -510,7 +541,6 @@ if(resetForm)resetForm.addEventListener("submit",function(event){
 });
 </script>"""
     return out+tail()
-
 
 def sonarr_cleanup_review_page(title,review):
     """Human review screen; no DELETE on GET, confirmation is CSRF protected."""
