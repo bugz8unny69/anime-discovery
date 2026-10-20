@@ -9,26 +9,26 @@ from pathlib import PurePosixPath
 
 VIDEO_SUFFIXES = frozenset({".mkv", ".mp4", ".m4v", ".avi"})
 _SEASON_EPISODE = re.compile(
-    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})(?!\d)", re.I)
+    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,4})(?!\d)", re.I)
 _EPISODE = re.compile(
-    r"(?<![A-Za-z0-9])(?:Episode|EP|E)[ ._-]*(?P<episode>\d{1,3})(?!\d)", re.I)
-_DASH_EPISODE = re.compile(r"\s-\s(?P<episode>\d{1,3})(?!\d)")
+    r"(?<![A-Za-z0-9])(?:Episode|EP|E)[ ._-]*(?P<episode>\d{1,4})(?!\d)", re.I)
+_DASH_EPISODE = re.compile(r"\s-\s(?P<episode>\d{1,4})(?!\d)")
 _SEASON_FOLDER = re.compile(r"^(?:Season[ ._-]*|S)(?P<season>\d{1,2})$", re.I)
-_EXTRA_E = re.compile(r"(?<![A-Za-z])E\d{1,3}(?!\d)", re.I)
+_EXTRA_E = re.compile(r"(?<![A-Za-z])E\d{1,4}(?!\d)", re.I)
 _X_EPISODE = re.compile(
-    r"(?<![A-Za-z0-9])(?P<season>\d{1,2})x(?P<episode>\d{1,3})(?!\d)", re.I)
-_BRACKET_EPISODE = re.compile(r"[\[(](?P<episode>\d{1,3})[\])]")
-_JP_EPISODE = re.compile(r"第\s*(?P<episode>\d{1,3})\s*話")
-_BARE_EPISODE = re.compile(r"^\s*(?P<episode>\d{1,3})\s*$")
+    r"(?<![A-Za-z0-9])(?P<season>\d{1,2})x(?P<episode>\d{1,4})(?!\d)", re.I)
+_BRACKET_EPISODE = re.compile(r"[\[(](?P<episode>\d{1,4})[\])]")
+_JP_EPISODE = re.compile(r"第\s*(?P<episode>\d{1,4})\s*話")
+_BARE_EPISODE = re.compile(r"^\s*(?P<episode>\d{1,4})\s*$")
 _SEASON_TOKEN = re.compile(
     r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![A-Za-z0-9])", re.I)
 _MORE_EPISODES = re.compile(
-    r"^\s*(?:[-+~&]|to)\s*(?:E(?:P(?:isode)?)?[ ._-]*)?\d{1,3}(?![A-Za-z0-9])", re.I)
+    r"^\s*(?:[-+~&]|to)\s*(?:E(?:P(?:isode)?)?[ ._-]*)?\d{1,4}(?![A-Za-z0-9])", re.I)
 
 
 
 _RELEASE_EPISODE = re.compile(
-    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,3})(?!\d)", re.I)
+    r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<episode>\d{1,4})(?!\d)", re.I)
 _RELEASE_SEASON = re.compile(
     r"(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![A-Za-z0-9])", re.I)
 _RELEASE_SEASON_WORD = re.compile(
@@ -118,6 +118,11 @@ def _video_episode(name, confirmed_season):
         if not matches and folder_seasons:
             matches = list(_BARE_EPISODE.finditer(base))
         numbers = {int(m.group("episode")) for m in matches}
+        # Four-digit bracket groups may be release years rather than episodes.
+        # Requiring explicit provider mapping later is safer than guessing.
+        if any(m.re is _BRACKET_EPISODE and
+               1900 <= int(m.group("episode")) <= 2100 for m in matches):
+            raise SelectionNeedsReview("Ambiguous four-digit year/episode: " + name)
         if len(numbers) != 1 or not matches:
             raise SelectionNeedsReview("Episode number missing or ambiguous: " + name)
         for match in matches:
@@ -224,4 +229,67 @@ def plan_gated_first_six(files, *, season, probe_verified=False, already_satisfi
         "already_satisfied": plan["already_satisfied"],
         "out_of_window_episodes": plan["out_of_window_episodes"],
         "file_names_by_index": plan["file_names_by_index"],
+    }
+
+
+def plan_verified_trial(files, *, season, start_episode, episode_map,
+                        probe_verified=False):
+    """Six episodes from an independently verified release-to-TVDB map.
+
+    The *caller* must obtain 'episode_map' from a trusted provider mapping,
+    not calculate an offset from file ordering, lowest episode number or
+    release metadata. Every video in the pack must have an explicit mapping.
+    Supports season-relative S02E01, absolute S02E13->S02E01,
+    Part 2 filenames 01->canonical E13, and continuous E1001.
+    """
+    if type(season) is not int or not 1 <= season <= 100:
+        raise ValueError("Verified positive season required")
+    if type(start_episode) is not int or not 1 <= start_episode <= 9994:
+        raise ValueError("Verified trial start required")
+    if type(probe_verified) is not bool:
+        raise ValueError("Probe attestation must be boolean")
+    if (not isinstance(episode_map, dict) or not episode_map or
+            any(type(src) is not int or src < 1 or src > 9999 or
+                type(dst) is not int or dst < 1 or dst > 9999
+                for src,dst in episode_map.items()) or
+            len(set(episode_map.values())) != len(episode_map)):
+        raise ValueError("Explicit, unique verified episode map required")
+    if not isinstance(files, list) or not files:
+        raise SelectionNeedsReview("Torrent file inventory unavailable")
+    mapped, names, canonical_used = {}, {}, set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise SelectionNeedsReview("Invalid torrent file entry")
+        index, name = entry.get("index"), entry.get("name")
+        if type(index) is not int or index < 0 or index in names:
+            raise SelectionNeedsReview("Duplicate or invalid torrent file index")
+        parsed = _video_episode(name, season)
+        names[index] = name
+        if parsed is None:
+            continue
+        release_episode = parsed[1]
+        if release_episode not in episode_map:
+            raise SelectionNeedsReview("Video episode lacks verified mapping")
+        canonical = episode_map[release_episode]
+        if canonical in canonical_used:
+            raise SelectionNeedsReview("Duplicate canonical episode in torrent")
+        canonical_used.add(canonical)
+        mapped[canonical] = index
+    if start_episode not in mapped:
+        raise SelectionNeedsReview("First trial episode not found in verified manifest")
+    end_episode=start_episode+5
+    wanted = {ep:idx for ep,idx in mapped.items()
+              if start_episode <= ep <= end_episode and
+                 (probe_verified or ep == start_episode)}
+    wanted_indices = sorted(wanted.values())
+    skipped_indices = sorted(set(names) - set(wanted_indices))
+    return {
+        "phase": "UNLOCK_REMAINING" if probe_verified else "PROBE_FIRST_EPISODE",
+        "season": season, "start_episode": start_episode,
+        "end_episode": end_episode,
+        "wanted_episodes": dict(sorted(wanted.items())),
+        "wanted_indices": wanted_indices, "skip_indices": skipped_indices,
+        "out_of_window_episodes": sorted(ep for ep in mapped
+                                         if not start_episode <= ep <= end_episode),
+        "file_names_by_index": dict(sorted(names.items())),
     }
