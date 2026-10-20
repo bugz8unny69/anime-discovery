@@ -1,6 +1,6 @@
 import unittest
 
-from anime_batch_selection import SelectionNeedsReview, plan_first_six, release_scope_hint
+from anime_batch_selection import SelectionNeedsReview, plan_first_six, plan_gated_first_six, release_scope_hint
 
 
 def video(index, name):
@@ -30,6 +30,47 @@ class BatchSelectionTests(unittest.TestCase):
     def test_mixed_season_release_hints_are_not_trusted(self):
         hint=release_scope_hint("Show S01E01 + S02E01 Batch")
         self.assertEqual(hint["kind"], "ambiguous_season")
+
+
+    def test_probe_downloads_only_e01_then_unblocks_five(self):
+        files=[video(i-1,"Season 02/Anime S02E%02d.mkv" % i)
+               for i in range(1,13)]
+        probe=plan_gated_first_six(files,season=2)
+        self.assertEqual(probe["phase"],"PROBE_E01")
+        self.assertEqual(probe["wanted_episodes"],{1:0})
+        self.assertEqual(probe["wanted_indices"],[0])
+        self.assertEqual(probe["skip_indices"],list(range(1,12)))
+        unlocked=plan_gated_first_six(files,season=2,probe_verified=True)
+        self.assertEqual(unlocked["phase"],"UNLOCK_E02_E06")
+        self.assertEqual(unlocked["wanted_indices"],list(range(6)))
+        self.assertEqual(unlocked["skip_indices"],list(range(6,12)))
+
+    def test_failed_probe_does_not_unlock_remaining_files(self):
+        files=[video(i,"Anime S01E%02d.mkv"%(i+1)) for i in range(10)]
+        failed=plan_gated_first_six(files,season=1,probe_verified=False)
+        self.assertEqual(failed["wanted_indices"],[0])
+        self.assertNotIn(1,failed["wanted_indices"])
+        self.assertEqual(failed["skip_indices"],list(range(1,10)))
+
+    def test_verified_existing_e01_allows_remaining_without_redownload(self):
+        files=[video(i,"Anime S01E%02d.mkv"%(i+1)) for i in range(10)]
+        held=plan_gated_first_six(files,season=1,
+                                  already_satisfied=[1])
+        self.assertEqual(held["wanted_indices"],[])
+        unlocked=plan_gated_first_six(files,season=1,
+                    already_satisfied=[1],probe_verified=True)
+        self.assertEqual(unlocked["wanted_indices"],list(range(1,6)))
+        self.assertEqual(unlocked["skip_indices"],[0,6,7,8,9])
+
+    def test_batch_without_e01_requires_separate_episode_search(self):
+        files=[video(0,"Anime S01E03.mkv"),video(1,"Anime S01E04.mkv")]
+        with self.assertRaisesRegex(SelectionNeedsReview,"E01"):
+            plan_gated_first_six(files,season=1)
+
+    def test_invalid_probe_evidence_flag_fails_closed(self):
+        with self.assertRaises(ValueError):
+            plan_gated_first_six([video(0,"Anime S01E01.mkv")],
+                                 season=1,probe_verified="yes")
 
     def test_single_episode_preserved(self):
         result = plan_first_six([video(0, "Example Show S01E01.mkv")], season=1)
