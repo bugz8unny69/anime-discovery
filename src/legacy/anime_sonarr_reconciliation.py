@@ -32,7 +32,7 @@ def check_series(db,series_id,settings,secrets,*,opener=None):
     ensure_schema(db)
     row=db.execute("SELECT external_id FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
     if not row or not str(row[0]).isdigit():raise ValueError("Verified TVDB series required")
-    plan=plan_staged_imports(db,series_id,trial_root=settings["storage"]["trial_root"])
+    plan=plan_staged_imports(db,series_id,trial_root=settings["storage"]["trial_root"],skip_missing=True)
     kwargs={} if opener is None else {"opener":opener}
     cfg=settings["sonarr"]
     entries=_request(cfg["base_url"],secrets["sonarr_api_key"],"GET","series",**kwargs)
