@@ -66,6 +66,9 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             "decision":"NEEDS_REVIEW","issues":[]}
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
+    if not settings.get("anidb",{}).get("enabled",True):
+        report["issues"].append("ANIDB_PUBLIC_SOURCE_DISABLED")
+        return report
     rows,truncated=anidb_matches(catalog,aliases,limit=10)
     report["anidb_candidates"]=[r["anidb_id"] for r in rows]
     if truncated:
@@ -152,6 +155,8 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
         try:
             if probe:
                 report=probe(title,settings,secrets)
+            elif not settings.get("anidb",{}).get("enabled",True):
+                report={"decision":"NEEDS_REVIEW","issues":["ANIDB_PUBLIC_SOURCE_DISABLED"]}
             else:
                 catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
                 report=investigate(title,settings,secrets,catalog)
