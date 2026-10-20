@@ -21,10 +21,13 @@ class SonarrImportNeedsReview(RuntimeError):
         super().__init__(message)
 
 
-def _candidate_review(reason, *, sonarr_id, item, count, message):
+def _candidate_review(reason, *, sonarr_id, item, count, message,
+                      rejection_count=None):
     LOG.warning(
-        "event=SONARR_KEEP_REVIEW reason=%s sonarr_id=%s season=%s episode=%s candidates=%d",
-        reason, sonarr_id, item["season"], item["episode"], count)
+        "event=SONARR_KEEP_REVIEW reason=%s sonarr_id=%s season=%s episode=%s "
+        "candidates=%d rejection_count=%s",
+        reason, sonarr_id, item["season"], item["episode"], count,
+        "-" if rejection_count is None else str(rejection_count))
     raise SonarrImportNeedsReview(reason, message)
 
 def _public_rejections(rejections):
@@ -93,19 +96,19 @@ def _rejected_with_inventory(cfg,key,sonarr_id,item,episode,plan_episodes,
         sonarr_id,len(plan_episodes),len(confirmed),
         str(len(plan_episodes)==len(confirmed)).lower(),
         str(current in confirmed).lower())
-    first=details[0]["reason"]
+    summary="; ".join(detail["reason"] for detail in details[:3])[:260]
     if current in confirmed:
         _candidate_review(
             "SONARR_EPISODE_ALREADY_PRESENT",sonarr_id=sonarr_id,item=item,
-            count=len(details),
+            count=1,rejection_count=len(details),
             message=("Sonarr reports this episode already has a registered library "
-                     "file. Its manual-import reason: "+first+
+                     "file. Its manual-import reasons: "+summary+
                      ". This does not prove the Anime-Trial copy was imported. "
                      "No staged files were deleted and Keep was not finalized."))
     _candidate_review(
         "SONARR_REJECTED_CANDIDATE",sonarr_id=sonarr_id,item=item,
-        count=len(details),
-        message=("Sonarr refused the candidate: "+first+
+        count=1,rejection_count=len(details),
+        message=("Sonarr refused the candidate: "+summary+
                  ". Review Wanted > Manual Import before retrying Keep."))
 
 
