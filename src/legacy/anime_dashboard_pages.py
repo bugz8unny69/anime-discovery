@@ -263,7 +263,7 @@ td(tr,job.source).classList.add("hide-mobile");
 td(tr,job.episode?"S"+String(job.season).padStart(2,"0")+"E"+String(job.episode).padStart(2,"0"):"—");
 let cell=document.createElement("td"),status=document.createElement("span");
 status.className="status "+(job.status==="COMPLETED"?"completed":
-job.status==="RUNNING"?"running":job.status.includes("WAITING")?"waiting":
+job.status==="RUNNING"||job.status==="DOWNLOADING"?"running":job.status.includes("WAITING")?"waiting":
 (job.status==="BLOCKED"||job.status==="CANCELED")?"blocked":"");
 status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
@@ -271,7 +271,7 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,job.activity_detail||"No further activity recorded");
 detail.classList.add("muted");
-if(typeof job.job_id==="number"){
+if(typeof job.job_id==="number" && !job.batch_download_active){
   const line=document.createElement("div");
   line.textContent="Job #"+job.job_id+" · "+(job.job_state||"UNKNOWN")+
     " · Attempts: "+(job.attempts??0)+
