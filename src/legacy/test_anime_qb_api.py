@@ -170,6 +170,22 @@ class QBFileSelectionTests(unittest.TestCase):
                                                 wanted_indices=wanted,skip_indices=skipped)
             self.assertFalse(any("/filePrio" in r.full_url for r in opener.requests))
 
+
+    def test_completed_probe_can_unlock_while_stopped_uploading(self):
+        # qBittorrent may mark the torrent complete for its initially
+        # selected E01, so the next priority transition sees a stoppedUP
+        # (or older pausedUP) state, not stoppedDL.
+        for state in ("stoppedUP","pausedUP"):
+            opener=PriorityOpener(state=state)
+            opener.priorities={0:1,1:0,2:0}
+            qb=QBittorrentAPI("http://localhost:8080",
+                             opener=opener,allow_writes=True)
+            plan=qb.apply_stopped_file_selection("a"*40,
+                                                wanted_indices=[0,1],
+                                                skip_indices=[2])
+            self.assertEqual(plan["wanted_indices"],[0,1])
+            self.assertEqual(opener.priorities,{0:1,1:1,2:0})
+
     def test_write_ack_without_readback_confirmation_fails(self):
         opener=PriorityOpener(apply=False)
         qb=QBittorrentAPI("http://localhost:8080",opener=opener,allow_writes=True)
