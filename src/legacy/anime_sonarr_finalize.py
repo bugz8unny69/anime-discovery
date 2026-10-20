@@ -7,6 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 from anime_sonarr import _request
+from anime_qb_ownership import OWNED, ownership, owned_now
 
 def _digest(path):
     h=hashlib.sha256()
@@ -87,6 +88,18 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
     if len(rows)!=len(ids):
         raise RuntimeError("Missing torrent provenance")
     hashes={str(infohash).lower() for _,infohash,_ in rows}
+    # Legacy releases, externally preexisting torrents, and uncertain add
+    # outcomes must not be deleted. The category alone is never enough.
+    owned_hashes={h for h in hashes if ownership(db,h)==OWNED
+                  and owned_now(db,h,qb)}
+    preserved_hashes=hashes-owned_hashes
+    if preserved_hashes:
+        from anime_series_lifecycle import ensure_cleanup_notice_schema
+        from time import time
+        ensure_cleanup_notice_schema(db)
+        db.executemany("""INSERT OR IGNORE INTO sonarr_keep_cleanup_notice
+            (series_id,infohash,ownership,created_at) VALUES (?,?,?,?)""",
+            [(series_id,h,ownership(db,h),int(time())) for h in preserved_hashes])
     digests={nid:digest for nid,_,digest in rows
              if isinstance(digest,str) and len(digest)==64 and all(c in "0123456789abcdef" for c in digest.lower())}
     destinations=confirm_sonarr_copies(settings,secrets,sonarr_id=sonarr_id,
@@ -105,13 +118,13 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
             logging.getLogger(__name__).exception(
                 "Shoko handoff queue failed for series %d",series_id)
     # Never delete a torrent referenced by another series or an unimported release.
-    for infohash in hashes:
+    for infohash in owned_hashes:
         referenced=db.execute("""SELECT r.notification_id FROM torrent_recovery_records r
             WHERE lower(r.infohash)=?""",(infohash,)).fetchall()
         if any(nid not in ids for (nid,) in referenced):
             raise RuntimeError("Torrent is shared with work outside this import")
     download_root=settings["storage"]["download_root"]
-    for infohash in hashes:
+    for infohash in owned_hashes:
         record=qb.torrent_details(infohash)
         if record is None:
             continue  # Already cleaned after staging; idempotent.
@@ -124,7 +137,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
     # episodes than were staged, even if only one was approved.
     from collections import Counter
     supported={".mkv",".mp4",".m4v",".avi"}
-    for infohash in hashes:
+    for infohash in owned_hashes:
         record=qb.torrent_details(infohash)
         if record is None:
             continue
@@ -144,7 +157,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         if not originals or Counter(originals)!=expected:
             raise RuntimeError("Original torrent media payload not fully imported")
     # Reaching this point proves the imported copies and torrent payload.
-    for infohash in hashes:
+    for infohash in owned_hashes:
         if qb.torrent_details(infohash) is not None:
             qb.remove_torrent(infohash,delete_files=True)
     for item in plan:
@@ -157,4 +170,5 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         db.rollback()
         raise
     return {"complete":True,"sonarr_id":sonarr_id,"imported_files":len(destinations),
-            "source_files_removed":len(plan),"torrents_reconciled":len(hashes)}
+            "source_files_removed":len(plan),"torrents_reconciled":len(owned_hashes),
+            "torrents_preserved":len(preserved_hashes)}

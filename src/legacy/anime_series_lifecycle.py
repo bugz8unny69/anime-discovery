@@ -17,9 +17,19 @@ def action(db, series_id, operation):
     return {"series_id":series_id,"action":operation,"ok":True}
 
 
+def ensure_cleanup_notice_schema(db):
+    db.execute("""CREATE TABLE IF NOT EXISTS sonarr_keep_cleanup_notice (
+        series_id INTEGER NOT NULL REFERENCES series(id),
+        infohash TEXT NOT NULL,
+        ownership TEXT NOT NULL CHECK(ownership IN ('EXTERNAL','UNCERTAIN')),
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(series_id,infohash))""")
+
+
 def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=None):
     """Admit series to Sonarr, then track pending episode import. No deletion."""
     from anime_sonarr import ensure_series
+    from anime_qb_ownership import OWNED, ownership_for_series
     if type(series_id) is not int or series_id<=0 or db.in_transaction:
         raise ValueError("Invalid Keep request")
     row=db.execute("SELECT external_id,title,status FROM series WHERE id=? AND source='tvdb'",(series_id,)).fetchone()
@@ -49,6 +59,10 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
     if not trial_root:
         raise ValueError("Trial root must be configured")
     manifest=plan_staged_imports(db,series_id,trial_root=trial_root)
+    # Preserve ownership decisions at Keep time for a durable, human-readable
+    # notice on the series page. Never infer ownership from qB category alone.
+    preserved=[row for row in ownership_for_series(db,series_id)
+               if row["ownership"]!=OWNED]
     command_id=None
     if sonarr_client is None or import_client is not None:
         from anime_sonarr_import import request_import
@@ -77,13 +91,22 @@ def keep(db, series_id, settings, secrets, *, sonarr_client=None, import_client=
             manifest_json=excluded.manifest_json,
             submitted_command_id=excluded.submitted_command_id""",
             (series_id,json.dumps(manifest),command_id))
+        ensure_cleanup_notice_schema(db)
+        db.execute("DELETE FROM sonarr_keep_cleanup_notice WHERE series_id=?",(series_id,))
+        from time import time
+        db.executemany("""INSERT INTO sonarr_keep_cleanup_notice
+            (series_id,infohash,ownership,created_at) VALUES (?,?,?,?)""",
+            [(series_id,row["infohash"],row["ownership"],int(time()))
+             for row in preserved])
         db.execute("UPDATE series SET status='SONARR_IMPORT_PENDING' WHERE id=?",(series_id,))
         db.commit()
     except BaseException:
         db.rollback()
         raise
     return {"series_id":series_id,"action":"keep","sonarr_id":result["sonarr_id"],"ok":True,
-            "trial_media_preserved":True,"import_pending":True,"command_id":command_id,"torrent_cleanup_authorized":False}
+            "trial_media_preserved":True,"import_pending":True,"command_id":command_id,
+            "torrent_cleanup_authorized":False,"torrents_preserved":len(preserved),
+            "cleanup_notice":"Original qBittorrent torrents will be preserved for manual removal after Sonarr import." if preserved else None}
 
 
 def bulk_action(db, series_ids, operation):
@@ -175,4 +198,12 @@ def inspect(db, series_id):
         WHERE d.series_id=? ORDER BY n.id DESC""",(series_id,)).fetchall()
     rejected=bool(db.execute(
         "SELECT 1 FROM series_rejection_blocks WHERE series_id=?", (series_id,)).fetchone())
-    return {"series":row, "episodes":episodes, "releases":releases, "rejected":rejected}
+    cleanup_notices=[]
+    if row[3] in ("SONARR_IMPORT_PENDING","KEPT"):
+        ensure_cleanup_notice_schema(db)
+        cleanup_notices=[{"infohash":hash_value,"ownership":ownership_state}
+            for hash_value,ownership_state in db.execute(
+                """SELECT infohash,ownership FROM sonarr_keep_cleanup_notice
+                   WHERE series_id=? ORDER BY infohash""",(series_id,))]
+    return {"series":row,"episodes":episodes,"releases":releases,
+            "rejected":rejected,"cleanup_notices":cleanup_notices}

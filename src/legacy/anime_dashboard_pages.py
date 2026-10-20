@@ -326,6 +326,21 @@ def detail_page(detail):
     series=detail["series"]
     out=shell(series[1],"Series")
     out+='<h1>'+escape(series[1])+'</h1><p class="muted">TVDB '+escape(series[2])+' · '+escape(series[3])+'</p>'
+    preserved=detail.get("cleanup_notices") or []
+    if preserved:
+        action=("Keep has been submitted to Sonarr." if series[3]=="SONARR_IMPORT_PENDING"
+                else "Keep completed.")
+        out+='<section class="panel" role="status" aria-live="polite">'
+        out+='<h2>Original qBittorrent files preserved</h2><p>'+escape(action)+' '
+        out+='Anime Discovery will not delete these original torrents or their files because it did not create them or cannot verify ownership. '
+        out+='After Sonarr finishes copying the episodes, remove these torrents and their files manually in qBittorrent if desired.</p>'
+        out+='<ul>'
+        for record in preserved:
+            reason=("Already in qBittorrent before Anime Discovery submitted"
+                    if record["ownership"]=="EXTERNAL"
+                    else "Ownership could not be verified")
+            out+='<li><code>'+escape(record["infohash"])+'</code> — '+escape(reason)+'</li>'
+        out+='</ul></section>'
     out+='<section class="panel"><h2>Episodes</h2><table><tr><th>Season</th><th>Episode</th><th>Status</th></tr>'
     for season,episode,state in detail["episodes"]:
         out+='<tr><td>'+escape(season)+'</td><td>'+escape(episode)+'</td><td>'+escape(state)+'</td></tr>'
