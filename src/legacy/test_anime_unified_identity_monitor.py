@@ -56,6 +56,33 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=1001,sender=self.sender)["sent"],0)
         self.assertEqual(check_once(self.db,{}, {},now=1002,probe=lambda *_:report)["processed"],0)
 
+    def test_pre_acquisition_proof_is_saved_before_queueing_for_keep(self):
+        report={"decision":"AUTO_VERIFIED","issues":[],
+                "approval":{"tvdb_id":123,"anidb_id":456,"season":2,"episode":3},
+                "episode_mapping":{"anidb_episode_number":2,"tvdb_season":2,"tvdb_episode":3},
+                "verified_anidb_episode_id":9876,
+                "episode_id_source":"AniDB HTTP catalog"}
+        self.assertEqual(check_once(self.db,{}, {},now=1200,
+            probe=lambda *_: report)["processed"],1)
+        self.assertEqual(self.db.execute("""SELECT anidb_id,anidb_episode_number,
+            anidb_episode_id,source FROM verified_anidb_episode_ids""").fetchone(),
+            (456,2,9876,"AniDB HTTP catalog"))
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM series").fetchone()[0],"DISCOVERED")
+        self.assertIsNone(self.db.execute("SELECT 1 FROM sqlite_master WHERE name='sonarr_keep'").fetchone())
+
+    def test_shared_anidb_rate_limit_waits_without_review_alert(self):
+        from anime_anidb_episode_lookup import AniDBLookupDeferred
+        def deferred(*_):
+            raise AniDBLookupDeferred(12)
+        result=check_once(self.db,{}, {},now=1000,probe=deferred)
+        self.assertEqual(result["pending_retries"],1)
+        check=self.db.execute("SELECT attempts,next_at,decision FROM unified_identity_checks").fetchone()
+        self.assertEqual(check,(0,1013,"LOOKUP_RETRY"))
+        self.assertEqual(self.db.execute("SELECT status FROM notifications").fetchone()[0],
+                         "IDENTIFYING")
+        self.assertEqual(alerts(self.db,self.settings,{},now=1010,sender=self.sender)["sent"],0)
+
     def test_public_titles_crossref_requires_exact_verified_episode_map(self):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
