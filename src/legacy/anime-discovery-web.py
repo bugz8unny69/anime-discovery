@@ -412,15 +412,9 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         result = bulk_action(db, values.get("series_ids", []), str(values["action"]))
                     else:
                         result = approve(db, values["notification_id"], values)
-                if route == "/webhook" and not result.get("duplicate") and not result.get("queued") and config_dir is not None:
-                    from anime_ntfy import notify_best_effort
-                    cfg=load_config(config_dir)
-                    notified=notify_best_effort(cfg["settings"],cfg["secrets"],result["notification_id"],
-                                       values.get("release_name") or values.get("torrentName") or "Unknown release")
-                    if notified:
-                        from anime_ntfy_monitor import mark_sent
-                        with self.database() as notify_db:
-                            mark_sent(notify_db,result["notification_id"])
+                # A webhook is only intake, never final identity review.
+                # NTFY review notifications are exclusively sent by the
+                # finalized-identity monitor after verified persisted evidence.
                 if route != "/webhook" and self.headers.get("Content-Type","").startswith("application/x-www-form-urlencoded"):
                     destination = "/series?id=" + str(result["series_id"]) if route == "/series-action" else ("/?page="+str(values.get("return_page",1))+"&size="+str(values.get("return_size",20)) if route=="/series-bulk" else ("/jobs" if route in ("/approve","/request-anime") else "/recognized"))
                     self.send_response(303)

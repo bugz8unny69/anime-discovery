@@ -22,6 +22,34 @@ class TriageTests(unittest.TestCase):
         self.notified=[]
         self.sender=lambda s,k,n,t:self.notified.append(n) or True
 
+    def test_invalid_xml_is_metadata_retry_not_user_review_even_after_three_attempts(self):
+        import xml.etree.ElementTree as ET
+        def malformed(*args):
+            raise ET.ParseError("Malformed upstream XML")
+        for moment in (1000,1500,3000,5000):
+            self.assertEqual(check_once(self.db,{}, {},now=moment,probe=malformed)["processed"],1)
+            record=self.db.execute("""SELECT decision,next_at,evidence_json
+                FROM unified_identity_checks WHERE notification_id=?""",(self.nid,)).fetchone()
+            self.assertEqual(record[0],"LOOKUP_RETRY")
+            self.assertGreater(record[1],moment)
+            self.assertIn("METADATA_UNAVAILABLE_IDENTITY_RESOLUTION",record[2])
+            self.assertEqual(self.db.execute("SELECT status FROM notifications WHERE id=?",
+                (self.nid,)).fetchone()[0],"IDENTIFYING")
+            self.assertEqual(alerts(self.db,self.settings,{},now=moment+1,
+                                    sender=self.sender)["sent"],0)
+        self.assertEqual(self.notified,[])
+
+    def test_metadata_sources_are_stage_labeled_and_retry(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import MetadataUnavailable
+        with patch("anime_unified_identity_monitor.ensure_titles",
+                   side_effect=MetadataUnavailable("ANIDB_TITLES")):
+            result=check_once(self.db,{"daemon":{"database_path":str(self.path)}}, {},
+                              now=1000)
+        self.assertEqual(result["pending_retries"],1)
+        row=self.db.execute("SELECT evidence_json FROM unified_identity_checks").fetchone()
+        self.assertIn("METADATA_UNAVAILABLE_ANIDB_TITLES",row[0])
+
     def test_review_only_after_lookup_and_one_alert(self):
         self.assertEqual(alerts(self.db,self.settings,{},now=1000,sender=self.sender)["sent"],0)
         self.assertEqual(check_once(self.db,{}, {},now=1001,

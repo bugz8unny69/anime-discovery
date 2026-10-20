@@ -27,6 +27,14 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
     with sqlite3.connect(settings["daemon"]["database_path"],isolation_level=None,
                          timeout=10) as db:
         db.execute("PRAGMA busy_timeout=10000")
+        # The live launcher keeps this worker running so Shoko may be enabled
+        # without a process restart. On a fresh library these Keep/import
+        # tables do not yet exist; no Sonarr import can be handed to Shoko.
+        required={"series","sonarr_keep","sonarr_import_manifest"}
+        present={row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not required.issubset(present):
+            return {"processed":0,"awaiting_keep":True}
         ensure_schema(db)
         db.execute("""CREATE TABLE IF NOT EXISTS shoko_alert_delivery (
             series_id INTEGER NOT NULL, notification_id INTEGER NOT NULL,

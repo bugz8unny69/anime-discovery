@@ -78,6 +78,7 @@ jobs:
             test_anime_ntfy_monitor \
             test_anime_notification_management \
             test_anime_unified_identity_monitor \
+            test_anime_xml_cache_integrity \
             test_anime_sonarr_import \
             test_anime_sonarr_finalize \
             test_anime_shoko_v3 \

@@ -38,61 +38,86 @@ def ensure_schema(db):
         source TEXT NOT NULL
     )""")
 
-def ensure_titles(path,*,now=None,downloader=None):
-    """Use cached public AniDB titles; refresh at most daily."""
-    now=int(time.time() if now is None else now)
+class MetadataUnavailable(Exception):
+    """Upstream/cached metadata is unusable; retry without a review alert."""
+    def __init__(self, source):
+        self.source=source
+        super().__init__("Metadata unavailable: "+source)
+
+
+def _validate_titles(payload):
+    import xml.etree.ElementTree as ET
+    if not isinstance(payload,bytes) or not payload or len(payload)>MAX_TITLES:
+        raise ValueError("Invalid or oversized AniDB titles")
+    content=(gzip.GzipFile(fileobj=io.BytesIO(payload)).read(MAX_TITLES*4+1)
+             if payload.startswith(b"\x1f\x8b") else payload)
+    if len(content)>MAX_TITLES*4:
+        raise ValueError("AniDB titles decompressed past size limit")
+    if ET.fromstring(content).tag!="animetitles":
+        raise ValueError("Wrong AniDB titles root")
+    return payload
+
+
+def _validate_mapping(data):
+    import xml.etree.ElementTree as ET
+    if not isinstance(data,bytes) or not data or len(data)>16*1024*1024:
+        raise ValueError("Invalid Anime-Lists payload")
+    if ET.fromstring(data).tag!="anime-list":
+        raise ValueError("Wrong Anime-Lists root")
+    return data
+
+
+def _validated_cache(path,validator):
+    try:
+        return validator(path.read_bytes()) if path.is_file() else None
+    except Exception:
+        # Do not reuse truncated, malformed, or otherwise untrusted cache data.
+        return None
+
+
+def _refresh_cache(path,*,now,downloader,validator,source):
+    """Cache validated XML atomically, retaining last-good on HTTP/XML errors."""
     path=Path(path)
-    if path.is_file() and now-int(path.stat().st_mtime)<86400:
-        return path
+    cached=_validated_cache(path,validator)
+    if cached is not None and 0<=now-int(path.stat().st_mtime)<86400:
+        return cached
+    try:
+        downloaded=validator(downloader())
+    except Exception as exc:
+        if cached is not None:
+            LOG.warning("Metadata refresh deferred source=%s error_type=%s using_last_good=true",
+                        source,type(exc).__name__)
+            return cached
+        LOG.warning("Metadata unavailable source=%s error_type=%s",source,type(exc).__name__)
+        raise MetadataUnavailable(source) from None
+    path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(path.suffix+".tmp")
+    try:
+        tmp.write_bytes(downloaded)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return downloaded
+
+
+def ensure_titles(path,*,now=None,downloader=None):
+    """Return validated AniDB title cache path; never accept malformed XML."""
+    now=int(time.time() if now is None else now)
     if downloader is None:
         def downloader():
             request=urllib.request.Request(TITLES_URL,headers={"User-Agent":"AnimeDiscovery/1.0"})
             with urllib.request.urlopen(request,timeout=25) as response:
                 return response.read(MAX_TITLES+1)
-    payload=downloader()
-    if not isinstance(payload,bytes) or len(payload)>MAX_TITLES or not payload:
-        raise ValueError("Invalid or oversized public AniDB catalog")
-    # Validate the downloaded catalog before replacing a known-good cache.
-    import xml.etree.ElementTree as ET
-    content=(gzip.GzipFile(fileobj=io.BytesIO(payload)).read(MAX_TITLES*4+1)
-             if payload.startswith(b"\x1f\x8b") else payload)
-    if len(content)>MAX_TITLES*4:
-        raise ValueError("Decompressed AniDB catalog too large")
-    if ET.fromstring(content).tag!="animetitles":
-        raise ValueError("Unexpected AniDB title catalog")
-    path.parent.mkdir(parents=True,exist_ok=True)
-    tmp=path.with_suffix(".tmp")
-    try:
-        tmp.write_bytes(payload)
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-    return path
+    _refresh_cache(path,now=now,downloader=downloader,
+                   validator=_validate_titles,source="ANIDB_TITLES")
+    return Path(path)
 
 
-def ensure_anime_lists(path, *, now=None, downloader=None):
-    """Refresh the Anime-Lists mapping cache daily, validating before publish."""
-    import xml.etree.ElementTree as ET
+def ensure_anime_lists(path,*,now=None,downloader=None):
+    """Return a validated Anime-Lists XML mapping from the local cache."""
     now=int(time.time() if now is None else now)
-    path=Path(path)
-    if path.is_file() and now-int(path.stat().st_mtime)<86400:
-        data=path.read_bytes()
-    else:
-        data=(downloader or download_anime_lists)()
-        if not isinstance(data,bytes) or not data or len(data)>16*1024*1024:
-            raise ValueError("Anime-Lists cache invalid or oversized")
-        if ET.fromstring(data).tag!="anime-list":
-            raise ValueError("Unexpected Anime-Lists root")
-        path.parent.mkdir(parents=True,exist_ok=True)
-        tmp=path.with_suffix(".tmp")
-        try:
-            tmp.write_bytes(data)
-            tmp.replace(path)
-        finally:
-            tmp.unlink(missing_ok=True)
-    if ET.fromstring(data).tag!="anime-list":
-        raise ValueError("Unexpected Anime-Lists root")
-    return data
+    return _refresh_cache(path,now=now,downloader=downloader or download_anime_lists,
+                          validator=_validate_mapping,source="ANIME_LISTS")
 
 
 def candidate_score(aliases,names):
@@ -285,6 +310,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     for nid,title,attempts in selected:
         attempts+=1
         retry_delay=None
+        stage="IDENTITY_RESOLUTION" if probe else "ANIDB_TITLES"
         try:
             if probe:
                 report=probe(title,settings,secrets)
@@ -292,6 +318,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report={"decision":"NEEDS_REVIEW","issues":["ANIDB_PUBLIC_SOURCE_DISABLED"]}
             else:
                 catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
+                stage="ANIME_LISTS"
                 mapping_xml=ensure_anime_lists(
                     Path(settings["daemon"]["database_path"]).parent/"anime-lists.xml")
                 aid_cfg=settings.get("anidb",{})
@@ -302,6 +329,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                         aid,ep,client=aid_cfg["client"],
                         clientver=aid_cfg.get("clientver",1),
                         metadata_path=Path(settings["daemon"]["database_path"]).parent/"anime-metadata.db")
+                stage="IDENTITY_RESOLUTION"
                 report=investigate(title,settings,secrets,catalog,
                                    mapping_xml=mapping_xml,anidb_resolve=direct)
             decision=report["decision"]
@@ -329,8 +357,20 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
             retry=False
         except Exception as exc:
+            import xml.etree.ElementTree as ET
             from anime_anidb_episode_lookup import AniDBLookupDeferred
-            if isinstance(exc,AniDBLookupDeferred):
+            if isinstance(exc,(MetadataUnavailable,ET.ParseError,gzip.BadGzipFile,EOFError)):
+                # An unavailable public metadata feed is not a user-review
+                # decision, regardless of how often the provider has failed.
+                source=exc.source if isinstance(exc,MetadataUnavailable) else stage
+                decision="LOOKUP_RETRY"
+                report={"decision":decision,"issues":["METADATA_UNAVAILABLE_"+source]}
+                retry=True
+                retry_delay=min(3600,60*2**min(attempts,6))
+                pending_retries+=1
+                LOG.warning("Identity metadata retry notification=%s source=%s error_type=%s",
+                            nid,source,type(exc).__name__)
+            elif isinstance(exc,AniDBLookupDeferred):
                 # A shared AniDB cooldown is a wait, not a failed identity.
                 attempts-=1
                 decision="LOOKUP_RETRY"
