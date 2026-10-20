@@ -31,9 +31,14 @@ SCHEMA = {
     "web": {"dashboard":False,"fields":{
         "host":field("0.0.0.0",visible=False),
         "port":field(8765,visible=False,minimum=1,maximum=65535)}},
-    "storage": {"dashboard":False,"fields":{
+    "storage": {"dashboard":True,"title":"Staged media permissions",
+                "description":"Optional owner and group for new Anime-Trial media. Leave blank to use the Anime Discovery service account. A different owner may require privileges the service does not have; inaccessible targets fail safely.","fields":{
         "download_root":field("",visible=False),
-        "trial_root":field("",visible=False)}},
+        "trial_root":field("",visible=False),
+        "staged_owner":field("",label="Staged file owner (optional)",
+            help_text="Linux username or numeric UID. Blank keeps the service user; changing owner requires sufficient filesystem permissions."),
+        "staged_group":field("",label="Staged file group (optional)",
+            help_text="Linux group name or numeric GID, e.g. media or 1002. The service must have permission to assign this group.")}},
     "identity": {"dashboard":True,"title":"Identity matching","fields":{
         "reuse_verified_cache":field(True,visible=False),
         "series_map":field({},visible=False),
