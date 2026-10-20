@@ -124,7 +124,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         if any(nid not in ids for (nid,) in referenced):
             raise RuntimeError("Torrent is shared with work outside this import")
     download_root=settings["storage"]["download_root"]
-    for infohash in hashes:
+    for infohash in owned_hashes:
         record=qb.torrent_details(infohash)
         if record is None:
             continue  # Already cleaned after staging; idempotent.
@@ -137,7 +137,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
     # episodes than were staged, even if only one was approved.
     from collections import Counter
     supported={".mkv",".mp4",".m4v",".avi"}
-    for infohash in hashes:
+    for infohash in owned_hashes:
         record=qb.torrent_details(infohash)
         if record is None:
             continue
@@ -157,7 +157,7 @@ def finalize_import(db,series_id,settings,secrets,*,qb,opener=None):
         if not originals or Counter(originals)!=expected:
             raise RuntimeError("Original torrent media payload not fully imported")
     # Reaching this point proves the imported copies and torrent payload.
-    for infohash in hashes:
+    for infohash in owned_hashes:
         if qb.torrent_details(infohash) is not None:
             qb.remove_torrent(infohash,delete_files=True)
     for item in plan:
