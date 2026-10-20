@@ -135,7 +135,7 @@ def step(db, job, qb, *, download_root, trial_root, settings, runner=None):
     if record is None:
         # This is the sole torrent-submission stage. On a delayed metadata
         # response, submit_once reconciles by hash rather than adding again.
-        acquired=submit_poll_pause(db,infohash,magnet,qb)
+        acquired=submit_poll_pause(db,infohash,magnet,qb,save_path=str(Path(download_root).resolve(strict=True)))
         if acquired["state"]=="DEFERRED":
             return "DEFERRED"
         if acquired["state"]!="MANIFEST_READY":
