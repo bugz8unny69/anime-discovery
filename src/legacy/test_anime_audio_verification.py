@@ -42,7 +42,7 @@ class FFprobeAudioGateTests(unittest.TestCase):
                 args,options=observed[0]
                 self.assertEqual(args[0],"ffprobe")
                 self.assertEqual(args[args.index("-select_streams")+1],"a")
-                self.assertIn("stream_tags=language",args)
+                self.assertIn("stream_tags=language",args[args.index("-show_entries")+1])
                 self.assertEqual(args[-1],"/tmp/source.mkv")
                 self.assertTrue(options["check"])
                 self.assertEqual(options["timeout"],30)
