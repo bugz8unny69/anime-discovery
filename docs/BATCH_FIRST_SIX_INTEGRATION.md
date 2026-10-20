@@ -1,3 +1,59 @@
+# Conditional size admission (draft implementation)
+
+The dashboard now exposes **Trial download size limits** with two integer MB
+settings in `settings.json`: `trial.max_episode_mb=600` and
+`trial.max_six_episode_mb=3000`. Here MB is decimal: 1 MB = 1,000,000
+bytes. They are hard admission limits, **not** limits on the torrent's
+total size and not filesystem/NFS quota scans.
+
+After qBittorrent produces a stable stopped manifest and the upstream
+verified episode mapping has identified file indices, admission examines
+**only the canonical six-episode trial window**. With all six file sizes
+known, the 3,000 MB total cap governs; an individual episode may exceed
+600 MB. Example: 700 + 400 + 400 + 400 + 400 + 400 = 2,700 MB is
+eligible. When fewer than six episode sizes are known, each newly
+arriving episode must be <=600 MB and the existing+new trial total must
+be <=3,000 MB. On the arrival of the sixth verified size, the total
+budget is authoritative. All six sizes must be independently mapped
+to unique canonical episodes: file order, torrent title or assumed
+season offsets are not acceptable evidence.
+
+`anime_trial_size_policy.authorize_manifest_sizes` atomically reserves
+known per-episode sizes by TVDB/AniDB, season, trial unit, episode,
+infohash and file index in `anime_trial_size_reservations`. This
+prevents six separately arriving files from losing cumulative totals
+across restarts. Same-source retries are idempotent; another hash/index
+for an already reserved episode **requires an operator recovery path**
+and is not silently substituted. A refused admission makes **no**
+new reservations. The E01 qB planner now consults this gate **before**
+setting any file priorities or resuming; it reserves six known sizes
+while initially downloading only E01. Legacy direct planner calls that
+lack verified series/window context still enforce the single-manifest
+limit, but cannot reserve across separate releases.
+
+Decisions emit `event=TRIAL_SIZE_DECISION` including
+`FULL_SIX_OVERRIDES_EPISODE_LIMIT`, `FULL_SIX_WITHIN_BUDGET`,
+`PARTIAL_TRIAL_WITHIN_BUDGET`, `EPISODE_SIZE_EXCEEDED`,
+`TRIAL_TOTAL_EXCEEDED`, and `CONFLICTING_EPISODE_RESERVATION`.
+A permanent size failure raises `TrialSizeRejected` (and doesn't
+start an alternative release). The general daemon translates that
+exception into a durable `NEEDS_REVIEW` job; its NTFY monitor can now
+notify once and remind according to the normal reminder interval.
+It does not notify for routine skipped E07+ releases.
+
+**Integration limit:** The full provider-bound batch worker,
+completed-file JP+EN ffprobe gate and E02–E06 unlock are still not
+registered for production. The existing single-episode
+`anime_claimed_pipeline` still uses its legacy direct qB submission
+path; it does NOT yet run this pre-download size gate for new individual
+episode torrents. The above behavior is implemented/tested in the
+draft batch admission components and available to a future verified
+single-episode intake. Do not merge or deploy until that integration
+and its manual blocked-episode replacement/recovery workflow are
+reviewed and tested.
+
+---
+
 ## Operational journald decision log
 
 The existing `anime-discovery-worker.py` configures Python INFO logging on
@@ -35,7 +91,7 @@ ffprobe gate and per-episode download/staging ledger are integrated.
 Status: **planner and offline tests only**. NOT DEPLOYED, NOT CONNECTED to
 the acquisition worker. Branch must not be treated as production batch support.
 
-## Confirmed development baseline issues
+## Historical baseline issues (prior to trial-policy implementation)
 
 - `anime_release_matching.resolve_release` requires a release-level episode.
 - `anime_media_completion.verified_media` requires exactly one file.
