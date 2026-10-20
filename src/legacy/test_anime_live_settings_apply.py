@@ -98,7 +98,7 @@ class LiveLauncherSettingsTests(unittest.TestCase):
                   patch.object(module.subprocess,"Popen",side_effect=FakeChild),
                   patch.object(module.time,"sleep",side_effect=KeyboardInterrupt)):
                 module.main()
-            names=[p.args[-1].name for p in process]
+            names=[Path(p.args[-1]).name for p in process]
             self.assertIn("anime_sonarr_import_monitor.py",names)
             self.assertIn("anime_shoko_handoff_monitor.py",names)
             self.assertTrue(all(p.terminated for p in process))
