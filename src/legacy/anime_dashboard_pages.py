@@ -111,7 +111,7 @@ def pager(path,result):
 def series_page(result,mappings=None):
     out=shell("Series","Series")
     out+="""<h1>Series</h1><p class="muted">Anime with completed episodes currently
-staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
+staged in Anime-Trial. Completed series stay visible if trial files are missing so you can reset acquisitions. Incoming releases and downloads appear under Jobs.</p>
 <section class="panel"><div class="toolbar">
 <div><h2>Anime-Trial library</h2><span class="muted">Select one or more series to manage.</span></div>"""
     out+=pager("/",result)+"</div>"
@@ -124,7 +124,10 @@ staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
         out+='<tr><td><input type="checkbox" name="series_ids" value="'+str(sid)+'" class="pick" aria-label="Select '+escape(item["title"])+'"></td>'
         out+='<td><a href="/series?id='+str(sid)+'">'+escape(item["title"])+'</a></td>'
         out+='<td class="hide-mobile">'+escape(item["tvdb_id"])+'</td>'
-        out+='<td>'+str(item["staged_episodes"])+'</td><td>'+escape(item["latest_episode"])+'</td>'
+        count=str(item["staged_episodes"])
+        if item.get("missing_staged_episodes"):
+            count+=" ("+str(item["missing_staged_episodes"])+" missing)"
+        out+='<td>'+count+'</td><td>'+escape(item["latest_episode"] or "—")+'</td>'
         out+='<td><span class="status">'+escape(item["status"])+'</span></td></tr>'
     if not result["items"]:
         out+='<tr><td colspan="6" class="empty">No series have reached Anime-Trial yet. Watch Jobs for incoming episodes.</td></tr>'
@@ -407,7 +410,10 @@ def detail_page(detail):
     out+='</table></section>'
     out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
+    if series[3] in ("KEPT","SONARR_IMPORT_PENDING"):
+        out+='<button type="button" disabled>Keep already submitted</button></form>'
+    else:
+        out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
     out+='<details style="margin-top:18px"><summary>Manage series</summary>'
     out+='<p class="muted">Choose an operation below. Hide activity and remove rejection do not delete files or rerun episodes.</p>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
