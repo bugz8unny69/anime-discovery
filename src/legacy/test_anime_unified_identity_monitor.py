@@ -84,6 +84,24 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=1001,sender=self.sender)["sent"],0)
         self.assertEqual(check_once(self.db,{}, {},now=1002,probe=lambda *_:report)["processed"],0)
 
+    def test_auto_verified_handoff_passes_real_acquisition_gate(self):
+        from anime_acquisition_gate import approved_dispatch
+        from anime_identity_rejection_gate import resolve_notification
+        report={"decision":"AUTO_VERIFIED","issues":[],
+                "approval":{"tvdb_id":123,"anidb_id":456,"season":1,"episode":2},
+                "verified_anidb_episode_id":9876}
+        self.assertEqual(check_once(self.db,{}, {},now=1000,
+                         probe=lambda *_:report)["processed"],1)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "APPROVED")
+        self.assertEqual(resolve_notification(self.db,self.nid),
+                         self.db.execute("SELECT id FROM series").fetchone()[0])
+        self.assertEqual(approved_dispatch(self.db,self.nid)["episode"],2)
+        job=self.db.execute("""SELECT state FROM daemon_jobs WHERE
+            kind='claimed_acquisition' AND subject_key=?""",(str(self.nid),)).fetchone()
+        self.assertEqual(job,("READY",))
+
     def test_pre_acquisition_proof_is_saved_before_queueing_for_keep(self):
         report={"decision":"AUTO_VERIFIED","issues":[],
                 "approval":{"tvdb_id":123,"anidb_id":456,"season":2,"episode":3},
