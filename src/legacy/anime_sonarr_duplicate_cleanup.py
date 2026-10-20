@@ -117,7 +117,16 @@ def review(db,series_id,settings,secrets,*,opener=None,audio_probe=confirmed_jp_
             "status":status,"reason":reason,
             "episode_file_id":state.get("sonarr_episode_file_id") if state else None})
     preserved=ownership_for_series(db,series_id)
-    return {"series_id":series_id,"sonarr_id":snapshot["sonarr_id"],
+    # Bind operator confirmation to the precise files inspected on the page.
+    # Never expand a past authorization to newly staged or replaced files.
+    selection=[{"notification_id":x["notification_id"],"path":x["path"],
+                "size":x["size"],"episode_file_id":x["episode_file_id"]}
+               for x in review_items if x["status"]=="REGISTERED"]
+    selection.sort(key=lambda item:item["notification_id"])
+    fingerprint=hashlib.sha256(json.dumps(selection,sort_keys=True,
+                         separators=(",",":")).encode()).hexdigest()
+    return {"review_fingerprint":fingerprint,
+            "series_id":series_id,"sonarr_id":snapshot["sonarr_id"],
             "monitored":snapshot["monitored"],"checked_at":snapshot["checked_at"],
             "episodes":review_items,"torrents":preserved,
             "eligible":sum(x["status"]=="REGISTERED" for x in review_items),
@@ -198,7 +207,7 @@ def _unlink_verified(path,root,expected):
     finally:
         os.close(fd)
 
-def confirm(db,series_id,settings,secrets,*,approved=False,qb=None,opener=None,
+def confirm(db,series_id,settings,secrets,*,approved=False,expected_review_fingerprint=None,qb=None,opener=None,
             audio_probe=confirmed_jp_en):
     """Explicit operator approval, independent fresh proof, durable audit."""
     if approved is not True:raise PermissionError("Explicit cleanup confirmation required")
@@ -206,6 +215,10 @@ def confirm(db,series_id,settings,secrets,*,approved=False,qb=None,opener=None,
     if qb is None:raise ValueError("Authenticated qB client required")
     ensure_schema(db)
     review_data=review(db,series_id,settings,secrets,opener=opener,audio_probe=audio_probe)
+    if (not isinstance(expected_review_fingerprint,str) or
+            len(expected_review_fingerprint)!=64 or
+            expected_review_fingerprint!=review_data["review_fingerprint"]):
+        raise RuntimeError("Cleanup review changed; reload and reconfirm exact files")
     db.execute("BEGIN IMMEDIATE")
     try:
         eligible=[x for x in review_data["episodes"] if x["status"]=="REGISTERED"]
