@@ -145,6 +145,10 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
                 catalog=ensure_titles(Path(settings["daemon"]["database_path"]).parent/"anidb-titles.xml.gz")
                 report=investigate(title,settings,secrets,catalog)
             decision=report["decision"]
+            if decision=="AUTO_VERIFIED":
+                from anime_webhook_processing import approve
+                approve(db,nid,report["approval"],source="verified_identity_mapping")
+                # approve() atomically records proof and queues the job.
             retry=False
         except Exception as exc:
             decision="LOOKUP_RETRY" if attempts<3 else "NEEDS_REVIEW"
@@ -162,7 +166,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=5):
                 next_at=excluded.next_at,decision=excluded.decision,
                 evidence_json=excluded.evidence_json""",
                 (nid,now,attempts,now+min(3600,60*2**attempts) if retry else 0,decision,safe))
-            if not retry:
+            if not retry and decision!="AUTO_VERIFIED":
                 db.execute("UPDATE notifications SET status='NEEDS_REVIEW' WHERE id=? AND status='IDENTIFYING'",(nid,))
         done+=1
     return {"processed":done,"pending_retries":sum(1 for _,_,a in selected if a<3)}
