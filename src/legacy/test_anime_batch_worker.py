@@ -137,8 +137,9 @@ class VerifiedBatchTests(unittest.TestCase):
         self.qb.source_root=self.root/"external-download"
         with self.assertRaisesRegex(ValueError,"qBittorrent save path outside download root"):
             self.step()
-        self.assertEqual(self.db.execute(
-            "SELECT COUNT(*) FROM anime_batch_staged").fetchone()[0],0)
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_batch_staged'"
+        ).fetchone())
         self.db.execute("""UPDATE daemon_jobs SET state='NEEDS_REVIEW',
             last_error='QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT'
             WHERE id=?""",(self.job["id"],))
