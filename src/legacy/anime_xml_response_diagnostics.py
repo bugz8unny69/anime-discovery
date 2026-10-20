@@ -57,12 +57,20 @@ def response_metadata(source,payload,*,status=None,content_type=None):
     }
 
 
-def log_bad_xml(source,payload,*,status=None,content_type=None,reason="INVALID_XML"):
+def log_bad_xml(source,payload,*,status=None,content_type=None,reason="INVALID_XML",
+                content_encoding=None,encoded_bytes=None):
     info=response_metadata(source,payload,status=status,content_type=content_type)
-    # The endpoint here is a fixed, public address, never a query string.
+    # Never log arbitrary server-returned encoding header values.
+    coding=str(content_encoding or "unknown").strip().lower()
+    if coding not in ("gzip","x-gzip","deflate","identity"):
+        coding="unknown"
+    original_size=(encoded_bytes if type(encoded_bytes) is int and
+                   encoded_bytes>=0 else info["bytes"])
+    # The endpoint here is a fixed public address, never a request/query URL.
     LOG.warning("upstream_xml_problem source=%s endpoint=%s http_status=%s "
-                "content_type=%s bytes=%s sha256_12=%s preview=%r reason=%s",
+                "content_type=%s content_encoding=%s encoded_bytes=%s "
+                "bytes=%s sha256_12=%s preview=%r reason=%s",
                 info["source"],info["endpoint"],info["http_status"],
-                info["content_type"],info["bytes"],info["sha256_12"],
-                info["prefix"],reason)
+                info["content_type"],coding,original_size,info["bytes"],
+                info["sha256_12"],info["prefix"],reason)
     return info
