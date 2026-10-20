@@ -124,6 +124,16 @@ def authorize_verified_batch(db, notification_id, report, settings, xml_bytes):
         if not previous:
             db.execute("""INSERT INTO anime_batch_authorizations VALUES (?,?,?,?,?,?,?,?)""",
                        (notification_id,*values))
+        existing_series=db.execute("SELECT id,status FROM series WHERE source='tvdb' AND external_id=?",
+                                   (result["tvdb_id"],)).fetchone()
+        if existing_series:
+            if existing_series[1]=="REJECTED" or db.execute(
+                "SELECT 1 FROM series_quarantine WHERE series_id=?",(existing_series[0],)).fetchone() or db.execute(
+                "SELECT 1 FROM series_rejection_blocks WHERE series_id=?",(existing_series[0],)).fetchone():
+                raise ValueError("Blocked or rejected verified batch series")
+        else:
+            db.execute("INSERT INTO series(source,external_id,title) VALUES ('tvdb',?,?)",
+                       (result["tvdb_id"],result["title"]))
         from anime_async_daemon import ensure_schema as job_schema
         job_schema(db)
         payload=json.dumps({"notification_id":notification_id},sort_keys=True)
