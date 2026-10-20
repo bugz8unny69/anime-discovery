@@ -455,6 +455,17 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 else:
                     self.send(200,json.dumps(result),"application/json")
             except (ValueError,KeyError,TypeError,sqlite3.Error,json.JSONDecodeError,RuntimeError) as exc:
+                # Browser Keep uses an HTML form. Never render a raw JSON
+                # error document for this user-facing operation. Preserve the
+                # existing JSON error contract for automation/API clients.
+                posted=locals().get("values")
+                browser_form=self.headers.get("Content-Type","").startswith(
+                    "application/x-www-form-urlencoded")
+                if (route=="/series-action" and browser_form
+                        and isinstance(posted,dict) and posted.get("action")=="keep"):
+                    from anime_dashboard_pages import keep_review_page
+                    return self.send(409,self.with_csrf(
+                        keep_review_page(posted.get("series_id"),exc)))
                 self.send(400,json.dumps({"error":str(exc)}),"application/json")
     return Handler
 
