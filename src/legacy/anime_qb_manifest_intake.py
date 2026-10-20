@@ -6,10 +6,13 @@ The torrent may transfer some pieces before the manifest arrives; this is
 intentional. Always stop it before using that manifest to choose wanted files.
 """
 import time
+import logging
 from pathlib import PurePosixPath
 
 from anime_qb_ownership import OWNED, owned_now, ownership
 from anime_qb_submission import submit_once
+
+LOG = logging.getLogger("anime_discovery.trial")
 
 STOPPED = frozenset(("pausedDL", "pausedUP", "stoppedDL", "stoppedUP"))
 
@@ -87,10 +90,14 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
             if check + 1 < attempts:
                 sleep(interval)
         if not submitted:
-            return {"state": "DEFERRED", "reason": "Submission not reconciled"}
+            LOG.warning("event=TORRENT_INTAKE_DEFERRED reason=SUBMISSION_NOT_RECONCILED hash=%s",
+                    infohash[:12])
+        return {"state": "DEFERRED", "reason": "Submission not reconciled"}
     # submit_once may find an externally owned, same-hash torrent: never
     # pause, reprioritize or otherwise control another application's source.
     if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
+        LOG.warning("event=TORRENT_INTAKE_REJECTED reason=OWNERSHIP_UNPROVEN hash=%s",
+                    infohash[:12])
         return {"state": "NEEDS_REVIEW", "reason": "Torrent ownership not proven"}
 
     current = qb.torrent_identity(infohash)
@@ -116,9 +123,13 @@ def submit_poll_pause(db, infohash, magnet_uri, qb, *, attempts=10, interval=1.0
                 raise ValueError("Torrent manifest changed during pause")
             if ownership(db, infohash) != OWNED or not owned_now(db, infohash, qb):
                 raise PermissionError("Torrent ownership changed during pause")
+            LOG.info("event=TORRENT_MANIFEST_READY reason=FILE_LIST_VERIFIED hash=%s file_count=%d",
+                     infohash[:12],len(stopped_files))
             return {"state": "MANIFEST_READY", "infohash": infohash.lower(),
                     "files": stopped_files}
         if attempt + 1 < attempts:
             sleep(interval)
     _stop_and_wait(qb, infohash, sleep=sleep)
+    LOG.info("event=TORRENT_INTAKE_DEFERRED reason=METADATA_NOT_READY hash=%s",
+             infohash[:12])
     return {"state": "DEFERRED", "reason": "Torrent metadata not yet available"}
