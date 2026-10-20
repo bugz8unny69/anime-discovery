@@ -113,6 +113,10 @@ class TrialSizeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 authorize_manifest_sizes(self.db, window=self.window,
                     infohash="a" * 40, episode_files=episode_files)
+        # Invalid caller arguments can be rejected before even creating a
+        # ledger; make the empty-table assertion independently of that path.
+        from anime_trial_size_policy import ensure_schema
+        ensure_schema(self.db)
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM anime_trial_size_reservations").fetchone()[0], 0)
 
