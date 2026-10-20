@@ -40,8 +40,10 @@ def size_limits(settings=None):
 def _sizes(sizes, first, *, allow_empty=False):
     if not isinstance(sizes, dict) or (not sizes and not allow_empty):
         raise ValueError("Canonical episode size map required")
+    if type(first) is not int or not 1 <= first <= 9994:
+        raise ValueError("Invalid canonical trial start")
     last = first + 5
-    if (type(first) is not int or not 1 <= first <= 9994 or
+    if (
             any(type(ep) is not int or not first <= ep <= last or
                 type(size) is not int or size <= 0 for ep, size in sizes.items())):
         raise ValueError("Invalid canonical episode or qB file size")
@@ -145,9 +147,12 @@ def authorize_manifest_sizes(db, *, window, infohash, episode_files, limits=None
     if len(indices) != len(set(indices)):
         raise ValueError("Duplicate qB file index")
     _sizes(incoming, first)
+    # SQLite CREATE TABLE inside a first-use transaction is rolled back along
+    # with a refused admission. Establish the schema independently so blocked
+    # attempts leave a usable ledger for diagnostics and future retries.
+    ensure_schema(db)
     db.execute("BEGIN IMMEDIATE")
     try:
-        ensure_schema(db)
         rows = db.execute("""SELECT episode,infohash,file_index,size_bytes,anidb_id
             FROM anime_trial_size_reservations
             WHERE tvdb_id=? AND season=? AND unit_key=?""",
