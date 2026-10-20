@@ -244,6 +244,32 @@ persist the batch's verified series/season identity and E01's exact
 file provenance, implement completed-file ffprobe validation and the
 conditional E02–E06 unlock, then update staging and safe retries.
 
+## Group filename variability and E01 identification
+
+qBittorrent provides file paths and byte/progress/priority metadata, **not**
+canonical episode IDs. There is no universal automatic E01 guarantee from
+arbitrary anime release-group filenames.
+
+The batch planner now recognizes the common `S02E01`, `2x01`,
+`Episode 01`, `EP01`, `Show - 01`, `Show [01]`, `第01話`,
+and bare `01.mkv` only inside a `Season 02/` or `S02/` directory.
+It also checks explicit season hints against the independently confirmed
+season, and rejects multi-episode ranges (`01-02`, `E01E02`, etc.)
+and contradictory file labels.
+
+**Do not** map an absolute episode `13` to a season-two E01 based on
+guesswork; TVDB/AniDB episode numbering can differ. Only a verified
+provider episode map may authorize such a conversion (not implemented).
+Never choose the first alphabetical filename as E01.
+
+To meet unattended-operation expectations, if a candidate manifest cannot
+uniquely identify the first episode, **do not download/select any file**;
+mark that release candidate ineligible and try a different release with
+an unambiguous E01. Candidate rejection and alternate search are still
+to be wired into the automatic batch worker. The current isolated planner
+raises `SelectionNeedsReview`; it does not yet perform alternate search.
+Genuinely conflicting identity evidence remains operator-review territory.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
