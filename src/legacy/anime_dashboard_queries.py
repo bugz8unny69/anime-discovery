@@ -103,10 +103,10 @@ def all_jobs(db, *,page=1,size=20):
         # An unmatched intake record is not an acquisition job. Make that
         # distinction visible instead of suggesting an idle worker.
         if status in ("RECEIVED","NEEDS REVIEW"):
-            explanation=("Waiting for episode identity: no acquisition job was created. "
+            explanation=("Identity check finished; manual review is required. No acquisition job was created. "
                          "Recognize the title or approve notification #"+str(nid)+" with TVDB/AniDB IDs and episode.")
         elif status=="IDENTIFYING":
-            explanation="Checking public AniDB titles and TVDB links; review notification follows if not verified."
+            explanation="Checking public AniDB titles and TVDB links. Identity is still in progress; NTFY alerts follow the finalized review status."
         elif status=="QUEUED":
             explanation="Acquisition job queued; waiting for a worker."
         elif status=="RUNNING":

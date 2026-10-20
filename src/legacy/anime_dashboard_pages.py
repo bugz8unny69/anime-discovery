@@ -274,6 +274,13 @@ async function openTrace(notificationId){
       traceLine(body,step.step+": "+JSON.stringify(Object.fromEntries(
         Object.entries(step).filter(([key])=>key!=="step"))));
     }
+    for(const entry of ev.crossref_diagnostics||[]){
+      traceLine(body,"Cross-reference TVDB #"+entry.tvdb_id+
+        " · type "+entry.media_type+
+        " · provider AniDB IDs: "+(entry.explicit_anidb_ids||[]).join(", ")+
+        " · matched: "+(entry.matching_anidb_ids||[]).join(", ")+
+        " · "+entry.reason);
+    }
     traceLine(body,"Verified cross-reference pairs: "+(ev.matching_pairs||[]).length);
     traceLine(body,"Reasons: "+((ev.issues||[]).join(", ")||"No reason codes recorded"));
   }catch(error){traceLine(body,"Could not load matching details: "+error.message)}

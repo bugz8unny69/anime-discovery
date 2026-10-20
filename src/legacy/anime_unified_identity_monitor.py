@@ -15,7 +15,7 @@ from pathlib import Path
 from anime_flat_config import load_config
 from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
-from anime_identity_crosscheck_v3 import explicit_anidb_ids
+from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 
 LOG=logging.getLogger(__name__)
 MAX_TITLES=32*1024*1024
@@ -97,7 +97,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     report={"title_queries":aliases[:5],"threshold_pct":threshold,
             "episode_candidate":episode,"anidb_candidates":[],
             "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
-            "matching_pairs":[],"workflow":[],
+            "matching_pairs":[],"crossref_diagnostics":[],"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
     if episode is None or episode<1:
         report["issues"].append("EPISODE_NUMBER_UNRESOLVED")
@@ -144,11 +144,26 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         detail=fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {}
         if str(detail.get("id"))!=tid:
             raise ValueError("TVDB ID response mismatch")
-        match=aid_set.intersection(explicit_anidb_ids(detail))
+        provider_ids=set(explicit_anidb_ids(detail))
+        media_type,media_labels=classify_tvdb(detail)
+        match=aid_set.intersection(provider_ids)
+        report["crossref_diagnostics"].append({
+            "tvdb_id":tid,"media_type":media_type,
+            "media_labels":media_labels[:8],
+            "explicit_anidb_ids":sorted(provider_ids)[:8],
+            "anidb_candidate_ids":sorted(aid_set)[:10],
+            "matching_anidb_ids":sorted(match),
+            "reason":("EXPLICIT_ANIDB_MATCH" if match else
+                      "TVDB_ANIDB_ID_CONFLICT" if provider_ids else
+                      "TVDB_ANIDB_REMOTE_ID_MISSING")})
+        if media_type in ("LIVE_ACTION","CONFLICTING_MEDIA_TYPE"):
+            report["crossref_diagnostics"][-1]["reason"]="REJECTED_UNSUITABLE_TVDB_MEDIA_TYPE"
+            continue
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid})
     report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
-                                "matching_pairs":len(report["matching_pairs"])})
+                                "matching_pairs":len(report["matching_pairs"]),
+                                "records_inspected":len(report["crossref_diagnostics"])})
     if not report["matching_pairs"]:
         report["issues"].append("NO_EXPLICIT_TVDB_ANIDB_CROSSREF")
     elif len(report["matching_pairs"])>1:
@@ -250,6 +265,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                      "threshold_pct":report.get("threshold_pct"),
                      "tvdb_results_count":report.get("tvdb_results_count"),
                      "candidate_scores":report.get("candidate_scores",[])[:5],
+                     "crossref_diagnostics":report.get("crossref_diagnostics",[])[:5],
                      "workflow":report.get("workflow",[])[:5]}
             safe=json.dumps(compact,sort_keys=True)
             if len(safe)>16000:
