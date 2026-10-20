@@ -1,6 +1,6 @@
 import unittest
 
-from anime_batch_selection import SelectionNeedsReview, plan_first_six
+from anime_batch_selection import SelectionNeedsReview, plan_first_six, release_scope_hint
 
 
 def video(index, name):
@@ -8,6 +8,29 @@ def video(index, name):
 
 
 class BatchSelectionTests(unittest.TestCase):
+
+    def test_cyberpunk_s2_batch_release_is_hint_not_episode(self):
+        title=("[Trix] Cyberpunk Edgerunners S02 1080p NF WEB-DL "
+               "Opus2.0 AV1 (Dual-Audio, Multi-Subs) (Season S2) (Batch)")
+        hint=release_scope_hint(title)
+        self.assertEqual(hint["kind"], "season_pack")
+        self.assertEqual(hint["season_hint"], 2)
+        self.assertIsNone(hint["episode_hint"])
+
+    def test_konosuba_s00e05_is_a_special_not_regular_e05(self):
+        title=("[Anime Time] KonoSuba - God's Blessing On This "
+               "Wonderful World - S00E05 - Movie Legend Of Crimson "
+               "(Fixed Subs Fonts) [BD] [Dual Audio][1080p]")
+        hint=release_scope_hint(title)
+        self.assertEqual(hint, {"kind":"special", "season_hint":0,
+                                "episode_hint":5})
+        with self.assertRaises(SelectionNeedsReview):
+            plan_first_six([video(0, "KonoSuba S00E05.mkv")],season=1)
+
+    def test_mixed_season_release_hints_are_not_trusted(self):
+        hint=release_scope_hint("Show S01E01 + S02E01 Batch")
+        self.assertEqual(hint["kind"], "ambiguous_season")
+
     def test_single_episode_preserved(self):
         result = plan_first_six([video(0, "Example Show S01E01.mkv")], season=1)
         self.assertEqual(result["wanted_episodes"], {1: 0})
