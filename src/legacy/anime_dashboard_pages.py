@@ -131,11 +131,14 @@ staged in Anime-Trial. Incoming releases and downloads appear under Jobs.</p>
     out+='''</tbody></table><input type="hidden" name="return_size" value="'''+str(result["page_size"])+'''">
 <input type="hidden" name="return_page" value="'''+str(result["page"])+'''">
 <div id="bulk-actions" class="actions hidden">
-<strong id="selection-count">0 selected</strong><div class="inline">
-<button type="submit" name="action" value="reject">Reject</button>
-<button type="submit" class="secondary" name="action" value="clear-history">Clear history</button>
-<button type="submit" class="secondary" name="action" value="reset">Reset</button>
-</div></div></form></section>'''
+<strong id="selection-count">0 selected</strong>
+<details><summary>Manage selected series</summary>
+<p class="muted">These controls do not delete staged files or restart completed jobs.</p>
+<div class="inline">
+<button type="submit" name="action" value="reject">Reject series</button>
+<button type="submit" class="secondary" name="action" value="clear-history">Hide old activity</button>
+<button type="submit" class="secondary" name="action" value="reset">Remove rejection / quarantine</button>
+</div></details></div></form></section>'''
     out+=pager("/",result)
     out+=request_panel(mappings or {})
     out+='''<script>
@@ -402,6 +405,24 @@ def detail_page(detail):
     for nid,release,season,episode,state,job,path in detail["releases"]:
         out+='<tr>'+''.join('<td>'+escape(v)+'</td>' for v in (release,season,episode,state,job,path))+'</tr>'
     out+='</table></section>'
+    out+='<section class="panel"><h2>Series actions</h2>'
     out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
-    out+='<button name="action" value="keep">Keep in Sonarr</button><button name="action" value="reject">Reject</button><button name="action" value="clear-history">Clear history</button><button name="action" value="reset">Reset</button></form>'
+    out+='<button name="action" value="keep">Keep in Sonarr</button></form>'
+    out+='<details style="margin-top:18px"><summary>Manage series</summary>'
+    out+='<p class="muted">Choose an operation below. Hide activity and remove rejection do not delete files or rerun episodes.</p>'
+    out+='<form method="post" action="/series-action" class="forms"><input type="hidden" name="series_id" value="'+str(series[0])+'">'
+    out+='<button class="secondary" name="action" value="clear-history">Hide old activity</button>'
+    out+='<button class="secondary" name="action" value="reset">Remove rejection / quarantine</button>'
+    out+='<button class="secondary" name="action" value="reject">Reject series</button></form>'
+    out+='<p class="muted"><strong>Reset acquisitions:</strong> Delete this series\' completed staging copies and previous completed acquisition jobs, then recreate pending jobs from stored Autobrr notifications and verified identities. Original torrents and other series are preserved.</p>'
+    out+='<form method="post" action="/series-reset-acquisitions" class="forms" id="acquisition-reset-form">'
+    out+='<input type="hidden" name="series_id" value="'+str(series[0])+'"><input type="hidden" name="reset_confirm" value="RESET">'
+    out+='<button type="submit" class="secondary">Reset acquisitions &amp; retry</button></form>'
+    out+='</details></section>'
+    out+="""<script>
+const resetForm=document.getElementById("acquisition-reset-form");
+if(resetForm)resetForm.addEventListener("submit",function(event){
+  if(!confirm("Delete this series' completed trial copies and prior acquisition jobs, then recreate fresh jobs from saved Autobrr records? Original torrents remain untouched."))event.preventDefault();
+});
+</script>"""
     return out+tail()
