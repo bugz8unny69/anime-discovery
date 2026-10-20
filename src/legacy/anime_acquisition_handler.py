@@ -32,15 +32,6 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                                   (payload['notification_id'],)).fetchone()
                 if not record:
                     return {'state':'NEEDS_REVIEW'}
-                if cleanup_source:
-                    from pathlib import Path
-                    path=db.execute("SELECT staged_path FROM torrent_recovery_records WHERE notification_id=?",
-                                    (payload['notification_id'],)).fetchone()[0]
-                    if not Path(path).is_file():
-                        return {'state':'NEEDS_REVIEW'}
-                    client = qb_factory()
-                    if client.contains_hash(payload['infohash']):
-                        client.remove_torrent(payload['infohash'], delete_files=True)
                 return {'state':'DONE'}
             if dispatch and dispatch[0]=='NEEDS_REVIEW':
                 return {'state':'NEEDS_REVIEW'}
@@ -64,8 +55,9 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 # Only scan once after durable finalization; never undo staging
                 # or retry acquisition because the Jellyfin service is down.
                 refresh_best_effort(jellyfin_refresh)
-                if cleanup_source:
-                    qb_factory().remove_torrent(payload['infohash'], delete_files=True)
+                # qBittorrent sources are intentionally retained until the
+                # explicit Sonarr Keep finalization. This is the only stage
+                # allowed to clean up proven-owned torrents.
             return result
 
     async def handler(job):
