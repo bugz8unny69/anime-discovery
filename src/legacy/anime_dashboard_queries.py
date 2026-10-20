@@ -154,6 +154,7 @@ def all_jobs(db, *,page=1,size=20):
                         "source":source,"release":release,
                        "received_at":received,"status":status,
                        "can_resolve":status=="NEEDS REVIEW" and not dispatch and not job,
+                       "can_recheck":nstatus=="NEEDS_REVIEW" and not dispatch and not job,
                        "can_delete":status in ("NEEDS REVIEW","RECEIVED","IDENTIFYING") and not dispatch and not job,
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "", "activity_detail":explanation,
