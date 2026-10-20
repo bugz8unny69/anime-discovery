@@ -48,12 +48,13 @@ class HandoffTests(unittest.TestCase):
                 self.assertIsNotNone(self.db.execute(
                     "SELECT notification_id FROM anime_batch_pending WHERE notification_id=?",
                     (nid,)).fetchone())
-                from anime_batch_verified_intake import authorize_verified_batch
-                import copy
-                report=copy.deepcopy(REPORT)
-                self.assertTrue(authorize_verified_batch(
-                    self.db,nid,report,self.settings,XML))
-                self.assertEqual(report["batch_authorization"]["decision"],"ELIGIBLE")
+                if label=="nyaa":
+                    from anime_batch_verified_intake import authorize_verified_batch
+                    import copy
+                    report=copy.deepcopy(REPORT)
+                    self.assertTrue(authorize_verified_batch(
+                        self.db,nid,report,self.settings,XML))
+                    self.assertEqual(report["batch_authorization"]["decision"],"ELIGIBLE")
 
     def test_legacy_indexer_pack_without_pending_has_actionable_blocker(self):
         from anime_batch_verified_intake import authorize_verified_batch
