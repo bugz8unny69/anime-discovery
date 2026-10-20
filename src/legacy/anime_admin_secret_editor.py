@@ -49,4 +49,5 @@ def set_secret(directory, key, *, clear=False, prompt=getpass.getpass, confirm=i
             _write(directory/"secrets.json",data,0o600)
         return {"secret":key,"changed":changed or key=="admin_password",
                 "status":"Set" if data.get(key) or key=="admin_password" else "Not set",
-                "restart_required":changed and key!="admin_password"}
+                "restart_required":False,
+                "apply_mode":"automatic"}
