@@ -215,6 +215,35 @@ series-level batch job, selecting E01 only and later unlocking E02–E06 are
 follow-on integration work. A live qBittorrent 4.5.2 smoke test and VM
 deployment are also outstanding.
 
+## Completed development slice: E01-only selection and guarded start
+
+`anime_qb_e01_probe.start_e01_probe(db, infohash, qb, season=...,
+stopped_manifest=...)` consumes the `MANIFEST_READY` result of
+`submit_poll_pause`. It independently checks the exact-hash SQLite
+ownership proof and qB tag, revalidates the complete filename/size/index
+inventory, and builds the existing `plan_gated_first_six` with
+`probe_verified=False`. It programs **only E01 priority=1**, sets all
+other files to priority=0, rechecks the manifest/ownership and calls
+`start_selected_torrent` only after priority readback. On failure before
+resume, the torrent stays stopped.
+
+It returns `PROBE_DOWNLOADING` with the selected file index. An
+idempotent retry during an E01-only transfer reports
+`already_running=True` rather than resetting priorities or resubmitting.
+If active priorities differ, it refuses to interfere. The method does
+NOT infer that E01 is complete or has JP+EN audio, and cannot unlock
+E02–E06. The caller must have already verified the exact series and
+season; this phase does not yet persist a multi-episode batch approval.
+Tests cover a 12-file season pack, repeat runs, ownership, wrong season,
+manifest changes and priority failures.
+
+The source-only intake and selection building blocks are now connected
+to one another via their function contracts. **They are not registered
+as a batch worker, deployed, or invoked on live torrents.** Next:
+persist the batch's verified series/season identity and E01's exact
+file provenance, implement completed-file ffprobe validation and the
+conditional E02–E06 unlock, then update staging and safe retries.
+
 ## Planner
 
 `anime_batch_selection.plan_first_six(files, season=N, already_satisfied=...)`
