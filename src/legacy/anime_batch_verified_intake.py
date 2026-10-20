@@ -47,9 +47,11 @@ def verified_pack_candidate(db, notification_id, report, settings, xml_bytes):
     def blocked(reason, action):
         report["batch_authorization"]={"decision":"BLOCKED",
                                         "reason":reason,"action":action}
-        report["issues"]=list(report.get("issues") or [])
-        if reason not in report["issues"]:
-            report["issues"].append(reason)
+        # Put the actionable blocker first; the Jobs dashboard shows only
+        # the first three issues and previously displayed only generic pack
+        # indicators while hiding the actual authorization failure.
+        report["issues"]=[reason]+[code for code in (report.get("issues") or [])
+                                   if code!=reason]
         report.setdefault("workflow",[]).append(
             {"step":"Batch authorization","decision":"BLOCKED",
              "reason":reason,"action":action})
