@@ -79,6 +79,9 @@ def preflight(qb,infohash,*,download_root,trial_root,sonarr_root=None):
         if not isinstance(item,dict):
             raise ValueError("Malformed torrent file manifest")
         target,info=_existing_download_path(path_root,item.get("name"))
+        declared=item.get("size")
+        if type(declared) is not int or declared<0 or info.st_size>declared:
+            raise ValueError("Downloaded file size conflicts with qB manifest")
         if not _within(target.resolve(strict=True),root):
             raise ValueError("Download resolves outside configured storage")
         if target in candidates:
