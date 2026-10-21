@@ -177,6 +177,21 @@ class CancelCleanupTests(unittest.TestCase):
                     delete_download_files=True,download_root=download,trial_root=trial)
             self.assertEqual(source.read_bytes(),b"preserve")
 
+    def test_uncertain_cleanup_never_resends_when_hash_still_present(self):
+        self.qb.fail=True
+        # A lost acknowledgement with qB still showing the torrent must
+        # not authorize a second destructive request.
+        def fail_without_removing(h,*,delete_files):
+            self.qb.removed.append(h)
+            raise OSError("connection dropped")
+        self.qb.remove_torrent=fail_without_removing
+        with self.assertRaises(OSError):
+            cleanup_torrents(self.db,self.jid,self.qb,approved=True)
+        self.assertIsNotNone(self.qb.torrent_identity(H))
+        with self.assertRaisesRegex(ValueError,"manual verification"):
+            cleanup_torrents(self.db,self.jid,self.qb,approved=True)
+        self.assertEqual(self.qb.removed,[H])
+
     def test_unproven_status_blocks(self):
         self.db.execute("UPDATE qb_torrent_ownership SET status='UNCERTAIN'")
         self.assertFalse(prepare(self.db,self.jid)["can_remove_torrents"])
