@@ -21,7 +21,7 @@ from anime_identification_probe import release_title,anidb_matches,tvdb_candidat
 from anime_batch_selection import release_scope_hint
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
-from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
+from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode, resolve_tvdb_episode
 from anime_tvdb_throttle import tvdb_scope, TVDBDeferred
 from anime_season_candidate_discovery import season_candidates
 
@@ -335,7 +335,10 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         if mapping_xml is not None and episode:
             for aid in sorted(aid_set):
                 try:
-                    resolved=resolve_anime_lists_episode(mapping_xml,aid,tid,episode)
+                    resolved=(resolve_tvdb_episode(mapping_xml,aid,tid,
+                        hint.get('season_hint'),episode)
+                        if hint.get('kind')=='single_episode' else
+                        resolve_anime_lists_episode(mapping_xml,aid,tid,episode))
                 except ET.ParseError:
                     log_bad_xml("ANIME_LISTS_MAPPING",mapping_xml,
                                 reason="MAPPING_PARSE_FAILURE")
