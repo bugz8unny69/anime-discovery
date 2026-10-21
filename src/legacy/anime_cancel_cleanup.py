@@ -154,6 +154,9 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
             FROM daemon_job_cleanup_attempts WHERE job_id=? AND infohash=?""",
             (job_id,h)).fetchone()
         if prior and prior[0] in ("REMOVED","ABSENT"):
+            if prior[1] and any(Path(path).exists() or Path(path).is_symlink()
+                                for path in json.loads(prior[2])):
+                raise ValueError("Files remain after earlier cleanup; manual review required")
             results.append((h,"ALREADY_"+prior[0]))
             continue
         if prior and prior[0]=="UNCERTAIN" and bool(prior[1])!=delete_download_files:
@@ -169,6 +172,10 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
                 for path in json.loads(prior[2]))
             results.append((h,"FILES_REMAIN" if remaining else "ABSENT"))
             continue
+        if prior and prior[0]=="UNCERTAIN":
+            # A hash still present after an ambiguous request might be a new
+            # torrent, or qB might not have acted. Never resend deletion.
+            raise ValueError("Prior cleanup outcome uncertain; manual verification required")
         ownership=db.execute("""SELECT status,marker,category FROM qb_torrent_ownership
             WHERE infohash=?""",(h,)).fetchone()
         tags=current.get("tags","") if isinstance(current,dict) else ""
