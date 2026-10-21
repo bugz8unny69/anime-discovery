@@ -690,6 +690,20 @@ class DashboardHTTPTests(unittest.TestCase):
         status,_,page=self.request("GET","/series?id="+str(sid))
         self.assertEqual(status,200)
 
+    def test_matching_details_renders_readable_sections_and_safe_diagnostics(self):
+        status,_,page=self.request("GET","/jobs")
+        self.assertEqual(status,200)
+        for section in ("Decision and next step","Release and lookup",
+                        "Verification checks","Candidate identities",
+                        "AniDB and Anime-Lists evidence","Advanced diagnostics"):
+            self.assertIn(section,page)
+        self.assertIn('aria-labelledby="match-trace-title"',page)
+        self.assertIn("No season comparison recorded",page)
+        self.assertIn("No cross-reference diagnostic records",page)
+        self.assertIn("JSON.stringify({decision:data.decision",page)
+        self.assertNotIn('traceLine(body,step.step+',page)
+        self.assertIn("textContent=String(text)",page)
+
     def test_identity_trace_requires_session_and_shows_scores(self):
         import os
         from anime_flat_config import DEFAULT_SETTINGS

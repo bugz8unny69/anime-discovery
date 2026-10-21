@@ -65,6 +65,19 @@ input.long{min-width:220px;flex:1}
 .actions{position:sticky;bottom:12px;box-shadow:0 10px 30px #0008;background:#25334a;
 border:1px solid #517092;padding:14px;border-radius:12px;display:flex;
 align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+
+.match-trace{background:#172335;color:#e8edf7;border:1px solid #52708f;border-radius:14px;padding:24px;width:min(900px,96vw);max-height:90vh;overflow:auto}
+.match-trace h3{font-size:1rem;margin:0 0 12px}.match-trace .trace-lead{font-size:1.15rem;font-weight:700;margin:6px 0}
+.trace-section{border-top:1px solid #34465c;padding:18px 0}.trace-section:first-child{border-top:0}
+.trace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.trace-card{padding:13px;background:#202f43;border:1px solid #354960;border-radius:10px;min-width:0;overflow-wrap:anywhere}
+.trace-label{display:block;color:#b1c4dd;font-size:.84rem;margin-bottom:5px}
+.trace-check{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #304159}
+.trace-check:last-child{border-bottom:0}.trace-check strong{display:block}
+.trace-state{font-weight:700;white-space:nowrap}.trace-pass{color:#9dedc5}.trace-fail{color:#ffc0c7}.trace-unknown{color:#ffe0a0}
+.trace-advanced{padding:12px;background:#111e2e;border-radius:10px;overflow-wrap:anywhere}
+.trace-advanced summary{cursor:pointer;font-weight:650}.trace-advanced pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.79rem;line-height:1.5}
+@media(max-width:650px){.match-trace{padding:14px;width:96vw}.trace-grid{grid-template-columns:1fr}}
 .hidden{display:none!important}
 @media(max-width:650px){.container{padding:20px 12px}th,td{padding:10px 7px}
 .panel{padding:13px}.hide-mobile{display:none}}
@@ -250,10 +263,10 @@ def jobs_page(result):
 <button type="submit">Approve &amp; queue</button>
 <button type="button" class="secondary" id="resolve-cancel">Cancel</button>
 </form></dialog>'''
-    out+='''<dialog id="match-trace-dialog" style="background:#172335;color:#e8edf7;border:1px solid #52708f;border-radius:14px;padding:24px;width:min(760px,95vw);max-height:85vh;overflow:auto">
-<h2>Identification workflow</h2>
-<p id="match-trace-summary" class="muted"></p>
-<div id="match-trace-body"></div>
+    out+='''<dialog id="match-trace-dialog" class="match-trace" aria-labelledby="match-trace-title">
+<h2 id="match-trace-title">Identification details</h2>
+<p id="match-trace-summary" class="muted" aria-live="polite"></p>
+<div id="match-trace-body" aria-live="polite"></div>
 <button type="button" class="secondary" id="match-trace-close">Close</button>
 </dialog>'''
     out+='<script>const initial='+json.dumps(result,separators=(",",":")).replace("<","\\u003c")+';'
@@ -355,49 +368,114 @@ if(typeof job.id==="number" && job.status!=="COMPLETED" && job.status!=="CANCELE
 tr.appendChild(actions);tbody.appendChild(tr)}}
 document.getElementById("resolve-cancel").addEventListener("click",()=>document.getElementById("resolve-dialog").close());
 document.getElementById("match-trace-close").addEventListener("click",()=>document.getElementById("match-trace-dialog").close());
-function traceLine(parent,text){
-  const p=document.createElement("p");p.textContent=text;parent.appendChild(p);
+function traceNode(tag,cls,text){
+  const node=document.createElement(tag);
+  if(cls)node.className=cls;
+  if(text!==undefined && text!==null)node.textContent=String(text);
+  return node;
 }
+function traceSection(root,title){
+  const section=traceNode("section","trace-section");
+  section.appendChild(traceNode("h3","",title));root.appendChild(section);return section;
+}
+function traceCard(root,label,value){
+  const box=traceNode("div","trace-card");
+  box.appendChild(traceNode("span","trace-label",label));
+  box.appendChild(traceNode("strong","",value??"Not recorded"));root.appendChild(box);
+}
+function traceCheck(root,label,state,detail){
+  const item=traceNode("div","trace-check");
+  const symbol=state==="pass"?"✓":state==="fail"?"✕":"?";
+  const cls=state==="pass"?"trace-pass":state==="fail"?"trace-fail":"trace-unknown";
+  item.appendChild(traceNode("span","trace-state "+cls,symbol));
+  const info=traceNode("div","");
+  info.appendChild(traceNode("strong","",label));
+  info.appendChild(traceNode("small","muted",detail||"Evidence not recorded"));
+  item.appendChild(info);root.appendChild(item);
+}
+function traceYesNo(value){return value===true?"pass":value===false?"fail":"unknown"}
 async function openTrace(notificationId){
   const dialog=document.getElementById("match-trace-dialog");
   const summary=document.getElementById("match-trace-summary");
   const body=document.getElementById("match-trace-body");
-  summary.textContent="Notification #"+notificationId;body.replaceChildren();
+  summary.textContent="Notification #"+notificationId+" · Loading evidence…";body.replaceChildren();
   dialog.showModal();
   try{
     const response=await fetch("/api/identity-trace?notification_id="+encodeURIComponent(notificationId),{cache:"no-store"});
-    const data=await response.json();if(!response.ok)throw Error(data.error||"Trace unavailable");
-    if(!data.available){traceLine(body,data.message);return}
-    const ev=data.evidence||{};
-    traceLine(body,"Decision: "+data.decision+" · Attempt "+data.attempts+
-      " · Title threshold "+(ev.threshold_pct??"not recorded")+"%");
-    traceLine(body,"Searched: "+(ev.title_queries||[]).join(" | "));
-    traceLine(body,"Episode candidate: "+(ev.episode_candidate??"not parsed"));
-    traceLine(body,"AniDB exact title candidates: "+(ev.anidb_candidates||[]).length);
-    traceLine(body,"TVDB responses considered: "+(ev.tvdb_results_count??"not recorded"));
-    for(const candidate of ev.candidate_scores||[]){
-      traceLine(body,"TVDB #"+candidate.tvdb_id+" · "+candidate.name+
-        " · score "+candidate.score_pct+"% / "+candidate.threshold_pct+"% · "+candidate.reason);
-      traceLine(body,"Compared release: "+(candidate.best_query||"not available")+
-        " ↔ TVDB title: "+(candidate.best_candidate_title||"not available"));
-      if(candidate.candidate_titles?.length){
-        traceLine(body,"Provider titles: "+candidate.candidate_titles.join(" | "));
+    const data=await response.json();if(!response.ok)throw Error("Identification evidence is unavailable");
+    if(!data.available){summary.textContent="Notification #"+notificationId;body.appendChild(traceNode("p","muted",data.message||"No identification evidence recorded"));return}
+    const ev=data.evidence||{},scores=Array.isArray(ev.candidate_scores)?ev.candidate_scores:[],
+      refs=Array.isArray(ev.crossref_diagnostics)?ev.crossref_diagnostics:[],
+      issues=Array.isArray(ev.issues)?ev.issues:[],
+      workflow=Array.isArray(ev.workflow)?ev.workflow:[],
+      queries=Array.isArray(ev.title_queries)?ev.title_queries:[];
+    summary.textContent="Notification #"+notificationId+" · Attempt "+(data.attempts??"unknown")+" · "+(data.decision||"Unknown decision");
+    const intro=traceSection(body,"Decision and next step");
+    intro.appendChild(traceNode("p","trace-lead",issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")?"Season mapping needs review":
+      data.decision==="NEEDS_REVIEW"?"Manual identification review required":data.decision||"Identification evidence"));
+    intro.appendChild(traceNode("p","muted",issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")
+      ?"The anime identity may match, but the release season differs from the provider mapping. Verify the season before using Resolve."
+      :data.decision==="NEEDS_REVIEW"?"Review the candidates and any failed or unverified checks below. Use Resolve only with independently verified IDs and season.":"Review the recorded identity evidence below."));
+    const parsed=traceSection(body,"Release and lookup");
+    const grid=traceNode("div","trace-grid");parsed.appendChild(grid);
+    traceCard(grid,"Searched title",queries.length?queries.join(" · "):"Not recorded");
+    traceCard(grid,"Episode candidate",ev.episode_candidate??"Not parsed");
+    traceCard(grid,"TVDB candidates returned",ev.tvdb_results_count??"Not recorded");
+    traceCard(grid,"Title threshold",ev.threshold_pct==null?"Not recorded":ev.threshold_pct+"%");
+    const checks=traceSection(body,"Verification checks");
+    if(scores.length){
+      for(const score of scores){
+        const passed=score.passed===true?true:score.passed===false?false:null;
+        traceCheck(checks,"TVDB #"+(score.tvdb_id??"unknown")+" — "+(score.name||"Unnamed candidate"),traceYesNo(passed),
+          "Title score "+(score.score_pct??"unknown")+"% · minimum "+(score.threshold_pct??ev.threshold_pct??"unknown")+"% · "+(score.reason||"No reason recorded"));
+      }
+    }else traceCheck(checks,"TVDB title check","unknown","No candidate scores recorded");
+    if(refs.length){
+      for(const ref of refs){
+        const matched=Array.isArray(ref.matching_anidb_ids)?ref.matching_anidb_ids:[];
+        traceCheck(checks,"AniDB ↔ TVDB #"+(ref.tvdb_id??"unknown"),matched.length?"pass":ref.reason==="EXPLICIT_ANIDB_MATCH"?"pass":"unknown",
+          "Matched AniDB IDs: "+(matched.length?matched.join(", "):"None recorded")+" · "+(ref.reason||"No reason recorded"));
+      }
+    }else traceCheck(checks,"AniDB ↔ TVDB cross-reference","unknown","No cross-reference diagnostic records");
+    const season=workflow.find(step=>step.step==="Provider season agreement");
+    const seasonKnown=season && typeof season.passed==="boolean";
+    traceCheck(checks,"Season agreement",seasonKnown?traceYesNo(season.passed):issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")?"fail":"unknown",
+      season?"Release season: "+(season.release_season??"unknown")+" · mapped season: "+(season.mapped_season??"unknown"):
+      issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")?"Release and mapped provider seasons disagree":"No season comparison recorded");
+    const matches=traceSection(body,"Candidate identities");
+    if(scores.length){
+      for(const candidate of scores){
+        const card=traceNode("div","trace-card");
+        card.appendChild(traceNode("strong","",candidate.name||"Unnamed TVDB candidate"));
+        card.appendChild(traceNode("p","muted","TVDB #"+(candidate.tvdb_id??"unknown")+" · "+(candidate.score_pct??"unknown")+"% title match"));
+        card.appendChild(traceNode("p","","Compared release: "+(candidate.best_query||"Not recorded")+" ↔ provider title: "+(candidate.best_candidate_title||"Not recorded")));
+        if(Array.isArray(candidate.candidate_titles)&&candidate.candidate_titles.length)
+          card.appendChild(traceNode("small","muted","Alternate/provider titles: "+candidate.candidate_titles.join(" · ")));
+        matches.appendChild(card);
+      }
+    }else matches.appendChild(traceNode("p","muted","No TVDB candidate identity details recorded"));
+    const ani=traceSection(body,"AniDB and Anime-Lists evidence");
+    ani.appendChild(traceNode("p","muted","AniDB candidate count: "+(Array.isArray(ev.anidb_candidates)?ev.anidb_candidates.length:"Not recorded")+
+      ". Candidate titles and IDs are shown when present in the saved evidence."));
+    if(Array.isArray(ev.anidb_candidates)){
+      for(const candidate of ev.anidb_candidates){
+        const title=typeof candidate==="object"&&candidate!==null?(candidate.title||candidate.name||candidate.anime_title):null;
+        const id=typeof candidate==="object"&&candidate!==null?(candidate.anidb_id||candidate.id):null;
+        ani.appendChild(traceNode("p","",title?(title+" · AniDB #"+(id??"unknown")):"AniDB candidate details not recorded"));
       }
     }
-    for(const step of ev.workflow||[]){
-      traceLine(body,step.step+": "+JSON.stringify(Object.fromEntries(
-        Object.entries(step).filter(([key])=>key!=="step"))));
+    for(const ref of refs){
+      ani.appendChild(traceNode("p","", "TVDB #"+(ref.tvdb_id??"unknown")+" ↔ AniDB IDs "+
+        (Array.isArray(ref.matching_anidb_ids)&&ref.matching_anidb_ids.length?ref.matching_anidb_ids.join(", "):"not verified")));
     }
-    for(const entry of ev.crossref_diagnostics||[]){
-      traceLine(body,"Cross-reference TVDB #"+entry.tvdb_id+
-        " · type "+entry.media_type+
-        " · provider AniDB IDs: "+(entry.explicit_anidb_ids||[]).join(", ")+
-        " · matched: "+(entry.matching_anidb_ids||[]).join(", ")+
-        " · "+entry.reason);
-    }
-    traceLine(body,"Verified cross-reference pairs: "+(ev.matching_pairs||[]).length);
-    traceLine(body,"Reasons: "+((ev.issues||[]).join(", ")||"No reason codes recorded"));
-  }catch(error){traceLine(body,"Could not load matching details: "+error.message)}
+    const details=traceNode("details","trace-advanced");
+    details.appendChild(traceNode("summary","","Advanced diagnostics (raw recorded evidence)"));
+    details.appendChild(traceNode("pre","",JSON.stringify({decision:data.decision,attempts:data.attempts,evidence:ev},null,2)));
+    body.appendChild(details);
+  }catch(error){
+    summary.textContent="Notification #"+notificationId;
+    body.replaceChildren(traceNode("p","muted","Could not load identification details. Try again later."));
+  }
 }
 async function manageJob(job,action,button){
   const subject=job.release+" (job #"+job.job_id+")";
