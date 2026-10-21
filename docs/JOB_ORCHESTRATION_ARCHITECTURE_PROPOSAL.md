@@ -7,6 +7,11 @@ Autobrr webhooks are captured as `notifications`, while the service **already ha
 
 Evidence: October 21 logs for notification #30 show `VERIFIED_SEASON_REMEMBERED` (TVDB 475631, AniDB 19954, S01), `OUTSIDE_TRIAL_WINDOW` for E10 (E01–E06), `anime_webhook_processing.py:57` ValueError, and misclassified `LOOKUP_RETRY` then `NEEDS_REVIEW`. Notifications #28/#31/#32 demonstrate similar errors. No claim is made that production configuration, job DB, or Prowlarr availability has been independently verified.
 
+## Confirmed design constraint: preserve notification history
+- **Do not remove, rename, replace, or repurpose the existing `notifications` table.** It is part of the Series History model and must retain its records and links.
+- Job orchestration is additive: worker jobs reference the persisted notification and any series-history association. Series History must continue to display historical notifications independently of the Jobs activity view.
+- Migration and tests must prove existing Series History behavior and historic notification IDs remain intact. No data loss or breaking history queries.
+
 ## Proposed architecture (decision requested)
 - **Webhook = event/inbox record**, not automatically the entire job. Retain an immutable or append-only inbound notification/event record for deduplication, source provenance, replay/audit and original release evidence.
 - **Job = scheduled executable work.** Webhook intake should durably enqueue an identity-resolution job (or equivalent explicit existing worker task), rather than using notification state as an implicit work queue. Jobs can enqueue child jobs: identity -> either verified acquisition or season catch-up search -> per-episode acquisition -> validation/staging tasks where useful. Do not blindly split every synchronous step into its own job.
@@ -36,7 +41,7 @@ Evidence: October 21 logs for notification #30 show `VERIFIED_SEASON_REMEMBERED`
 - Backfill must not claim success if no candidates were found, downloaded, validated and staged.
 
 ## Open design decisions
-- Should `notifications` be renamed conceptually to `inbound_events` in the UI/documentation while keeping its DB table as legacy storage?
+- How should immutable notification and Series History references be displayed alongside correlated root/child jobs? **The `notifications` table and its Series History function are non-negotiable and remain intact.**
 - Do we require a strict tree (single parent) or support DAG lineage for coalesced season searches triggered by many notifications?
 - Which job outcomes should propagate to ancestor summaries without changing ancestor completion state?
 - What does a future heavy settings action need: transaction, immediate effect, deferred apply, audit, retry, or a separate approval gate?
