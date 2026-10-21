@@ -58,6 +58,37 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(asyncio.run(handler(job)),'DONE')
                 finalize.assert_called_once()
 
+    def test_size_rejection_cleanup_must_be_verified(self):
+        from anime_trial_size_policy import TrialSizeRejected
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"jobs.db"
+            with sqlite3.connect(path) as db:
+                db.execute("CREATE TABLE daemon_jobs(id INTEGER,kind TEXT,state TEXT,lease_token TEXT,lease_until REAL)")
+                db.execute("INSERT INTO daemon_jobs VALUES(1,'claimed_acquisition','LEASED','token',?)",(time.time()+300,))
+                db.execute("CREATE TABLE episode_dispatch(notification_id INTEGER,state TEXT)")
+                db.execute("INSERT INTO episode_dispatch VALUES(4,'CLAIMED')")
+            class Client: pass
+            job={"id":1,"lease_token":"token","subject_key":"4",
+                 "payload_json":json.dumps({"notification_id":4,"infohash":"a"*40,
+                 "magnet_uri":"magnet:?xt=urn:btih:"+"a"*40,"title":"Example","tvdb_id":123})}
+            handler=make_acquisition_handler(path,lambda:Client(),download_root=directory,trial_root=directory)
+            with (patch("anime_acquisition_handler.approved_dispatch",return_value={"series_id":4}),
+                  patch("anime_acquisition_handler.reserve",return_value="OWNER"),
+                  patch("anime_acquisition_handler.resolve_series_name",return_value="Example"),
+                  patch("anime_acquisition_handler.QBittorrentAPI",Client),
+                  patch("anime_acquisition_handler.admit_single_episode",side_effect=TrialSizeRejected("EPISODE_SIZE_EXCEEDED")),
+                  patch("anime_acquisition_handler.cleanup_rejected_dual_audio",side_effect=ValueError("unsafe"))):
+                self.assertEqual(asyncio.run(handler(job)),"NEEDS_REVIEW")
+                self.assertEqual(job["episode_outcome"],"EPISODE_SIZE_EXCEEDED")
+            with (patch("anime_acquisition_handler.approved_dispatch",return_value={"series_id":4}),
+                  patch("anime_acquisition_handler.reserve",return_value="OWNER"),
+                  patch("anime_acquisition_handler.resolve_series_name",return_value="Example"),
+                  patch("anime_acquisition_handler.QBittorrentAPI",Client),
+                  patch("anime_acquisition_handler.admit_single_episode",side_effect=TrialSizeRejected("EPISODE_SIZE_EXCEEDED")),
+                  patch("anime_acquisition_handler.cleanup_rejected_dual_audio",return_value=True)):
+                self.assertEqual(asyncio.run(handler(job)),"BLOCKED")
+                self.assertEqual(job["episode_outcome"],"SIZE_REJECTED_EPISODE_SIZE_EXCEEDED")
+
     def test_completed_dispatch_is_not_submitted_twice(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'jobs.db'
