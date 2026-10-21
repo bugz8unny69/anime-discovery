@@ -7,6 +7,7 @@ verifying staged files still exist on disk.
 from pathlib import Path
 import json
 from anime_job_management import latest_events
+from anime_review_messages import describe_review
 
 PAGE_SIZES=(20,50,100)
 
@@ -178,7 +179,7 @@ def all_jobs(db, *,page=1,size=20):
                         "batch_download_active":batch_active,
                         "batch_stage":batch_stage,
                         "can_retry":job=="NEEDS_REVIEW",
-                        "can_cancel":job=="NEEDS_REVIEW",
+                        "can_cancel":job=="NEEDS_REVIEW" and not bool(stage and Path(stage).is_file()),
                         "last_admin_action":event,
                         "source":source,"release":release,
                        "received_at":received,"status":status,
@@ -230,5 +231,5 @@ def all_jobs(db, *,page=1,size=20):
                        "release":request["title"]+" (one-time search)",
                        "received_at":0,"status":job_status,"season":request["season"],
                        "episode":None,"series_title":request["title"],
-                       "message":error or "","staged":False})
+                       "message":"","staged":False})
     return _page(result,page,size)
