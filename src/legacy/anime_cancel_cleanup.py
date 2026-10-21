@@ -1,4 +1,4 @@
-"""Explicit, resumable canceled-job torrent cleanup (never deletes media files).
+"""Explicit, resumable canceled-job torrent cleanup with optional guarded downloads.
 
 Rechecks durable attribution and active consumers on every attempt. A missing
 qB record is not treated as proof that this application removed it.
@@ -66,16 +66,25 @@ def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_cleanup_attempts (
         job_id INTEGER NOT NULL REFERENCES daemon_jobs(id), infohash TEXT NOT NULL,
         state TEXT NOT NULL CHECK(state IN ('PENDING','UNCERTAIN','REMOVED','ABSENT')),
-        updated_at REAL NOT NULL, PRIMARY KEY(job_id,infohash))""")
+        updated_at REAL NOT NULL,
+        delete_files_requested INTEGER NOT NULL DEFAULT 0,
+        file_paths_json TEXT NOT NULL DEFAULT '[]',
+        PRIMARY KEY(job_id,infohash))""")
 
-def cleanup_torrents(db,job_id,qb,*,approved=False):
-    """Operator-only qB cleanup. Never request deleteFiles, never unlink files.
+def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
+                     download_root=None,trial_root=None,sonarr_root=None):
+    """Operator-only qB cleanup; downloads require full preflight and opt-in.
 
-    A qB timeout after removal is marked UNCERTAIN; an operator must inspect
-    before retrying. Does not initiate cleanup from worker or cancel actions.
+    A qB timeout is marked UNCERTAIN; reconciliation must not resend a
+    destructive request without checking current identity. Staged files
+    are outside this function's authorized scope.
     """
     if approved is not True:
         raise PermissionError("Explicit cleanup approval required")
+    if type(delete_download_files) is not bool:
+        raise ValueError("File cleanup must be an explicit boolean")
+    if delete_download_files and (not download_root or not trial_root):
+        raise ValueError("Download cleanup requires verified storage roots")
     if db.in_transaction:
         raise ValueError("Autocommit connection required")
     preview=prepare(db,job_id)
@@ -85,18 +94,24 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
     results=[]
     for record in preview["records"]:
         h=record["infohash"]
-        prior=db.execute("""SELECT state FROM daemon_job_cleanup_attempts
-            WHERE job_id=? AND infohash=?""",(job_id,h)).fetchone()
+        prior=db.execute("""SELECT state,delete_files_requested,file_paths_json
+            FROM daemon_job_cleanup_attempts WHERE job_id=? AND infohash=?""",
+            (job_id,h)).fetchone()
         if prior and prior[0] in ("REMOVED","ABSENT"):
             results.append((h,"ALREADY_"+prior[0]))
             continue
+        if prior and prior[0]=="UNCERTAIN" and bool(prior[1])!=delete_download_files:
+            raise ValueError("Cannot change cleanup mode while prior attempt is uncertain")
         current=qb.torrent_identity(h)
         if prior and prior[0]=="UNCERTAIN" and current is None:
             # A previous request may have completed despite a lost reply.
             # Record verified absence without asserting who removed it.
             db.execute("""UPDATE daemon_job_cleanup_attempts SET state='ABSENT',
                 updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
-            results.append((h,"ABSENT"))
+            remaining=bool(prior[1]) and any(
+                __import__("pathlib").Path(path).exists()
+                for path in json.loads(prior[2]))
+            results.append((h,"FILES_REMAIN" if remaining else "ABSENT"))
             continue
         ownership=db.execute("""SELECT status,marker,category FROM qb_torrent_ownership
             WHERE infohash=?""",(h,)).fetchone()
@@ -110,15 +125,31 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
         # Recheck other consumers immediately before submitting removal.
         if not all(r["eligible"] for r in prepare(db,job_id)["records"]):
             raise ValueError("Torrent became shared or ownership changed")
-        db.execute("""INSERT INTO daemon_job_cleanup_attempts VALUES (?,?,'UNCERTAIN',?)
+        plan={"files":[],"bytes":0}
+        if delete_download_files:
+            from anime_cleanup_file_safety import preflight
+            plan=preflight(qb,h,download_root=download_root,trial_root=trial_root,
+                           sonarr_root=sonarr_root)
+        db.execute("""INSERT INTO daemon_job_cleanup_attempts
+            (job_id,infohash,state,updated_at,delete_files_requested,file_paths_json)
+            VALUES (?,?,'UNCERTAIN',?,?,?)
             ON CONFLICT(job_id,infohash) DO UPDATE SET state='UNCERTAIN',
-            updated_at=excluded.updated_at""",(job_id,h,time.time()))
+            updated_at=excluded.updated_at,
+            delete_files_requested=excluded.delete_files_requested,
+            file_paths_json=excluded.file_paths_json""",
+            (job_id,h,time.time(),int(delete_download_files),
+             json.dumps(plan["files"])))
         db.execute("""UPDATE daemon_job_cleanup_review SET status='CLEANUP_NEEDED'
             WHERE job_id=?""",(job_id,))
         try:
-            qb.remove_torrent(h,delete_files=False)
+            qb.remove_torrent(h,delete_files=delete_download_files)
             if qb.torrent_identity(h) is not None:
                 raise RuntimeError("Torrent removal not confirmed")
+            if delete_download_files:
+                from pathlib import Path
+                if any(Path(path).exists() or Path(path).is_symlink()
+                       for path in plan["files"]):
+                    raise RuntimeError("Downloaded file removal not confirmed")
         except Exception:
             # Cannot know if qB completed a timed-out request.
             raise
@@ -128,6 +159,13 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
     if len(results)==len(preview["records"]) and all(
             state in ("REMOVED","ABSENT","ALREADY_REMOVED","ALREADY_ABSENT")
             for _,state in results):
-        db.execute("""UPDATE daemon_job_cleanup_review
-            SET status='TORRENTS_REMOVED' WHERE job_id=?""",(job_id,))
+        modes=db.execute("""SELECT delete_files_requested,file_paths_json
+            FROM daemon_job_cleanup_attempts WHERE job_id=?""",(job_id,)).fetchall()
+        files_cleared=bool(modes) and all(
+            requested and all(not __import__("pathlib").Path(path).exists()
+                              for path in json.loads(paths))
+            for requested,paths in modes)
+        db.execute("""UPDATE daemon_job_cleanup_review SET status=?
+            WHERE job_id=?""",("DOWNLOADS_CLEARED" if files_cleared
+                               else "TORRENTS_REMOVED",job_id))
     return results
