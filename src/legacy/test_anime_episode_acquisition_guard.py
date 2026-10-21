@@ -32,6 +32,15 @@ class EpisodeSlots(unittest.TestCase):
         mark_staged(self.db,10)
         self.assertEqual(reserve(self.db,11),"SKIPPED_DUPLICATE")
         self.assertEqual(reserve(self.db,10),"OWNER")
+    def test_staged_release_wakes_held_jobs_and_is_idempotent(self):
+        reserve(self.db,10)
+        self.db.execute("""INSERT INTO daemon_jobs VALUES
+            (1,'claimed_acquisition','DEFERRED','ON_HOLD','11',3600)""")
+        self.db.execute("UPDATE episode_dispatch SET state='DONE' WHERE notification_id=10")
+        mark_staged(self.db,10)
+        mark_staged(self.db,10)
+        self.assertEqual(self.db.execute("SELECT available_at FROM daemon_jobs WHERE id=1").fetchone()[0],0)
+        self.assertEqual(reserve(self.db,11),"SKIPPED_DUPLICATE")
     def test_active_claim_survives_restart_and_uncertain_failure(self):
         reserve(self.db,10)
         self.assertEqual(reserve(self.db,11),"ON_HOLD")
