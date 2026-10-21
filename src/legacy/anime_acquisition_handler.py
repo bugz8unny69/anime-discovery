@@ -84,13 +84,27 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 selected_index=intake["file_index"]
             try:
                 result=process_claimed(db, payload['notification_id'],
-                infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
-                qb=client, download_root=download_root,
-                trial_root=trial_root, title=series_name,
-                tvdb_id=payload['tvdb_id'],english_title=series_name,
-                staged_owner=staged_owner,staged_group=staged_group,
-            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode,
-            selected_file_index=selected_index)
+                    infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
+                    qb=client, download_root=download_root,
+                    trial_root=trial_root, title=series_name,
+                    tvdb_id=payload['tvdb_id'],english_title=series_name,
+                    staged_owner=staged_owner,staged_group=staged_group,
+                    staged_directory_mode=staged_directory_mode,
+                    staged_file_mode=staged_file_mode,
+                    selected_file_index=selected_index)
+            except DualAudioRejected:
+                # A successful probe proved that an actual completed video
+                # lacks required Japanese + English audio tracks.
+                try:
+                    cleanup_rejected_dual_audio(
+                        db,{**job,"notification_id":payload["notification_id"]},
+                        payload["infohash"],client,download_root=download_root,
+                        trial_root=trial_root,sonarr_root=sonarr_root)
+                except (ValueError,OSError,RuntimeError,PermissionError,sqlite3.Error):
+                    job["episode_outcome"]="DUAL_AUDIO_CLEANUP_NEEDS_REVIEW"
+                    return {"state":"NEEDS_REVIEW"}
+                job["episode_outcome"]="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                return {"state":"BLOCKED"}
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],
                     payload['notification_id'],series_title=series_name)
