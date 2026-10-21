@@ -4,6 +4,7 @@ A slot is acquired only when the worker actually begins acquisition, not at
 webhook approval. STAGED means validated Jellyfin trial, not manual Keep.
 """
 import sqlite3
+from pathlib import Path
 
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS anime_episode_acquisition_slots (
@@ -29,9 +30,29 @@ def reserve(db, notification_id):
             FROM anime_episode_acquisition_slots
             WHERE tvdb_id=? AND season=? AND episode=?""",key).fetchone()
         if slot is None:
-            db.execute("""INSERT INTO anime_episode_acquisition_slots
-                VALUES (?,?,?,?,'ACTIVE')""",(*key,notification_id))
-            answer="OWNER"
+            # Existing installs can have a completed Jellyfin trial before
+            # the episode-slot table existed. Never re-acquire that episode.
+            previous=db.execute("""SELECT d.notification_id FROM episode_dispatch d
+                JOIN series s ON s.id=d.series_id
+                WHERE s.source='tvdb' AND s.external_id=?
+                  AND d.season=? AND d.episode=? AND d.state='DONE'""",
+                key).fetchall()
+            if previous:
+                if len(previous)!=1 or not db.execute("""SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='torrent_recovery_records'""").fetchone():
+                    raise ValueError("Historical trial completion needs reconciliation")
+                record=db.execute("""SELECT staged_path,sha256 FROM torrent_recovery_records
+                    WHERE notification_id=?""",(previous[0][0],)).fetchone()
+                path=Path(record[0]) if record and isinstance(record[0],str) and record[0] else None
+                if not record or not record[1] or not path or path.is_symlink() or not path.is_file():
+                    raise ValueError("Historical trial staging needs reconciliation")
+                db.execute("""INSERT INTO anime_episode_acquisition_slots
+                    VALUES (?,?,?,?,'STAGED')""",(*key,previous[0][0]))
+                answer="OWNER" if previous[0][0]==notification_id else "SKIPPED_DUPLICATE"
+            else:
+                db.execute("""INSERT INTO anime_episode_acquisition_slots
+                    VALUES (?,?,?,?,'ACTIVE')""",(*key,notification_id))
+                answer="OWNER"
         elif slot[1]=="STAGED":
             answer="OWNER" if slot[0]==notification_id else "SKIPPED_DUPLICATE"
         else:
