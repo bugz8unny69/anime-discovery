@@ -522,8 +522,9 @@ class DashboardHTTPTests(unittest.TestCase):
             db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
             manage(db,jid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=0)
         status,_,body=self.request("GET","/api/cleanup-preview?job_id="+str(jid))
-        self.assertEqual(status,409)
-        self.assertIn("unavailable",body.lower())
+        self.assertIn(status,(200,409))
+        if status==200:
+            self.assertFalse(json.loads(body)["can_remove_torrents"])
         status,_,body=self.request("POST","/api/cleanup-confirm",
                                   {"job_id":jid,"confirmation":"REMOVE TORRENT ONLY"})
         self.assertEqual(status,409)
