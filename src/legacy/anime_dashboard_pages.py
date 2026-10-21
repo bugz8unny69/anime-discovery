@@ -298,16 +298,28 @@ if(job.status==="CANCELED" && typeof job.job_id==="number"){
         alert(summary+" Cleanup is blocked to protect unknown or shared resources. No files were deleted.");
         return;
       }
-      if(!confirm(summary+" Remove only the owned qBittorrent torrent entries? Downloaded and staged files will NOT be deleted."))return;
-      const typed=prompt('Type REMOVE TORRENT ONLY to confirm. Files will be preserved.');
-      if(typed!=="REMOVE TORRENT ONLY")return;
+      const size=Number(plan.possible_download_bytes||0);
+      const footprint=(size/1073741824).toFixed(2)+" GiB of verified download data";
+      const canDelete=plan.can_delete_download_files===true;
+      const guidance=canDelete
+        ? summary+" "+footprint+". Choose whether to preserve or remove only those verified downloads. Staged and library files are always preserved."
+        : summary+" Torrent-only cleanup is available. Files will be preserved because complete download-file verification is unavailable.";
+      if(!confirm(guidance))return;
+      const typed=prompt(canDelete
+        ? 'Type REMOVE TORRENT ONLY (preserve files) or REMOVE OWNED DOWNLOAD FILES (delete only preflight-verified downloads).'
+        : 'Type REMOVE TORRENT ONLY to preserve all files.');
+      if(typed!=="REMOVE TORRENT ONLY" &&
+         !(canDelete && typed==="REMOVE OWNED DOWNLOAD FILES"))return;
       const csrf=document.querySelector('input[name="_csrf"]')?.value;
       const done=await fetch("/api/cleanup-confirm",{method:"POST",credentials:"same-origin",
         headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
         body:JSON.stringify({job_id:job.job_id,confirmation:typed})});
       const result=await done.json();
       if(!done.ok)throw Error(result.error||"Cleanup requires review");
-      alert(result.removed+" torrent entry/entries removed. Media files were preserved.");
+      alert(result.removed+" torrent entry/entries removed. "+
+        (result.download_file_cleanup_requested
+          ? "Verified download-file deletion was requested; staged media preserved."
+          : "Downloaded and staged files were preserved."));
       await refresh();
     }catch(error){alert(error.message)}
   });actions.appendChild(btn);
