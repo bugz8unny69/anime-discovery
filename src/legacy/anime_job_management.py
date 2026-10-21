@@ -39,6 +39,25 @@ def latest_events(db):
                          "previous_error":error,"at":at}
             for job_id,action,old,error,at in rows}
 
+def has_staged_media(db, kind, subject_key):
+    """Protect completed staged batch episodes from job cancellation.
+
+    Uses durable staging records (rather than mere filename existence).
+    Never mutate the filesystem during review or cancellation.
+    """
+    if kind != "verified_batch_acquisition":
+        return False
+    if not db.execute("""SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='anime_batch_staged'""").fetchone():
+        return False
+    return bool(db.execute("""SELECT 1
+        FROM anime_batch_authorizations a
+        JOIN anime_batch_staged s ON s.tvdb_id=a.tvdb_id
+            AND s.anidb_id=a.anidb_id AND s.season=a.season
+            AND s.unit_key=a.unit_key AND s.infohash=a.infohash
+        WHERE a.notification_id=? LIMIT 1""",(subject_key,)).fetchone())
+
+
 def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None):
     """Compare-and-swap an idle job; preserve the attempt and error history.
 
@@ -75,6 +94,8 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
             raise ValueError("Only needs-review jobs can be manually retried")
         if operation=="cancel" and state!="NEEDS_REVIEW":
             raise ValueError("Only needs-review jobs can be canceled")
+        if operation=="cancel" and has_staged_media(db,kind,subject_key):
+            raise ValueError("Staged episodes require completion recovery, not cancellation")
         new_state="READY" if operation=="retry" else "BLOCKED"
         # Compare-and-swap under a write lock prevents racing claim/retry
         # across dashboard requests and all workers. Do not reset attempts.
