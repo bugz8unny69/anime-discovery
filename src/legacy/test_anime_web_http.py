@@ -530,6 +530,21 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(status,409)
         self.assertNotIn("qbittorrent_password",body)
 
+    def test_identity_review_messages_are_actionable_without_vm_logs(self):
+        from anime_review_messages import describe_review
+        expected={
+            "NO_TVDB_SEARCH_RESULTS":"TVDB returned no matching series",
+            "ALL_TVDB_TITLES_BELOW_THRESHOLD":"title-match threshold",
+            "LOOKUP_AttributeError":"technical error",
+        }
+        for code,fragment in expected.items():
+            with self.subTest(code=code):
+                message=describe_review(code)
+                self.assertIn(fragment,message)
+                self.assertNotIn("service logs",message.lower())
+        self.assertNotIn("no matching series",
+                         describe_review("LOOKUP_AttributeError").lower())
+
     def test_manage_job_api_retry_cancel_and_visible_activity(self):
         from anime_async_daemon import enqueue
         with sqlite3.connect(self.db,isolation_level=None) as db:
