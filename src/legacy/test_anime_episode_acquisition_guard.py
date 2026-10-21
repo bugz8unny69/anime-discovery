@@ -1,5 +1,7 @@
 """Offline atomic episode acquisition arbitration."""
 import sqlite3
+import tempfile
+from pathlib import Path
 import unittest
 from anime_episode_acquisition_guard import reserve,mark_staged
 
@@ -41,6 +43,23 @@ class EpisodeSlots(unittest.TestCase):
         mark_staged(self.db,10)
         self.assertEqual(self.db.execute("SELECT available_at FROM daemon_jobs WHERE id=1").fetchone()[0],0)
         self.assertEqual(reserve(self.db,11),"SKIPPED_DUPLICATE")
+    def test_historical_staged_episode_prevents_fresh_torrent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            video=Path(folder)/"trial.mkv"
+            video.write_bytes(b"staged trial")
+            self.db.execute("""CREATE TABLE torrent_recovery_records(
+                notification_id INTEGER, staged_path TEXT, sha256 TEXT)""")
+            self.db.execute("""INSERT INTO torrent_recovery_records VALUES (?,?,?)""",
+                            (10,str(video),"digest"))
+            self.db.execute("UPDATE episode_dispatch SET state='DONE' WHERE notification_id=10")
+            self.assertEqual(reserve(self.db,11),"SKIPPED_DUPLICATE")
+            self.assertEqual(self.db.execute(
+                "SELECT owner_notification_id,state FROM anime_episode_acquisition_slots"
+            ).fetchone(),(10,"STAGED"))
+    def test_missing_historical_trial_blocks_reacquisition(self):
+        self.db.execute("UPDATE episode_dispatch SET state='DONE' WHERE notification_id=10")
+        with self.assertRaisesRegex(ValueError,"Historical trial"):
+            reserve(self.db,11)
     def test_active_claim_survives_restart_and_uncertain_failure(self):
         reserve(self.db,10)
         self.assertEqual(reserve(self.db,11),"ON_HOLD")
