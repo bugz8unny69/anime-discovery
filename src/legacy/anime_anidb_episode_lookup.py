@@ -168,14 +168,30 @@ def lookup_episode_id(aid, epno, *, client, clientver, metadata_path,
         db.execute("PRAGMA busy_timeout=15000")
         db.execute("PRAGMA foreign_keys=ON")
         ensure_schema(db)
-        cached = db.execute("""SELECT anidb_episode_id FROM anidb_episode_catalog
-            WHERE anidb_id=? AND episode_type=1 AND episode_number=?""",
+        # A positive cache entry must belong to an existing validated
+        # per-anime catalog. Never trust an orphaned/internally inconsistent
+        # SQLite row as an AniDB EID.
+        cached = db.execute("""SELECT e.anidb_episode_id, a.fetched_at,
+                    a.regular_episode_count
+            FROM anidb_episode_catalog AS e
+            LEFT JOIN anidb_anime_catalog AS a ON a.anidb_id=e.anidb_id
+            WHERE e.anidb_id=? AND e.episode_type=1 AND e.episode_number=?""",
             (aid,epno)).fetchone()
         if cached is not None:
-            return cached[0]
-        catalog = db.execute("SELECT fetched_at FROM anidb_anime_catalog WHERE anidb_id=?",
+            eid, fetched_at, episode_count = cached
+            if (type(eid) is not int or eid<=0 or
+                    type(fetched_at) is not int or fetched_at<0 or
+                    type(episode_count) is not int or episode_count<1):
+                raise ValueError("Unverified AniDB episode cache identity")
+            return eid
+        catalog = db.execute("SELECT fetched_at, regular_episode_count FROM anidb_anime_catalog WHERE anidb_id=?",
                              (aid,)).fetchone()
-        if catalog and stamp - catalog[0] < MISSING_REFRESH_SECONDS:
+        if catalog and (type(catalog[0]) is not int or catalog[0]<0 or
+                        type(catalog[1]) is not int or catalog[1]<0):
+            raise ValueError("Invalid AniDB catalog cache metadata")
+        # Clock rollback must not indefinitely suppress lookup of a missing
+        # episode; require a nonnegative cache age for the negative TTL.
+        if catalog and 0<=stamp-catalog[0]<MISSING_REFRESH_SECONDS:
             return None
 
         # Reserve an upstream request across all processes BEFORE contacting AniDB.

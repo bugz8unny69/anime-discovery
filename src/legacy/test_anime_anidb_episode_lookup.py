@@ -80,6 +80,41 @@ class AniDBEpisodeLookupTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT regular_episode_count FROM anidb_anime_catalog").fetchone()[0],2)
         self.assertFalse((Path(self.tmp.name)/"anime-456.xml").exists())
 
+    def test_episode_ids_are_scoped_to_the_anidb_anime_record(self):
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+        # A second anime with episode 2 cannot borrow the first anime's EID.
+        with self.assertRaises(AniDBLookupDeferred):
+            self.resolve(789,2,now=100001)
+        self.payload=(b'<anime id="789"><episodes><episode id="5555">'
+                      b'<epno type="1">2</epno></episode></episodes></anime>')
+        self.assertEqual(self.resolve(789,2,now=100010),5555)
+        self.assertEqual(self.resolve(456,2,now=100011),9876)
+        self.assertEqual(len(self.urls),2)
+
+    def test_invalid_cached_episode_identity_fails_without_network(self):
+        self.assertEqual(self.resolve(456,2,now=100000),9876)
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.execute("DELETE FROM anidb_anime_catalog WHERE anidb_id=456")
+        with self.assertRaisesRegex(ValueError,"Unverified AniDB episode cache"):
+            self.resolve(456,2,now=100020)
+        self.assertEqual(len(self.urls),1)
+
+    def test_missing_episode_after_clock_rollback_does_not_suppress_refresh(self):
+        self.assertIsNone(self.resolve(456,8,now=100000))
+        self.payload=XML.replace(b'</episodes>',
+            b'<episode id="9999"><epno type="1">8</epno></episode></episodes>')
+        # The independent shared HTTP cooldown must still be enforced.
+        with self.assertRaises(AniDBLookupDeferred):
+            self.resolve(456,8,now=99990)
+        self.assertEqual(len(self.urls),1)
+        # Simulate recovery of the persisted request clock after a rollback.
+        # This must not require waiting 24h for a negative-cache TTL.
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("UPDATE anidb_http_rate_limit SET next_allowed_at=0 WHERE id=1")
+        self.assertEqual(self.resolve(456,8,now=99990),9999)
+        self.assertEqual(len(self.urls),2)
+
     def test_unknown_episodes_refresh_at_most_daily(self):
         self.assertIsNone(self.resolve(456,9,now=100000))
         self.assertIsNone(self.resolve(456,9,now=100002))
