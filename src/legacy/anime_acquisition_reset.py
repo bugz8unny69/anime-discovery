@@ -165,7 +165,7 @@ def reset_acquisitions(db, series_id, *, trial_root):
         job_ids=[r[0] for r in rows]
         next_job_id=db.execute("SELECT COALESCE(MAX(id),0)+1 FROM daemon_jobs").fetchone()[0]
         for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
-            if table=="daemon_job_admin_events" or not re.fullmatch(r"[a-zA-Z_][a-zA-Z_0-9]*",table):
+            if table in ("daemon_job_admin_events","daemon_job_archived_subjects") or not re.fullmatch(r"[a-zA-Z_][a-zA-Z_0-9]*",table):
                 continue
             if any(fk[2]=="daemon_jobs" for fk in db.execute('PRAGMA foreign_key_list("'+table+'")')):
                 raise ValueError("Unknown job reference in "+table+"; reset refused")
@@ -196,6 +196,8 @@ def reset_acquisitions(db, series_id, *, trial_root):
                 pass
         ensure_schema(db)
         for jid in job_ids:
+            if _table_exists(db,"daemon_job_archived_subjects"):
+                db.execute("DELETE FROM daemon_job_archived_subjects WHERE job_id=?",(jid,))
             if _table_exists(db,"daemon_job_admin_events"):
                 db.execute("DELETE FROM daemon_job_admin_events WHERE job_id=?",(jid,))
             db.execute("DELETE FROM daemon_jobs WHERE id=? AND state='DONE'",(jid,))
