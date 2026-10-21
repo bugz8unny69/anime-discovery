@@ -15,7 +15,8 @@ from anime_acquisition_runtime import acquisition_handlers
 from anime_async_daemon import run_workers
 from anime_qb_api import QBittorrentAPI
 from anime_prowlarr_search import ProwlarrClient
-from anime_shared_discovery import handler_factory\nfrom anime_identity_job import handler_factory as identity_handler_factory, recover_pending
+from anime_shared_discovery import handler_factory
+from anime_identity_job import handler_factory as identity_handler_factory, recover_pending
 from anime_batch_worker import handler_factory as batch_handler_factory
 from anime_jellyfin_refresh import refresh_library
 
