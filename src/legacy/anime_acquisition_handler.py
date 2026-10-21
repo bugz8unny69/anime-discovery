@@ -12,10 +12,13 @@ from anime_series_naming import resolve_series_name
 from anime_flat_config import load_config
 from anime_qb_api import QBittorrentAPI
 from anime_single_size_intake import admit_single_episode
+from anime_episode_acquisition_guard import reserve,mark_staged,EpisodeSlotNeedsReview
+from anime_audio_verification import DualAudioRejected
+from anime_cancel_cleanup import cleanup_rejected_dual_audio
 
 
 def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None,
-                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None):
+                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None, sonarr_root=None):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -29,6 +32,19 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
             if (not row or row[0] != 'LEASED' or row[1] != job['lease_token']
                     or row[2] < time.time()):
                 raise ValueError('Stale acquisition lease')
+            # A restart after external cleanup but before daemon.finish must
+            # NEVER re-add a torrent whose dual-audio probe already failed.
+            if db.execute("""SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='anime_rejected_audio_cleanup'""").fetchone():
+                previous=db.execute("""SELECT state FROM anime_rejected_audio_cleanup
+                    WHERE job_id=? AND infohash=?""",
+                    (job['id'],payload['infohash'])).fetchone()
+                if previous:
+                    if previous[0]=="REMOVED":
+                        job["episode_outcome"]="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                        return {"state":"BLOCKED"}
+                    job["episode_outcome"]="DUAL_AUDIO_CLEANUP_NEEDS_REVIEW"
+                    return {"state":"NEEDS_REVIEW"}
             dispatch=db.execute("SELECT state FROM episode_dispatch WHERE notification_id=?",
                                 (payload['notification_id'],)).fetchone()
             if dispatch and dispatch[0]=='DONE':
@@ -36,12 +52,34 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                                   (payload['notification_id'],)).fetchone()
                 if not record:
                     return {'state':'NEEDS_REVIEW'}
+                # Restore the slot after a crash between finalization and
+                # recording completion; never start another torrent.
+                try:
+                    slot=reserve(db,payload['notification_id'])
+                except EpisodeSlotNeedsReview:
+                    job["episode_outcome"]="HISTORICAL_EPISODE_STAGING_UNVERIFIED"
+                    return {"state":"NEEDS_REVIEW"}
+                if slot!="OWNER":
+                    job["episode_outcome"]="STAGED_EPISODE_SLOT_CONFLICT"
+                    return {"state":"NEEDS_REVIEW"}
+                mark_staged(db,payload['notification_id'])
                 return {'state':'DONE'}
             if dispatch and dispatch[0]=='NEEDS_REVIEW':
                 return {'state':'NEEDS_REVIEW'}
             # Recheck approval before constructing any external client. A series
             # may have been quarantined or rejected since the job was enqueued.
             approval=approved_dispatch(db, payload['notification_id'])
+            try:
+                slot=reserve(db,payload['notification_id'])
+            except EpisodeSlotNeedsReview:
+                job["episode_outcome"]="HISTORICAL_EPISODE_STAGING_UNVERIFIED"
+                return {"state":"NEEDS_REVIEW"}
+            if slot=="ON_HOLD":
+                job["episode_outcome"]="ON_HOLD"
+                return {"state":"DEFERRED"}
+            if slot=="SKIPPED_DUPLICATE":
+                job["episode_outcome"]="SKIPPED_DUPLICATE"
+                return {"state":"DONE"}
             # Resolve a clean English series name from verified TVDB identity
             # or a unique recognized mapping BEFORE contacting qBittorrent.
             # Never use the Autobrr release label as a folder name.
@@ -67,19 +105,35 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 if intake["state"]=="DEFERRED":
                     return intake
                 selected_index=intake["file_index"]
-            result=process_claimed(db, payload['notification_id'],
-                infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
-                qb=client, download_root=download_root,
-                trial_root=trial_root, title=series_name,
-                tvdb_id=payload['tvdb_id'],english_title=series_name,
-                staged_owner=staged_owner,staged_group=staged_group,
-            staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode,
-            selected_file_index=selected_index)
+            try:
+                result=process_claimed(db, payload['notification_id'],
+                    infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
+                    qb=client, download_root=download_root,
+                    trial_root=trial_root, title=series_name,
+                    tvdb_id=payload['tvdb_id'],english_title=series_name,
+                    staged_owner=staged_owner,staged_group=staged_group,
+                    staged_directory_mode=staged_directory_mode,
+                    staged_file_mode=staged_file_mode,
+                    selected_file_index=selected_index)
+            except DualAudioRejected:
+                # A successful probe proved that an actual completed video
+                # lacks required Japanese + English audio tracks.
+                try:
+                    cleanup_rejected_dual_audio(
+                        db,{**job,"notification_id":payload["notification_id"]},
+                        payload["infohash"],client,download_root=download_root,
+                        trial_root=trial_root,sonarr_root=sonarr_root)
+                except (ValueError,OSError,RuntimeError,PermissionError,sqlite3.Error):
+                    job["episode_outcome"]="DUAL_AUDIO_CLEANUP_NEEDS_REVIEW"
+                    return {"state":"NEEDS_REVIEW"}
+                job["episode_outcome"]="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                return {"state":"BLOCKED"}
             if result['state']=='DONE':
                 finalize_acquisition(db,job['id'],job['lease_token'],
                     payload['notification_id'],series_title=series_name)
                 # Only scan once after durable finalization; never undo staging
                 # or retry acquisition because the Jellyfin service is down.
+                mark_staged(db,payload['notification_id'])
                 refresh_best_effort(jellyfin_refresh)
                 # qBittorrent sources are intentionally retained until the
                 # explicit Sonarr Keep finalization. This is the only stage

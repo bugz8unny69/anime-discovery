@@ -159,6 +159,19 @@ Before activating new code, it records the old and requested Git SHAs to `/var/l
 
 If an interrupted run leaves the checkout exactly at either the recorded old or target SHA **and clean**, the next run first restores the old revision and attempts to restart the service. A dirty or unexpected checkout is **not automatically reset**: it stops and requires review so that unexplained changes are not deleted. This is conservative rerun safety, not a guarantee of automatic recovery from arbitrary filesystem corruption. A failure during an application update may require inspecting the SQLite schema and service logs; code rollback never automatically replaces the live database. This is a Git-only enhancement; no Docker and no automatic release packaging.
 
+## Anime trial lifecycle — authoritative meaning of Keep
+
+**Do not conflate audio validation, trial staging, and the user's Keep button.** This distinction has been lost in previous chats and must be preserved in all future implementation, status labels, and PRs.
+
+1. Autobrr/release-group candidates are identified and acquired under an episode-level duplicate guard. Downloaded files are examined using **actual ffprobe evidence** for both Japanese and English audio; the release title's `Dual-Audio` string is not proof.
+2. A candidate that **passes** dual-audio validation is staged into the **anime trial folder served by Jellyfin**, where the user can watch it. **Staging is NOT Keep**, and staging must not import the anime into Sonarr.
+3. **Keep is a later, explicit decision by the user after watching the trial in Jellyfin.** Only then does the established downstream workflow send the anime to Sonarr and continue its normal completion/integration steps. Never automatically press Keep or equate download completion/audio pass with this decision.
+4. If a candidate **fails Japanese+English audio validation**, it must never enter the Jellyfin trial or Sonarr. The desired workflow is to use the **existing verified, ownership-aware qBittorrent cleanup code** to remove that candidate's torrent **and its torrent payload files**, then safely release its episode claim and try **one** alternate release-group candidate. Deleting a failed candidate's owned torrent payload is distinct from deleting verified staged trial media or Sonarr/library files.
+5. Once a valid dual-audio candidate is **successfully staged for trial**, other release-group candidates for that TVDB series/season/episode should be skipped/closed; **do not wait for the user to click Keep** before clearing duplicate waiting jobs. Conversely, an audio failure can promote the next held group **only after cleanup is confirmed**; uncertain ownership, incomplete cleanup, or ambiguous failure must stop for review. Never download all competing groups simultaneously.
+6. All runtime torrent deletion must remain restricted to the existing verified ownership/cleanup gates and explicit authorized application policy. **No direct or unconditional qBittorrent deletion, NFS path deletion, or media cleanup** as a shortcut. User permission to implement this behavior in a PR is not permission to run cleanup on live torrents during development.
+
+**Status semantics:** `ON HOLD` means another candidate owns the episode's active trial acquisition; `SKIPPED DUPLICATE` means a valid candidate has been **staged for Jellyfin trial**, not kept in Sonarr; `NEEDS REVIEW` applies to unsafe/uncertain states. These lifecycle statuses are target behavior and must not be claimed implemented by a PR unless code/tests explicitly provide them.
+
 ## Recovery and cleanup safety
 
 Architecture: **Checkpoint → Validate → Resume; or Cancel → Clean up abandoned resources → Preserve history.**

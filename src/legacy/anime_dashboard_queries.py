@@ -11,8 +11,8 @@ from anime_review_messages import describe_review
 
 PAGE_SIZES=(20,50,100)
 JOB_STATUSES=("RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING",
-              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH",
-              "COMPLETED","BLOCKED","CANCELED")
+              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH","ON HOLD",
+              "SKIPPED DUPLICATE","COMPLETED","BLOCKED","CANCELED")
 
 
 def pagination(page=1, size=20):
@@ -112,7 +112,13 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
         batch_active=bool(batch_stage in ("PROBE","UNLOCKED") and job in ("DEFERRED","LEASED","READY"))
         event=events.get(job_id)
         canceled=job=="BLOCKED" and event is not None and event["action"]=="cancel"
-        if canceled:
+        if job=="BLOCKED" and error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET":
+            status="CANCELED"
+        elif job=="DEFERRED" and error=="ON_HOLD":
+            status="ON HOLD"
+        elif job=="DONE" and error=="SKIPPED_DUPLICATE":
+            status="SKIPPED DUPLICATE"
+        elif canceled:
             status="CANCELED"
         elif job=="DONE" and dispatch=="DONE":
             status="COMPLETED"
@@ -160,7 +166,14 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
                          "Live qBittorrent progress is not available in this view; "
                          "this status does not confirm that transfer speed is nonzero.")
         elif status=="CANCELED":
-            explanation="Canceled by administrator."
+            explanation=("Canceled: required Japanese and English audio tracks were not both present. "
+                         "Owned torrent and payload deletion confirmed."
+                         if error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                         else "Canceled by administrator.")
+        elif status=="ON HOLD":
+            explanation="Another release owns this episode; waiting for successful trial staging or confirmed cleanup."
+        elif status=="SKIPPED DUPLICATE":
+            explanation="The episode has been staged for Jellyfin trial from another release; no competing torrent started."
         else:
             explanation=error or ("Current job state: "+status.lower())
         if status=="NEEDS REVIEW" and job:
@@ -201,7 +214,14 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
                        "can_recheck":nstatus=="NEEDS_REVIEW" and not dispatch and not job,
                        "season":season,"episode":episode,
                        "series_title":title,"message":error or "", "activity_detail":explanation,
-                       "staged":bool(stage and Path(stage).is_file())})
+                       "staged":bool(stage and Path(stage).is_file()),
+                       "cleanup_status":("DOWNLOADS_CLEARED" if
+                           status=="CANCELED" and error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET" and
+                           db.execute("""SELECT 1 FROM sqlite_master WHERE type='table'
+                               AND name='anime_rejected_audio_cleanup'""").fetchone() and
+                           db.execute("""SELECT 1 FROM anime_rejected_audio_cleanup
+                               WHERE job_id=? AND state='REMOVED'""",(job_id,)).fetchone()
+                           else cleanup_reviews.get(job_id,"NOT_VERIFIED"))})
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='daemon_job_archived_subjects'").fetchone():
         history=db.execute("""SELECT a.job_id,n.id,n.source,n.release_name,n.received_at,
             j.attempts,j.last_error,j.kind

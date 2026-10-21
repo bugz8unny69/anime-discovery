@@ -242,7 +242,8 @@ def jobs_page(result):
 <span class="status running" id="live-indicator">● Live</span>'''
     selected=result.get("status_filter","ALL")
     statuses=("ALL","RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING","DOWNLOADING",
-              "WAITING FOR DOWNLOAD","WAITING FOR SEARCH","COMPLETED","BLOCKED","CANCELED")
+              "WAITING FOR DOWNLOAD","WAITING FOR SEARCH","ON HOLD",
+              "SKIPPED DUPLICATE","COMPLETED","BLOCKED","CANCELED")
     options="".join('<option value="'+escape(st)+'"'+(" selected" if st==selected else "")+'>'+escape("All statuses" if st=="ALL" else st.title())+'</option>' for st in statuses)
     out+='<label>Status <select id="job-status-filter">'+options+'</select></label>'
     out+=pager("/jobs",result)+"</div></div>"
@@ -291,7 +292,7 @@ td(tr,job.episode?"S"+String(job.season).padStart(2,"0")+"E"+String(job.episode)
 let cell=document.createElement("td"),status=document.createElement("span");
 status.className="status "+(job.status==="COMPLETED"?"completed":
 job.status==="RUNNING"||job.status==="DOWNLOADING"?"running":job.status.includes("WAITING")?"waiting":
-(job.status==="BLOCKED"||job.status==="CANCELED")?"blocked":"");
+(job.status==="BLOCKED"||job.status==="CANCELED")?"blocked":job.status==="ON HOLD"?"waiting":"");
 status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}

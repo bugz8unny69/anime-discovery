@@ -11,6 +11,23 @@ class QueueTests(unittest.TestCase):
         self.db=sqlite3.connect(Path(self.temp.name)/"queue.db",isolation_level=None)
         self.addCleanup(self.db.close)
 
+    def test_worker_finishes_job_without_local_logging_shadow(self):
+        import asyncio
+        from anime_async_daemon import run_workers
+        db_path=Path(self.temp.name)/"worker-logging.db"
+        with sqlite3.connect(db_path,isolation_level=None) as worker_db:
+            enqueue(worker_db,"identify","notification:51","{}")
+        stop=asyncio.Event()
+        async def handler(job):
+            stop.set()
+            return "DONE"
+        asyncio.run(run_workers(db_path,{"identify":handler},
+            concurrency=1,poll_seconds=0.01,stop=stop))
+        with sqlite3.connect(db_path) as worker_db:
+            self.assertEqual(worker_db.execute(
+                "SELECT state FROM daemon_jobs WHERE subject_key='notification:51'"
+            ).fetchone()[0],"DONE")
+
     def test_unique_jobs_and_retry(self):
         enqueue(self.db,"identify","notification:1","{}")
         enqueue(self.db,"identify","notification:1","{}")

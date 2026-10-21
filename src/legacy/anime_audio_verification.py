@@ -6,6 +6,9 @@ metadata are not acceptable evidence of Japanese/English dual audio.
 import json
 import subprocess
 
+class DualAudioRejected(ValueError):
+    """Actual media probe completed but Japanese + English are not both present."""
+
 def audio_languages(path, *, runner=subprocess.run):
     result=runner(["ffprobe","-v","error","-select_streams","a",
                    "-show_entries","stream=index:stream_tags=language",

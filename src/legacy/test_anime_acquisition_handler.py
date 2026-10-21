@@ -52,6 +52,8 @@ class HandlerTests(unittest.TestCase):
             with (patch('anime_acquisition_handler.approved_dispatch',return_value={'series_id':4}),
                   patch('anime_acquisition_handler.resolve_series_name',return_value='Example'),
                   patch('anime_acquisition_handler.process_claimed',return_value={'state':'DONE'}),
+                  patch('anime_acquisition_handler.reserve',return_value='OWNER'),
+                  patch('anime_acquisition_handler.mark_staged'),
                   patch('anime_acquisition_handler.finalize_acquisition') as finalize):
                 self.assertEqual(asyncio.run(handler(job)),'DONE')
                 finalize.assert_called_once()
@@ -73,7 +75,9 @@ class HandlerTests(unittest.TestCase):
                 'payload_json':json.dumps({'notification_id':4,'infohash':'a'*40,
                 'magnet_uri':'magnet:?xt=urn:btih:'+'a'*40,
                 'title':'Example','tvdb_id':123})}
-            with patch('anime_acquisition_handler.process_claimed') as pipeline:
+            with (patch('anime_acquisition_handler.process_claimed') as pipeline,
+                  patch('anime_acquisition_handler.reserve',return_value='OWNER'),
+                  patch('anime_acquisition_handler.mark_staged')):
                 self.assertEqual(asyncio.run(handler(job)),'DONE')
                 pipeline.assert_not_called()
 

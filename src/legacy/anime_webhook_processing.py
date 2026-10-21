@@ -16,6 +16,7 @@ from anime_release_matching import resolve_release
 from anime_batch_selection import release_scope_hint
 from anime_trial_policy import eligibility, journal
 
+
 HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 
