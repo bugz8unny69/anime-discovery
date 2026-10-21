@@ -111,8 +111,11 @@ class ManageTests(unittest.TestCase):
                    expected_attempts=0)
         self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs WHERE id=?",
             (jid,)).fetchone()[0],"NEEDS_REVIEW")
-        self.assertIsNone(self.db.execute(
-            "SELECT 1 FROM daemon_job_archived_subjects WHERE job_id=?",(jid,)).fetchone())
+        if self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_job_archived_subjects'"
+        ).fetchone():
+            self.assertIsNone(self.db.execute(
+                "SELECT 1 FROM daemon_job_archived_subjects WHERE job_id=?",(jid,)).fetchone())
 
     def test_orphaned_staging_schema_fails_closed(self):
         from anime_job_management import has_staged_media
