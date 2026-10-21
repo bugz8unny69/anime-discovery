@@ -1,6 +1,6 @@
 """Upgrade an archive-based VM installation without Git, SSH or network access.
 
-User supplies a trusted, checksum-verified GitHub release tar.gz on the VM.
+User supplies a trusted, checksum-verified GitHub release tar.gz or zip on the VM.
 The deployment code is exchanged atomically with rollback on failed service
 restart. Existing /etc configuration and /var/lib database remain untouched.
 """
@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import stat
 import tarfile
+import zipfile
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -17,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from anime_admin_upgrade import command
 
 
-def _extract(archive, destination):
+def _extract_tar(archive, destination):
     """Restrict tar members to ordinary files beneath anime-discovery/."""
     if not Path(archive).is_file():
         raise FileNotFoundError(archive)
@@ -59,6 +60,72 @@ def _extract(archive, destination):
     if not (destination/"deploy"/"install-homelab.py").is_file() or not (
             destination/"src"/"legacy"/"anime-discovery-live.py").is_file():
         raise ValueError("Archive is not an Anime Discovery release")
+
+
+
+def _extract_zip(archive, destination):
+    """Extract only regular ZIP entries under anime-discovery/, without links."""
+    if not Path(archive).is_file():
+        raise FileNotFoundError(archive)
+    total = 0
+    count = 0
+    with zipfile.ZipFile(archive) as source:
+        for info in source.infolist():
+            parts = PurePosixPath(info.filename).parts
+            if (not parts or parts[0] != "anime-discovery"
+                    or any(p in ("..", ".") for p in parts)
+                    or "\\" in info.filename):
+                raise ValueError("Archive has unsafe member path")
+            # The POSIX mode field in a ZIP entry can identify a symlink or
+            # other special entry; never extract those.
+            mode = (info.external_attr >> 16) & 0xffff
+            file_type = stat.S_IFMT(mode)
+            if file_type not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError("Archive has unsupported links or special files")
+            total += info.file_size
+            count += 1
+            if total > 100 * 1024 * 1024 or count > 10000:
+                raise ValueError("Archive exceeds safe limits")
+            target = destination.joinpath(*parts[1:])
+            if info.is_dir():
+                if file_type == stat.S_IFREG:
+                    raise ValueError("Invalid ZIP directory")
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                if len(parts) < 2 or file_type == stat.S_IFDIR:
+                    raise ValueError("Invalid ZIP file")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                # Bounded copy: do not trust the ZIP size declaration alone.
+                with source.open(info) as payload, target.open("xb") as output:
+                    remaining = 100 * 1024 * 1024 - (total - info.file_size)
+                    while True:
+                        chunk = payload.read(min(1024 * 1024, remaining + 1))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        if remaining < 0:
+                            raise ValueError("Archive exceeds safe limits")
+                        output.write(chunk)
+                target.chmod(0o755 if mode & 0o111 else 0o644)
+    _normalize_extraction(destination)
+
+
+def _normalize_extraction(destination):
+    for directory in [destination, *destination.rglob("*")]:
+        if directory.is_dir():
+            directory.chmod(0o755)
+    if not (destination/"deploy"/"install-homelab.py").is_file() or not (
+            destination/"src"/"legacy"/"anime-discovery-live.py").is_file():
+        raise ValueError("Archive is not an Anime Discovery release")
+
+
+def _extract(archive, destination):
+    archive = Path(archive)
+    if archive.suffix.lower() == ".zip":
+        return _extract_zip(archive, destination)
+    if archive.name.endswith(".tar.gz"):
+        return _extract_tar(archive, destination)
+    raise ValueError("Expected a release .tar.gz or .zip archive")
 
 
 def upgrade_archive(root,archive,*,db_path,service="anime-discovery.service",runner=command,
