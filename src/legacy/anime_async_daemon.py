@@ -200,7 +200,6 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                   operation=job["kind"], job_id=job["id"], outcome=outcome,
                   elapsed_ms=span.milliseconds())
             if outcome=="NEEDS_REVIEW":
-                import logging
                 logging.getLogger("anime_discovery.trial").warning(
                     "event=ACQUISITION_NEEDS_REVIEW reason=%s job=%d kind=%s",
                     reason or "HANDLER_NEEDS_REVIEW",job["id"],job["kind"])
