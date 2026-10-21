@@ -114,6 +114,25 @@ class ManageTests(unittest.TestCase):
         self.assertIsNone(self.db.execute(
             "SELECT 1 FROM daemon_job_archived_subjects WHERE job_id=?",(jid,)).fetchone())
 
+    def test_orphaned_staging_schema_fails_closed(self):
+        from anime_job_management import has_staged_media
+        enqueue(self.db,"verified_batch_acquisition","19",'{"notification_id":19}')
+        jid=self.db.execute("""SELECT id FROM daemon_jobs
+            WHERE kind='verified_batch_acquisition' AND subject_key='19'""").fetchone()[0]
+        self.db.execute("""CREATE TABLE anime_batch_staged (
+            tvdb_id TEXT, anidb_id TEXT, season INTEGER,
+            unit_key TEXT, infohash TEXT)""")
+        self.db.execute("""INSERT INTO anime_batch_staged VALUES
+            ('384541','19445',2,'SEASON','abc')""")
+        self.assertTrue(has_staged_media(self.db,"verified_batch_acquisition","19"))
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+        with self.assertRaisesRegex(ValueError,"completion recovery"):
+            manage(self.db,jid,"cancel",expected_state="NEEDS_REVIEW",
+                   expected_attempts=0)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],
+            "NEEDS_REVIEW")
+
     def test_explicit_admin_retry_of_batch_needs_review_is_audited(self):
         enqueue(self.db,"verified_batch_acquisition","pack","{}")
         jid=self.db.execute("SELECT id FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0]
