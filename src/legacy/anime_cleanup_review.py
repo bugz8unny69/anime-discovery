@@ -5,7 +5,7 @@ unlinks files, or performs external side effects.
 """
 import re
 
-HASH = re.compile(r"(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})\\Z")
+HASH = re.compile(r"(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})")
 
 
 def inventory(db, kind, subject_key):
