@@ -24,7 +24,7 @@ class NotificationManagementTests(unittest.TestCase):
         item=all_jobs(self.db)["items"][0]
         self.assertEqual(item["id"],self.nid)
         self.assertTrue(item["can_resolve"])
-        self.assertTrue(item["can_delete"])
+        self.assertNotIn("can_delete",item)
 
     def test_delete_unmatched_and_ntfy_metadata(self):
         self.db.execute("""CREATE TABLE IF NOT EXISTS ntfy_delivery
