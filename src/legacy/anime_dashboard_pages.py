@@ -325,7 +325,7 @@ if(job.can_retry || job.can_cancel){
     actions.appendChild(document.createTextNode(" "));
   }
 }
-if(typeof job.id==="number" && job.status!=="COMPLETED"){
+if(typeof job.id==="number" && job.status!=="COMPLETED" && job.status!=="CANCELED"){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";
   btn.textContent="Matching details";btn.addEventListener("click",()=>openTrace(job.id));
   actions.appendChild(btn);
@@ -379,8 +379,8 @@ async function openTrace(notificationId){
 }
 async function manageJob(job,action,button){
   const subject=job.release+" (job #"+job.job_id+")";
-  if(action==="cancel" && !confirm("Cancel future attempts for "+subject+
-      "? This will not delete or stop any torrent or media."))return;
+  if(action==="cancel" && !confirm("Cancel and archive "+subject+
+      "? Existing torrent and files will be preserved until cleanup is explicitly verified."))return;
   button.disabled=true;
   try{
     const csrf=document.querySelector('input[name="_csrf"]')?.value;
