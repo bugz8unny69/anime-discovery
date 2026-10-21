@@ -13,10 +13,12 @@ from anime_flat_config import load_config
 from anime_qb_api import QBittorrentAPI
 from anime_single_size_intake import admit_single_episode
 from anime_episode_acquisition_guard import reserve,mark_staged
+from anime_audio_verification import DualAudioRejected
+from anime_cancel_cleanup import cleanup_rejected_dual_audio
 
 
 def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None,
-                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None):
+                             staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None, sonarr_root=None):
     if not callable(qb_factory):
         raise ValueError('qBittorrent client factory required')
 
@@ -80,7 +82,8 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 if intake["state"]=="DEFERRED":
                     return intake
                 selected_index=intake["file_index"]
-            result=process_claimed(db, payload['notification_id'],
+            try:
+                result=process_claimed(db, payload['notification_id'],
                 infohash=payload['infohash'], magnet_uri=payload['magnet_uri'],
                 qb=client, download_root=download_root,
                 trial_root=trial_root, title=series_name,
