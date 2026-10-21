@@ -80,7 +80,7 @@ def main(argv=None):
     commands=parser.add_subparsers(dest="command",required=True)
 
     upgrade_cmd=commands.add_parser("upgrade",help="Upgrade Git checkout or extracted release archive")
-    upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
+    upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Local checksum-verified release .tar.gz or .zip for archive installations")
     upgrade_cmd.add_argument("--verbose",action="store_true",help="Show upgrade milestones and service readiness checks")
     upgrade_cmd.add_argument("--backup",action="store_true",help="Keep code and database backups after successful archive upgrade")
     setup_cmd=commands.add_parser("setup",help="Run local first-run configuration")
@@ -132,7 +132,7 @@ def main(argv=None):
                     verbose=args.verbose,backup=args.backup,log=lambda message: print(message,file=sys.stderr,flush=True))
             else:
                 if not (root/".git").exists():
-                    raise ValueError("Archive installation: download the new release tar.gz and pass its local path to upgrade")
+                    raise ValueError("Archive installation: download the release .tar.gz or .zip and pass its local path to upgrade")
                 result=upgrade(root,db_path=args.db or configured_db,
                     verbose=args.verbose,log=lambda message: print(message,file=sys.stderr,flush=True))
             print(json.dumps(result,indent=2,sort_keys=True))
