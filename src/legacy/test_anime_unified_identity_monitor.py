@@ -346,6 +346,15 @@ class TriageTests(unittest.TestCase):
         self.assertIn("AMBIGUOUS_SEASON_SPECIFIC_ANIDB",report["issues"])
         self.assertNotIn("approval",report)
 
+    def test_reverse_mapping_without_offset_preserves_episode_number(self):
+        from anime_identity_mapping_v4 import resolve_tvdb_episode
+        xml=(b'<anime-list><anime anidbid="789" tvdbid="123" '
+             b'defaulttvdbseason="2"/></anime-list>')
+        rule=resolve_tvdb_episode(xml,"789","123",2,3)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule["anidb_episode_number"],3)
+        self.assertEqual(rule["tvdb_episode"],3)
+
     def test_reverse_mapping_offset_resolves_anidb_number_not_tvdb_number(self):
         from anime_identity_mapping_v4 import resolve_tvdb_episode
         xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
