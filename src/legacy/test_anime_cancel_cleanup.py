@@ -1,5 +1,7 @@
 """Isolated canceled-torrent cleanup fencing tests, no live qB or media."""
 import sqlite3
+import tempfile
+from pathlib import Path
 import unittest
 from anime_async_daemon import enqueue
 from anime_job_management import manage
@@ -88,6 +90,57 @@ class CancelCleanupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             cleanup_torrents(self.db,self.jid,self.qb,approved=True)
         self.assertEqual(self.qb.removed,[])
+
+    def test_explicit_file_cleanup_only_under_verified_download_root(self):
+        with tempfile.TemporaryDirectory() as root:
+            download=Path(root)/"downloads"
+            trial=Path(root)/"trial"
+            download.mkdir();trial.mkdir()
+            target=download/"episode.mkv"
+            target.write_bytes(b"only this source")
+            class FilesQB(MockQB):
+                def torrent_details(self,h):
+                    return {"hash":h,"save_path":str(download),"state":"pausedDL"}
+                def torrent_files(self,h):
+                    return [{"name":"episode.mkv"}]
+                def torrent_inventory(self):
+                    return [{"hash":H,"save_path":str(download)}]
+                def remove_torrent(self,h,*,delete_files):
+                    self.removed.append((h,delete_files))
+                    if delete_files: target.unlink()
+                    self.record=None
+            qb=FilesQB()
+            result=cleanup_torrents(self.db,self.jid,qb,approved=True,
+                delete_download_files=True,download_root=download,trial_root=trial)
+            self.assertEqual(result,[(H,"REMOVED")])
+            self.assertFalse(target.exists())
+            self.assertEqual(qb.removed,[(H,True)])
+            self.assertEqual(self.db.execute(
+                "SELECT status FROM daemon_job_cleanup_review").fetchone()[0],
+                "DOWNLOADS_CLEARED")
+            self.assertEqual(cleanup_torrents(self.db,self.jid,qb,approved=True,
+                delete_download_files=True,download_root=download,trial_root=trial),
+                [(H,"ALREADY_REMOVED")])
+            self.assertEqual(qb.removed,[(H,True)])
+
+    def test_file_deletion_refuses_unstopped_torrent_without_side_effects(self):
+        with tempfile.TemporaryDirectory() as root:
+            download=Path(root)/"downloads"
+            trial=Path(root)/"trial"
+            download.mkdir();trial.mkdir()
+            source=download/"episode.mkv"
+            source.write_bytes(b"preserve")
+            class ActiveQB(MockQB):
+                def torrent_details(self,h):
+                    return {"hash":h,"save_path":str(download),"state":"downloading"}
+                def torrent_files(self,h):
+                    return [{"name":"episode.mkv"}]
+                def torrent_inventory(self):
+                    return [{"hash":H,"save_path":str(download)}]
+            with self.assertRaisesRegex(ValueError,"Stop the torrent"):
+                cleanup_torrents(self.db,self.jid,ActiveQB(),approved=True,
+                    delete_download_files=True,download_root=download,trial_root=trial)
+            self.assertEqual(source.read_bytes(),b"preserve")
 
     def test_unproven_status_blocks(self):
         self.db.execute("UPDATE qb_torrent_ownership SET status='UNCERTAIN'")
