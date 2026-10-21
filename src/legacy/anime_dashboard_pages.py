@@ -282,9 +282,10 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,"");const disclosure=document.createElement("details");disclosure.className="job-details";const summary=document.createElement("summary");const preview=document.createElement("span");preview.textContent=job.activity_detail||"No further activity recorded";summary.appendChild(preview);disclosure.appendChild(summary);detail.appendChild(disclosure);
 let actions=document.createElement("td");
-if(job.status==="CANCELED" && typeof job.job_id==="number"){
+if(job.status==="CANCELED" && typeof job.job_id==="number" &&
+   !["TORRENTS_REMOVED","DOWNLOADS_CLEARED"].includes(job.cleanup_status)){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";
-  btn.textContent="Review cleanup";
+  btn.textContent=job.cleanup_status==="CLEANUP_NEEDED"?"Retry cleanup":"Review cleanup";
   btn.addEventListener("click",async()=>{
     try{
       const response=await fetch("/api/cleanup-preview?job_id="+encodeURIComponent(job.job_id),
@@ -301,9 +302,12 @@ if(job.status==="CANCELED" && typeof job.job_id==="number"){
       const size=Number(plan.possible_download_bytes||0);
       const footprint=(size/1073741824).toFixed(2)+" GiB of verified download data";
       const canDelete=plan.can_delete_download_files===true;
-      const guidance=canDelete
-        ? summary+" "+footprint+". Choose whether to preserve or remove only those verified downloads. Staged and library files are always preserved."
-        : summary+" Torrent-only cleanup is available. Files will be preserved because complete download-file verification is unavailable.";
+      const pending=plan.records.some(item=>item.reconcile_only);
+      const guidance=pending
+        ? summary+" An earlier request may have completed. Confirm to reconcile its recorded outcome; missing torrents will not be removed again."
+        : canDelete
+          ? summary+" "+footprint+". Choose whether to preserve or remove only those verified downloads. Staged and library files are always preserved."
+          : summary+" Torrent-only cleanup is available. Files will be preserved because complete download-file verification is unavailable.";
       if(!confirm(guidance))return;
       const typed=prompt(canDelete
         ? 'Type REMOVE TORRENT ONLY (preserve files) or REMOVE OWNED DOWNLOAD FILES (delete only preflight-verified downloads).'
