@@ -4,7 +4,7 @@ A mapped AniDB ID is a candidate, not independent proof of an anime title or
 the internal AniDB episode ID. Never authorize acquisition from this helper.
 """
 import xml.etree.ElementTree as ET
-from anime_identity_mapping_v4 import resolve_episode
+from anime_identity_mapping_v4 import resolve_tvdb_episode
 from anime_identification_probe import load_anidb
 
 def season_candidates(mapping_xml,catalog,tvdb_id,season,episode,*,limit=20):
@@ -23,7 +23,7 @@ def season_candidates(mapping_xml,catalog,tvdb_id,season,episode,*,limit=20):
     # episode mappings that agree with the *release* season.
     mapped={}
     for aid in sorted(ids):
-        rule=resolve_episode(mapping_xml,aid,str(tvdb_id),episode)
+        rule=resolve_tvdb_episode(mapping_xml,aid,str(tvdb_id),season,episode)
         if rule is not None and rule["tvdb_season"]==season:
             mapped[aid]=rule
     if not mapped:

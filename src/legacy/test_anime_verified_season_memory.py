@@ -110,7 +110,7 @@ class VerifiedSeasonMemoryTests(unittest.TestCase):
             anidb_resolve=lambda aid,ep:self.fail("Episode absent; no AniDB lookup"))
         self.assertNotEqual(report["decision"],"AUTO_VERIFIED")
         self.assertNotIn("approval",report)
-        self.assertIn("TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED",report["issues"])
+        self.assertIn("SEASON_EPISODE_MAPPING_UNVERIFIED",report["issues"])
 
     def test_cache_never_trusts_stale_or_ambiguous_mapping(self):
         self.save(2,19445)
@@ -157,7 +157,7 @@ class VerifiedSeasonMemoryTests(unittest.TestCase):
                 login=lambda *_:"token",fetch=fetch,mapping_xml=XML,
                 anidb_resolve=lambda *args:self.fail("Season conflict must stop mapping"))
         self.assertNotEqual(report["decision"],"AUTO_VERIFIED")
-        self.assertIn("RELEASE_SEASON_PROVIDER_MISMATCH",report["issues"])
+        self.assertIn("SEASON_EPISODE_MAPPING_UNVERIFIED",report["issues"])
         self.assertNotIn("approval",report)
 
     def test_qualified_recognized_names_keep_two_anidb_productions_separate(self):
