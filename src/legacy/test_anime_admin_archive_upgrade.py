@@ -2,6 +2,7 @@
 import io
 import stat
 import tarfile
+import zipfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -124,6 +125,35 @@ class ArchiveUpgradeTests(unittest.TestCase):
             upgrade_archive(self.root,self.archive,db_path=self.database,runner=self.runner)
         self.assertFalse(self.calls)
         self.assertEqual((self.root/"src"/"legacy"/"anime-discovery-live.py").read_text(),"old runtime")
+
+
+    def test_zip_release_upgrade_preserves_database_and_rollback_backup(self):
+        archive=self.base/"release.zip"
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr("anime-discovery/deploy/install-homelab.py","new installer")
+            z.writestr("anime-discovery/src/legacy/anime-discovery-live.py","new runtime")
+            z.writestr("anime-discovery/README.md","new release")
+        result=upgrade_archive(self.root,archive,db_path=self.database,
+                               runner=self.runner,backup=True)
+        self.assertTrue(result["updated"])
+        self.assertEqual((self.root/"src"/"legacy"/"anime-discovery-live.py").read_text(),"new runtime")
+        self.assertTrue(Path(result["backup_database"]).is_file())
+
+    def test_zip_path_traversal_and_symlinks_fail_before_service_stop(self):
+        archive=self.base/"unsafe.zip"
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr("anime-discovery/../../outside.txt","bad")
+        with self.assertRaisesRegex(ValueError,"unsafe"):
+            upgrade_archive(self.root,archive,db_path=self.database,runner=self.runner)
+        self.assertFalse(self.calls)
+        symlink=zipfile.ZipInfo("anime-discovery/src/legacy/evil")
+        symlink.create_system=3
+        symlink.external_attr=(stat.S_IFLNK | 0o777)<<16
+        with zipfile.ZipFile(archive,"w") as z:
+            z.writestr(symlink,"/etc/passwd")
+        with self.assertRaisesRegex(ValueError,"special"):
+            upgrade_archive(self.root,archive,db_path=self.database,runner=self.runner)
+        self.assertFalse(self.calls)
 
     def test_refuses_git_checkout_or_missing_database(self):
         (self.root/".git").mkdir()
