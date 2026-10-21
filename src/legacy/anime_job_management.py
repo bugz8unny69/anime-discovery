@@ -6,6 +6,7 @@ This avoids rebuilding production tables just to add a new display state.
 Only waiting jobs may be changed. Active leases are never seized.
 """
 import sqlite3
+from pathlib import Path
 import json
 from anime_cleanup_review import inventory
 import time
@@ -53,10 +54,21 @@ def has_staged_media(db, kind, subject_key):
     Uses durable staging records (rather than mere filename existence).
     Never mutate the filesystem during review or cancellation.
     """
-    if kind != "verified_batch_acquisition":
-        return False
     tables={row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
+    if kind=="claimed_acquisition":
+        if "episode_dispatch" in tables and db.execute(
+            """SELECT 1 FROM episode_dispatch WHERE notification_id=?
+               AND state='DONE' LIMIT 1""",(subject_key,)).fetchone():
+            return True
+        if "torrent_recovery_records" in tables:
+            for (path,) in db.execute("""SELECT staged_path FROM torrent_recovery_records
+                WHERE notification_id=?""",(subject_key,)):
+                if path and (Path(path).exists() or Path(path).is_symlink()):
+                    return True
+        return False
+    if kind != "verified_batch_acquisition":
+        return False
     if "anime_batch_staged" not in tables:
         return False
     if "anime_batch_authorizations" not in tables:
