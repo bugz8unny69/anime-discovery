@@ -12,7 +12,7 @@ from anime_series_naming import resolve_series_name
 from anime_flat_config import load_config
 from anime_qb_api import QBittorrentAPI
 from anime_single_size_intake import admit_single_episode
-from anime_episode_acquisition_guard import reserve,mark_staged
+from anime_episode_acquisition_guard import reserve,mark_staged,EpisodeSlotNeedsReview
 from anime_audio_verification import DualAudioRejected
 from anime_cancel_cleanup import cleanup_rejected_dual_audio
 
@@ -54,7 +54,11 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                     return {'state':'NEEDS_REVIEW'}
                 # Restore the slot after a crash between finalization and
                 # recording completion; never start another torrent.
-                slot=reserve(db,payload['notification_id'])
+                try:
+                    slot=reserve(db,payload['notification_id'])
+                except EpisodeSlotNeedsReview:
+                    job["episode_outcome"]="HISTORICAL_EPISODE_STAGING_UNVERIFIED"
+                    return {"state":"NEEDS_REVIEW"}
                 if slot!="OWNER":
                     job["episode_outcome"]="STAGED_EPISODE_SLOT_CONFLICT"
                     return {"state":"NEEDS_REVIEW"}
@@ -65,7 +69,11 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
             # Recheck approval before constructing any external client. A series
             # may have been quarantined or rejected since the job was enqueued.
             approval=approved_dispatch(db, payload['notification_id'])
-            slot=reserve(db,payload['notification_id'])
+            try:
+                slot=reserve(db,payload['notification_id'])
+            except EpisodeSlotNeedsReview:
+                job["episode_outcome"]="HISTORICAL_EPISODE_STAGING_UNVERIFIED"
+                return {"state":"NEEDS_REVIEW"}
             if slot=="ON_HOLD":
                 job["episode_outcome"]="ON_HOLD"
                 return {"state":"DEFERRED"}
