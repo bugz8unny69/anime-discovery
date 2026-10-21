@@ -346,6 +346,41 @@ class TriageTests(unittest.TestCase):
         self.assertIn("AMBIGUOUS_SEASON_SPECIFIC_ANIDB",report["issues"])
         self.assertNotIn("approval",report)
 
+    def test_reverse_mapping_offset_resolves_anidb_number_not_tvdb_number(self):
+        from anime_identity_mapping_v4 import resolve_tvdb_episode
+        xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
+             b'defaulttvdbseason="2" episodeoffset="2"/></anime-list>')
+        result=resolve_tvdb_episode(xml,"456","123",2,3)
+        self.assertEqual(result["anidb_episode_number"],1)
+        self.assertEqual(result["tvdb_episode"],3)
+        self.assertIsNone(resolve_tvdb_episode(xml,"456","123",1,3))
+
+    def test_offset_episode_pipeline_uses_actual_anidb_episode_number(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
+             b'defaulttvdbseason="2" episodeoffset="2"/></anime-list>')
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
+        rows=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
+        called=[]
+        def fetch(url,bearer=None):
+            if "/extended" in url:
+                return {"data":{"id":123,"name":"Example",
+                                "genres":[{"name":"Animation"}]}}
+            return {"data":{"episodes":[{"id":777,"seasonNumber":2,"number":3}]},
+                    "links":{"next":None}}
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(rows,False)):
+            result=investigate("[Group] Example S02E03",settings,
+                {"tvdb_api_key":"secret"},None,mapping_xml=xml,
+                search=lambda *_:self.fail("Expected targeted TVDB lookup"),
+                login=lambda _:"token",fetch=fetch,
+                anidb_resolve=lambda aid,ep:(called.append((aid,ep)) or
+                    (9876 if (aid,ep)==(456,1) else None)))
+        self.assertEqual(called,[(456,1)])
+        self.assertEqual(result["decision"],"AUTO_VERIFIED")
+        self.assertEqual(result["verified_anidb_episode_id"],9876)
+        self.assertEqual(result["episode_mapping"]["anidb_episode_number"],1)
+
     def test_anidb_first_release_shapes_keep_single_and_batch_paths_separate(self):
         from anime_unified_identity_monitor import investigate
         from anime_batch_selection import release_scope_hint
