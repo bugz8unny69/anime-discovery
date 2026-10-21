@@ -7,7 +7,7 @@ from anime_safe_handlers import SAFE_HANDLERS
 from anime_acquisition_handler import make_acquisition_handler
 
 def acquisition_handlers(db_path, qb_factory, *, download_root, trial_root,
-                         enabled=False, cleanup_source=False, jellyfin_refresh=None, staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None):
+                         enabled=False, cleanup_source=False, jellyfin_refresh=None, staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640", size_settings=None, sonarr_root=None):
     if enabled is not True:
         raise PermissionError("Acquisition handlers require explicit opt-in")
     handlers=dict(SAFE_HANDLERS)
@@ -15,5 +15,5 @@ def acquisition_handlers(db_path, qb_factory, *, download_root, trial_root,
         db_path,qb_factory,download_root=download_root,trial_root=trial_root, cleanup_source=cleanup_source, jellyfin_refresh=jellyfin_refresh,
             staged_owner=staged_owner,staged_group=staged_group,
             staged_directory_mode=staged_directory_mode,staged_file_mode=staged_file_mode,
-            size_settings=size_settings)
+            size_settings=size_settings,sonarr_root=sonarr_root)
     return handlers
