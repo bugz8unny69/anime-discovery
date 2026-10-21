@@ -38,7 +38,13 @@ table{width:100%;border-collapse:collapse;margin-top:14px;font-size:.94rem}
 th{text-align:left;color:#a9bfd8;font-weight:600}
 th,td{padding:13px 12px;border-bottom:1px solid #2b3d54}
 tbody tr:hover{background:#1e3046}
-td{overflow-wrap:anywhere;word-break:normal;vertical-align:top} td button{max-width:100%;white-space:normal}
+td{overflow-wrap:anywhere;word-break:normal;vertical-align:top}
+.jobs-table th,.jobs-table td{padding:7px 8px}.jobs-table{min-width:850px}
+.jobs-table td:last-child{min-width:175px}.jobs-table td:last-child button{padding:6px 9px;margin:2px;font-size:.87rem}
+.job-release{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:270px}
+.job-details summary{cursor:pointer;color:#a8bad1;max-width:300px}
+.job-details summary span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.job-details[open] summary span{display:block} td button{max-width:100%;white-space:normal}
 a{color:#87c8ff}input,select,button{background:#24344a;color:#eff5ff;
 border:1px solid #47607e;border-radius:8px;padding:10px 12px;font:inherit}
 input[type=checkbox]{width:18px;height:18px;accent-color:#56b2ff}
@@ -149,12 +155,13 @@ def tail():
 def pager(path,result):
     page,total,pages,size=result["page"],result["total"],result["pages"],result["page_size"]
     def href(p):
-        return path+"?"+urlencode({"page":p,"size":size})
+        return path+"?"+urlencode({"page":p,"size":size,**({"status":result["status_filter"]} if path=="/jobs" and result.get("status_filter","ALL")!="ALL" else {})})
+    suffix=("&status="+result["status_filter"].replace(" ","%20") if path=="/jobs" and result.get("status_filter","ALL")!="ALL" else "")
     opts="".join('<option value="'+str(n)+'"'+(" selected" if n==size else "")+'>'+str(n)+'</option>'
                  for n in (20,50,100))
     return ('<div class="page-controls"><span class="muted">'+str(total)+' total</span>'
             '<label>Rows per page <select onchange="location.href='
-            "'"+path+"?page=1&size=' + this.value"+'"'
+            "'"+path+"?page=1&size=' + this.value + '"+suffix+"'"+'"'
             '>'+opts+'</select></label>'
             +('<a href="'+href(page-1)+'">← Previous</a>' if page>1 else '')
             +'<span>Page '+str(page)+' of '+str(pages)+'</span>'
@@ -220,8 +227,13 @@ def jobs_page(result):
     out+='''<h1>Jobs</h1><p class="muted">Track incoming releases and acquisition jobs. Status updates every five seconds.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
+    selected=result.get("status_filter","ALL")
+    statuses=("ALL","RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING","DOWNLOADING",
+              "WAITING FOR DOWNLOAD","WAITING FOR SEARCH","COMPLETED","BLOCKED","CANCELED")
+    options="".join('<option value="'+escape(st)+'"'+(" selected" if st==selected else "")+'>'+escape("All statuses" if st=="ALL" else st.title())+'</option>' for st in statuses)
+    out+='<label>Status <select id="job-status-filter">'+options+'</select></label>'
     out+=pager("/jobs",result)+"</div></div>"
-    out+='''<table><thead><tr><th>Received</th><th>Release / Anime</th>
+    out+='''<table class="jobs-table"><thead><tr><th>Received</th><th>Release / Anime</th>
 <th class="hide-mobile">Source</th><th>Episode</th><th>Status</th><th>Activity details</th><th>Actions</th></tr>
 </thead><tbody id="job-rows"></tbody></table>
 <div id="no-jobs" class="empty hidden">No release notifications yet.</div>
@@ -254,7 +266,7 @@ tbody.replaceChildren();blank.classList.toggle("hidden",data.items.length!==0);
 for(const job of data.items){
 const tr=document.createElement("tr");
 td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
-let title=td(tr,job.release);
+let title=td(tr,"");let release=document.createElement("span");release.className="job-release";release.textContent=job.release;release.title=job.release;title.appendChild(release);
 if(typeof job.id==="number"){let id=document.createElement("small");id.className="muted";id.textContent=" · Notification #"+job.id;title.appendChild(id)}
 if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
@@ -268,8 +280,7 @@ status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
-const detail=td(tr,job.activity_detail||"No further activity recorded");
-detail.classList.add("muted");
+const detail=td(tr,"");const disclosure=document.createElement("details");disclosure.className="job-details";const summary=document.createElement("summary");const preview=document.createElement("span");preview.textContent=job.activity_detail||"No further activity recorded";summary.appendChild(preview);disclosure.appendChild(summary);detail.appendChild(disclosure);
 let actions=document.createElement("td");
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
@@ -380,6 +391,7 @@ try{let response=await fetch("/api/jobs"+location.search,{cache:"no-store"});
 if(!response.ok)throw Error("status "+response.status);
 update(await response.json());live.textContent="● Live";live.className="status running"}
 catch(e){live.textContent="Updates paused";live.className="status waiting"}}
+document.getElementById("job-status-filter").addEventListener("change",e=>{const p=new URLSearchParams(location.search);p.set("status",e.target.value);p.set("page","1");location.href="/jobs?"+p.toString()});
 setInterval(refresh,5000);
 </script>'''
     return out+tail()
