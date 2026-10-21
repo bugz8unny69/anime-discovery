@@ -264,8 +264,11 @@ class TriageTests(unittest.TestCase):
         settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
         def fetch(url,bearer=None):
             if "/extended" in url:
-                return {"data":{"id":305089,"remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
-            self.fail("No episode lookup for wrong-season candidate")
+                return {"data":{"id":305089,"name":"ReZERO",
+                                "genres":[{"name":"Animation"}],
+                                "remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
+            return {"data":{"episodes":[{"id":888,"seasonNumber":4,"number":19}]},
+                    "links":{"next":None}}
         with patch("anime_unified_identity_monitor.anidb_matches",
                    return_value=([{"anidb_id":"11370","titles":["ReZERO"],
                                   "matched_titles":["ReZERO"]}],False)):
