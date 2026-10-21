@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from anime_xml_response_diagnostics import InvalidXMLResponse,log_bad_xml
 from pathlib import Path
 from anime_flat_config import load_config
-from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm
+from anime_identification_probe import release_title,anidb_matches,tvdb_candidates,norm,candidate_titles
 from anime_batch_selection import release_scope_hint
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
@@ -165,6 +165,13 @@ def title_diagnostics(aliases,candidates,threshold):
                      "reason":reason})
     return rows
 
+def _anidb_family_title(aliases,titles):
+    """Advisory family-title corroboration; never approval on its own."""
+    terms=[norm(a) for a in aliases if isinstance(a,str) and len(norm(a))>=6]
+    names=[norm(t) for t in titles if isinstance(t,str)]
+    return any(n.startswith(term) or term.startswith(n)
+               for term in terms for n in names if n and len(n)>=6)
+
 def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvdb_token,fetch=request_json,mapping_xml=None,anidb_resolve=None,trusted_season=None):
     aliases,episode=release_title(name)
     threshold=settings.get("identity",{}).get("match_threshold_pct",90)
@@ -232,11 +239,39 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if not settings["tvdb"]["enabled"] or not secrets.get("tvdb_api_key"):
         report["issues"].append("TVDB_DISABLED_OR_KEY_MISSING")
         return report
-    if known:
-        candidates=[{"tvdb_id":str(known["tvdb_id"]),"name":known["title"]}]
-        errors=[]
-    else:
-        candidates,errors=search(aliases,secrets["tvdb_api_key"])
+    # AniDB -> Anime-Lists -> targeted TVDB: avoid broad title searches when
+    # exactly one TVDB series is cross-referenced by the title-matched AniDB IDs.
+    targeted={}
+    if mapping_xml is not None and rows and not truncated and not known:
+        root=ET.fromstring(mapping_xml)
+        if root.tag!="anime-list":
+            raise ValueError("Invalid Anime-Lists cross-reference root")
+        aids={str(r["anidb_id"]) for r in rows}
+        tids={node.get("tvdbid") for node in root.findall("anime")
+              if node.get("anidbid") in aids and (node.get("tvdbid") or "").isdecimal()
+              and int(node.get("tvdbid"))>0}
+        if len(tids)==1:
+            tid=tids.pop()
+            token=login(secrets["tvdb_api_key"])
+            detail=fetch(TVDB_URL+"/series/"+tid+"/extended",bearer=token).get("data") or {}
+            if str(detail.get("id"))!=tid:
+                raise ValueError("TVDB ID response mismatch")
+            names=candidate_titles(detail)
+            if names:
+                targeted[tid]=detail
+                candidates=[{"tvdb_id":tid,"name":names[0],
+                             "candidate_titles":names}]
+                errors=[]
+                report["workflow"].append({"step":"AniDB-first targeted TVDB discovery",
+                    "tvdb_id":tid,"source":"cached Anime-Lists","passed":True})
+    if not targeted:
+        if known:
+            candidates=[{"tvdb_id":str(known["tvdb_id"]),"name":known["title"]}]
+            errors=[]
+        else:
+            candidates,errors=search(aliases,secrets["tvdb_api_key"])
+        report["workflow"].append({"step":"TVDB discovery fallback",
+            "reason":"NO_UNIQUE_LOCAL_CROSSREFERENCE_OR_TVDB_TITLES"})
     report["tvdb_candidates"]=[str(c["tvdb_id"]) for c in candidates]
     report["tvdb_results_count"]=len(candidates)
     report["candidate_scores"]=title_diagnostics(aliases,candidates,threshold)
@@ -258,7 +293,7 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     if len(accepted)>10:
         report["issues"].append("AMBIGUOUS_TVDB_CANDIDATES")
         return report
-    token=login(secrets["tvdb_api_key"])
+    token=token if targeted else login(secrets["tvdb_api_key"])
     aid_set={str(x["anidb_id"]) for x in rows}
     # Anime-Lists independently corroborates series ID pairs even if TVDB
     # lacks an AniDB remote ID. Parse the trusted cached XML exactly once.
@@ -275,7 +310,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         tid=str(candidate["tvdb_id"])
         if tid not in accepted:
             continue
-        detail=fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {}
+        detail=(targeted[tid] if tid in targeted else
+                fetch(TVDB_URL+"/series/"+str(int(tid))+"/extended",bearer=token).get("data") or {})
         if str(detail.get("id"))!=tid:
             raise ValueError("TVDB ID response mismatch")
         provider_ids=set(explicit_anidb_ids(detail))
@@ -285,6 +321,12 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
                 and mapping_xml is not None and catalog is not None):
             discovered=season_candidates(mapping_xml,catalog,tid,
                                          hint.get("season_hint"),episode)
+            # A sequel's AniDB title must remain present in the official
+            # catalog and independently resemble the parsed release family.
+            # The TVDB title has already passed its independent threshold.
+            for item in discovered:
+                item["title_family_corrob"]=(item["title_index_present"]
+                    and _anidb_family_title(aliases,item["titles"]))
             report["season_mapping_candidates"].extend(discovered)
             report["workflow"].append({"step":"Season-compatible Anime-Lists candidates",
                 "tvdb_id":tid,"release_season":hint.get("season_hint"),
@@ -320,6 +362,23 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         for aid in sorted(match):
             report["matching_pairs"].append({"tvdb_id":tid,"anidb_id":aid,
                **({"episode_rule":mapped[aid]} if aid in mapped else {})})
+    # Prefer a uniquely season-compatible, title-corroborated AniDB sequel
+    # over an original-series cross-reference. Never infer a relationship from
+    # the release season alone; the cached XML must resolve the exact episode.
+    if hint.get("kind")=="single_episode" and report["season_mapping_candidates"]:
+        acceptable={(item["tvdb_id"],item["anidb_id"]):item
+                    for item in report["season_mapping_candidates"]
+                    if item.get("title_family_corrob")}
+        if len(acceptable)==1:
+            key,item=next(iter(acceptable.items()))
+            report["matching_pairs"]=[{"tvdb_id":key[0],"anidb_id":key[1],
+                                       "episode_rule":item["episode_rule"]}]
+            report["workflow"].append({"step":"Season-specific AniDB selection",
+                "tvdb_id":key[0],"anidb_id":key[1],
+                "source":"Anime-Lists episode rule + AniDB title family",
+                "unique":True})
+        elif len(acceptable)>1:
+            report["issues"].append("AMBIGUOUS_SEASON_SPECIFIC_ANIDB")
     report["workflow"].append({"step":"Explicit TVDB-to-AniDB cross-reference",
                                 "matching_pairs":len(report["matching_pairs"]),
                                 "records_inspected":len(report["crossref_diagnostics"])})
