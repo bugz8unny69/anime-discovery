@@ -104,7 +104,7 @@ def preflight(qb,infohash,*,download_root,trial_root,sonarr_root=None):
             name=PurePosixPath(entry["name"])
             if name.is_absolute() or ".." in name.parts:
                 raise ValueError("Unsafe shared torrent path")
-            candidate=Path(other_save).joinpath(*name.parts)
+            candidate=Path(other_save).joinpath(*name.parts).resolve(strict=False)
             if candidate in candidates:
                 raise ValueError("Torrent file shared with another torrent")
     # Reinspect each file directly before returning the plan.
