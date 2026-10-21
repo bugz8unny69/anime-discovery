@@ -314,7 +314,15 @@ def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,so
         raise ValueError("No verified torrent payload paths")
     db.execute("BEGIN IMMEDIATE")
     try:
-        # Fence a new approval or sharing link across the destructive action.
+        # Fence new leases and any new sharing link before destructive I/O.
+        live_lease=db.execute("""SELECT lease_token,lease_until,state FROM daemon_jobs
+            WHERE id=?""",(job["id"],)).fetchone()
+        if not live_lease or live_lease[0]!=job["lease_token"] or live_lease[1]<time.time() or live_lease[2]!="LEASED":
+            raise ValueError("Cleanup lease expired before deletion")
+        if db.execute("SELECT 1 FROM torrent_recovery_records WHERE lower(infohash)=?",(infohash,)).fetchone():
+            raise ValueError("Torrent acquired staged-media consumer")
+        if db.execute("SELECT 1 FROM anime_batch_authorizations WHERE lower(infohash)=?",(infohash,)).fetchone():
+            raise ValueError("Torrent acquired batch consumer")
         if db.execute("SELECT 1 FROM notifications WHERE lower(info_hash)=? AND id<>?",(infohash,nid)).fetchone():
             raise ValueError("Torrent became shared")
         current=qb.torrent_identity(infohash)
