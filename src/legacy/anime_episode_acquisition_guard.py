@@ -6,6 +6,9 @@ webhook approval. STAGED means validated Jellyfin trial, not manual Keep.
 import sqlite3
 from pathlib import Path
 
+class EpisodeSlotNeedsReview(ValueError):
+    """Existing episode evidence is inconsistent; never start another torrent."""
+
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS anime_episode_acquisition_slots (
       tvdb_id TEXT NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL,
@@ -40,12 +43,12 @@ def reserve(db, notification_id):
             if previous:
                 if len(previous)!=1 or not db.execute("""SELECT 1 FROM sqlite_master
                     WHERE type='table' AND name='torrent_recovery_records'""").fetchone():
-                    raise ValueError("Historical trial completion needs reconciliation")
+                    raise EpisodeSlotNeedsReview("HISTORICAL_EPISODE_STAGING_UNVERIFIED")
                 record=db.execute("""SELECT staged_path,sha256 FROM torrent_recovery_records
                     WHERE notification_id=?""",(previous[0][0],)).fetchone()
                 path=Path(record[0]) if record and isinstance(record[0],str) and record[0] else None
                 if not record or not record[1] or not path or path.is_symlink() or not path.is_file():
-                    raise ValueError("Historical trial staging needs reconciliation")
+                    raise EpisodeSlotNeedsReview("HISTORICAL_EPISODE_STAGING_UNVERIFIED")
                 db.execute("""INSERT INTO anime_episode_acquisition_slots
                     VALUES (?,?,?,?,'STAGED')""",(*key,previous[0][0]))
                 answer="OWNER" if previous[0][0]==notification_id else "SKIPPED_DUPLICATE"
