@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 from anime_async_daemon import enqueue
 from anime_job_management import manage
-from anime_cancel_cleanup import prepare,cleanup_torrents
+from anime_cancel_cleanup import prepare,preview_live,cleanup_torrents
 
 H="a"*40
 class MockQB:
@@ -78,6 +78,9 @@ class CancelCleanupTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT status FROM daemon_job_cleanup_review").fetchone()[0],
             "CLEANUP_NEEDED")
+        preview=preview_live(self.db,self.jid,self.qb)
+        self.assertTrue(preview["can_remove_torrents"])
+        self.assertTrue(preview["records"][0]["reconcile_only"])
         self.assertEqual(cleanup_torrents(
             self.db,self.jid,self.qb,approved=True),[(H,"ABSENT")])
         self.assertEqual(len(self.qb.removed),1)
