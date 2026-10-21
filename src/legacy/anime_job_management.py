@@ -85,6 +85,13 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
             (new_state,job_id,kind,state,attempts)).rowcount
         if changed!=1:
             raise ValueError("Job is leased or changed; refresh and try again")
+        if operation=="cancel":
+            db.execute("""INSERT INTO daemon_job_archived_subjects
+                (job_id,kind,original_subject_key) VALUES (?,?,?)""",
+                (job_id,kind,subject_key))
+            db.execute("""UPDATE daemon_jobs SET subject_key=?
+                WHERE id=? AND state='BLOCKED'""",
+                ("archived:"+str(job_id)+":"+subject_key,job_id))
         db.execute("""INSERT INTO daemon_job_admin_events
             (job_id,action,previous_state,previous_attempts,previous_error,created_at)
             VALUES (?,?,?,?,?,?)""",(job_id,operation,state,attempts,error,now))
