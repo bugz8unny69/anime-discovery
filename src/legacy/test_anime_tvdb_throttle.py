@@ -52,6 +52,8 @@ class TVDBThrottleTests(unittest.TestCase):
                 return self
             def __exit__(self,*args):
                 pass
+            def read(self,*args):
+                return self.data.encode()
         def urlopen(req,timeout):
             urls.append(req.full_url)
             if req.full_url.endswith("/login"):
