@@ -80,3 +80,7 @@ def record_failure(path,status,retry_after,*,now=None):
         db.execute("""UPDATE tvdb_http_limit SET failures=?,
                  next_allowed_at=MAX(next_allowed_at,?) WHERE id=1""",
                  (min(count+1,7),stamp+wait))
+
+def record_success(path):
+    with _db(path) as db:
+        db.execute("UPDATE tvdb_http_limit SET failures=0 WHERE id=1")
