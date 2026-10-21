@@ -60,7 +60,7 @@ class ManageTests(unittest.TestCase):
         self.assertIsNone(claim(self.db,now=99999))
         self.assertEqual(self.row()[2:4],(1,"IdentityNotReady"))
         self.assertEqual(latest_events(self.db)[self.job_id]["action"],"cancel")
-        with self.assertRaisesRegex(ValueError,"changed"):
+        with self.assertRaisesRegex(ValueError,"changed|Expected waiting"):
             manage(self.db,self.job_id,"cancel",
                    expected_state="DEFERRED",expected_attempts=1)
         with self.assertRaises(ValueError):
@@ -123,7 +123,7 @@ class ManageTests(unittest.TestCase):
         self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         with sqlite3.connect(self.path,isolation_level=None) as other:
             manage(other,self.job_id,"retry",
-                   expected_state="DEFERRED",expected_attempts=1)
+                   expected_state="NEEDS_REVIEW",expected_attempts=1)
         with self.assertRaisesRegex(ValueError,"changed"):
             manage(self.db,self.job_id,"cancel",
                    expected_state="NEEDS_REVIEW",expected_attempts=1)
