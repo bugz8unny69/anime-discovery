@@ -11,8 +11,8 @@ from anime_review_messages import describe_review
 
 PAGE_SIZES=(20,50,100)
 JOB_STATUSES=("RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING",
-              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH",
-              "COMPLETED","BLOCKED","CANCELED")
+              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH","ON HOLD",
+              "SKIPPED DUPLICATE","COMPLETED","BLOCKED","CANCELED")
 
 
 def pagination(page=1, size=20):
