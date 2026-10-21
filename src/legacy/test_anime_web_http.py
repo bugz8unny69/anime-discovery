@@ -498,14 +498,14 @@ class DashboardHTTPTests(unittest.TestCase):
             enqueue(db,"claimed_acquisition",str(nid),'{"notification_id":1}')
             jid=db.execute("""SELECT id FROM daemon_jobs WHERE kind='claimed_acquisition'
                 AND subject_key=?""",(str(nid),)).fetchone()[0]
-            db.execute("""UPDATE daemon_jobs SET state='DEFERRED',
+            db.execute("""UPDATE daemon_jobs SET state='NEEDS_REVIEW',
                 attempts=10,available_at=9999999999,last_error='IdentityNotReady'
                 WHERE id=?""",(jid,))
         status,_,page=self.request("GET","/jobs")
         self.assertEqual(status,200)
         self.assertIn("Retry Now",page)
         self.assertIn("Cancel Job",page)
-        self.assertIn("Next retry:",page)
+        self.assertNotIn("Next retry:",page)
         status,_,body=self.request("GET","/api/jobs")
         self.assertEqual(status,200)
         item=next(j for j in json.loads(body)["items"] if j.get("job_id")==jid)
@@ -513,13 +513,15 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertEqual(item["last_error"],"IdentityNotReady")
         self.assertTrue(item["can_retry"])
         self.assertTrue(item["can_cancel"])
-        data={"job_id":jid,"action":"retry","expected_state":"DEFERRED",
+        data={"job_id":jid,"action":"retry","expected_state":"NEEDS_REVIEW",
               "expected_attempts":10}
         status,_,body=self.request("POST","/api/manage-job",data)
         self.assertEqual(status,200,body)
         self.assertEqual(json.loads(body)["state"],"READY")
         self.assertEqual(self.request("POST","/api/manage-job",data)[0],409)
-        data={"job_id":jid,"action":"cancel","expected_state":"READY",
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+        data={"job_id":jid,"action":"cancel","expected_state":"NEEDS_REVIEW",
               "expected_attempts":10}
         status,_,body=self.request("POST","/api/manage-job",data)
         self.assertEqual(status,200,body)
