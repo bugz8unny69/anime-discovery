@@ -36,6 +36,7 @@ table{width:100%;border-collapse:collapse;margin-top:14px;font-size:.94rem}
 th{text-align:left;color:#a9bfd8;font-weight:600}
 th,td{padding:13px 12px;border-bottom:1px solid #2b3d54}
 tbody tr:hover{background:#1e3046}
+td{overflow-wrap:anywhere;word-break:normal;vertical-align:top} td button{max-width:100%;white-space:normal}
 a{color:#87c8ff}input,select,button{background:#24344a;color:#eff5ff;
 border:1px solid #47607e;border-radius:8px;padding:10px 12px;font:inherit}
 input[type=checkbox]{width:18px;height:18px;accent-color:#56b2ff}
