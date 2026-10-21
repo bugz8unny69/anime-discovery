@@ -16,7 +16,6 @@ def main():
     try:
         for script in ("anime-discovery-web.py", "anime-discovery-worker.py"):
             processes.append(subprocess.Popen([sys.executable, str(base / script)]))
-        processes.append(subprocess.Popen([sys.executable, str(base / "anime_unified_identity_monitor.py")]))
         # Monitor reloads config each cycle, including enablement changes.
         # Always launch it so Save & Apply can enable NTFY without a daemon restart.
         processes.append(subprocess.Popen([sys.executable, str(base / "anime_ntfy_monitor.py")]))
