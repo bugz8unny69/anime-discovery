@@ -210,6 +210,26 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
                 if old_magnet and old_magnet[0]!=magnet:
                     raise ValueError("Duplicate season-pack notification changed magnet identity")
                 db.execute("INSERT OR IGNORE INTO anime_batch_pending VALUES (?,?)",(nid,magnet))
+        # Upgrade legacy canceled jobs that still occupy the unique subject
+        # slot. Only an auditable admin cancellation can be archived.
+        if old:
+            from anime_job_management import ensure_schema as admin_schema
+            admin_schema(db)
+            for kind in ("verified_batch_acquisition","claimed_acquisition"):
+                archived=db.execute("""SELECT j.id FROM daemon_jobs j
+                    JOIN daemon_job_admin_events e ON e.job_id=j.id
+                    WHERE j.kind=? AND j.subject_key=? AND j.state='BLOCKED'
+                      AND e.id=(SELECT MAX(id) FROM daemon_job_admin_events
+                                WHERE job_id=j.id) AND e.action='cancel'""",
+                    (kind,str(nid))).fetchone()
+                if archived:
+                    jid=archived[0]
+                    db.execute("""INSERT OR IGNORE INTO daemon_job_archived_subjects
+                        (job_id,kind,original_subject_key) VALUES (?,?,?)""",
+                        (jid,kind,str(nid)))
+                    db.execute("""UPDATE daemon_jobs SET subject_key=?
+                        WHERE id=? AND state='BLOCKED' AND subject_key=?""",
+                        ("archived:"+str(jid)+":"+str(nid),jid,str(nid)))
         # An explicitly canceled attempt is terminal. On a fresh webhook,
         # reuse persisted verified batch authorization and create a NEW job.
         # The old job remains in archived history and is never reactivated.
