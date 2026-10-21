@@ -16,10 +16,10 @@ _FIELDS = frozenset({
 _TOKEN = re.compile(r"^[a-zA-Z0-9_.:-]{1,96}$")
 _SECRETS = (
     (re.compile(r"(?i)\b(bearer)\s+[^\s,;\]\)]+"), r"\1 [REDACTED]"),
-    (re.compile(r"(?i)\b(password|token|api[_-]?key|secret|cookie|authorization)\b"
+    (re.compile(r"(?i)\b(password|passkey|access[_-]?token|token|api[_-]?key|apikey|x-emby-token|secret|cookie|authorization|signature)\b"
                 r"(\s*[:=]\s*|\s+)[^\s,;\]\)]+"), r"\1=[REDACTED]"),
     (re.compile(r"(?i)(https?://)[^/@\s]+@"), r"\1[REDACTED]@"),
-    (re.compile(r"(?i)([?&](?:token|key|api_key|password|secret|auth)=)[^&#\s]+"),
+    (re.compile(r"(?i)([?&](?:token|access_token|key|api_key|apikey|passkey|password|secret|auth|signature|x-emby-token)=)[^&#\s]+"),
      r"\1[REDACTED]"),
 )
 
