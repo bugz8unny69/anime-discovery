@@ -282,6 +282,36 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,"");const disclosure=document.createElement("details");disclosure.className="job-details";const summary=document.createElement("summary");const preview=document.createElement("span");preview.textContent=job.activity_detail||"No further activity recorded";summary.appendChild(preview);disclosure.appendChild(summary);detail.appendChild(disclosure);
 let actions=document.createElement("td");
+if(job.status==="CANCELED" && typeof job.job_id==="number"){
+  let btn=document.createElement("button");btn.type="button";btn.className="secondary";
+  btn.textContent="Review cleanup";
+  btn.addEventListener("click",async()=>{
+    try{
+      const response=await fetch("/api/cleanup-preview?job_id="+encodeURIComponent(job.job_id),
+        {credentials:"same-origin"});
+      const plan=await response.json();
+      if(!response.ok)throw Error(plan.error||"Cleanup preview unavailable");
+      const count=plan.records.length;
+      const summary=count?count+" candidate torrent(s); "+
+        plan.records.filter(item=>item.eligible).length+" ownership-verified.": "No verified torrent candidates.";
+      if(!plan.can_remove_torrents){
+        alert(summary+" Cleanup is blocked to protect unknown or shared resources. No files were deleted.");
+        return;
+      }
+      if(!confirm(summary+" Remove only the owned qBittorrent torrent entries? Downloaded and staged files will NOT be deleted."))return;
+      const typed=prompt('Type REMOVE TORRENT ONLY to confirm. Files will be preserved.');
+      if(typed!=="REMOVE TORRENT ONLY")return;
+      const csrf=document.querySelector('input[name="_csrf"]')?.value;
+      const done=await fetch("/api/cleanup-confirm",{method:"POST",credentials:"same-origin",
+        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+        body:JSON.stringify({job_id:job.job_id,confirmation:typed})});
+      const result=await done.json();
+      if(!done.ok)throw Error(result.error||"Cleanup requires review");
+      alert(result.removed+" torrent entry/entries removed. Media files were preserved.");
+      await refresh();
+    }catch(error){alert(error.message)}
+  });actions.appendChild(btn);
+}
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
   btn.addEventListener("click",()=>{
