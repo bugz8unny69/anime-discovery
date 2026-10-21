@@ -69,8 +69,8 @@ class EndToEndTests(unittest.TestCase):
             db.execute("INSERT INTO notifications VALUES(7,?)",(HASH,))
             db.execute("CREATE TABLE verified_series_identity(notification_id INTEGER,tvdb_id TEXT)")
             db.execute("INSERT INTO verified_series_identity VALUES(7,'123')")
-            db.execute("CREATE TABLE episode_dispatch(notification_id INTEGER PRIMARY KEY,series_id INTEGER,state TEXT,last_error TEXT,updated_at INTEGER)")
-            db.execute("INSERT INTO episode_dispatch VALUES(7,4,'CLAIMED',NULL,0)")
+            db.execute("CREATE TABLE episode_dispatch(notification_id INTEGER PRIMARY KEY,series_id INTEGER,season INTEGER,episode INTEGER,state TEXT,last_error TEXT,updated_at INTEGER)")
+            db.execute("INSERT INTO episode_dispatch VALUES(7,4,1,1,'CLAIMED',NULL,0)")
             db.execute("INSERT INTO daemon_jobs(kind,subject_key,payload_json,state) VALUES(?,?,?,'READY')",
                 ("claimed_acquisition","7",json.dumps({
                     "notification_id":7,"infohash":HASH,"magnet_uri":MAGNET,
