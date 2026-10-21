@@ -25,6 +25,9 @@ class CancelCleanupTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         enqueue(self.db,"claimed_acquisition","7",'{"notification_id":7}')
         self.jid=self.db.execute("SELECT id FROM daemon_jobs").fetchone()[0]
+        self.db.execute("""CREATE TABLE notifications
+            (id INTEGER,info_hash TEXT)""")
+        self.db.execute("INSERT INTO notifications VALUES (7,?)",(H,))
         self.db.execute("""CREATE TABLE torrent_recovery_records
             (notification_id INTEGER, infohash TEXT)""")
         self.db.execute("""CREATE TABLE anime_batch_authorizations
@@ -70,6 +73,13 @@ class CancelCleanupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"uncertain"):
             cleanup_torrents(self.db,self.jid,self.qb,approved=True)
         self.assertEqual(len(self.qb.removed),1)
+
+    def test_other_notification_hash_blocks_even_without_recovery_row(self):
+        self.db.execute("INSERT INTO notifications VALUES (8,?)",(H,))
+        self.assertFalse(prepare(self.db,self.jid)["can_remove_torrents"])
+        with self.assertRaises(ValueError):
+            cleanup_torrents(self.db,self.jid,self.qb,approved=True)
+        self.assertEqual(self.qb.removed,[])
 
     def test_unproven_status_blocks(self):
         self.db.execute("UPDATE qb_torrent_ownership SET status='UNCERTAIN'")
