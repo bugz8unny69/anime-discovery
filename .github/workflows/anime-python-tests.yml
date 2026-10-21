@@ -23,6 +23,7 @@ jobs:
           PYTHONPATH: src/legacy
         run: |
           python -m unittest -v \
+            test_anime_diagnostics \
             test_anime_acquisition_flow \
             test_anime_qb_submission \
             test_anime_action_reconcile \
