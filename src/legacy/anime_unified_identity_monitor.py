@@ -565,9 +565,37 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 # Save the exact AniDB ID first: if this write fails, do not
                 # authorize a download without retained post-Keep provenance.
                 db.commit()
-                approve(db,nid,report["approval"],source="verified_identity_mapping")
-                # approve() atomically records proof and queues the job.
-                db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
+                from anime_trial_policy import eligibility
+                approved = report["approval"]
+                policy = eligibility(db,tvdb_id=approved["tvdb_id"],
+                                     anidb_id=approved["anidb_id"],
+                                     season=approved["season"],episode=approved["episode"])
+                if policy["eligible"]:
+                    approve(db,nid,approved,source="verified_identity_mapping")
+                    # approve() atomically records proof and queues the job.
+                    db.execute("UPDATE notifications SET status='APPROVED' WHERE id=? AND status='IDENTIFYING'",(nid,))
+                else:
+                    # The verified identity is sound; only this incoming
+                    # episode falls outside the configured evaluation range.
+                    # This is a normal terminal outcome, never a lookup error.
+                    search_titles=report.get("title_queries") or []
+                    alias=next((name for name in search_titles
+                                if isinstance(name,str) and name.strip() and len(name)<=200),None)
+                    report["episode_range"]={"season":approved["season"],
+                        "episode":approved["episode"],"start":policy["window"]["start"],
+                        "end":policy["window"]["end"]}
+                    if alias and settings.get("prowlarr",{}).get("enabled",False):
+                        from anime_shared_discovery import schedule
+                        schedule(db,title=alias,tvdb_id=approved["tvdb_id"],
+                                 anidb_id=approved["anidb_id"],season=approved["season"],
+                                 up_to=policy["window"]["end"],origin="autobrr")
+                        report["issues"]=["EPISODE_EXCLUDED_BACKFILL_QUEUED"]
+                    else:
+                        report["issues"]=["EPISODE_EXCLUDED_BACKFILL_UNAVAILABLE"]
+                    decision="EPISODE_EXCLUDED"
+                    report["decision"]=decision
+                    db.execute("""UPDATE notifications SET status='EXCLUDED_TRIAL_WINDOW'
+                        WHERE id=? AND status='IDENTIFYING'""",(nid,))
             retry=False
         except Exception as exc:
             import xml.etree.ElementTree as ET
