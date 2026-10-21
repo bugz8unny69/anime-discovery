@@ -53,10 +53,11 @@ def preflight(qb,infohash,*,download_root,trial_root,sonarr_root=None):
         raise ValueError("Download and staging storage overlap")
     if sonarr_root:
         other=Path(sonarr_root)
-        if other.exists():
-            other=other.resolve(strict=True)
-            if root==other or _within(root,other) or _within(other,root):
-                raise ValueError("Downloads overlap Sonarr-managed storage")
+        if not other.is_dir() or other.is_symlink():
+            raise ValueError("Sonarr storage root cannot be verified")
+        other=other.resolve(strict=True)
+        if root==other or _within(root,other) or _within(other,root):
+            raise ValueError("Downloads overlap Sonarr-managed storage")
     detail=qb.torrent_details(infohash)
     if not detail or detail.get("hash","").lower()!=infohash:
         raise ValueError("Exact torrent details unavailable")
