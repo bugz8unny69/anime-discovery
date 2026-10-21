@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from anime_tvdb_throttle import reserve_request, record_failure, TVDBDeferred, current_scope
+from anime_tvdb_throttle import reserve_request, record_failure, record_success, TVDBDeferred, current_scope
 
 from anime_identity_catalog import audit, read_catalog
 from anime_config_runtime import get as config_get
@@ -50,7 +50,10 @@ def request_json(url, payload=None, bearer=None):
         reserve_request(scope)
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.load(resp)
+            result=json.load(resp)
+        if scope and url.startswith(TVDB_URL+"/"):
+            record_success(scope)
+        return result
     except urllib.error.HTTPError as exc:
         if scope and url.startswith(TVDB_URL+"/"):
             record_failure(scope,exc.code,exc.headers.get("Retry-After"))
