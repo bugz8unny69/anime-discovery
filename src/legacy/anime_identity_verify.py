@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from anime_tvdb_throttle import reserve_request, record_failure, TVDBDeferred, current_scope
 
 from anime_identity_catalog import audit, read_catalog
 from anime_config_runtime import get as config_get
@@ -44,8 +45,23 @@ def request_json(url, payload=None, bearer=None):
     if bearer:
         headers['Authorization'] = 'Bearer ' + bearer
     req = urllib.request.Request(url, data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.load(resp)
+    scope=current_scope()
+    if scope and url.startswith(TVDB_URL+"/"):
+        reserve_request(scope)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as exc:
+        if scope and url.startswith(TVDB_URL+"/"):
+            record_failure(scope,exc.code,exc.headers.get("Retry-After"))
+            if exc.code in (429,500,502,503,504):
+                raise TVDBDeferred("TVDB temporary HTTP restriction") from None
+        raise
+    except (urllib.error.URLError,TimeoutError):
+        if scope and url.startswith(TVDB_URL+"/"):
+            record_failure(scope,503,None)
+            raise TVDBDeferred("TVDB temporarily unavailable") from None
+        raise
 
 def tvdb_token(api_key, pin=''):
     payload = {'apikey': api_key}
