@@ -65,7 +65,7 @@ def prepare(db, job_id):
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_cleanup_attempts (
         job_id INTEGER NOT NULL REFERENCES daemon_jobs(id), infohash TEXT NOT NULL,
-        state TEXT NOT NULL CHECK(state IN ('PENDING','UNCERTAIN','REMOVED')),
+        state TEXT NOT NULL CHECK(state IN ('PENDING','UNCERTAIN','REMOVED','ABSENT')),
         updated_at REAL NOT NULL, PRIMARY KEY(job_id,infohash))""")
 
 def cleanup_torrents(db,job_id,qb,*,approved=False):
@@ -87,12 +87,17 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
         h=record["infohash"]
         prior=db.execute("""SELECT state FROM daemon_job_cleanup_attempts
             WHERE job_id=? AND infohash=?""",(job_id,h)).fetchone()
-        if prior and prior[0]=="REMOVED":
-            results.append((h,"REMOVED"))
+        if prior and prior[0] in ("REMOVED","ABSENT"):
+            results.append((h,prior[0]))
             continue
-        if prior and prior[0]=="UNCERTAIN":
-            raise ValueError("Prior removal outcome uncertain; manual verification required")
         current=qb.torrent_identity(h)
+        if prior and prior[0]=="UNCERTAIN" and current is None:
+            # A previous request may have completed despite a lost reply.
+            # Record verified absence without asserting who removed it.
+            db.execute("""UPDATE daemon_job_cleanup_attempts SET state='ABSENT',
+                updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
+            results.append((h,"ABSENT"))
+            continue
         ownership=db.execute("""SELECT status,marker,category FROM qb_torrent_ownership
             WHERE infohash=?""",(h,)).fetchone()
         tags=current.get("tags","") if isinstance(current,dict) else ""
