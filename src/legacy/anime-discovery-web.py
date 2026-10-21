@@ -172,6 +172,17 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
             path=route.path
             if path=="/health":
                 return self.send(200,'{"status":"running"}',"application/json")
+            if path=="/api/cleanup-preview":
+                try:
+                    ids=parse_qs(route.query).get("job_id",[])
+                    if len(ids)!=1 or not ids[0].isdigit() or int(ids[0])<1:
+                        raise ValueError("Valid canceled job ID required")
+                    from anime_cancel_cleanup import prepare
+                    with self.database() as db:
+                        preview=prepare(db,int(ids[0]))
+                    return self.send(200,json.dumps(preview),"application/json")
+                except (ValueError,TypeError,sqlite3.Error) as exc:
+                    return self.send(409,json.dumps({"error":str(exc)}),"application/json")
             if path=="/api/identity-trace":
                 try:
                     params=parse_qs(route.query)
