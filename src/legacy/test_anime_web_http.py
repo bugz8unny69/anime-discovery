@@ -716,6 +716,26 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertNotIn('traceLine(body,step.step+',page)
         self.assertIn("textContent=String(text)",page)
 
+    def test_matching_details_explains_exact_episode_identity_and_failure_states(self):
+        status,_,page=self.request("GET","/jobs")
+        self.assertEqual(status,200)
+        for value in ("Why verification stopped","Episode identity chain",
+                      "Season-specific Anime-Lists candidates",
+                      "Identification workflow","Selected TVDB series",
+                      "Selected AniDB anime","AniDB episode number",
+                      "AniDB internal EID","Episode ID source",
+                      "VERIFIED_EPISODE_MAPPING_MISSING",
+                      "AMBIGUOUS_SEASON_SPECIFIC_ANIDB",
+                      "BATCH_FILE_MANIFEST_REQUIRED"):
+            self.assertIn(value,page)
+        self.assertIn("ev.season_mapping_candidates",page)
+        self.assertIn("ev.verified_anidb_episode_id",page)
+        self.assertIn("ev.episode_mapping",page)
+        self.assertIn("textContent=String(text)",page)
+        self.assertNotIn("innerHTML=",page[page.index("function traceNode("):page.index("async function retryIdentity(")])
+        self.assertIn('id="match-trace-retry"',page)
+        self.assertIn('openTrace(job.id,job.status==="NEEDS REVIEW"&&job.can_resolve===true)',page)
+
     def test_identity_trace_requires_session_and_shows_scores(self):
         import os
         from anime_flat_config import DEFAULT_SETTINGS
