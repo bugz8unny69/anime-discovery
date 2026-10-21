@@ -183,20 +183,39 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
              json.dumps(plan["files"])))
         db.execute("""UPDATE daemon_job_cleanup_review SET status='CLEANUP_NEEDED'
             WHERE job_id=?""",(job_id,))
+        # Fence new notifications/authorizations while executing the
+        # externally destructive step. UNCERTAIN was already committed, so
+        # interruption or rollback never erases the recovery checkpoint.
+        db.execute("BEGIN IMMEDIATE")
         try:
+            if not all(r["eligible"] for r in prepare(db,job_id)["records"]):
+                raise ValueError("Torrent became shared before cleanup")
+            live=qb.torrent_identity(h)
+            fresh_tags=live.get("tags","") if isinstance(live,dict) else ""
+            fresh_labels={v.strip() for v in fresh_tags.split(",")} if isinstance(fresh_tags,str) else set()
+            if (not isinstance(live,dict) or live.get("hash","").lower()!=h or
+                live.get("category")!=CATEGORY or ownership[1] not in fresh_labels):
+                raise ValueError("Torrent identity changed before cleanup")
+            if delete_download_files:
+                from anime_cleanup_file_safety import preflight
+                fresh_plan=preflight(qb,h,download_root=download_root,
+                    trial_root=trial_root,sonarr_root=sonarr_root)
+                if fresh_plan!=plan:
+                    raise ValueError("Torrent download manifest changed before cleanup")
             qb.remove_torrent(h,delete_files=delete_download_files)
             if qb.torrent_identity(h) is not None:
                 raise RuntimeError("Torrent removal not confirmed")
-            if delete_download_files:
-                from pathlib import Path
-                if any(Path(path).exists() or Path(path).is_symlink()
-                       for path in plan["files"]):
-                    raise RuntimeError("Downloaded file removal not confirmed")
-        except Exception:
-            # Cannot know if qB completed a timed-out request.
+            if delete_download_files and any(
+                    Path(path).exists() or Path(path).is_symlink()
+                    for path in plan["files"]):
+                raise RuntimeError("Downloaded file removal not confirmed")
+            db.execute("""UPDATE daemon_job_cleanup_attempts SET state='REMOVED',
+                updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
+            db.commit()
+        except BaseException:
+            db.rollback()
+            # Original UNCERTAIN checkpoint survives a lost qB response.
             raise
-        db.execute("""UPDATE daemon_job_cleanup_attempts SET state='REMOVED',
-            updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
         results.append((h,"REMOVED"))
     if len(results)==len(preview["records"]) and all(
             state in ("REMOVED","ABSENT","ALREADY_REMOVED","ALREADY_ABSENT")
@@ -204,7 +223,7 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
         modes=db.execute("""SELECT delete_files_requested,file_paths_json
             FROM daemon_job_cleanup_attempts WHERE job_id=?""",(job_id,)).fetchall()
         files_cleared=bool(modes) and all(
-            requested and all(not __import__("pathlib").Path(path).exists()
+            requested and all(not Path(path).exists() and not Path(path).is_symlink()
                               for path in json.loads(paths))
             for requested,paths in modes)
         status=("DOWNLOADS_CLEARED" if files_cleared else
