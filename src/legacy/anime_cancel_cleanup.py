@@ -340,14 +340,30 @@ def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,so
     except BaseException:
         db.rollback()
         raise
-    # An error after UNCERTAIN is intentionally not retried automatically.
-    qb.remove_torrent(infohash,delete_files=True)
-    if qb.torrent_identity(infohash) is not None:
-        raise RuntimeError("qBittorrent removal not confirmed")
-    if any(Path(path).exists() or Path(path).is_symlink() for path in plan["files"]):
-        raise RuntimeError("Torrent payload deletion not confirmed")
+    # The UNCERTAIN checkpoint survives a lost qB reply or process crash.
+    # Serialize and revalidate immediately before the irreversible deletion.
     db.execute("BEGIN IMMEDIATE")
     try:
+        current=qb.torrent_identity(infohash)
+        labels={v.strip() for v in str((current or {}).get("tags") or "").split(",")}
+        if (not current or current.get("hash","").lower()!=infohash or
+                current.get("category")!=CATEGORY or owner[1] not in labels):
+            raise ValueError("Torrent ownership changed before deletion")
+        if db.execute("SELECT 1 FROM notifications WHERE lower(info_hash)=? AND id<>?",(infohash,nid)).fetchone():
+            raise ValueError("Torrent became shared before deletion")
+        if db.execute("SELECT 1 FROM torrent_recovery_records WHERE lower(infohash)=?",(infohash,)).fetchone():
+            raise ValueError("Staged resource appeared before deletion")
+        if db.execute("SELECT 1 FROM anime_batch_authorizations WHERE lower(infohash)=?",(infohash,)).fetchone():
+            raise ValueError("Batch resource appeared before deletion")
+        fresh=preflight(qb,infohash,download_root=download_root,
+                        trial_root=trial_root,sonarr_root=sonarr_root)
+        if fresh!=plan:
+            raise ValueError("Torrent payload changed before deletion")
+        qb.remove_torrent(infohash,delete_files=True)
+        if qb.torrent_identity(infohash) is not None:
+            raise RuntimeError("qBittorrent removal not confirmed")
+        if any(Path(path).exists() or Path(path).is_symlink() for path in plan["files"]):
+            raise RuntimeError("Torrent payload deletion not confirmed")
         db.execute("""UPDATE anime_rejected_audio_cleanup SET state='REMOVED',
             updated_at=? WHERE job_id=? AND state='UNCERTAIN'""",
             (time.time(),job["id"]))
@@ -357,6 +373,8 @@ def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,so
             raise ValueError("Active episode claim not found after cleanup")
         changed=db.execute("""DELETE FROM anime_episode_acquisition_slots
             WHERE owner_notification_id=? AND state='ACTIVE'""",(nid,)).rowcount
+        if changed!=1:
+            raise ValueError("Episode claim changed during cleanup")
         db.execute("""UPDATE daemon_jobs SET available_at=0
             WHERE kind='claimed_acquisition' AND state='DEFERRED'
               AND last_error='ON_HOLD' AND subject_key IN (
@@ -365,8 +383,6 @@ def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,so
                 WHERE se.source='tvdb' AND se.external_id=?
                   AND d.season=? AND d.episode=?
               )""",key)
-        if changed!=1:
-            raise ValueError("Episode claim changed during cleanup")
         db.commit()
     except BaseException:
         db.rollback()
