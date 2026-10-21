@@ -150,16 +150,18 @@ def all_jobs(db, *,page=1,size=20):
                          "Live qBittorrent progress is not available in this view; "
                          "this status does not confirm that transfer speed is nonzero.")
         elif status=="CANCELED":
-            explanation="Canceled by an administrator. The job will not be retried; no torrent or media was deleted."
+            explanation="Canceled by administrator."
         else:
             explanation=error or ("Current job state: "+status.lower())
-        if status!="CANCELED" and error=="QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT":
+        if status=="NEEDS REVIEW" and job:
+            explanation="Needs review. Check service logs for technical details."
+        if status=="NEEDS REVIEW" and not job and error=="QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT":
             explanation=("qBittorrent's save_path is outside Anime Discovery's configured "
                          "download_root. Compare the exact torrent save_path with "
                          "settings.storage.download_root in the worker's filesystem namespace. "
                          "Correct the path configuration or the torrent save location; "
                          "do not disable the containment check or move verified files blindly.")
-        if status in ("IDENTIFYING","NEEDS REVIEW") and nid in identity_checks:
+        if status in ("IDENTIFYING","NEEDS REVIEW") and not job and nid in identity_checks:
             decision,codes,_is_pack,_action=identity_checks[nid]
             explanation+=" Latest identity check: "+str(decision)[:80]
             if decision=="BATCH_VERIFIED":
