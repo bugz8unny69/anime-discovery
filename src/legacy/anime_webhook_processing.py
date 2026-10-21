@@ -130,7 +130,7 @@ def approve(db, notification_id, values, *, source="manual"):
         raise
 
 
-def receive(db, values, *, series_map=None, gap_search_enabled=False):
+def receive(db, values, *, series_map=None, gap_search_enabled=False,\n            identity_jobs_enabled=False):
     """Accept Autobrr metadata. Repeat GUID+hash is idempotent."""
     if not isinstance(values,dict):
         raise ValueError("Expected webhook object")
@@ -252,6 +252,15 @@ def receive(db, values, *, series_map=None, gap_search_enabled=False):
                         (kind,subject_key,payload_json,state)
                         VALUES (?,?,?,'READY')""",
                         (BATCH_KIND,str(nid),json.dumps({"notification_id":nid})))
+        if identity_jobs_enabled and not auto:
+            # Migration switch stays disabled until the dedicated identity
+            # worker is deployed and the legacy identity poller retired.
+            # Notification and job must commit or roll back together.
+            from anime_job_lineage import enqueue_linked_in_transaction
+            enqueue_linked_in_transaction(
+                db, "identity_resolution", "notification:"+str(nid),
+                json.dumps({"notification_id":nid},sort_keys=True),
+                notification_id=nid)
         db.commit()
     except BaseException:
         db.rollback()
