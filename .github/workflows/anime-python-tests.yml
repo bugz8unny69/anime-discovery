@@ -87,10 +87,10 @@ jobs:
             test_anime_dashboard_auth \
             test_anime_live_acquisition \
             test_anime_admin_upgrade \
+            test_anime_standalone_upgrade \
             test_anime_shared_discovery \
             test_anime_admin_config_migration \
             test_anime_install_existing_config \
-            test_anime_admin_archive_upgrade \
             test_anime_sonarr_keep \
             test_anime_notification_tvdb \
             test_anime_admin_integrations \
