@@ -55,6 +55,16 @@ def mark_staged(db,notification_id):
               (notification_id,notification_id)).rowcount
         if changed!=1:
             raise ValueError("Stage confirmation requires owned slot and completed dispatch")
+        db.execute("""UPDATE daemon_jobs SET available_at=0
+          WHERE kind='claimed_acquisition' AND state='DEFERRED'
+            AND last_error='ON_HOLD' AND subject_key IN (
+            SELECT CAST(d.notification_id AS TEXT) FROM episode_dispatch d
+            JOIN series se ON se.id=d.series_id
+            JOIN anime_episode_acquisition_slots slot
+              ON slot.tvdb_id=se.external_id
+             AND slot.season=d.season AND slot.episode=d.episode
+            WHERE slot.owner_notification_id=? AND slot.state='STAGED'
+          )""",(notification_id,))
         db.commit()
     except BaseException:
         db.rollback()
