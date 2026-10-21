@@ -397,6 +397,25 @@ function traceCheck(root,label,state,detail){
   item.appendChild(info);root.appendChild(item);
 }
 function traceYesNo(value){return value===true?"pass":value===false?"fail":"unknown"}
+function traceIssueExplanation(code){
+  const descriptions={
+    SEASON_EPISODE_MAPPING_UNVERIFIED:"Anime-Lists has not established a unique season/episode mapping. No episode can be approved.",
+    RELEASE_SEASON_PROVIDER_MISMATCH:"The parsed release season disagrees with the verified provider mapping.",
+    VERIFIED_EPISODE_MAPPING_MISSING:"The correct internal AniDB episode ID has not been independently verified.",
+    MULTIPLE_TVDB_ANIDB_CROSSREFS:"Multiple provider identity pairs remain plausible.",
+    AMBIGUOUS_SEASON_SPECIFIC_ANIDB:"More than one season-specific AniDB production remains plausible.",
+    TVDB_EPISODE_NOT_UNIQUELY_CONFIRMED:"TVDB did not uniquely confirm the mapped episode.",
+    BATCH_FILE_MANIFEST_REQUIRED:"Season packs require a verified file manifest before episode selection.",
+    EPISODE_NUMBER_UNRESOLVED:"The release title did not establish a unique episode number.",
+    NO_ANIDB_EXACT_TITLE_MATCH:"No exact normalized AniDB title was found.",
+    ALL_TVDB_TITLES_BELOW_THRESHOLD:"TVDB provider names did not meet the title matching threshold.",
+    NO_EXPLICIT_TVDB_ANIDB_CROSSREF:"No independently corroborated AniDB/TVDB identity link was found."
+  };
+  return descriptions[code]||"This recorded check requires review; consult Advanced diagnostics for provider evidence.";
+}
+function traceNumber(value){return Number.isSafeInteger(value)&&value>0?String(value):"Not verified"}
+function traceCandidateId(value){return typeof value==="string"&&/^\\d+$/.test(value)?value:
+  Number.isSafeInteger(value)&&value>0?String(value):"unknown"}
 async function openTrace(notificationId,canRetryIdentity=false){
   const dialog=document.getElementById("match-trace-dialog");
   const retry=document.getElementById("match-trace-retry");
@@ -426,6 +445,13 @@ async function openTrace(notificationId,canRetryIdentity=false){
       :issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")
       ?"The anime identity may match, but the release season differs from the provider mapping. Verify the season before using Resolve."
       :data.decision==="NEEDS_REVIEW"?"Review the candidates and any failed or unverified checks below. Use Resolve only with independently verified IDs and season.":"Review the recorded identity evidence below."));
+    if(issues.length){
+      const explanation=traceSection(body,"Why verification stopped");
+      for(const code of issues.slice(0,20)){
+        const label=typeof code==="string"?code:"UNKNOWN_ISSUE";
+        traceCheck(explanation,label.replace(/_/g," "),"fail",traceIssueExplanation(label));
+      }
+    }
     const parsed=traceSection(body,"Release and lookup");
     const grid=traceNode("div","trace-grid");parsed.appendChild(grid);
     traceCard(grid,"Searched title",queries.length?queries.join(" · "):"Not recorded");
@@ -485,6 +511,55 @@ async function openTrace(notificationId,canRetryIdentity=false){
     for(const ref of refs){
       ani.appendChild(traceNode("p","", "TVDB #"+(ref.tvdb_id??"unknown")+" ↔ AniDB IDs "+
         (Array.isArray(ref.matching_anidb_ids)&&ref.matching_anidb_ids.length?ref.matching_anidb_ids.join(", "):"not verified")));
+    }
+    const chain=traceSection(body,"Episode identity chain");
+    const chainGrid=traceNode("div","trace-grid");chain.appendChild(chainGrid);
+    const pairs=Array.isArray(ev.matching_pairs)?ev.matching_pairs:[];
+    const chosen=pairs.length===1&&pairs[0]&&typeof pairs[0]==="object"?pairs[0]:null;
+    const rule=ev.episode_mapping&&typeof ev.episode_mapping==="object"?ev.episode_mapping:null;
+    traceCard(chainGrid,"Selected TVDB series",chosen?"TVDB #"+traceCandidateId(chosen.tvdb_id):"Not uniquely verified");
+    traceCard(chainGrid,"Selected AniDB anime",chosen?"AniDB #"+traceCandidateId(chosen.anidb_id):"Not uniquely verified");
+    traceCard(chainGrid,"TVDB season / episode",rule?
+      "S"+String(rule.tvdb_season??"?").padStart(2,"0")+"E"+String(rule.tvdb_episode??"?").padStart(2,"0"):
+      "Not verified");
+    traceCard(chainGrid,"AniDB episode number",rule?traceNumber(rule.anidb_episode_number):"Not verified");
+    traceCard(chainGrid,"AniDB internal EID",traceNumber(ev.verified_anidb_episode_id));
+    traceCard(chainGrid,"Episode ID source",traceNumber(ev.verified_anidb_episode_id)!=="Not verified"?
+      (ev.episode_id_source||"Not recorded"):"Not verified");
+    traceCheck(chain,"Exact episode identity",traceNumber(ev.verified_anidb_episode_id)!=="Not verified"&&
+      rule&&chosen?"pass":"unknown",
+      rule?"Mapping source: "+(rule.mapping_source||"Not recorded")+
+        " · AniDB episode "+traceNumber(rule.anidb_episode_number):
+        "No uniquely verified season/episode rule recorded");
+    const mappedCandidates=Array.isArray(ev.season_mapping_candidates)?ev.season_mapping_candidates:[];
+    const mapped=traceSection(body,"Season-specific Anime-Lists candidates");
+    if(!mappedCandidates.length)mapped.appendChild(traceNode("p","muted","No season-specific candidates recorded"));
+    for(const item of mappedCandidates.slice(0,20)){
+      if(!item||typeof item!=="object")continue;
+      const card=traceNode("div","trace-card");
+      card.appendChild(traceNode("strong","","AniDB #"+traceCandidateId(item.anidb_id)+
+        " → TVDB #"+traceCandidateId(item.tvdb_id)));
+      const er=item.episode_rule&&typeof item.episode_rule==="object"?item.episode_rule:{};
+      card.appendChild(traceNode("p","", "TVDB season "+(er.tvdb_season??"unknown")+
+        " episode "+(er.tvdb_episode??"unknown")+" ↔ AniDB episode "+
+        (er.anidb_episode_number??"unknown")));
+      const titles=Array.isArray(item.titles)?item.titles.slice(0,6):[];
+      card.appendChild(traceNode("small","muted","AniDB titles: "+(titles.length?titles.join(" · "):"Not recorded")+
+        " · Catalog present: "+(item.title_index_present===true?"yes":"not verified")+
+        " · Title family corroborated: "+(item.title_family_corrob===true?"yes":
+        item.title_family_corrob===false?"no":"not recorded")));
+      mapped.appendChild(card);
+    }
+    const steps=traceSection(body,"Identification workflow");
+    if(!workflow.length)steps.appendChild(traceNode("p","muted","No workflow steps recorded"));
+    for(const step of workflow.slice(0,30)){
+      if(!step||typeof step!=="object")continue;
+      const label=typeof step.step==="string"?step.step:"Unnamed step";
+      const state=step.passed===true?"pass":step.passed===false?"fail":"unknown";
+      const facts=Object.entries(step).filter(([key])=>key!=="step")
+        .map(([key,value])=>key.replace(/_/g," ")+": "+(typeof value==="object"?
+          JSON.stringify(value):String(value))).join(" · ");
+      traceCheck(steps,label,state,facts||"No additional evidence recorded");
     }
     const details=traceNode("details","trace-advanced");
     details.appendChild(traceNode("summary","","Advanced diagnostics (raw recorded evidence)"));
