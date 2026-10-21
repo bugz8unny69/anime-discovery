@@ -88,7 +88,7 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
         prior=db.execute("""SELECT state FROM daemon_job_cleanup_attempts
             WHERE job_id=? AND infohash=?""",(job_id,h)).fetchone()
         if prior and prior[0] in ("REMOVED","ABSENT"):
-            results.append((h,prior[0]))
+            results.append((h,"ALREADY_"+prior[0]))
             continue
         current=qb.torrent_identity(h)
         if prior and prior[0]=="UNCERTAIN" and current is None:
