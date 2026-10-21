@@ -492,25 +492,32 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertIn('class="jobs-table"',page)
         self.assertEqual(self.request("GET","/api/jobs?status=BOGUS")[0],400)
 
-    def test_jobs_resolve_dialog_and_safe_delete_api(self):
+    def test_jobs_resolve_preserved_and_notification_delete_retired(self):
         status,_,page=self.request("GET","/jobs")
         self.assertEqual(status,200)
         self.assertIn('id="resolve-dialog"',page)
         self.assertIn('name="notification_id"',page)
         self.assertIn("Notification #",page)
-        payload={"source":"nyaa","release_name":"Unmatched for deletion",
-                 "source_guid":"delete-api-test","info_hash":HASH,
+        self.assertNotIn('job.can_delete',page)
+        self.assertNotIn('"/api/delete-notification"',page)
+        payload={"source":"nyaa","release_name":"Review must remain",
+                 "source_guid":"delete-api-retired","info_hash":HASH,
                  "token":"secret-token"}
         status,_,body=self.request("POST","/webhook",payload)
         self.assertEqual(status,200)
         nid=json.loads(body)["notification_id"]
         status,_,body=self.request("POST","/api/delete-notification",
                                  {"notification_id":nid})
-        self.assertEqual(status,200)
-        self.assertTrue(json.loads(body)["deleted"])
+        self.assertEqual(status,410)
         with sqlite3.connect(self.db) as conn:
-            self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
-                                           (nid,)).fetchone())
+            self.assertIsNotNone(conn.execute(
+                "SELECT 1 FROM notifications WHERE id=?",(nid,)).fetchone())
+        status,_,data=self.request("GET","/api/jobs")
+        self.assertEqual(status,200)
+        matching=[item for item in json.loads(data)["items"] if item.get("id")==nid]
+        self.assertEqual(len(matching),1)
+        self.assertNotIn("can_delete",matching[0])
+
 
     def test_cleanup_preview_is_authenticated_and_never_deletes_media(self):
         from anime_async_daemon import enqueue
