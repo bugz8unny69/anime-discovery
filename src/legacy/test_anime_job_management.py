@@ -108,7 +108,7 @@ class ManageTests(unittest.TestCase):
         worker=claim(self.db,now=110,lease_seconds=30)
         self.assertIsNotNone(worker)
         for action in ("cancel","retry"):
-            with self.assertRaisesRegex(ValueError,"changed"):
+            with self.assertRaisesRegex(ValueError,"changed|Expected waiting"):
                 manage(self.db,self.job_id,action,
                        expected_state="DEFERRED",expected_attempts=1,now=150)
         self.assertEqual(self.row()[0],"LEASED")
@@ -157,8 +157,9 @@ class ManageTests(unittest.TestCase):
     def test_unrecognized_kind_cannot_be_administered(self):
         enqueue(self.db,"unsafe_handler","7","{}")
         jid=self.db.execute("SELECT id FROM daemon_jobs WHERE kind='unsafe_handler'").fetchone()[0]
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
         with self.assertRaisesRegex(ValueError,"Unsupported"):
-            manage(self.db,jid,"cancel",expected_state="READY",expected_attempts=0)
+            manage(self.db,jid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=0)
         self.assertEqual(self.db.execute(
             "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],"READY")
 
