@@ -264,8 +264,11 @@ class TriageTests(unittest.TestCase):
         settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
         def fetch(url,bearer=None):
             if "/extended" in url:
-                return {"data":{"id":305089,"remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
-            self.fail("No episode lookup for wrong-season candidate")
+                return {"data":{"id":305089,"name":"ReZERO",
+                                "genres":[{"name":"Animation"}],
+                                "remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
+            return {"data":{"episodes":[{"id":888,"seasonNumber":4,"number":19}]},
+                    "links":{"next":None}}
         with patch("anime_unified_identity_monitor.anidb_matches",
                    return_value=([{"anidb_id":"11370","titles":["ReZERO"],
                                   "matched_titles":["ReZERO"]}],False)):
@@ -273,9 +276,136 @@ class TriageTests(unittest.TestCase):
                 {"tvdb_api_key":"test"},catalog,mapping_xml=xml,
                 search=lambda *_:([{"tvdb_id":"305089","name":"ReZERO"}],[]),
                 login=lambda _:"token",fetch=fetch)
-        self.assertEqual(result["decision"],"NEEDS_REVIEW")
+        self.assertEqual(result["decision"],"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+        self.assertIn("VERIFIED_EPISODE_MAPPING_MISSING",result["issues"])
         self.assertIn("19242",[v["anidb_id"] for v in result["season_mapping_candidates"]])
         self.assertNotIn("approval",result)
+
+    def test_anidb_first_sequel_uses_targeted_tvdb_and_exact_eid(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        catalog=Path(self.tmp.name)/"titles.xml"
+        catalog.write_text("""<animetitles>
+        <anime aid="11370"><title>ReZERO</title></anime>
+        <anime aid="19242"><title>ReZERO Fourth Season</title></anime>
+        </animetitles>""")
+        xml=(b'<anime-list>'
+             b'<anime anidbid="11370" tvdbid="305089" defaulttvdbseason="1"/>'
+             b'<anime anidbid="19242" tvdbid="305089" defaulttvdbseason="4"/>'
+             b'</anime-list>')
+        calls=[]
+        def fetch(url,bearer=None):
+            calls.append(url)
+            if "/extended" in url:
+                return {"data":{"id":305089,"name":"ReZERO",
+                        "genres":[{"name":"Animation"}],
+                        "remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
+            return {"data":{"episodes":[{"id":888,"seasonNumber":4,"number":19}]},
+                    "links":{"next":None}}
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(
+                [{"anidb_id":"11370","titles":["ReZERO"],
+                  "matched_titles":["ReZERO"]}],False)):
+            params=dict(settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}},
+                secrets={"tvdb_api_key":"secret"},catalog=catalog,
+                mapping_xml=xml,search=lambda *_:self.fail("Broad TVDB search forbidden"),
+                login=lambda _:"token",fetch=fetch)
+            pending=investigate("[Group] ReZERO S04E19",anidb_resolve=None,**params)
+            verified=investigate("[Group] ReZERO S04E19",
+                anidb_resolve=lambda aid,ep:77777 if (aid,ep)==(19242,19) else None,
+                **params)
+        self.assertEqual(pending["decision"],
+                         "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+        self.assertEqual(verified["decision"],"AUTO_VERIFIED")
+        self.assertEqual(verified["approval"],
+                         {"tvdb_id":305089,"anidb_id":19242,"season":4,"episode":19})
+        self.assertEqual(verified["verified_anidb_episode_id"],77777)
+        self.assertEqual(verified["episode_id_source"],"AniDB HTTP catalog")
+        self.assertEqual(len([c for c in calls if "/extended" in c]),2)
+
+    def test_season_selection_ambiguous_entries_fail_closed(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        catalog=Path(self.tmp.name)/"titles.xml"
+        catalog.write_text("""<animetitles>
+          <anime aid="111"><title>Example</title></anime>
+          <anime aid="222"><title>Example Second</title></anime>
+          <anime aid="333"><title>Example Another</title></anime></animetitles>""")
+        xml=(b'<anime-list><anime anidbid="111" tvdbid="123" defaulttvdbseason="1"/>'
+             b'<anime anidbid="222" tvdbid="123" defaulttvdbseason="2"/>'
+             b'<anime anidbid="333" tvdbid="123" defaulttvdbseason="2"/></anime-list>')
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(
+                [{"anidb_id":"111","titles":["Example"],"matched_titles":["Example"]}],False)):
+            report=investigate("[Group] Example S02E03",
+                {"tvdb":{"enabled":True},"identity":{"episode_map":{}}},
+                {"tvdb_api_key":"key"},catalog,mapping_xml=xml,
+                search=lambda *_:self.fail("No broad search"),
+                login=lambda _:"token",
+                fetch=lambda url,bearer=None:{"data":{"id":123,"name":"Example",
+                    "genres":[{"name":"Animation"}]}})
+        self.assertEqual(report["decision"],"NEEDS_REVIEW")
+        self.assertIn("AMBIGUOUS_SEASON_SPECIFIC_ANIDB",report["issues"])
+        self.assertNotIn("approval",report)
+
+    def test_anidb_first_release_shapes_keep_single_and_batch_paths_separate(self):
+        from anime_unified_identity_monitor import investigate
+        from anime_batch_selection import release_scope_hint
+        from anime_identification_probe import release_title
+        from unittest.mock import patch
+        catalog=Path(self.tmp.name)/"shapes-titles.xml"
+        catalog.write_text('<animetitles><anime aid="456"><title>Example</title></anime>'
+                           '<anime aid="789"><title>Example Second Season</title></anime>'
+                           '</animetitles>')
+        xml=(b'<anime-list><anime anidbid="456" tvdbid="123" '
+             b'defaulttvdbseason="1"/><anime anidbid="789" '
+             b'tvdbid="123" defaulttvdbseason="2"/></anime-list>')
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}}
+        secrets={"tvdb_api_key":"hidden"}
+        def fetch(url,bearer=None):
+            if "/extended" in url:
+                return {"data":{"id":123,"name":"Example",
+                        "genres":[{"name":"Animation"}],
+                        "remoteIds":[{"sourceName":"AniDB","id":"456"}]}}
+            return {"data":{"episodes":[
+                {"id":888,"seasonNumber":1,"number":1},
+                {"id":889,"seasonNumber":2,"number":1}]},
+                "links":{"next":None}}
+        base={"search":lambda *_:self.fail("Targeted lookup should avoid broad search"),
+              "login":lambda _:"token","fetch":fetch,"mapping_xml":xml,
+              "anidb_resolve":lambda aid,ep:9876 if (aid,ep)==(789,1) else None}
+        with patch("anime_unified_identity_monitor.anidb_matches",
+                   return_value=([{"anidb_id":"456","titles":["Example"],
+                                  "matched_titles":["Example"]}],False)):
+            plain=investigate("[Group] Example - 01",settings,secrets,catalog,**base)
+            season_two=investigate("[Group] Example S02E01",settings,secrets,catalog,**base)
+            batch=investigate("[Group] Example S02 (Batch)",settings,secrets,catalog,**base)
+            season_only=investigate("[Group] Example Season 2",settings,secrets,catalog,**base)
+
+        # An unqualified E01 is not silently interpreted as season 1.
+        self.assertEqual(release_scope_hint("[Group] Example - 01")["kind"],"unknown")
+        self.assertEqual(plain["episode_candidate"],1)
+        self.assertNotEqual(plain["decision"],"AUTO_VERIFIED")
+        self.assertNotIn("approval",plain)
+        # A season-qualified single episode can resolve the exact AniDB EID.
+        self.assertEqual(season_two["release_scope_hint"]["kind"],"single_episode")
+        self.assertEqual(season_two["decision"],"AUTO_VERIFIED")
+        self.assertEqual(season_two["approval"]["season"],2)
+        self.assertEqual(season_two["approval"]["anidb_id"],789)
+        self.assertEqual(season_two["verified_anidb_episode_id"],9876)
+        # A season pack has no episode and must preserve the original verified
+        # identity anchor for the separately gated batch-manifest handler.
+        for name,report in (("[Group] Example S02 (Batch)",batch),
+                            ("[Group] Example Season 2",season_only)):
+            with self.subTest(release=name):
+                self.assertEqual(release_scope_hint(name)["kind"],"season_pack")
+                self.assertIsNone(release_title(name)[1])
+                self.assertIsNone(report["episode_candidate"])
+                self.assertEqual(report["decision"],"NEEDS_REVIEW")
+                self.assertIn("BATCH_FILE_MANIFEST_REQUIRED",report["issues"])
+                self.assertIn("EPISODE_NUMBER_UNRESOLVED",report["issues"])
+                self.assertEqual(report["matching_pairs"],
+                                 [{"tvdb_id":"123","anidb_id":"456"}])
+                self.assertNotIn("approval",report)
+                self.assertEqual(report["season_mapping_candidates"],[])
 
     def test_anime_lists_and_direct_anidb_episode_enable_verification(self):
         from unittest.mock import patch
