@@ -23,6 +23,7 @@ from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
 from anime_tvdb_throttle import tvdb_scope, TVDBDeferred
+from anime_season_candidate_discovery import season_candidates
 
 LOG=logging.getLogger(__name__)
 MAX_TITLES=32*1024*1024
@@ -170,7 +171,8 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
     report={"title_queries":aliases[:5],"threshold_pct":threshold,
             "episode_candidate":episode,"anidb_candidates":[],
             "tvdb_candidates":[],"tvdb_results_count":0,"candidate_scores":[],
-            "matching_pairs":[],"crossref_diagnostics":[],"episode_mapping":None,"workflow":[],
+            "matching_pairs":[],"crossref_diagnostics":[],"season_mapping_candidates":[],
+             "episode_mapping":None,"workflow":[],
             "decision":"NEEDS_REVIEW","issues":[]}
     # Hints improve Needs Review diagnostics only: never approve from a
     # torrent name, especially a batch without a verified file manifest.
@@ -278,6 +280,15 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             raise ValueError("TVDB ID response mismatch")
         provider_ids=set(explicit_anidb_ids(detail))
         media_type,media_labels=classify_tvdb(detail)
+        if (media_type not in ("LIVE_ACTION","CONFLICTING_MEDIA_TYPE")
+                and hint.get("kind")=="single_episode"
+                and mapping_xml is not None and catalog is not None):
+            discovered=season_candidates(mapping_xml,catalog,tid,
+                                         hint.get("season_hint"),episode)
+            report["season_mapping_candidates"].extend(discovered)
+            report["workflow"].append({"step":"Season-compatible Anime-Lists candidates",
+                "tvdb_id":tid,"release_season":hint.get("season_hint"),
+                "returned":len(discovered),"approval_authority":False})
         mapped={}
         if mapping_xml is not None and episode:
             for aid in sorted(aid_set):
