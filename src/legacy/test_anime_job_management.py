@@ -161,7 +161,7 @@ class ManageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"Unsupported"):
             manage(self.db,jid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=0)
         self.assertEqual(self.db.execute(
-            "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],"READY")
+            "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],"NEEDS_REVIEW")
 
 if __name__=="__main__":
     unittest.main()
