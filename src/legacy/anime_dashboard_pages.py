@@ -12,6 +12,7 @@ def shell(title,active):
     tabs=[("/","Series"),("/jobs","Jobs"),("/recognized","Recognized names"),("/settings","Settings")]
     navigation="".join('<a class="tab'+(" selected" if name==active else "")+
                        '" href="'+route+'">'+name+'</a>' for route,name in tabs)
+    layout_class="container jobs-wide" if active=="Jobs" else "container"
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>"""+escape(title)+""" · Anime Discovery</title>
@@ -20,6 +21,7 @@ def shell(title,active):
 *{box-sizing:border-box}
 body{margin:0;background:#0d1420;color:#e8edf7}
 .container{max-width:1280px;margin:auto;padding:28px 24px 80px}
+.container.jobs-wide{max-width:1600px}
 header{display:flex;justify-content:space-between;align-items:center;gap:16px}
 .brand{font-size:1.3rem;letter-spacing:.01em;font-weight:750}
 nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 30px;border-bottom:1px solid #34435a}
@@ -60,7 +62,7 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .hidden{display:none!important}
 @media(max-width:650px){.container{padding:20px 12px}th,td{padding:10px 7px}
 .panel{padding:13px}.hide-mobile{display:none}}
-</style></head><body><main class="container"><header>
+</style></head><body><main class="""+layout_class+""""><header>
 <span class="brand">◈ Anime Discovery</span>
 <form method="post" action="/logout"><button class="secondary" type="submit">Sign out</button></form></header><nav aria-label="Main navigation">"""+navigation+"</nav>"
 
@@ -215,11 +217,7 @@ if(!checks.some(x=>x.checked))e.preventDefault()});
 
 def jobs_page(result):
     out=shell("Jobs","Jobs")
-    out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
-from receipt through download and completion. Status and activity details refresh every
-five seconds. Retry and Cancel are available only when a job needs review.
-Retry continues the same attempt; Cancel permanently archives it without deleting
-torrents or media. A later webhook can create a fresh attempt.</p><section class="panel">
+    out+='''<h1>Jobs</h1><p class="muted">Track incoming releases and acquisition jobs. Status updates every five seconds.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
