@@ -5,6 +5,7 @@ qB record is not treated as proof that this application removed it.
 """
 import json
 import sqlite3
+from pathlib import Path
 import time
 
 from anime_qb_ownership import CATEGORY
@@ -109,7 +110,7 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
             db.execute("""UPDATE daemon_job_cleanup_attempts SET state='ABSENT',
                 updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
             remaining=bool(prior[1]) and any(
-                __import__("pathlib").Path(path).exists()
+                (Path(path).exists() or Path(path).is_symlink())
                 for path in json.loads(prior[2]))
             results.append((h,"FILES_REMAIN" if remaining else "ABSENT"))
             continue
@@ -165,7 +166,9 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
             requested and all(not __import__("pathlib").Path(path).exists()
                               for path in json.loads(paths))
             for requested,paths in modes)
+        status=("DOWNLOADS_CLEARED" if files_cleared else
+                "CLEANUP_NEEDED" if any(requested for requested,_ in modes)
+                else "TORRENTS_REMOVED")
         db.execute("""UPDATE daemon_job_cleanup_review SET status=?
-            WHERE job_id=?""",("DOWNLOADS_CLEARED" if files_cleared
-                               else "TORRENTS_REMOVED",job_id))
+            WHERE job_id=?""",(status,job_id))
     return results
