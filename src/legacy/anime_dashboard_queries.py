@@ -62,6 +62,10 @@ def all_jobs(db, *,page=1,size=20):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
     events=latest_events(db)
+    cleanup_reviews={}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_job_cleanup_review'").fetchone():
+        cleanup_reviews={jid:state for jid,state in db.execute(
+            "SELECT job_id,status FROM daemon_job_cleanup_review")}
     identity_checks={}
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
         for nid,decision,document in db.execute(
@@ -204,11 +208,16 @@ def all_jobs(db, *,page=1,size=20):
               AND a.kind IN ('verified_batch_acquisition','claimed_acquisition')
             ORDER BY a.job_id DESC""").fetchall()
         for jid,nid,source,release,received,attempts,old_error,kind in history:
+            cleanup_status=cleanup_reviews.get(jid,"NOT_VERIFIED")
+            cleanup_message=("Canceled; resource cleanup needs review."
+                             if cleanup_status=="REVIEW_REQUIRED"
+                             else "Canceled; resource cleanup has not been verified.")
             result.append({"id":nid,"job_id":jid,"job_state":"BLOCKED",
                 "attempts":attempts,"last_error":old_error,
                 "last_admin_action":events.get(jid),
                 "source":source,"release":release,"received_at":received,
-                "status":"CANCELED","message":"","activity_detail":"Canceled by administrator.",
+                "status":"CANCELED","message":"","activity_detail":cleanup_message,
+                "cleanup_status":cleanup_status,
                 "can_retry":False,"can_cancel":False,"can_resolve":False,
                 "can_recheck":False,"can_delete":False,"season":None,"episode":None,
                 "series_title":"","staged":False})
