@@ -39,6 +39,10 @@ def prepare(db, job_id):
         owned=db.execute("""SELECT status,marker,category FROM qb_torrent_ownership
             WHERE infohash=?""",(h,)).fetchone()
         shared=False
+        if "notifications" in tabs:
+            shared=bool(db.execute("""SELECT 1 FROM notifications
+                WHERE lower(info_hash)=? AND CAST(id AS TEXT)!=? LIMIT 1""",
+                (h,subject)).fetchone())
         if "torrent_recovery_records" in tabs:
             shared=bool(db.execute("""SELECT 1 FROM torrent_recovery_records
                 WHERE lower(infohash)=? AND CAST(notification_id AS TEXT) != ?
@@ -51,7 +55,7 @@ def prepare(db, job_id):
         proven=(owned is not None and owned[0]=="OWNED" and
                 owned[2]==CATEGORY and bool(owned[1]))
         eligible=(proven and not shared and
-                  {"torrent_recovery_records","anime_batch_authorizations"} <= tabs)
+                  {"notifications","torrent_recovery_records","anime_batch_authorizations"} <= tabs)
         records.append({"infohash":h,"eligible":eligible,"shared":shared,
                         "ownership":owned[0] if owned else "UNCERTAIN"})
     return {"job_id":job_id,"records":records,
