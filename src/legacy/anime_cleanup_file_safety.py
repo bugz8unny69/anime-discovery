@@ -118,4 +118,5 @@ def preflight(qb,infohash,*,download_root,trial_root,sonarr_root=None):
         if path.is_symlink() or observed!=expected:
             raise ValueError("Download changed during cleanup preview")
     return {"files":sorted(str(p) for p in candidates),
-            "bytes":sum(value[2] for value in candidates.values())}
+            "bytes":sum(value[2] for value in candidates.values()),
+            "fingerprints":{str(p):list(value) for p,value in candidates.items()}}
