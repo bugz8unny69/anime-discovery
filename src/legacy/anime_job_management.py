@@ -6,6 +6,8 @@ This avoids rebuilding production tables just to add a new display state.
 Only waiting jobs may be changed. Active leases are never seized.
 """
 import sqlite3
+import json
+from anime_cleanup_review import inventory
 import time
 
 MANAGEABLE_KINDS=("claimed_acquisition","series_gap_search","verified_batch_acquisition")
@@ -23,6 +25,12 @@ def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_archived_subjects (
         job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),
         kind TEXT NOT NULL, original_subject_key TEXT NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_cleanup_review (
+        job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),
+        status TEXT NOT NULL CHECK(status IN ('REVIEW_REQUIRED','NOT_VERIFIED')),
+        candidate_hashes_json TEXT NOT NULL,
+        created_at REAL NOT NULL
+    )""")
     db.execute("""CREATE INDEX IF NOT EXISTS daemon_job_admin_events_latest
         ON daemon_job_admin_events(job_id,id)""")
 
@@ -112,6 +120,11 @@ def manage(db, job_id, operation, *, expected_state, expected_attempts, now=None
         if changed!=1:
             raise ValueError("Job is leased or changed; refresh and try again")
         if operation=="cancel":
+            resources=inventory(db,kind,subject_key)
+            db.execute("""INSERT INTO daemon_job_cleanup_review
+                (job_id,status,candidate_hashes_json,created_at) VALUES (?,?,?,?)""",
+                (job_id,resources["cleanup_status"],
+                 json.dumps(resources["candidate_hashes"]),now))
             db.execute("""INSERT INTO daemon_job_archived_subjects
                 (job_id,kind,original_subject_key) VALUES (?,?,?)""",
                 (job_id,kind,subject_key))
