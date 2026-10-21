@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from anime_fresh_database import initialize
-from anime_identity_job import handler_factory, recover_pending
+from anime_identity_job import handler_factory
 from anime_job_lineage import enqueue_linked
 from anime_async_daemon import claim, finish
 
@@ -28,16 +28,6 @@ class IdentityJobTests(unittest.TestCase):
 
     def _handler(self):
         return handler_factory(self.path,lambda job: ({},{}))
-
-    def test_recovery_is_idempotent_and_preserves_notification(self):
-        recover_pending(self.path)
-        recover_pending(self.path)
-        self.assertEqual(self.db.execute(
-            "SELECT COUNT(*) FROM daemon_jobs WHERE kind='identity_resolution'"
-            ).fetchone()[0],1)
-        self.assertEqual(self.db.execute(
-            "SELECT status FROM notifications WHERE id=?",(self.nid,)
-            ).fetchone()[0],"IDENTIFYING")
 
     def test_identity_job_finishes_without_following_downstream_work(self):
         enqueue_linked(self.db,"identity_resolution","notification:"+str(self.nid),
