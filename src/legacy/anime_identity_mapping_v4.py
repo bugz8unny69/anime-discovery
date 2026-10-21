@@ -109,6 +109,29 @@ def resolve_episode(xml_bytes, anidb_id, tvdb_id, anidb_episode, *, anidb_season
             "mapping_source":"Anime-Lists"}
 
 
+def resolve_tvdb_episode(xml_bytes, anidb_id, tvdb_id, tvdb_season, tvdb_episode,
+                         *, max_anidb_episode=300):
+    """Reverse only uniquely resolvable TVDB -> AniDB episode mappings.
+
+    A release's TVDB episode number is not an AniDB episode number when
+    Anime-Lists defines offsets or explicit remaps. Resolve by bounded
+    enumeration through the existing authoritative forward mapping.
+    """
+    if (type(tvdb_season) is not int or tvdb_season<1 or
+            type(tvdb_episode) is not int or tvdb_episode<1 or
+            type(max_anidb_episode) is not int or not 1<=max_anidb_episode<=1000):
+        return None
+    matches=[]
+    for number in range(1,max_anidb_episode+1):
+        rule=resolve_episode(xml_bytes,anidb_id,tvdb_id,number)
+        if (rule is not None and rule["tvdb_season"]==tvdb_season
+                and rule["tvdb_episode"]==tvdb_episode):
+            matches.append(rule)
+            if len(matches)>1:
+                return None
+    return matches[0] if len(matches)==1 else None
+
+
 def evaluate(report, xml_bytes):
     report = dict(report)
     ids = sorted({str(p['anidb_id']) for p in report.get('crosscheck_v3', [])})
