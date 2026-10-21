@@ -4,6 +4,7 @@ import hmac
 import html
 import json
 import logging
+from anime_diagnostics import configure_logging, event
 import re
 import sqlite3
 import time
@@ -532,8 +533,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
 
 
 def main():
-    logging.basicConfig(level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    configure_logging()
     config = load_config()
     settings, secrets = config["settings"], config["secrets"]
     token = secrets.get("web_token")

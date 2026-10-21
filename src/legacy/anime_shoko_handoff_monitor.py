@@ -4,6 +4,7 @@ Never mutates Sonarr, qBittorrent or media. Shoko folder scanning and episode
 linking are separate, explicitly configured side effects; cleanup does not
 wait for Shoko. Restarts safely reconstruct verified Sonarr provenance.
 """
+from anime_diagnostics import configure_logging, event
 import json
 import logging
 import sqlite3
@@ -194,12 +195,13 @@ def check_once(settings,secrets,*,inspector=None,copy_verifier=None,alert_sender
         return {"processed":processed,"errors":errors}
 
 def main():
+    configure_logging()
     while True:
         try:
             cfg=load_config()
             check_once(cfg["settings"],cfg["secrets"])
         except Exception as exc:
-            LOG.warning("Shoko monitor deferred (%s)",type(exc).__name__)
+            event(LOG, logging.ERROR, "MONITOR_UNEXPECTED_FAILURE", subsystem="shoko", operation="check_once", error_type=type(exc).__name__, retryable=True, exc_info=True)
         wait_for_change(60)
 
 if __name__=="__main__":

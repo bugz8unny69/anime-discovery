@@ -7,6 +7,10 @@ import asyncio
 import sqlite3
 import time
 import uuid
+import logging
+from anime_diagnostics import event, Span
+
+LOG = logging.getLogger(__name__)
 
 LEASE_SECONDS = 300
 
@@ -134,6 +138,9 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 except asyncio.TimeoutError:
                     pass
                 continue
+            span = Span()
+            event(LOG, logging.INFO, "JOB_STARTED", subsystem="worker",
+                  operation=job["kind"], job_id=job["id"], attempt=job["attempts"] + 1)
             try:
                 if config_manager is not None:
                     try:
@@ -164,8 +171,14 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                     raise ValueError("Invalid handler result")
                 reason=""
             except asyncio.CancelledError:
+                event(LOG, logging.WARNING, "JOB_CANCELED", subsystem="worker",
+                      job_id=job["id"], operation=job["kind"])
                 raise
             except Exception as exc:
+                event(LOG, logging.ERROR, "JOB_HANDLER_EXCEPTION",
+                      subsystem="worker", operation=job["kind"], job_id=job["id"],
+                      attempt=job["attempts"] + 1, error_type=type(exc).__name__,
+                      elapsed_ms=span.milliseconds(), retryable=True, exc_info=True)
                 # A verified hard size violation cannot fix itself via retry.
                 # Keep the source as-is and create an actionable terminal job
                 # review, rather than spinning forever in DEFERRED.
@@ -183,6 +196,9 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 else:
                     outcome="DEFERRED"
                     reason=type(exc).__name__
+            event(LOG, logging.INFO, "JOB_FINISHED", subsystem="worker",
+                  operation=job["kind"], job_id=job["id"], outcome=outcome,
+                  elapsed_ms=span.milliseconds())
             if outcome=="NEEDS_REVIEW":
                 import logging
                 logging.getLogger("anime_discovery.trial").warning(
