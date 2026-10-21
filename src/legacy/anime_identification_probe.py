@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from anime_config_runtime import data_path, get
 from anime_identity_verify import TITLES_URL, TVDB_URL, tvdb_token, request_json
+from anime_tvdb_throttle import TVDBDeferred
 
 EP = re.compile(
     r'(?<![A-Za-z0-9])S(?P<season>\d{1,2})[ ._-]*E(?P<season_ep>\d{1,4})(?!\d)'
@@ -161,6 +162,8 @@ def tvdb_candidates(aliases, api_key):
                 results[key]['exact_title_overlap'] = bool(
                     {norm(n) for n in results[key]['candidate_titles']} &
                     {norm(a) for a in aliases if isinstance(a, str)})
+        except TVDBDeferred:
+            raise
         except Exception as exc:
             errors.append(f'TVDB search failed for {alias!r}: {type(exc).__name__}')
     return list(results.values()), errors
