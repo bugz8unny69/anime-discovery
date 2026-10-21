@@ -47,8 +47,12 @@ def has_staged_media(db, kind, subject_key):
     """
     if kind != "verified_batch_acquisition":
         return False
-    if not db.execute("""SELECT 1 FROM sqlite_master
-        WHERE type='table' AND name='anime_batch_staged'""").fetchone():
+    tables={row[0] for row in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"anime_batch_staged","anime_batch_authorizations"} <= tables:
+        # Legacy/mid-migration databases may not have both evidence tables.
+        # An absent staging table is not evidence of staged media; do not
+        # run a join against a missing authorization table.
         return False
     return bool(db.execute("""SELECT 1
         FROM anime_batch_authorizations a
