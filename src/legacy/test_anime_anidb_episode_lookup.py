@@ -104,6 +104,14 @@ class AniDBEpisodeLookupTests(unittest.TestCase):
         self.assertIsNone(self.resolve(456,8,now=100000))
         self.payload=XML.replace(b'</episodes>',
             b'<episode id="9999"><epno type="1">8</epno></episode></episodes>')
+        # The independent shared HTTP cooldown must still be enforced.
+        with self.assertRaises(AniDBLookupDeferred):
+            self.resolve(456,8,now=99990)
+        self.assertEqual(len(self.urls),1)
+        # Simulate recovery of the persisted request clock after a rollback.
+        # This must not require waiting 24h for a negative-cache TTL.
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("UPDATE anidb_http_rate_limit SET next_allowed_at=0 WHERE id=1")
         self.assertEqual(self.resolve(456,8,now=99990),9999)
         self.assertEqual(len(self.urls),2)
 
