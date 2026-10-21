@@ -102,7 +102,7 @@ class CancelCleanupTests(unittest.TestCase):
                 def torrent_details(self,h):
                     return {"hash":h,"save_path":str(download),"state":"pausedDL"}
                 def torrent_files(self,h):
-                    return [{"name":"episode.mkv"}]
+                    return [{"name":"episode.mkv","size":len(target.read_bytes())}]
                 def torrent_inventory(self):
                     return [{"hash":H,"save_path":str(download)}]
                 def remove_torrent(self,h,*,delete_files):
