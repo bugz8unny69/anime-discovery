@@ -28,7 +28,7 @@ def ensure_schema(db):
         kind TEXT NOT NULL, original_subject_key TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_cleanup_review (
         job_id INTEGER PRIMARY KEY REFERENCES daemon_jobs(id),
-        status TEXT NOT NULL CHECK(status IN ('REVIEW_REQUIRED','NOT_VERIFIED','CLEANUP_NEEDED','TORRENTS_REMOVED')),
+        status TEXT NOT NULL CHECK(status IN ('REVIEW_REQUIRED','NOT_VERIFIED','CLEANUP_NEEDED','TORRENTS_REMOVED','DOWNLOADS_CLEARED')),
         candidate_hashes_json TEXT NOT NULL,
         created_at REAL NOT NULL
     )""")
