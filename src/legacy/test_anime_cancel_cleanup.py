@@ -61,7 +61,7 @@ class CancelCleanupTests(unittest.TestCase):
     def test_owned_torrent_only_never_deletes_files_and_idempotent(self):
         self.assertEqual(cleanup_torrents(self.db,self.jid,self.qb,approved=True),[(H,"REMOVED")])
         self.assertEqual(self.qb.removed,[H])
-        self.assertEqual(cleanup_torrents(self.db,self.jid,self.qb,approved=True),[(H,"REMOVED")])
+        self.assertEqual(cleanup_torrents(self.db,self.jid,self.qb,approved=True),[(H,"ALREADY_REMOVED")])
         self.assertEqual(self.qb.removed,[H])
 
     def test_timeout_requires_manual_review(self):
