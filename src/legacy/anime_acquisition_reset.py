@@ -167,6 +167,14 @@ def reset_acquisitions(db, series_id, *, trial_root):
         for (table,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'"):
             if table in ("daemon_job_admin_events","daemon_job_archived_subjects") or not re.fullmatch(r"[a-zA-Z_][a-zA-Z_0-9]*",table):
                 continue
+            if table=="daemon_job_cleanup_review":
+                # An empty ledger cannot obstruct resetting unrelated DONE jobs.
+                # Any ledger reference to a target job must instead block reset.
+                if any(db.execute(
+                    "SELECT 1 FROM daemon_job_cleanup_review WHERE job_id=?",
+                    (jid,)).fetchone() for jid in job_ids):
+                    raise ValueError("Canceled-job cleanup review blocks reset")
+                continue
             if any(fk[2]=="daemon_jobs" for fk in db.execute('PRAGMA foreign_key_list("'+table+'")')):
                 raise ValueError("Unknown job reference in "+table+"; reset refused")
         root,files=_staged_files(db,paths,trial_root)

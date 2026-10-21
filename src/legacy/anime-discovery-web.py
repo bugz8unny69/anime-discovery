@@ -172,6 +172,32 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
             path=route.path
             if path=="/health":
                 return self.send(200,'{"status":"running"}',"application/json")
+            if path=="/api/cleanup-preview":
+                try:
+                    ids=parse_qs(route.query).get("job_id",[])
+                    if len(ids)!=1 or not ids[0].isdigit() or int(ids[0])<1:
+                        raise ValueError("Valid canceled job ID required")
+                    from anime_cancel_cleanup import prepare,preview_live
+                    with self.database() as db:
+                        if config_dir is None:
+                            preview=prepare(db,int(ids[0]))
+                        else:
+                            from anime_qb_api import QBittorrentAPI
+                            cfg=load_config(config_dir)
+                            settings,secrets=cfg["settings"],cfg["secrets"]
+                            qbcfg=settings["qbittorrent"]
+                            qb=QBittorrentAPI(qbcfg["base_url"])
+                            qb.login(qbcfg["username"],secrets["qbittorrent_password"])
+                            preview=preview_live(db,int(ids[0]),qb,
+                                download_root=settings["storage"]["download_root"],
+                                trial_root=settings["storage"]["trial_root"],
+                                sonarr_root=settings.get("sonarr",{}).get("root_folder"))
+                    return self.send(200,json.dumps(preview),"application/json")
+                except (ValueError,TypeError,sqlite3.Error,OSError,RuntimeError,KeyError,
+                        PermissionError):
+                    return self.send(409,json.dumps({
+                        "error":"Cleanup preview unavailable; verify integration and resource evidence."}),
+                        "application/json")
             if path=="/api/identity-trace":
                 try:
                     params=parse_qs(route.query)
@@ -234,7 +260,8 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         return self.send(200,self.with_csrf(recognized_page(aliases(),config_dir is not None)))
                     if path=="/":
                         return self.send(200,self.with_csrf(series_page(staged_series(db,page=page,size=size),aliases())))
-                    result=all_jobs(db,page=page,size=size)
+                    result=all_jobs(db,page=page,size=size,
+                                    status_filter=params.get("status",["ALL"])[-1])
                 if path=="/api/jobs":
                     return self.send(200,json.dumps(result),"application/json")
                 return self.send(200,self.with_csrf(jobs_page(result)))
@@ -317,6 +344,43 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.redirect("/jobs")
                 except (ValueError,TypeError,sqlite3.Error,OSError) as exc:
                     return self.send(409,str(exc),"text/plain")
+            if route=="/api/cleanup-confirm":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    if (type(values.get("job_id")) is not int or values["job_id"]<1 or
+                        values.get("confirmation") not in
+                        ("REMOVE TORRENT ONLY","REMOVE OWNED DOWNLOAD FILES")):
+                        raise ValueError("Explicit resource cleanup confirmation required")
+                    if config_dir is None:
+                        raise ValueError("Configured integrations required")
+                    from anime_cancel_cleanup import cleanup_torrents
+                    from anime_qb_api import QBittorrentAPI
+                    cfg=load_config(config_dir)
+                    settings,secrets=cfg["settings"],cfg["secrets"]
+                    qb_settings=settings["qbittorrent"]
+                    qb=QBittorrentAPI(qb_settings["base_url"],allow_writes=True)
+                    qb.login(qb_settings["username"],secrets["qbittorrent_password"])
+                    with self.database() as db:
+                        result=cleanup_torrents(db,values["job_id"],qb,approved=True,
+                            delete_download_files=values["confirmation"]=="REMOVE OWNED DOWNLOAD FILES",
+                            download_root=settings["storage"]["download_root"],
+                            trial_root=settings["storage"]["trial_root"],
+                            sonarr_root=settings.get("sonarr",{}).get("root_folder"))
+                    SECURITY_LOG.info("Confirmed torrent-only cleanup job_id=%d",
+                                      values["job_id"])
+                    return self.send(200,json.dumps({
+                        "removed":sum(state=="REMOVED" for _,state in result),
+                        "download_file_cleanup_requested":
+                            values["confirmation"]=="REMOVE OWNED DOWNLOAD FILES",
+                        "staged_media_preserved":True}),"application/json")
+                except (ValueError,TypeError,sqlite3.Error,OSError,RuntimeError,KeyError,
+                        PermissionError) as exc:
+                    # Do not disclose credential-bearing qB exception strings.
+                    SECURITY_LOG.warning("Torrent-only cleanup stopped error_type=%s",
+                                         type(exc).__name__)
+                    return self.send(409,json.dumps({
+                        "error":"Cleanup not confirmed; inspect resource review and service logs."}),
+                        "application/json")
             if route=="/api/manage-job":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()

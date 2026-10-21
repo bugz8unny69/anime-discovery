@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from anime_batch_completion import inspect_completed_episode, BatchNeedsReview
-from anime_trial_staging import stage_verified, staged_destination
+from anime_trial_staging import stage_verified, staged_destination, reconcile_staged_metadata
 
 LOG = logging.getLogger("anime_discovery.trial")
 
@@ -128,6 +128,14 @@ def stage_completed_batch_file(db, infohash, qb, *, window, stopped_manifest,
         stage_verified(source,trial_root,title=title,tvdb_id=window["tvdb_id"],
                        season=window["season"],episode=episode,series_id=row[0],
                        **permissions)
+    # A crash after publishing the verified video can leave NFO metadata
+    # absent while the SQLite checkpoint is missing. Repair NFOs first,
+    # then commit the staging checkpoint without recopying verified bytes.
+    reconcile_staged_metadata(expected,title=title,tvdb_id=window["tvdb_id"],
+        season=window["season"],episode=episode,
+        staged_owner=permissions.get("staged_owner",""),
+        staged_group=permissions.get("staged_group",""),
+        staged_file_mode=permissions.get("staged_file_mode","0640"))
     db.execute("BEGIN IMMEDIATE")
     try:
         db.execute("""INSERT OR IGNORE INTO anime_batch_staged VALUES (?,?,?,?,?,?,?,?,?)""",

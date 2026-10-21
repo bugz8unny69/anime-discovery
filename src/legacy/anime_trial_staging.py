@@ -23,6 +23,47 @@ def staged_destination(trial_root, *, title, season, episode, suffix, english_ti
     return (Path(trial_root)/folder/("Season %02d"%season)/
             ("S%02dE%02d"%(season,episode)+suffix.lower()))
 
+def reconcile_staged_metadata(dest, *, title, tvdb_id, season, episode,
+                              staged_owner="", staged_group="",
+                              staged_file_mode="0640"):
+    """Repair only missing NFO files after verifying a published episode.
+
+    Caller must already have verified the media digest against its source.
+    Existing metadata from another identity is never overwritten.
+    """
+    dest=Path(dest)
+    if not dest.is_file() or dest.is_symlink():
+        raise ValueError("Verified staged episode required")
+    folder=dest.parent.parent
+    if folder.is_symlink() or dest.parent.is_symlink():
+        raise ValueError("Unsafe staged metadata directory")
+    uid,gid=resolve_policy(staged_owner,staged_group)
+    parse_mode(staged_file_mode,directory=False)
+    for path,tag in ((folder/"tvshow.nfo","tvshow"),
+                     (dest.with_suffix(".nfo"),"episodedetails")):
+        if path.is_symlink():
+            raise ValueError("Unsafe existing NFO")
+        if path.exists():
+            try:
+                doc=ET.parse(path).getroot()
+                ids=[node.text for node in doc.findall("uniqueid")
+                     if node.attrib.get("type")=="tvdb"]
+                if doc.tag!=tag or str(tvdb_id) not in ids:
+                    raise ValueError("Staged NFO identity mismatch")
+                if tag=="episodedetails" and (
+                        doc.findtext("season")!=str(season) or
+                        doc.findtext("episode")!=str(episode)):
+                    raise ValueError("Staged episode NFO mismatch")
+            except ET.ParseError as exc:
+                raise ValueError("Staged NFO malformed") from exc
+        elif tag=="tvshow":
+            write_series_nfo(folder,title=title,tvdb_id=tvdb_id)
+        else:
+            write_episode_nfo(dest,title=title,tvdb_id=tvdb_id,
+                              season=season,episode=episode)
+        apply_file(path,uid=uid,gid=gid,mode=staged_file_mode)
+
+
 def stage_verified(source, trial_root, *, title, tvdb_id, season, episode, series_id, english_title=None, staged_owner="", staged_group="", staged_directory_mode="2770", staged_file_mode="0640"):
     source=Path(source)
     root=Path(trial_root)

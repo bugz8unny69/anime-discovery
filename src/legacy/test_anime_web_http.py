@@ -468,6 +468,30 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 thread.join(2)
 
+    def test_jobs_status_filter_and_paging_controls(self):
+        from anime_webhook_processing import receive
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            for n in range(24):
+                receive(db,{"source":"nyaa","source_guid":"filter-"+str(n),
+                    "release_name":"Example "+str(n),"info_hash":format(n+1,"040x")})
+        status,_,body=self.request("GET","/api/jobs?status=IDENTIFYING&size=20&page=1")
+        self.assertEqual(status,200)
+        data=json.loads(body)
+        self.assertEqual(data["status_filter"],"IDENTIFYING")
+        self.assertEqual(data["total"],24)
+        self.assertEqual(data["pages"],2)
+        self.assertEqual(len(data["items"]),20)
+        status,_,body=self.request("GET","/api/jobs?status=IDENTIFYING&size=20&page=2")
+        self.assertEqual(status,200)
+        self.assertEqual(len(json.loads(body)["items"]),4)
+        status,_,page=self.request("GET","/jobs?status=IDENTIFYING&size=20&page=1")
+        self.assertEqual(status,200)
+        self.assertIn("job-status-filter",page)
+        self.assertIn("Next",page)
+        self.assertIn("status=IDENTIFYING",page)
+        self.assertIn('class="jobs-table"',page)
+        self.assertEqual(self.request("GET","/api/jobs?status=BOGUS")[0],400)
+
     def test_jobs_resolve_dialog_and_safe_delete_api(self):
         status,_,page=self.request("GET","/jobs")
         self.assertEqual(status,200)
@@ -487,6 +511,24 @@ class DashboardHTTPTests(unittest.TestCase):
         with sqlite3.connect(self.db) as conn:
             self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
                                            (nid,)).fetchone())
+
+    def test_cleanup_preview_is_authenticated_and_never_deletes_media(self):
+        from anime_async_daemon import enqueue
+        from anime_job_management import manage
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            enqueue(db,"claimed_acquisition","98765",'{"notification_id":98765}')
+            jid=db.execute("""SELECT id FROM daemon_jobs WHERE
+                kind='claimed_acquisition' AND subject_key='98765'""").fetchone()[0]
+            db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+            manage(db,jid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=0)
+        status,_,body=self.request("GET","/api/cleanup-preview?job_id="+str(jid))
+        self.assertIn(status,(200,409))
+        if status==200:
+            self.assertFalse(json.loads(body)["can_remove_torrents"])
+        status,_,body=self.request("POST","/api/cleanup-confirm",
+                                  {"job_id":jid,"confirmation":"REMOVE TORRENT ONLY"})
+        self.assertEqual(status,409)
+        self.assertNotIn("qbittorrent_password",body)
 
     def test_manage_job_api_retry_cancel_and_visible_activity(self):
         from anime_async_daemon import enqueue
@@ -824,3 +866,14 @@ class DashboardHTTPTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class JobActionPresentationTests(unittest.TestCase):
+    def test_jobs_retains_checkpoint_retry_and_resolve_without_identity_recheck(self):
+        # Assert the actual browser script, not the separate identity API.
+        source=Path(__file__).with_name("anime_dashboard_pages.py").read_text()
+        self.assertNotIn('textContent="Recheck identity"', source)
+        self.assertNotIn('fetch("/api/recheck-identity"', source)
+        self.assertIn('job.can_retry', source)
+        self.assertIn('job.can_resolve', source)
+

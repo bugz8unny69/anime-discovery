@@ -6,9 +6,13 @@ verifying staged files still exist on disk.
 """
 from pathlib import Path
 import json
-from anime_job_management import latest_events
+from anime_job_management import latest_events, has_staged_media
+from anime_review_messages import describe_review
 
 PAGE_SIZES=(20,50,100)
+JOB_STATUSES=("RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING",
+              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH",
+              "COMPLETED","BLOCKED","CANCELED")
 
 
 def pagination(page=1, size=20):
@@ -57,10 +61,16 @@ def staged_series(db, *, page=1,size=20):
     return _page(list(grouped.values()),page,size)
 
 
-def all_jobs(db, *,page=1,size=20):
+def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
+    if status_filter!="ALL" and status_filter not in JOB_STATUSES:
+        raise ValueError("Invalid job status filter")
     events=latest_events(db)
+    cleanup_reviews={}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_job_cleanup_review'").fetchone():
+        cleanup_reviews={jid:state for jid,state in db.execute(
+            "SELECT job_id,status FROM daemon_job_cleanup_review")}
     identity_checks={}
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='unified_identity_checks'").fetchone():
         for nid,decision,document in db.execute(
@@ -170,7 +180,12 @@ def all_jobs(db, *,page=1,size=20):
                     "EPISODE_NUMBER_UNRESOLVED",
                     "EXACT_IDENTITY_NOT_VERIFIED")]
             if codes:
-                explanation+="; "+", ".join(codes)
+                if any(code.startswith("LOOKUP_") for code in codes):
+                    explanation=describe_review(next(code for code in codes if code.startswith("LOOKUP_")))
+                elif status=="NEEDS REVIEW":
+                    explanation=describe_review(codes[0])
+                else:
+                    explanation+="; "+", ".join(codes)
         result.append({"id":nid,"job_id":job_id,"job_state":job,"attempts":attempts,
                         "next_retry_at":retry_at if job=="DEFERRED" else None,
                         "lease_until":lease_until if job=="LEASED" else None,
@@ -178,7 +193,7 @@ def all_jobs(db, *,page=1,size=20):
                         "batch_download_active":batch_active,
                         "batch_stage":batch_stage,
                         "can_retry":job=="NEEDS_REVIEW",
-                        "can_cancel":job=="NEEDS_REVIEW",
+                        "can_cancel":job=="NEEDS_REVIEW" and not bool(stage and Path(stage).is_file()) and not has_staged_media(db,"verified_batch_acquisition" if nstatus=="APPROVED_BATCH" else "claimed_acquisition",str(nid)),
                         "last_admin_action":event,
                         "source":source,"release":release,
                        "received_at":received,"status":status,
@@ -198,11 +213,20 @@ def all_jobs(db, *,page=1,size=20):
               AND a.kind IN ('verified_batch_acquisition','claimed_acquisition')
             ORDER BY a.job_id DESC""").fetchall()
         for jid,nid,source,release,received,attempts,old_error,kind in history:
+            cleanup_status=cleanup_reviews.get(jid,"NOT_VERIFIED")
+            cleanup_message={
+                "REVIEW_REQUIRED":"Canceled; resource cleanup needs review.",
+                "NOT_VERIFIED":"Canceled; resource cleanup has not been verified.",
+                "CLEANUP_NEEDED":"Canceled; torrent cleanup requires review or retry.",
+                "TORRENTS_REMOVED":"Canceled; torrent entries removed or confirmed absent. Files preserved.",
+                "DOWNLOADS_CLEARED":"Canceled; owned torrents and verified downloads removed. Staged files preserved.",
+            }.get(cleanup_status,"Canceled; cleanup status unavailable.")
             result.append({"id":nid,"job_id":jid,"job_state":"BLOCKED",
                 "attempts":attempts,"last_error":old_error,
                 "last_admin_action":events.get(jid),
                 "source":source,"release":release,"received_at":received,
-                "status":"CANCELED","message":"","activity_detail":"Canceled by administrator.",
+                "status":"CANCELED","message":"","activity_detail":cleanup_message,
+                "cleanup_status":cleanup_status,
                 "can_retry":False,"can_cancel":False,"can_resolve":False,
                 "can_recheck":False,"can_delete":False,"season":None,"episode":None,
                 "series_title":"","staged":False})
@@ -230,5 +254,5 @@ def all_jobs(db, *,page=1,size=20):
                        "release":request["title"]+" (one-time search)",
                        "received_at":0,"status":job_status,"season":request["season"],
                        "episode":None,"series_title":request["title"],
-                       "message":error or "","staged":False})
-    return _page(result,page,size)
+                       "message":"","staged":False})
+    return _page([item for item in result if status_filter=="ALL" or item["status"]==status_filter],page,size) | {"status_filter":status_filter}

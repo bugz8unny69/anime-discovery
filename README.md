@@ -265,6 +265,36 @@ used to match incoming releases, whether or not they have reached
 Anime-Trial. This prevents the library from being confused with the
 inbox or the identity configuration.
 
+### Jobs: cancel and cleanup (operator review)
+
+Cancel is available only for an idle acquisition job in **Needs Review**.
+It archives that acquisition attempt and keeps its original audit history;
+it does **not** stop a leased worker or immediately delete anything.
+An interrupted acquisition with verified staged media must be recovered,
+not canceled.
+
+Canceled jobs with durable torrent provenance show **Review cleanup**.
+The preview checks current qBittorrent category/tag ownership, other jobs
+and notifications that might use the same torrent, and the verified download
+folder before enabling any destructive action. Two choices are separate:
+
+- **REMOVE TORRENT ONLY** removes proven-owned torrent entries while
+  preserving download files and all staged media.
+- **REMOVE OWNED DOWNLOAD FILES** is an explicit stronger opt-in available
+  only when qBittorrent is stopped and every source file, configured
+  storage root, Sonarr overlap, and competing qBittorrent file path pass
+  preflight. No partial/unknown, symlinked, hardlinked, shared or
+  out-of-root files are intentionally removed. Never select this just to
+  bypass manual verification.
+
+A failed or interrupted cleanup persists **Cleanup needed** and exposes
+**Retry cleanup**. qBittorrent timeouts are reconciled against the exact hash
+before any new removal attempt. If torrent metadata disappears but downloaded
+files remain, the system preserves those files for manual review rather than
+blindly deleting them. **Canceled** never implies all files were cleaned.
+This operation is not performed automatically by the background worker.
+Keep a separate verified backup before deploying schema-changing updates.
+
 ## Shared Prowlarr episode discovery
 
 Add this section to `/etc/anime-discovery/settings.json`:

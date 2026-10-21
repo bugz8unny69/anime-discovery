@@ -89,6 +89,70 @@ class ManageTests(unittest.TestCase):
         self.assertEqual(latest[1],"READY")
         self.assertEqual(self.row()[0],"BLOCKED")
 
+    def test_published_single_episode_blocks_api_cancellation(self):
+        from anime_job_management import has_staged_media
+        staged=Path(self.tmp.name)/"published.mkv"
+        staged.write_bytes(b"verified original bytes")
+        self.db.execute("""CREATE TABLE torrent_recovery_records
+            (notification_id INTEGER,staged_path TEXT)""")
+        self.db.execute("INSERT INTO torrent_recovery_records VALUES (1,?)",
+                        (str(staged),))
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",
+                        (self.job_id,))
+        self.assertTrue(has_staged_media(self.db,"claimed_acquisition","1"))
+        with self.assertRaisesRegex(ValueError,"completion recovery"):
+            manage(self.db,self.job_id,"cancel",
+                   expected_state="NEEDS_REVIEW",expected_attempts=0)
+        self.assertTrue(staged.exists())
+        self.assertEqual(self.row()[0],"NEEDS_REVIEW")
+
+    def test_completed_batch_episode_cannot_be_abandoned_by_cancel(self):
+        from anime_job_management import has_staged_media
+        enqueue(self.db,"verified_batch_acquisition","17",'{"notification_id":17}')
+        jid=self.db.execute("""SELECT id FROM daemon_jobs
+            WHERE kind='verified_batch_acquisition' AND subject_key='17'""").fetchone()[0]
+        self.db.execute("""CREATE TABLE anime_batch_authorizations (
+            notification_id INTEGER, tvdb_id TEXT, anidb_id TEXT,
+            season INTEGER, unit_key TEXT, infohash TEXT)""")
+        self.db.execute("""CREATE TABLE anime_batch_staged (
+            tvdb_id TEXT, anidb_id TEXT, season INTEGER, unit_key TEXT,
+            infohash TEXT)""")
+        self.db.execute("""INSERT INTO anime_batch_authorizations VALUES
+            (17,'384541','19445',2,'SEASON','abc')""")
+        self.db.execute("""INSERT INTO anime_batch_staged VALUES
+            ('384541','19445',2,'SEASON','abc')""")
+        self.assertTrue(has_staged_media(self.db,"verified_batch_acquisition","17"))
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+        with self.assertRaisesRegex(ValueError,"completion recovery"):
+            manage(self.db,jid,"cancel",expected_state="NEEDS_REVIEW",
+                   expected_attempts=0)
+        self.assertEqual(self.db.execute("SELECT state FROM daemon_jobs WHERE id=?",
+            (jid,)).fetchone()[0],"NEEDS_REVIEW")
+        if self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_job_archived_subjects'"
+        ).fetchone():
+            self.assertIsNone(self.db.execute(
+                "SELECT 1 FROM daemon_job_archived_subjects WHERE job_id=?",(jid,)).fetchone())
+
+    def test_orphaned_staging_schema_fails_closed(self):
+        from anime_job_management import has_staged_media
+        enqueue(self.db,"verified_batch_acquisition","19",'{"notification_id":19}')
+        jid=self.db.execute("""SELECT id FROM daemon_jobs
+            WHERE kind='verified_batch_acquisition' AND subject_key='19'""").fetchone()[0]
+        self.db.execute("""CREATE TABLE anime_batch_staged (
+            tvdb_id TEXT, anidb_id TEXT, season INTEGER,
+            unit_key TEXT, infohash TEXT)""")
+        self.db.execute("""INSERT INTO anime_batch_staged VALUES
+            ('384541','19445',2,'SEASON','abc')""")
+        self.assertTrue(has_staged_media(self.db,"verified_batch_acquisition","19"))
+        self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+        with self.assertRaisesRegex(ValueError,"completion recovery"):
+            manage(self.db,jid,"cancel",expected_state="NEEDS_REVIEW",
+                   expected_attempts=0)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM daemon_jobs WHERE id=?",(jid,)).fetchone()[0],
+            "NEEDS_REVIEW")
+
     def test_explicit_admin_retry_of_batch_needs_review_is_audited(self):
         enqueue(self.db,"verified_batch_acquisition","pack","{}")
         jid=self.db.execute("SELECT id FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0]

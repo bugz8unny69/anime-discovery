@@ -12,6 +12,7 @@ def shell(title,active):
     tabs=[("/","Series"),("/jobs","Jobs"),("/recognized","Recognized names"),("/settings","Settings")]
     navigation="".join('<a class="tab'+(" selected" if name==active else "")+
                        '" href="'+route+'">'+name+'</a>' for route,name in tabs)
+    layout_class="container jobs-wide" if active=="Jobs" else "container"
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>"""+escape(title)+""" · Anime Discovery</title>
@@ -20,6 +21,7 @@ def shell(title,active):
 *{box-sizing:border-box}
 body{margin:0;background:#0d1420;color:#e8edf7}
 .container{max-width:1280px;margin:auto;padding:28px 24px 80px}
+.container.jobs-wide{max-width:1600px}
 header{display:flex;justify-content:space-between;align-items:center;gap:16px}
 .brand{font-size:1.3rem;letter-spacing:.01em;font-weight:750}
 nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 30px;border-bottom:1px solid #34435a}
@@ -36,6 +38,13 @@ table{width:100%;border-collapse:collapse;margin-top:14px;font-size:.94rem}
 th{text-align:left;color:#a9bfd8;font-weight:600}
 th,td{padding:13px 12px;border-bottom:1px solid #2b3d54}
 tbody tr:hover{background:#1e3046}
+td{overflow-wrap:anywhere;word-break:normal;vertical-align:top}
+.jobs-table th,.jobs-table td{padding:7px 8px}.jobs-table{min-width:850px}
+.jobs-table td:last-child{min-width:175px}.jobs-table td:last-child button{padding:6px 9px;margin:2px;font-size:.87rem}
+.job-release{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:270px}
+.job-details summary{cursor:pointer;color:#a8bad1;max-width:300px}
+.job-details summary span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.job-details[open] summary span{display:block} td button{max-width:100%;white-space:normal}
 a{color:#87c8ff}input,select,button{background:#24344a;color:#eff5ff;
 border:1px solid #47607e;border-radius:8px;padding:10px 12px;font:inherit}
 input[type=checkbox]{width:18px;height:18px;accent-color:#56b2ff}
@@ -59,7 +68,7 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .hidden{display:none!important}
 @media(max-width:650px){.container{padding:20px 12px}th,td{padding:10px 7px}
 .panel{padding:13px}.hide-mobile{display:none}}
-</style></head><body><main class="container"><header>
+</style></head><body><main class="""+layout_class+""""><header>
 <span class="brand">◈ Anime Discovery</span>
 <form method="post" action="/logout"><button class="secondary" type="submit">Sign out</button></form></header><nav aria-label="Main navigation">"""+navigation+"</nav>"
 
@@ -146,12 +155,13 @@ def tail():
 def pager(path,result):
     page,total,pages,size=result["page"],result["total"],result["pages"],result["page_size"]
     def href(p):
-        return path+"?"+urlencode({"page":p,"size":size})
+        return path+"?"+urlencode({"page":p,"size":size,**({"status":result["status_filter"]} if path=="/jobs" and result.get("status_filter","ALL")!="ALL" else {})})
+    suffix=("&status="+result["status_filter"].replace(" ","%20") if path=="/jobs" and result.get("status_filter","ALL")!="ALL" else "")
     opts="".join('<option value="'+str(n)+'"'+(" selected" if n==size else "")+'>'+str(n)+'</option>'
                  for n in (20,50,100))
     return ('<div class="page-controls"><span class="muted">'+str(total)+' total</span>'
             '<label>Rows per page <select onchange="location.href='
-            "'"+path+"?page=1&size=' + this.value"+'"'
+            "'"+path+"?page=1&size=' + this.value + '"+suffix+"'"+'"'
             '>'+opts+'</select></label>'
             +('<a href="'+href(page-1)+'">← Previous</a>' if page>1 else '')
             +'<span>Page '+str(page)+' of '+str(pages)+'</span>'
@@ -214,15 +224,16 @@ if(!checks.some(x=>x.checked))e.preventDefault()});
 
 def jobs_page(result):
     out=shell("Jobs","Jobs")
-    out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
-from receipt through download and completion. Status and activity details refresh every
-five seconds. Retry and Cancel are available only when a job needs review.
-Retry continues the same attempt; Cancel permanently archives it without deleting
-torrents or media. A later webhook can create a fresh attempt.</p><section class="panel">
+    out+='''<h1>Jobs</h1><p class="muted">Track incoming releases and acquisition jobs. Status updates every five seconds.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
+    selected=result.get("status_filter","ALL")
+    statuses=("ALL","RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING","DOWNLOADING",
+              "WAITING FOR DOWNLOAD","WAITING FOR SEARCH","COMPLETED","BLOCKED","CANCELED")
+    options="".join('<option value="'+escape(st)+'"'+(" selected" if st==selected else "")+'>'+escape("All statuses" if st=="ALL" else st.title())+'</option>' for st in statuses)
+    out+='<label>Status <select id="job-status-filter">'+options+'</select></label>'
     out+=pager("/jobs",result)+"</div></div>"
-    out+='''<table><thead><tr><th>Received</th><th>Release / Anime</th>
+    out+='''<table class="jobs-table"><thead><tr><th>Received</th><th>Release / Anime</th>
 <th class="hide-mobile">Source</th><th>Episode</th><th>Status</th><th>Activity details</th><th>Actions</th></tr>
 </thead><tbody id="job-rows"></tbody></table>
 <div id="no-jobs" class="empty hidden">No release notifications yet.</div>
@@ -255,7 +266,7 @@ tbody.replaceChildren();blank.classList.toggle("hidden",data.items.length!==0);
 for(const job of data.items){
 const tr=document.createElement("tr");
 td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
-let title=td(tr,job.release);
+let title=td(tr,"");let release=document.createElement("span");release.className="job-release";release.textContent=job.release;release.title=job.release;title.appendChild(release);
 if(typeof job.id==="number"){let id=document.createElement("small");id.className="muted";id.textContent=" · Notification #"+job.id;title.appendChild(id)}
 if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
@@ -269,9 +280,54 @@ status.textContent=job.status;cell.appendChild(status);
 if(job.message){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
-const detail=td(tr,job.activity_detail||"No further activity recorded");
-detail.classList.add("muted");
+const detail=td(tr,"");const disclosure=document.createElement("details");disclosure.className="job-details";const summary=document.createElement("summary");const preview=document.createElement("span");preview.textContent=job.activity_detail||"No further activity recorded";summary.appendChild(preview);disclosure.appendChild(summary);detail.appendChild(disclosure);
 let actions=document.createElement("td");
+if(job.status==="CANCELED" && typeof job.job_id==="number" &&
+   !["TORRENTS_REMOVED","DOWNLOADS_CLEARED"].includes(job.cleanup_status)){
+  let btn=document.createElement("button");btn.type="button";btn.className="secondary";
+  btn.textContent=job.cleanup_status==="CLEANUP_NEEDED"?"Retry cleanup":"Review cleanup";
+  btn.addEventListener("click",async()=>{
+    try{
+      const response=await fetch("/api/cleanup-preview?job_id="+encodeURIComponent(job.job_id),
+        {credentials:"same-origin"});
+      const plan=await response.json();
+      if(!response.ok)throw Error(plan.error||"Cleanup preview unavailable");
+      const count=plan.records.length;
+      const summary=count?count+" candidate torrent(s); "+
+        plan.records.filter(item=>item.eligible).length+" ownership-verified.": "No verified torrent candidates.";
+      if(!plan.can_remove_torrents){
+        alert(summary+" Cleanup is blocked to protect unknown or shared resources. No files were deleted.");
+        return;
+      }
+      const size=Number(plan.possible_download_bytes||0);
+      const footprint=(size/1073741824).toFixed(2)+" GiB of verified download data";
+      const canDelete=plan.can_delete_download_files===true;
+      const pending=plan.records.some(item=>item.reconcile_only);
+      const guidance=pending
+        ? summary+" An earlier request may have completed. Confirm to reconcile its recorded outcome; missing torrents will not be removed again."
+        : canDelete
+          ? summary+" "+footprint+". Choose whether to preserve or remove only those verified downloads. Staged and library files are always preserved."
+          : summary+" Torrent-only cleanup is available. Files will be preserved because complete download-file verification is unavailable.";
+      if(!confirm(guidance))return;
+      const typed=prompt(canDelete
+        ? 'Type REMOVE TORRENT ONLY (preserve files) or REMOVE OWNED DOWNLOAD FILES (delete only preflight-verified downloads).'
+        : 'Type REMOVE TORRENT ONLY to preserve all files.');
+      if(typed!=="REMOVE TORRENT ONLY" &&
+         !(canDelete && typed==="REMOVE OWNED DOWNLOAD FILES"))return;
+      const csrf=document.querySelector('input[name="_csrf"]')?.value;
+      const done=await fetch("/api/cleanup-confirm",{method:"POST",credentials:"same-origin",
+        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+        body:JSON.stringify({job_id:job.job_id,confirmation:typed})});
+      const result=await done.json();
+      if(!done.ok)throw Error(result.error||"Cleanup requires review");
+      alert(result.removed+" torrent entry/entries removed. "+
+        (result.download_file_cleanup_requested
+          ? "Verified download-file deletion was requested; staged media preserved."
+          : "Downloaded and staged files were preserved."));
+      await refresh();
+    }catch(error){alert(error.message)}
+  });actions.appendChild(btn);
+}
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";
   btn.addEventListener("click",()=>{
@@ -279,25 +335,6 @@ if(job.can_resolve){
     document.getElementById("resolve-release").textContent=job.release+" · Notification #"+job.id;
     document.getElementById("resolve-dialog").showModal();
   });actions.appendChild(btn);
-}
-if(job.can_recheck){
-  let btn=document.createElement("button");btn.type="button";
-  btn.className="secondary";btn.textContent="Recheck identity";
-  btn.addEventListener("click",async()=>{
-    if(!confirm("Recheck verified provider identity for notification #"+job.id+"? No torrent will be submitted without successful verification."))return;
-    btn.disabled=true;
-    try{
-      const csrf=document.querySelector('input[name="_csrf"]')?.value;
-      const response=await fetch("/api/recheck-identity",{method:"POST",
-        credentials:"same-origin",
-        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
-        body:JSON.stringify({notification_id:job.id})});
-      const outcome=await response.json();
-      if(!response.ok)throw Error(outcome.error||"Identity recheck failed");
-      await refresh();
-    }catch(error){alert(error.message);btn.disabled=false}
-  });
-  actions.appendChild(btn);actions.appendChild(document.createTextNode(" "));
 }
 if(job.can_delete){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent="Delete";
@@ -325,7 +362,7 @@ if(job.can_retry || job.can_cancel){
     actions.appendChild(document.createTextNode(" "));
   }
 }
-if(typeof job.id==="number" && job.status!=="COMPLETED"){
+if(typeof job.id==="number" && job.status!=="COMPLETED" && job.status!=="CANCELED"){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";
   btn.textContent="Matching details";btn.addEventListener("click",()=>openTrace(job.id));
   actions.appendChild(btn);
@@ -379,8 +416,8 @@ async function openTrace(notificationId){
 }
 async function manageJob(job,action,button){
   const subject=job.release+" (job #"+job.job_id+")";
-  if(action==="cancel" && !confirm("Cancel future attempts for "+subject+
-      "? This will not delete or stop any torrent or media."))return;
+  if(action==="cancel" && !confirm("Cancel and archive "+subject+
+      "? Existing torrent and files will be preserved until cleanup is explicitly verified."))return;
   button.disabled=true;
   try{
     const csrf=document.querySelector('input[name="_csrf"]')?.value;
@@ -400,6 +437,7 @@ try{let response=await fetch("/api/jobs"+location.search,{cache:"no-store"});
 if(!response.ok)throw Error("status "+response.status);
 update(await response.json());live.textContent="● Live";live.className="status running"}
 catch(e){live.textContent="Updates paused";live.className="status waiting"}}
+document.getElementById("job-status-filter").addEventListener("change",e=>{const p=new URLSearchParams(location.search);p.set("status",e.target.value);p.set("page","1");location.href="/jobs?"+p.toString()});
 setInterval(refresh,5000);
 </script>'''
     return out+tail()

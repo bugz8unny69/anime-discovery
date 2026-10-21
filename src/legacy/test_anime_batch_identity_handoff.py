@@ -148,8 +148,9 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM daemon_jobs WHERE kind='verified_batch_acquisition'").fetchone()[0],0)
         detail=all_jobs(self.db)["items"][0]["activity_detail"]
-        self.assertIn(expected,detail)
-        self.assertIn("Season-pack verification requires review",detail)
+        from anime_review_messages import describe_review
+        self.assertEqual(detail,describe_review(expected))
+        self.assertNotIn(expected,detail)
         self.assertNotIn("approve notification",detail)
 
     def test_real_cyberpunk_s02_batch_title_parses_unambiguously(self):

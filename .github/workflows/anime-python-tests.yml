@@ -29,6 +29,10 @@ jobs:
             test_anime_action_reconcile \
             test_anime_acquisition_gate \
             test_anime_daemon_leases \
+            test_anime_cancel_cleanup \
+            test_anime_cleanup_file_safety \
+            test_anime_staged_metadata_reconcile \
+            test_anime_cleanup_review \
             test_anime_job_management \
             test_anime_series_naming \
             test_anime_acquisition_reset \
