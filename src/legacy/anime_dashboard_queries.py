@@ -61,10 +61,10 @@ def staged_series(db, *, page=1,size=20):
     return _page(list(grouped.values()),page,size)
 
 
-def all_jobs(db, *,page=1,size=20,status="ALL"):
+def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
-    if status!="ALL" and status not in JOB_STATUSES:
+    if status_filter!="ALL" and status_filter not in JOB_STATUSES:
         raise ValueError("Invalid job status filter")
     events=latest_events(db)
     cleanup_reviews={}
@@ -251,4 +251,4 @@ def all_jobs(db, *,page=1,size=20,status="ALL"):
                        "received_at":0,"status":job_status,"season":request["season"],
                        "episode":None,"series_title":request["title"],
                        "message":"","staged":False})
-    return _page([item for item in result if status=="ALL" or item["status"]==status],page,size) | {"status_filter":status}
+    return _page([item for item in result if status_filter=="ALL" or item["status"]==status_filter],page,size) | {"status_filter":status_filter}
