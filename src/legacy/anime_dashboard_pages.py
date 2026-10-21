@@ -459,9 +459,17 @@ async function openTrace(notificationId){
       ". Candidate titles and IDs are shown when present in the saved evidence."));
     if(Array.isArray(ev.anidb_candidates)){
       for(const candidate of ev.anidb_candidates){
-        const title=typeof candidate==="object"&&candidate!==null?(candidate.title||candidate.name||candidate.anime_title):null;
+        const title=typeof candidate==="object"&&candidate!==null?(candidate.matched_titles?.[0]||candidate.titles?.[0]||candidate.title||candidate.name||candidate.anime_title):null;
         const id=typeof candidate==="object"&&candidate!==null?(candidate.anidb_id||candidate.id):null;
-        ani.appendChild(traceNode("p","",title?(title+" · AniDB #"+(id??"unknown")):"AniDB candidate details not recorded"));
+        const item=traceNode("div","trace-card");
+        item.appendChild(traceNode("strong","",title?(title+" · AniDB #"+(id??"unknown")):"AniDB candidate #"+(id??"unknown")+" (title not recorded)"));
+        if(typeof candidate==="object"&&candidate!==null){
+          const matches=Array.isArray(candidate.matched_titles)?candidate.matched_titles:[];
+          const aliases=Array.isArray(candidate.titles)?candidate.titles.filter(t=>!matches.includes(t)):[];
+          if(matches.length)item.appendChild(traceNode("p","muted","Matched title"+(matches.length>1?"s":"")+": "+matches.join(" · ")));
+          if(aliases.length)item.appendChild(traceNode("small","muted","Other AniDB titles: "+aliases.join(" · ")));
+        }
+        ani.appendChild(item);
       }
     }
     for(const ref of refs){
