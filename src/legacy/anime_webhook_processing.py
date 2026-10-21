@@ -15,6 +15,7 @@ from anime_async_daemon import ensure_schema
 from anime_release_matching import resolve_release
 from anime_batch_selection import release_scope_hint
 from anime_trial_policy import eligibility, journal
+from anime_episode_acquisition_guard import competing_claim, CompetingEpisodeAcquisition
 
 HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
@@ -74,6 +75,12 @@ def approve(db, notification_id, values, *, source="manual"):
                 raise ValueError("Series rejected; reset before a new acquisition")
             if db.execute("SELECT 1 FROM series_quarantine WHERE series_id=?", (sid,)).fetchone():
                 raise ValueError("Series quarantined")
+        # Serialize competing release-group approvals by verified episode.
+        # BEGIN IMMEDIATE above ensures two workers cannot both pass this
+        # check and enqueue separate jobs concurrently.
+        competitor=competing_claim(db,tvdb,season,episode,nid)
+        if competitor is not None:
+            raise CompetingEpisodeAcquisition(competitor)
         prior = db.execute("""SELECT d.series_id,d.season,d.episode,v.tvdb_id,v.anidb_id
              FROM episode_dispatch d JOIN verified_series_identity v
              ON v.notification_id=d.notification_id
