@@ -277,6 +277,71 @@ class TriageTests(unittest.TestCase):
         self.assertIn("19242",[v["anidb_id"] for v in result["season_mapping_candidates"]])
         self.assertNotIn("approval",result)
 
+    def test_anidb_first_sequel_uses_targeted_tvdb_and_exact_eid(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        catalog=Path(self.tmp.name)/"titles.xml"
+        catalog.write_text("""<animetitles>
+        <anime aid="11370"><title>ReZERO</title></anime>
+        <anime aid="19242"><title>ReZERO Fourth Season</title></anime>
+        </animetitles>""")
+        xml=(b'<anime-list>'
+             b'<anime anidbid="11370" tvdbid="305089" defaulttvdbseason="1"/>'
+             b'<anime anidbid="19242" tvdbid="305089" defaulttvdbseason="4"/>'
+             b'</anime-list>')
+        calls=[]
+        def fetch(url,bearer=None):
+            calls.append(url)
+            if "/extended" in url:
+                return {"data":{"id":305089,"name":"ReZERO",
+                        "genres":[{"name":"Animation"}],
+                        "remoteIds":[{"sourceName":"AniDB","id":"11370"}]}}
+            return {"data":{"episodes":[{"id":888,"seasonNumber":4,"number":19}]},
+                    "links":{"next":None}}
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(
+                [{"anidb_id":"11370","titles":["ReZERO"],
+                  "matched_titles":["ReZERO"]}],False)):
+            params=dict(settings={"tvdb":{"enabled":True},"identity":{"episode_map":{}}},
+                secrets={"tvdb_api_key":"secret"},catalog=catalog,
+                mapping_xml=xml,search=lambda *_:self.fail("Broad TVDB search forbidden"),
+                login=lambda _:"token",fetch=fetch)
+            pending=investigate("[Group] ReZERO S04E19",anidb_resolve=None,**params)
+            verified=investigate("[Group] ReZERO S04E19",
+                anidb_resolve=lambda aid,ep:77777 if (aid,ep)==(19242,19) else None,
+                **params)
+        self.assertEqual(pending["decision"],
+                         "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+        self.assertEqual(verified["decision"],"AUTO_VERIFIED")
+        self.assertEqual(verified["approval"],
+                         {"tvdb_id":305089,"anidb_id":19242,"season":4,"episode":19})
+        self.assertEqual(verified["verified_anidb_episode_id"],77777)
+        self.assertEqual(verified["episode_id_source"],"AniDB HTTP catalog")
+        self.assertEqual(len([c for c in calls if "/extended" in c]),2)
+
+    def test_season_selection_ambiguous_entries_fail_closed(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        catalog=Path(self.tmp.name)/"titles.xml"
+        catalog.write_text("""<animetitles>
+          <anime aid="111"><title>Example</title></anime>
+          <anime aid="222"><title>Example Second</title></anime>
+          <anime aid="333"><title>Example Another</title></anime></animetitles>""")
+        xml=(b'<anime-list><anime anidbid="111" tvdbid="123" defaulttvdbseason="1"/>'
+             b'<anime anidbid="222" tvdbid="123" defaulttvdbseason="2"/>'
+             b'<anime anidbid="333" tvdbid="123" defaulttvdbseason="2"/></anime-list>')
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(
+                [{"anidb_id":"111","titles":["Example"],"matched_titles":["Example"]}],False)):
+            report=investigate("[Group] Example S02E03",
+                {"tvdb":{"enabled":True},"identity":{"episode_map":{}}},
+                {"tvdb_api_key":"key"},catalog,mapping_xml=xml,
+                search=lambda *_:self.fail("No broad search"),
+                login=lambda _:"token",
+                fetch=lambda url,bearer=None:{"data":{"id":123,"name":"Example",
+                    "genres":[{"name":"Animation"}]}})
+        self.assertEqual(report["decision"],"NEEDS_REVIEW")
+        self.assertIn("AMBIGUOUS_SEASON_SPECIFIC_ANIDB",report["issues"])
+        self.assertNotIn("approval",report)
+
     def test_anime_lists_and_direct_anidb_episode_enable_verification(self):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
