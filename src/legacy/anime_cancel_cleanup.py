@@ -343,8 +343,20 @@ def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,so
         db.execute("""UPDATE anime_rejected_audio_cleanup SET state='REMOVED',
             updated_at=? WHERE job_id=? AND state='UNCERTAIN'""",
             (time.time(),job["id"]))
+        key=db.execute("""SELECT tvdb_id,season,episode FROM anime_episode_acquisition_slots
+            WHERE owner_notification_id=? AND state='ACTIVE'""",(nid,)).fetchone()
+        if not key:
+            raise ValueError("Active episode claim not found after cleanup")
         changed=db.execute("""DELETE FROM anime_episode_acquisition_slots
             WHERE owner_notification_id=? AND state='ACTIVE'""",(nid,)).rowcount
+        db.execute("""UPDATE daemon_jobs SET available_at=0
+            WHERE kind='claimed_acquisition' AND state='DEFERRED'
+              AND last_error='ON_HOLD' AND subject_key IN (
+                SELECT CAST(d.notification_id AS TEXT) FROM episode_dispatch d
+                JOIN series se ON se.id=d.series_id
+                WHERE se.source='tvdb' AND se.external_id=?
+                  AND d.season=? AND d.episode=?
+              )""",key)
         if changed!=1:
             raise ValueError("Episode claim changed during cleanup")
         db.commit()
