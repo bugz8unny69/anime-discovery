@@ -214,9 +214,12 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
             ORDER BY a.job_id DESC""").fetchall()
         for jid,nid,source,release,received,attempts,old_error,kind in history:
             cleanup_status=cleanup_reviews.get(jid,"NOT_VERIFIED")
-            cleanup_message=("Canceled; resource cleanup needs review."
-                             if cleanup_status=="REVIEW_REQUIRED"
-                             else "Canceled; resource cleanup has not been verified.")
+            cleanup_message={
+                "REVIEW_REQUIRED":"Canceled; resource cleanup needs review.",
+                "NOT_VERIFIED":"Canceled; resource cleanup has not been verified.",
+                "CLEANUP_NEEDED":"Canceled; torrent cleanup requires review or retry.",
+                "TORRENTS_REMOVED":"Canceled; torrent entries removed or confirmed absent. Files preserved.",
+            }.get(cleanup_status,"Canceled; cleanup status unavailable.")
             result.append({"id":nid,"job_id":jid,"job_state":"BLOCKED",
                 "attempts":attempts,"last_error":old_error,
                 "last_admin_action":events.get(jid),
