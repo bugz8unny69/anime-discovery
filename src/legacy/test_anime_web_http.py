@@ -468,6 +468,30 @@ class DashboardHTTPTests(unittest.TestCase):
                 server.server_close()
                 thread.join(2)
 
+    def test_jobs_status_filter_and_paging_controls(self):
+        from anime_webhook_processing import receive
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            for n in range(24):
+                receive(db,{"source":"nyaa","source_guid":"filter-"+str(n),
+                    "release_name":"Example "+str(n),"info_hash":format(n+1,"040x")})
+        status,_,body=self.request("GET","/api/jobs?status=RECEIVED&size=20&page=1")
+        self.assertEqual(status,200)
+        data=json.loads(body)
+        self.assertEqual(data["status_filter"],"RECEIVED")
+        self.assertEqual(data["total"],24)
+        self.assertEqual(data["pages"],2)
+        self.assertEqual(len(data["items"]),20)
+        status,_,body=self.request("GET","/api/jobs?status=RECEIVED&size=20&page=2")
+        self.assertEqual(status,200)
+        self.assertEqual(len(json.loads(body)["items"]),4)
+        status,_,page=self.request("GET","/jobs?status=RECEIVED&size=20&page=1")
+        self.assertEqual(status,200)
+        self.assertIn("job-status-filter",page)
+        self.assertIn("Next",page)
+        self.assertIn("status=RECEIVED",page)
+        self.assertIn('class="jobs-table"',page)
+        self.assertEqual(self.request("GET","/api/jobs?status=BOGUS")[0],400)
+
     def test_jobs_resolve_dialog_and_safe_delete_api(self):
         status,_,page=self.request("GET","/jobs")
         self.assertEqual(status,200)
