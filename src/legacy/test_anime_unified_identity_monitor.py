@@ -198,7 +198,7 @@ class TriageTests(unittest.TestCase):
         from unittest.mock import patch
         from anime_unified_identity_monitor import investigate
         settings={"tvdb":{"enabled":True},"identity":{"episode_map":{
-            "123:1:19":{"verified":True,"anidb_episode_id":9876}}}
+            "123:1:19":{"verified":True,"anidb_episode_id":9876}}}}
         rows=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
         xml=b'<anime-list><anime anidbid="456" tvdbid="123"/></anime-list>'
         def fetch(url,bearer=None):
