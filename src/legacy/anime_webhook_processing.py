@@ -130,7 +130,8 @@ def approve(db, notification_id, values, *, source="manual"):
         raise
 
 
-def receive(db, values, *, series_map=None, gap_search_enabled=False,\n            identity_jobs_enabled=False):
+def receive(db, values, *, series_map=None, gap_search_enabled=False,
+            identity_jobs_enabled=False):
     """Accept Autobrr metadata. Repeat GUID+hash is idempotent."""
     if not isinstance(values,dict):
         raise ValueError("Expected webhook object")
