@@ -506,7 +506,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report={"decision":decision,"issues":["LOOKUP_"+type(exc).__name__]}
                 retry=attempts<3
                 pending_retries+=int(retry)
-                LOG.warning("Identity triage retry notification=%s error_type=%s",
+                LOG.exception("Identity triage retry notification=%s error_type=%s",
                             nid,type(exc).__name__)
         LOG.info("identity notification=%s attempt=%s decision=%s threshold=%s anidb_matches=%s tvdb_candidates=%s issues=%s",
                  nid,attempts,decision,report.get("threshold_pct","n/a"),
