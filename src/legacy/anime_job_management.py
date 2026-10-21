@@ -62,10 +62,13 @@ def has_staged_media(db, kind, subject_key):
                AND state='DONE' LIMIT 1""",(subject_key,)).fetchone():
             return True
         if "torrent_recovery_records" in tables:
-            for (path,) in db.execute("""SELECT staged_path FROM torrent_recovery_records
-                WHERE notification_id=?""",(subject_key,)):
-                if path and (Path(path).exists() or Path(path).is_symlink()):
-                    return True
+            columns={row[1] for row in db.execute(
+                'PRAGMA table_info("torrent_recovery_records")')}
+            if "staged_path" in columns:
+                for (path,) in db.execute("""SELECT staged_path FROM torrent_recovery_records
+                    WHERE notification_id=?""",(subject_key,)):
+                    if path and (Path(path).exists() or Path(path).is_symlink()):
+                        return True
         return False
     if kind != "verified_batch_acquisition":
         return False
