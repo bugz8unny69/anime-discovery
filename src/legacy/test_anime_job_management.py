@@ -55,7 +55,7 @@ class ManageTests(unittest.TestCase):
         self.deferred()
         self.db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(self.job_id,))
         result=manage(self.db,self.job_id,"cancel",
-                      expected_state="DEFERRED",expected_attempts=1,now=102)
+                      expected_state="NEEDS_REVIEW",expected_attempts=1,now=102)
         self.assertEqual(result["state"],"BLOCKED")
         self.assertIsNone(claim(self.db,now=99999))
         self.assertEqual(self.row()[2:4],(1,"IdentityNotReady"))
@@ -126,7 +126,7 @@ class ManageTests(unittest.TestCase):
                    expected_state="DEFERRED",expected_attempts=1)
         with self.assertRaisesRegex(ValueError,"changed"):
             manage(self.db,self.job_id,"cancel",
-                   expected_state="DEFERRED",expected_attempts=1)
+                   expected_state="NEEDS_REVIEW",expected_attempts=1)
         self.assertEqual(self.row()[0],"READY")
         self.assertEqual(self.db.execute(
             "SELECT COUNT(*) FROM daemon_job_admin_events").fetchone()[0],1)
