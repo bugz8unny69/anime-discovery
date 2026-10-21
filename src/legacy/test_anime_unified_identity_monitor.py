@@ -182,16 +182,41 @@ class TriageTests(unittest.TestCase):
             result=investigate("[Group] Example - 02",settings,secrets,None,
                 search=lambda aliases,key:([{"tvdb_id":"123","name":"Example"}],[]),
                 login=lambda key:"session",fetch=fetch)
-            self.assertEqual(result["decision"],"AUTO_VERIFIED")
-            self.assertEqual(result["approval"]["episode"],2)
+            self.assertEqual(result["decision"],"NEEDS_REVIEW")
+            self.assertIn("SEASON_EPISODE_MAPPING_UNVERIFIED",result["issues"])
+            self.assertNotIn("approval",result)
             self.assertNotIn("secret-never-in-report",str(result))
             settings["identity"]["episode_map"]={}
             missing=investigate("[Group] Example - 02",settings,secrets,None,
                 search=lambda aliases,key:([{"tvdb_id":"123","name":"Example"}],[]),
                 login=lambda key:"session",fetch=fetch)
-            self.assertEqual(missing["decision"],
-                             "SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+            self.assertEqual(missing["decision"],"NEEDS_REVIEW")
+            self.assertIn("SEASON_EPISODE_MAPPING_UNVERIFIED",missing["issues"])
             self.assertNotIn("approval",missing)
+
+    def test_missing_anime_lists_rule_never_infers_season_one_or_episode(self):
+        from unittest.mock import patch
+        from anime_unified_identity_monitor import investigate
+        settings={"tvdb":{"enabled":True},"identity":{"episode_map":{
+            "123:1:19":{"verified":True,"anidb_episode_id":9876}}}}
+        rows=[{"anidb_id":"456","titles":["Example"],"matched_titles":["Example"]}]
+        xml=b'<anime-list><anime anidbid="456" tvdbid="123"/></anime-list>'
+        def fetch(url,bearer=None):
+            if "/extended" in url:
+                return {"data":{"id":123,"remoteIds":[{"sourceName":"AniDB","id":"456"}]}}
+            self.fail("No TVDB episode lookup allowed without a verified episode rule")
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(rows,False)):
+            for name in ("[Group] Example S01E19","[Group] Example S02E19",
+                         "[Group] Example S04E19","[Group] Example - 19"):
+                with self.subTest(release=name):
+                    report=investigate(name,settings,{"tvdb_api_key":"private"},None,
+                        mapping_xml=xml,search=lambda *_:([{"tvdb_id":"123","name":"Example"}],[]),
+                        login=lambda _:"token",fetch=fetch)
+                    self.assertEqual(report["decision"],"NEEDS_REVIEW")
+                    self.assertIn("SEASON_EPISODE_MAPPING_UNVERIFIED",report["issues"])
+                    self.assertIsNone(report["episode_mapping"])
+                    self.assertNotIn("approval",report)
+                    self.assertNotIn("private",str(report))
 
     def test_live_action_collision_rejected_and_remote_ids_diagnosed(self):
         from unittest.mock import patch

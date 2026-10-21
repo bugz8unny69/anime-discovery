@@ -321,8 +321,17 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         tid=pair["tvdb_id"]
         rule=pair.get("episode_rule")
         report["episode_mapping"]=rule
-        season=rule["tvdb_season"] if rule else 1
-        mapped_ep=rule["tvdb_episode"] if rule else episode
+        if rule is None:
+            # A TVDB/AniDB series link does not establish an episode's season.
+            # Never manufacture Season 1 or assume episode numbering matches.
+            report["issues"].append("SEASON_EPISODE_MAPPING_UNVERIFIED")
+            report["workflow"].append({"step":"Provider season agreement",
+                "release_season":hint.get("season_hint"),
+                "mapped_season":None,"passed":None,
+                "reason":"NO_VERIFIED_ANIME_LISTS_EPISODE_RULE"})
+            return report
+        season=rule["tvdb_season"]
+        mapped_ep=rule["tvdb_episode"]
         if (hint.get("kind")=="single_episode"
                 and hint.get("season_hint")!=season):
             # Never assign a TVDB Season 2 release to Season 1 merely

@@ -418,9 +418,12 @@ async function openTrace(notificationId,canRetryIdentity=false){
       queries=Array.isArray(ev.title_queries)?ev.title_queries:[];
     summary.textContent="Notification #"+notificationId+" · Attempt "+(data.attempts??"unknown")+" · "+(data.decision||"Unknown decision");
     const intro=traceSection(body,"Decision and next step");
-    intro.appendChild(traceNode("p","trace-lead",issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")?"Season mapping needs review":
+    intro.appendChild(traceNode("p","trace-lead",issues.includes("SEASON_EPISODE_MAPPING_UNVERIFIED")?"Season and episode mapping not verified":
+      issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")?"Season mapping needs review":
       data.decision==="NEEDS_REVIEW"?"Manual identification review required":data.decision||"Identification evidence"));
-    intro.appendChild(traceNode("p","muted",issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")
+    intro.appendChild(traceNode("p","muted",issues.includes("SEASON_EPISODE_MAPPING_UNVERIFIED")
+      ?"The AniDB and TVDB series may match, but Anime-Lists did not verify a unique destination season and episode. No season was assumed. Verify both before using Resolve."
+      :issues.includes("RELEASE_SEASON_PROVIDER_MISMATCH")
       ?"The anime identity may match, but the release season differs from the provider mapping. Verify the season before using Resolve."
       :data.decision==="NEEDS_REVIEW"?"Review the candidates and any failed or unverified checks below. Use Resolve only with independently verified IDs and season.":"Review the recorded identity evidence below."));
     const parsed=traceSection(body,"Release and lookup");

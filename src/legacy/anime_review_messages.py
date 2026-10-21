@@ -20,6 +20,8 @@ REVIEW_DESCRIPTIONS = MappingProxyType({
     "ALL_TVDB_TITLES_BELOW_THRESHOLD": "TVDB returned candidates, but none met the title-match threshold. Review Matching details or use Resolve with verified IDs.",
     "AMBIGUOUS_TVDB_CANDIDATES": "Several TVDB series could match. Review Matching details to identify the correct series.",
     "TVDB_DISABLED_OR_KEY_MISSING": "TVDB lookup is disabled or its API key is missing. Check integration settings.",
+    "SEASON_EPISODE_MAPPING_UNVERIFIED": "Anime-Lists did not verify a unique TVDB season and episode for this AniDB record. Review the season mapping before using Resolve.",
+    "RELEASE_SEASON_PROVIDER_MISMATCH": "The release season disagrees with a verified provider mapping. Review the season and episode before using Resolve.",
     "AMBIGUOUS_ANIDB_TITLES": "Multiple AniDB titles could match. Review Matching details before resolving the identity.",
     "ANIDB_PUBLIC_SOURCE_DISABLED": "Automatic AniDB title lookup is disabled. Check settings or resolve the title manually.",
 })
