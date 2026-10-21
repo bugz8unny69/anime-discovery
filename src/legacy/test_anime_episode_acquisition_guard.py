@@ -58,7 +58,7 @@ class EpisodeSlots(unittest.TestCase):
             ).fetchone(),(10,"STAGED"))
     def test_missing_historical_trial_blocks_reacquisition(self):
         self.db.execute("UPDATE episode_dispatch SET state='DONE' WHERE notification_id=10")
-        with self.assertRaisesRegex(ValueError,"Historical trial"):
+        with self.assertRaisesRegex(ValueError,"HISTORICAL_EPISODE_STAGING_UNVERIFIED"):
             reserve(self.db,11)
     def test_active_claim_survives_restart_and_uncertain_failure(self):
         reserve(self.db,10)
