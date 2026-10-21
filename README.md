@@ -217,6 +217,14 @@ database backup remain available. It does not overwrite
 `/etc/anime-discovery`, your NFS mounts, or the SQLite database.
 For Git checkouts, `admin upgrade` without a package path still uses Git.
 
+### Upgrade source selection (proposed SSH-first behavior)
+
+For a Git-based installation, run `sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py upgrade` without an archive argument. The upgrader fetches `develop` from the pinned SSH repository `git@github.com:bugz8unny69/anime-discovery.git`; it does not require `origin` to be configured with SSH. The VM's checkout owner must already have read access to that repository through its SSH key. SSH failure leaves the existing checkout/service unchanged; **there is no automatic HTTP/HTTPS fallback**. A potential future public Git HTTPS fallback requires separate security review and explicit implementation.
+
+For an extracted-archive installation (not a Git checkout), pass the path to a locally downloaded and verified `.tar.gz` or `.zip` release, e.g. `sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py upgrade /path/to/release.zip --backup`. The archive path is not a URL. Verify publisher provenance and SHA256SUMS before upgrading. Use `--backup` to retain application and database rollback copies after a successful archive upgrade; the Git upgrade makes an SQLite backup as part of its normal path.
+
+Do not run either upgrade on the live VM merely to test an unmerged pull request; use temp fixtures or an isolated test checkout first.
+
 ## Built-in VM upgrade and administration
 
 After the first installation, update the checked-out `develop` release and

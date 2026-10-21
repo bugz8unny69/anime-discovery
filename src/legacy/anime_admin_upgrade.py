@@ -11,6 +11,13 @@ import pwd
 import sqlite3
 import subprocess
 
+# Fixed private source for archive-free upgrades. Do not depend on a mutable
+# origin URL, which might inadvertently be configured to point elsewhere.
+SSH_SOURCE = "git@github.com:bugz8unny69/anime-discovery.git"
+# FUTURE (not enabled): opt-in public HTTPS source after independently
+# reviewing repository identity, redirect handling and transport policy.
+# Never automatically fall back from failed SSH to an arbitrary HTTP remote.
+
 
 def command(*args, cwd=None):
     if args and args[0]=="git" and cwd is not None:
@@ -53,8 +60,8 @@ def upgrade(root, *, service="anime-discovery.service", branch="develop", db_pat
     if current_branch!=branch:
         raise ValueError("Upgrade requires the deployed "+branch+" branch (found "+current_branch+")")
     previous=runner("git","rev-parse","HEAD",cwd=root)
-    progress("Fetching "+branch+" from origin")
-    runner("git","fetch","origin",branch,cwd=root)
+    progress("Fetching "+branch+" from the pinned GitHub SSH repository")
+    runner("git","fetch",SSH_SOURCE,branch,cwd=root)
     latest=runner("git","rev-parse","FETCH_HEAD",cwd=root)
     if latest==previous:
         return {"updated":False,"version":previous,"backup":None}
