@@ -63,6 +63,47 @@ def prepare(db, job_id):
             "can_remove_torrents":bool(records) and all(r["eligible"] for r in records),
             "will_delete_files":False}
 
+def preview_live(db,job_id,qb,*,download_root=None,trial_root=None,sonarr_root=None):
+    """Read-only live preflight; no archive, SQLite or filesystem writes."""
+    result=prepare(db,job_id)
+    for record in result["records"]:
+        record["live_owned"]=False
+        record["file_cleanup_ready"]=False
+        record["file_preview"]=[]
+        record["file_bytes"]=0
+        if not record["eligible"]:
+            continue
+        h=record["infohash"]
+        owned=db.execute("""SELECT marker,category FROM qb_torrent_ownership
+            WHERE infohash=? AND status='OWNED'""",(h,)).fetchone()
+        current=qb.torrent_identity(h)
+        tags=current.get("tags","") if isinstance(current,dict) else ""
+        labels={v.strip() for v in tags.split(",")} if isinstance(tags,str) else set()
+        if (not owned or not isinstance(current,dict) or
+            current.get("hash","").lower()!=h or
+            current.get("category")!=CATEGORY or
+            owned[1]!=CATEGORY or owned[0] not in labels):
+            record["eligible"]=False
+            continue
+        record["live_owned"]=True
+        if download_root and trial_root:
+            try:
+                from anime_cleanup_file_safety import preflight
+                files=preflight(qb,h,download_root=download_root,
+                    trial_root=trial_root,sonarr_root=sonarr_root)
+            except (OSError,ValueError,RuntimeError):
+                pass
+            else:
+                record["file_cleanup_ready"]=True
+                record["file_preview"]=files["files"]
+                record["file_bytes"]=files["bytes"]
+    result["can_remove_torrents"]=bool(result["records"]) and all(
+        r["eligible"] for r in result["records"])
+    result["can_delete_download_files"]=result["can_remove_torrents"] and all(
+        r["file_cleanup_ready"] for r in result["records"])
+    result["possible_download_bytes"]=sum(r["file_bytes"] for r in result["records"])
+    return result
+
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS daemon_job_cleanup_attempts (
         job_id INTEGER NOT NULL REFERENCES daemon_jobs(id), infohash TEXT NOT NULL,
