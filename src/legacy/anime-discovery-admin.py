@@ -131,6 +131,10 @@ def main(argv=None):
                 result=upgrade_archive(root,args.archive,db_path=args.db or configured_db,
                     verbose=args.verbose,backup=args.backup,log=lambda message: print(message,file=sys.stderr,flush=True))
             else:
+                standalone=Path("/usr/local/sbin/anime-discovery-upgrade")
+                if standalone.is_file():
+                    subprocess.run([str(standalone)],check=True)
+                    return
                 if not (root/".git").exists():
                     raise ValueError("Archive installation: download the release .tar.gz or .zip and pass its local path to upgrade")
                 result=upgrade(root,db_path=args.db or configured_db,
