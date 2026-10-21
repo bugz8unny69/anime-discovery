@@ -14,6 +14,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from anime_tvdb_throttle import reserve_request, record_failure, record_success, TVDBDeferred, current_scope
+from anime_tvdb_response_cache import cache_get,cache_put,fingerprint
 
 from anime_identity_catalog import audit, read_catalog
 from anime_config_runtime import get as config_get
@@ -46,6 +47,20 @@ def request_json(url, payload=None, bearer=None):
         headers['Authorization'] = 'Bearer ' + bearer
     req = urllib.request.Request(url, data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
     scope=current_scope()
+    # Only cache authenticated GETs for the bounded, ID-specific TVDB API
+    # endpoints used by identification. No broad searches or arbitrary URLs.
+    cache_kind=None
+    if scope and payload is None and bearer and url.startswith(TVDB_URL+"/"):
+        suffix=url[len(TVDB_URL):]
+        if re.fullmatch(r"/series/[1-9][0-9]*/extended",suffix):
+            cache_kind="series"
+        elif re.fullmatch(r"/series/[1-9][0-9]*/episodes/default\\?page=[0-9]{1,3}",suffix):
+            cache_kind="episodes"
+    cache_key=(fingerprint(bearer),url) if cache_kind else None
+    if cache_kind:
+        saved=cache_get(scope,cache_kind,cache_key)
+        if saved is not None:
+            return saved
     if scope and url.startswith(TVDB_URL+"/"):
         reserve_request(scope)
     try:
@@ -53,6 +68,10 @@ def request_json(url, payload=None, bearer=None):
             result=json.load(resp)
         if scope and url.startswith(TVDB_URL+"/"):
             record_success(scope)
+        # Cache only structurally plausible successful results; callers still
+        # perform their complete ID, title and episode verification.
+        if cache_kind and isinstance(result,dict) and isinstance(result.get("data"),(dict,list)):
+            cache_put(scope,cache_kind,cache_key,result)
         return result
     except urllib.error.HTTPError as exc:
         if scope and url.startswith(TVDB_URL+"/"):
@@ -67,6 +86,12 @@ def request_json(url, payload=None, bearer=None):
         raise
 
 def tvdb_token(api_key, pin=''):
+    scope=current_scope()
+    key=fingerprint(api_key+"\\x00"+pin) if scope else None
+    if scope:
+        saved=cache_get(scope,"token",key)
+        if saved is not None:
+            return saved
     payload = {'apikey': api_key}
     if pin:
         payload['pin'] = pin
@@ -74,6 +99,8 @@ def tvdb_token(api_key, pin=''):
     token = data.get('data', {}).get('token')
     if not token:
         raise ValueError('TVDB login did not return a token')
+    if scope:
+        cache_put(scope,"token",key,token)
     return token
 
 def tvdb_series(series_id, token):
