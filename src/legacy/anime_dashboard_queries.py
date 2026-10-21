@@ -171,7 +171,12 @@ def all_jobs(db, *,page=1,size=20):
                     "EPISODE_NUMBER_UNRESOLVED",
                     "EXACT_IDENTITY_NOT_VERIFIED")]
             if codes:
-                explanation+="; "+", ".join(codes)
+                if any(code.startswith("LOOKUP_") for code in codes):
+                    explanation=describe_review(next(code for code in codes if code.startswith("LOOKUP_")))
+                elif status=="NEEDS REVIEW":
+                    explanation=describe_review(codes[0])
+                else:
+                    explanation+="; "+", ".join(codes)
         result.append({"id":nid,"job_id":job_id,"job_state":job,"attempts":attempts,
                         "next_retry_at":retry_at if job=="DEFERRED" else None,
                         "lease_until":lease_until if job=="LEASED" else None,
