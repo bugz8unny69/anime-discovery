@@ -44,7 +44,7 @@ def prepare(db, job_id):
                 WHERE lower(info_hash)=? AND CAST(id AS TEXT)!=? LIMIT 1""",
                 (h,subject)).fetchone())
         if "torrent_recovery_records" in tabs:
-            shared=bool(db.execute("""SELECT 1 FROM torrent_recovery_records
+            shared=shared or bool(db.execute("""SELECT 1 FROM torrent_recovery_records
                 WHERE lower(infohash)=? AND CAST(notification_id AS TEXT) != ?
                 LIMIT 1""",(h,subject)).fetchone())
         if "anime_batch_authorizations" in tabs:
