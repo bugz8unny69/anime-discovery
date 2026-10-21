@@ -2,10 +2,17 @@
 name: Anime Discovery Python tests
 on:
   push:
-    branches: [develop, 'feature/**', 'fix/**']
+    branches: [develop]
   pull_request:
     branches: [develop]
   workflow_dispatch:
+
+# Cancel obsolete runs from the same PR, branch, or manual dispatch.
+# Keep push and pull_request groups separate so they cannot cancel each other.
+concurrency:
+  group: anime-python-tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
