@@ -53,7 +53,11 @@ def mark_staged(db,notification_id):
             AND EXISTS(SELECT 1 FROM episode_dispatch d
               WHERE d.notification_id=? AND d.state='DONE')""",
               (notification_id,notification_id)).rowcount
-        if changed!=1:
+        if changed!=1 and not db.execute("""SELECT 1 FROM anime_episode_acquisition_slots
+            WHERE owner_notification_id=? AND state='STAGED'
+              AND EXISTS(SELECT 1 FROM episode_dispatch d
+                WHERE d.notification_id=? AND d.state='DONE')""",
+                (notification_id,notification_id)).fetchone():
             raise ValueError("Stage confirmation requires owned slot and completed dispatch")
         db.execute("""UPDATE daemon_jobs SET available_at=0
           WHERE kind='claimed_acquisition' AND state='DEFERRED'
