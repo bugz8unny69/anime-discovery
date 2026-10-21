@@ -8,6 +8,7 @@ class EpisodeSlots(unittest.TestCase):
         self.db=sqlite3.connect(":memory:",isolation_level=None)
         self.addCleanup(self.db.close)
         self.db.executescript("""
+          CREATE TABLE daemon_jobs(id INTEGER PRIMARY KEY,kind TEXT,state TEXT,last_error TEXT,subject_key TEXT,available_at REAL);
           CREATE TABLE series(id INTEGER PRIMARY KEY,source TEXT,external_id TEXT);
           CREATE TABLE episode_dispatch(notification_id INTEGER PRIMARY KEY,
             series_id INTEGER,season INTEGER,episode INTEGER,state TEXT);
