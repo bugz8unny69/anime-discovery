@@ -74,9 +74,23 @@ def preview_live(db,job_id,qb,*,download_root=None,trial_root=None,sonarr_root=N
         if not record["eligible"]:
             continue
         h=record["infohash"]
+        previous=None
+        if "daemon_job_cleanup_attempts" in _tables(db):
+            previous=db.execute("""SELECT state,delete_files_requested,file_paths_json
+                FROM daemon_job_cleanup_attempts WHERE job_id=? AND infohash=?""",
+                (job_id,h)).fetchone()
+        record["retry_state"]=previous[0] if previous else None
+        record["reconcile_only"]=False
         owned=db.execute("""SELECT marker,category FROM qb_torrent_ownership
             WHERE infohash=? AND status='OWNED'""",(h,)).fetchone()
         current=qb.torrent_identity(h)
+        if previous and previous[0] in ("UNCERTAIN","REMOVED","ABSENT") and current is None:
+            # There is no torrent to delete again. An earlier UNCERTAIN
+            # request may be reconciled by explicit operator confirmation.
+            record["reconcile_only"]=True
+            record["file_cleanup_ready"]=bool(previous[1])
+            record["file_preview"]=json.loads(previous[2])
+            continue
         tags=current.get("tags","") if isinstance(current,dict) else ""
         labels={v.strip() for v in tags.split(",")} if isinstance(tags,str) else set()
         if (not owned or not isinstance(current,dict) or
