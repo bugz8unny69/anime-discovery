@@ -1,4 +1,4 @@
-"""Unified-inbox background identity triage.
+"""Provider-backed identity resolution used by queued identity jobs.
 
 Network evidence is observational; only configured exact mappings can
 authorize a download through the existing webhook approval gate.
@@ -690,19 +690,3 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1,notification_id
         done+=1
     return {"processed":done,"pending_retries":pending_retries}
 
-def main():
-    configure_logging()
-    while True:
-        try:
-            cfg=load_config()
-            with sqlite3.connect(cfg["settings"]["daemon"]["database_path"],timeout=10) as db:
-                db.execute("PRAGMA busy_timeout=10000")
-                check_once(db,cfg["settings"],cfg["secrets"])
-        except Exception as exc:
-            event(LOG, logging.ERROR, "IDENTITY_LOOP_EXCEPTION",
-                  subsystem="identity", operation="check_once",
-                  error_type=type(exc).__name__, retryable=True, exc_info=True)
-        wait_for_change(60)
-
-if __name__=="__main__":
-    main()
