@@ -169,7 +169,7 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                         raise RuntimeError("Lease renewal failed")
                 if outcome not in ("DONE","DEFERRED","NEEDS_REVIEW","BLOCKED"):
                     raise ValueError("Invalid handler result")
-                reason=""
+                reason=str(job.get("episode_outcome") or "")
             except asyncio.CancelledError:
                 event(LOG, logging.WARNING, "JOB_CANCELED", subsystem="worker",
                       job_id=job["id"], operation=job["kind"])
