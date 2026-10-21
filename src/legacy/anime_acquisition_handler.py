@@ -32,6 +32,19 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
             if (not row or row[0] != 'LEASED' or row[1] != job['lease_token']
                     or row[2] < time.time()):
                 raise ValueError('Stale acquisition lease')
+            # A restart after external cleanup but before daemon.finish must
+            # NEVER re-add a torrent whose dual-audio probe already failed.
+            if db.execute("""SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='anime_rejected_audio_cleanup'""").fetchone():
+                previous=db.execute("""SELECT state FROM anime_rejected_audio_cleanup
+                    WHERE job_id=? AND infohash=?""",
+                    (job['id'],payload['infohash'])).fetchone()
+                if previous:
+                    if previous[0]=="REMOVED":
+                        job["episode_outcome"]="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                        return {"state":"BLOCKED"}
+                    job["episode_outcome"]="DUAL_AUDIO_CLEANUP_NEEDS_REVIEW"
+                    return {"state":"NEEDS_REVIEW"}
             dispatch=db.execute("SELECT state FROM episode_dispatch WHERE notification_id=?",
                                 (payload['notification_id'],)).fetchone()
             if dispatch and dispatch[0]=='DONE':
