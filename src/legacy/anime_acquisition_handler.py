@@ -15,6 +15,7 @@ from anime_single_size_intake import admit_single_episode
 from anime_episode_acquisition_guard import reserve,mark_staged,EpisodeSlotNeedsReview
 from anime_audio_verification import DualAudioRejected
 from anime_cancel_cleanup import cleanup_rejected_dual_audio
+from anime_trial_size_policy import TrialSizeRejected
 
 
 def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, cleanup_source=False, jellyfin_refresh=None,
@@ -99,9 +100,24 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 # Real qB intake always enforces the hard MB budget before
                 # selecting any file. Legacy injected fakes keep offline tests
                 # independent of the qB HTTP transport implementation.
-                intake=admit_single_episode(db,payload['notification_id'],
-                    payload['infohash'],payload['magnet_uri'],client,
-                    size_settings=size_settings,download_root=download_root)
+                try:
+                    intake=admit_single_episode(db,payload['notification_id'],
+                        payload['infohash'],payload['magnet_uri'],client,
+                        size_settings=size_settings,download_root=download_root)
+                except TrialSizeRejected as rejected:
+                    # A known-over-budget manifest is terminal for THIS release.
+                    # The existing guarded cleanup can clear the slot only if
+                    # it can prove owned data removal. Otherwise stay in review.
+                    try:
+                        cleanup_rejected_dual_audio(
+                            db,{**job,"notification_id":payload["notification_id"]},
+                            payload["infohash"],client,download_root=download_root,
+                            trial_root=trial_root,sonarr_root=sonarr_root)
+                    except (ValueError,OSError,RuntimeError,PermissionError,sqlite3.Error):
+                        job["episode_outcome"]=rejected.reason
+                        return {"state":"NEEDS_REVIEW"}
+                    job["episode_outcome"]="SIZE_REJECTED_"+rejected.reason
+                    return {"state":"BLOCKED"}
                 if intake["state"]=="DEFERRED":
                     return intake
                 selected_index=intake["file_index"]
