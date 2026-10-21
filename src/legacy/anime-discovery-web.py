@@ -409,14 +409,9 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 except (ValueError,TypeError,sqlite3.Error) as exc:
                     return self.send(409,json.dumps({"error":str(exc)}),"application/json")
             if route=="/api/delete-notification":
-                try:
-                    values=getattr(self,"_cached_form",None) or self.form()
-                    from anime_notification_management import delete_unmatched
-                    with self.database() as db:
-                        outcome=delete_unmatched(db,values.get("notification_id"))
-                    return self.send(200,json.dumps(outcome),"application/json")
-                except (ValueError,TypeError,sqlite3.Error) as exc:
-                    return self.send(400,json.dumps({"error":str(exc)}),"application/json")
+                return self.send(410,json.dumps({
+                    "error":"Notification deletion has been retired. Review the identity using Resolve; acquisition jobs use Cancel Job when eligible."}),
+                    "application/json")
             if route=="/api/test-connection":
                 if config_dir is None: return self.send(404,"Not found","text/plain")
                 try:
