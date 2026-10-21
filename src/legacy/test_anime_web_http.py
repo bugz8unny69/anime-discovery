@@ -512,6 +512,23 @@ class DashboardHTTPTests(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT 1 FROM notifications WHERE id=?",
                                            (nid,)).fetchone())
 
+    def test_cleanup_preview_is_authenticated_and_never_deletes_media(self):
+        from anime_async_daemon import enqueue
+        from anime_job_management import manage
+        with sqlite3.connect(self.db,isolation_level=None) as db:
+            enqueue(db,"claimed_acquisition","98765",'{"notification_id":98765}')
+            jid=db.execute("""SELECT id FROM daemon_jobs WHERE
+                kind='claimed_acquisition' AND subject_key='98765'""").fetchone()[0]
+            db.execute("UPDATE daemon_jobs SET state='NEEDS_REVIEW' WHERE id=?",(jid,))
+            manage(db,jid,"cancel",expected_state="NEEDS_REVIEW",expected_attempts=0)
+        status,_,body=self.request("GET","/api/cleanup-preview?job_id="+str(jid))
+        self.assertEqual(status,409)
+        self.assertIn("unavailable",body.lower())
+        status,_,body=self.request("POST","/api/cleanup-confirm",
+                                  {"job_id":jid,"confirmation":"REMOVE TORRENT ONLY"})
+        self.assertEqual(status,409)
+        self.assertNotIn("qbittorrent_password",body)
+
     def test_manage_job_api_retry_cancel_and_visible_activity(self):
         from anime_async_daemon import enqueue
         with sqlite3.connect(self.db,isolation_level=None) as db:
