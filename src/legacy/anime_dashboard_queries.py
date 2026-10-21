@@ -112,7 +112,13 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
         batch_active=bool(batch_stage in ("PROBE","UNLOCKED") and job in ("DEFERRED","LEASED","READY"))
         event=events.get(job_id)
         canceled=job=="BLOCKED" and event is not None and event["action"]=="cancel"
-        if canceled:
+        if job=="BLOCKED" and error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET":
+            status="CANCELED"
+        elif job=="DEFERRED" and error=="ON_HOLD":
+            status="ON HOLD"
+        elif job=="DONE" and error=="SKIPPED_DUPLICATE":
+            status="SKIPPED DUPLICATE"
+        elif canceled:
             status="CANCELED"
         elif job=="DONE" and dispatch=="DONE":
             status="COMPLETED"
@@ -160,7 +166,14 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
                          "Live qBittorrent progress is not available in this view; "
                          "this status does not confirm that transfer speed is nonzero.")
         elif status=="CANCELED":
-            explanation="Canceled by administrator."
+            explanation=("Canceled: required Japanese and English audio tracks were not both present. "
+                         "Owned torrent and payload deletion confirmed."
+                         if error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
+                         else "Canceled by administrator.")
+        elif status=="ON HOLD":
+            explanation="Another release owns this episode; waiting for successful trial staging or confirmed cleanup."
+        elif status=="SKIPPED DUPLICATE":
+            explanation="The episode has been staged for Jellyfin trial from another release; no competing torrent started."
         else:
             explanation=error or ("Current job state: "+status.lower())
         if status=="NEEDS REVIEW" and job:
