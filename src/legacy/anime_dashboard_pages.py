@@ -294,7 +294,7 @@ status.className="status "+(job.status==="COMPLETED"?"completed":
 job.status==="RUNNING"||job.status==="DOWNLOADING"?"running":job.status.includes("WAITING")?"waiting":
 (job.status==="BLOCKED"||job.status==="CANCELED")?"blocked":job.status==="ON HOLD"?"waiting":"");
 status.textContent=job.status;cell.appendChild(status);
-if(job.message){let small=document.createElement("small");small.className="muted";
+if(job.message && !(job.status==="ON HOLD" && job.message==="ON_HOLD")){let small=document.createElement("small");small.className="muted";
 small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,"");const disclosure=document.createElement("details");disclosure.className="job-details";const summary=document.createElement("summary");const preview=document.createElement("span");preview.textContent=job.activity_detail||"No further activity recorded";summary.appendChild(preview);disclosure.appendChild(summary);detail.appendChild(disclosure);
