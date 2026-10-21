@@ -16,7 +16,7 @@ from anime_async_daemon import run_workers
 from anime_qb_api import QBittorrentAPI
 from anime_prowlarr_search import ProwlarrClient
 from anime_shared_discovery import handler_factory
-from anime_identity_job import handler_factory as identity_handler_factory, recover_pending
+from anime_identity_job import handler_factory as identity_handler_factory
 from anime_batch_worker import handler_factory as batch_handler_factory
 from anime_jellyfin_refresh import refresh_library
 
@@ -121,9 +121,6 @@ def main():
         raise RuntimeError("Configure existing storage.download_root and storage.trial_root")
     if not qb["username"] or not secrets.get("qbittorrent_password"):
         raise RuntimeError("Configure qbittorrent.username and secrets.json qbittorrent_password")
-    # Migrate incomplete inbox records before worker claims begin. This is
-    # idempotent across restarts and does not overwrite notification history.
-    recover_pending(db_path)
     handlers=runtime_handlers(db_path,config)
     print("Anime Discovery worker running; integration settings reload per job",flush=True)
     try:
