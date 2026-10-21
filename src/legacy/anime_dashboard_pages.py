@@ -336,21 +336,6 @@ if(job.can_resolve){
     document.getElementById("resolve-dialog").showModal();
   });actions.appendChild(btn);
 }
-if(job.can_delete){
-  let btn=document.createElement("button");btn.type="button";btn.className="secondary";btn.textContent="Delete";
-  btn.addEventListener("click",async()=>{
-    if(!confirm("Delete unmatched notification #"+job.id+"? No torrent or media will be deleted."))return;
-    try{
-      let csrf=document.querySelector('input[name="_csrf"]')?.value;
-      let response=await fetch("/api/delete-notification",{method:"POST",credentials:"same-origin",
-        headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
-        body:JSON.stringify({notification_id:job.id})});
-      let outcome=await response.json();
-      if(!response.ok)throw Error(outcome.error||"Deletion failed");
-      await refresh();
-    }catch(error){alert(error.message)}
-  });actions.appendChild(btn);
-}
 if(job.can_retry || job.can_cancel){
   for(const [operation,label] of [["retry","Retry Now"],["cancel","Cancel Job"]]){
     if(!(operation==="retry"?job.can_retry:job.can_cancel))continue;
