@@ -137,8 +137,9 @@ class CancelCleanupTests(unittest.TestCase):
                 def torrent_identity(self,h):
                     self.calls+=1
                     if self.calls==2:
-                        target.unlink()
-                        target.write_bytes(b"same-size-b")
+                        replacement=download/"replacement.mkv"
+                        replacement.write_bytes(b"same-size-b")
+                        replacement.replace(target)
                     return self.record
                 def torrent_details(self,h):
                     return {"hash":h,"save_path":str(download),"state":"pausedDL"}
