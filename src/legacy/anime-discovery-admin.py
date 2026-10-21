@@ -73,16 +73,12 @@ def doctor(path):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(prog="anime-discovery-admin.py",
-        description="Manage Anime Discovery releases, database and flat-file settings.")
+        description="Manage Anime Discovery database and flat-file settings.")
     parser.add_argument("--config-dir",type=Path,default=DEFAULT_CONFIG)
     parser.add_argument("--db",type=Path,default=None,
                         help="Override configured database path for local administration")
     commands=parser.add_subparsers(dest="command",required=True)
 
-    upgrade_cmd=commands.add_parser("upgrade",help="Upgrade Git checkout or extracted release archive")
-    upgrade_cmd.add_argument("archive",nargs="?",type=Path,help="Downloaded release tar.gz for archive installations")
-    upgrade_cmd.add_argument("--verbose",action="store_true",help="Show upgrade milestones and service readiness checks")
-    upgrade_cmd.add_argument("--backup",action="store_true",help="Keep code and database backups after successful archive upgrade")
     setup_cmd=commands.add_parser("setup",help="Run local first-run configuration")
     setup_cmd.add_argument("--reconfigure",action="store_true",help="Revisit current configuration")
     commands.add_parser("status",help="Show installed version, service and database readiness")
@@ -121,21 +117,6 @@ def main(argv=None):
         if args.command=="setup":
             from anime_admin_setup import setup
             print(json.dumps(setup(args.config_dir,reconfigure=args.reconfigure),indent=2))
-        elif args.command=="upgrade":
-            from anime_admin_upgrade import upgrade
-            config=load_config(args.config_dir)
-            configured_db=Path(config["settings"]["daemon"]["database_path"])
-            root=Path(__file__).resolve().parents[2]
-            if args.archive is not None:
-                from anime_admin_archive_upgrade import upgrade_archive
-                result=upgrade_archive(root,args.archive,db_path=args.db or configured_db,
-                    verbose=args.verbose,backup=args.backup,log=lambda message: print(message,file=sys.stderr,flush=True))
-            else:
-                if not (root/".git").exists():
-                    raise ValueError("Archive installation: download the new release tar.gz and pass its local path to upgrade")
-                result=upgrade(root,db_path=args.db or configured_db,
-                    verbose=args.verbose,log=lambda message: print(message,file=sys.stderr,flush=True))
-            print(json.dumps(result,indent=2,sort_keys=True))
         elif args.command=="status":
             from anime_admin_upgrade import command
             root=Path(__file__).resolve().parents[2]

@@ -1,7 +1,7 @@
 name: Publish downloadable archive
 on:
-  push:
-    branches: [develop]
+  # Packages are created only by an explicitly requested workflow run.
+  # Do not publish release assets on ordinary develop merges.
   workflow_dispatch:
 permissions:
   contents: write

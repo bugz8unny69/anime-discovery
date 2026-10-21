@@ -1,4 +1,5 @@
 """Poll pending Sonarr manual-copy imports and safely finalize completed Keeps."""
+from anime_diagnostics import configure_logging, event
 import logging
 import sqlite3
 import time
@@ -80,12 +81,13 @@ def check_once(settings,secrets,*,qb_factory=None):
         return {"processed":len(pending),"complete":complete,"errors":errors}
 
 def main():
+    configure_logging()
     while True:
         try:
             config=load_config()
             check_once(config["settings"],config["secrets"])
         except Exception as exc:
-            LOG.warning("Sonarr Keep monitor iteration deferred (%s)",type(exc).__name__)
+            event(LOG, logging.ERROR, "MONITOR_UNEXPECTED_FAILURE", subsystem="sonarr", operation="check_once", error_type=type(exc).__name__, retryable=True, exc_info=True)
         wait_for_change(60)
 
 if __name__=="__main__":

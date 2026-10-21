@@ -1,4 +1,5 @@
 """Unified-database review reminder scheduler; never mutates acquisition state."""
+from anime_diagnostics import configure_logging, event
 import sqlite3
 import re
 import time
@@ -71,6 +72,7 @@ def check_once(db, settings, secrets, *, now=None, sender=notify_best_effort):
     return {"sent":sent,"pending":len(rows)+len(jobs)}
 
 def main():
+    configure_logging()
     while True:
         try:
             cfg=load_config()
@@ -82,7 +84,7 @@ def main():
                     db.execute("PRAGMA busy_timeout=10000")
                     check_once(db,settings,secrets)
         except Exception as exc:
-            LOG.warning("NTFY monitor iteration failed (%s)",type(exc).__name__)
+            event(LOG, logging.ERROR, "MONITOR_UNEXPECTED_FAILURE", subsystem="ntfy", operation="check_once", error_type=type(exc).__name__, retryable=True, exc_info=True)
         wait_for_change(60)
 
 if __name__=="__main__":

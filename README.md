@@ -63,8 +63,8 @@ The service account must own the existing mode-0600 `secrets.json` and
 have access to the configuration, media and database paths. The installer
 refuses to change ownership of existing secret files silently.
 A pre-existing systemd service is also refused, to avoid disrupting another
-deployment. After first installation, use
-`anime-discovery-admin.py upgrade` for subsequent releases.
+deployment. For subsequent Git upgrades, install and use the independent
+`/usr/local/sbin/anime-discovery-upgrade` after its PR is reviewed and merged.
 
 
 The launcher starts the dashboard/webhook and acquisition worker together.
@@ -176,70 +176,60 @@ For existing installations, after deploying the new release, run
 `settings migrate` to preview new settings and `settings migrate --apply`
 to add defaults. Then run the interactive admin command, which securely updates the key\nand enables scanning without showing the key in process arguments:\n\n```bash\nsudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py settings configure-jellyfin\nsudo systemctl restart anime-discovery.service\n```\n\nNo SQLite reset is required.
 
-## Release archive deployment (no Git clone)
+## Upgrading an existing Git installation
 
-GitHub Actions builds versioned tar.gz and zip releases when changes are
-merged into develop. Each release includes SHA256SUMS.
+The supported application upgrade path is a standalone Python bootstrapper
+installed at `/usr/local/sbin/anime-discovery-upgrade`. It runs independently
+of the application runtime, fetches `develop` from the pinned private SSH
+repository `git@github.com:bugz8unny69/anime-discovery.git`, and performs
+in-place fast-forward Git updates. No Docker or archive inputs.
 
-This is a **private repository**: release assets require authenticated
-download. Anonymous wget will not work. Download with your authenticated
-GitHub browser session or GitHub CLI, then transfer the archive to the VM
-using an available secure transport. No Git clone or SSH access is needed
-on the VM.
-
-Extract the archive into /opt (it contains an anime-discovery/ directory):
+After the bootstrapper PR has passed CI, been reviewed, **merged**, and cloned
+onto the VM, install the independent program once:
 
 ```bash
-sudo tar -xzf anime-discovery-build-VERSION.tar.gz -C /opt
-cd /opt/anime-discovery
-sudo python3 deploy/install-homelab.py
+sudo -H python3 /opt/anime-discovery/deploy/anime-discovery-upgrade.py --install
 ```
 
-Verify the package with the published SHA256SUMS before extraction. The
-installer asks for the existing Linux service account (default
-anime-discovery) and requires membership in the media group (GID 1002).
-It detects existing settings.json and secrets.json, requests confirmation
-before correcting permissions, and does not overwrite credentials.
-The configured existing database must be archived or removed separately
-before installation.
-
-**Archive-based upgrades:** Download and verify the newer release
-`.tar.gz`, copy it onto the VM, then run:
+Then run future upgrades with:
 
 ```bash
-sudo python3 /opt/anime-discovery/src/legacy/anime-discovery-admin.py upgrade /path/to/new-release.tar.gz
+sudo -H /usr/local/sbin/anime-discovery-upgrade
 ```
 
-The offline upgrade validates archive entries, makes an online SQLite
-backup, stops the service, swaps the application code, starts the service,
-and restores the old code if startup fails. The old code directory and
-database backup remain available. It does not overwrite
-`/etc/anime-discovery`, your NFS mounts, or the SQLite database.
-For Git checkouts, `admin upgrade` without a package path still uses Git.
+The root-run command authenticates using root's effective SSH configuration;
+the Git checkout is returned to its original `anime-discovery` owner before
+service startup. The tool backs up SQLite, preserves `/etc/anime-discovery`,
+tracks the last successful Git commit at
+`/var/lib/anime-discovery/upgrade-state.json`, and refuses unsafe or
+non-fast-forward state. If interrupted, it attempts conservative recovery
+when the checkout exactly matches a known commit and is clean. Arbitrary
+partial filesystem corruption may still require intervention.
 
-## Built-in VM upgrade and administration
+`anime-discovery-admin.py` is for application, settings, and database
+administration only. It **does not** expose an `upgrade` subcommand.
+The former **local ZIP/tar.gz upgrade implementation has been removed**.
+The manual GitHub archive-publishing workflow is a separate historical
+release facility; it is not an upgrade input and was not modified by this PR.
 
-After the first installation, update the checked-out `develop` release and
-restart Anime Discovery directly on the VM:
+### Future enhancement: trusted online archive source (not implemented)
 
-```bash
-cd /opt/anime-discovery
-sudo python3 src/legacy/anime-discovery-admin.py upgrade
-```
+If releases eventually become public, consider fetching a versioned archive
+from an approved official HTTPS endpoint (GitHub Releases or a separately
+controlled distribution hostname). No URL or hostname is configured yet.
+That feature needs explicit opt-in, trusted publisher and checksum/signature
+verification, immutable release identifiers, safe extraction, rollback tests,
+and a defined policy for SSH-versus-HTTPS use. **Do not treat an arbitrary
+URL, manually supplied local archive, or HTTPS fallback as supported today.**
 
-The upgrade fetches `origin/develop`, requires a clean checkout and a
-fast-forward release, creates an online-safe dated SQLite backup,
-stops the service, updates the Git checkout, verifies the database,
-and restarts the service. If the service restart fails, the previous Git
-revision is restored; the SQLite backup remains available. Git fetches run
-as the checkout's owner so the existing private-repository credentials work
-when the admin command is launched with sudo.
+For a fresh VM installation, refer to the existing
+`deploy/install-homelab.py` instructions above. **Never rerun the fresh
+installer against an installed service or an existing database.**
 
-The admin interface now follows a consistent, discoverable hierarchy:
+## Built-in VM administration
 
 ```text
 anime-discovery-admin.py status
-anime-discovery-admin.py upgrade
 anime-discovery-admin.py database init
 anime-discovery-admin.py database doctor
 anime-discovery-admin.py settings show
@@ -247,8 +237,8 @@ anime-discovery-admin.py settings set KEY VALUE
 ```
 
 Existing `doctor` and `new-database` spellings still work for older scripts.
-The application itself still reads its settings and secrets from flat files;
-no environment variables or worker flags are required.
+The application reads settings and secrets from flat files; no environment
+variables or worker flags are required.
 
 ## Dashboard: Series and Jobs
 

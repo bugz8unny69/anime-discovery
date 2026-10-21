@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from anime_admin_upgrade import upgrade
+from anime_admin_upgrade import upgrade, SSH_SOURCE
 from anime_fresh_database import initialize
 
 spec=importlib.util.spec_from_file_location("anime_admin_upgrade_cli",
@@ -45,6 +45,8 @@ class UpgradeTests(unittest.TestCase):
             self.assertEqual(backup.execute("PRAGMA integrity_check").fetchone()[0],"ok")
         self.assertIn(("systemctl","stop","anime-discovery.service"),self.calls)
         self.assertIn(("git","merge","--ff-only","FETCH_HEAD"),self.calls)
+        self.assertIn(("git","fetch",SSH_SOURCE,"develop"),self.calls)
+        self.assertNotIn(("git","fetch","origin","develop"),self.calls)
         self.assertIn(("systemctl","start","anime-discovery.service"),self.calls)
 
     def test_dirty_worktree_never_stops_service(self):

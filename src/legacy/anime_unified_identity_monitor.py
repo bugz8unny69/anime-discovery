@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 import io
 import json
 import logging
+from anime_diagnostics import event, Span, configure_logging
 import sqlite3
 import time
 from anime_config_wakeup import wait_for_change
@@ -392,6 +393,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
     pending_retries=0
     for nid,title,attempts in selected:
         attempts+=1
+        span=Span()
         retry_delay=None
         mapping_xml=None
         stage="IDENTITY_RESOLUTION" if probe else "ANIDB_TITLES"
@@ -506,8 +508,12 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 report={"decision":decision,"issues":["LOOKUP_"+type(exc).__name__]}
                 retry=attempts<3
                 pending_retries+=int(retry)
-                LOG.exception("Identity triage retry notification=%s error_type=%s",
-                            nid,type(exc).__name__)
+                event(LOG, logging.ERROR, "IDENTITY_UNEXPECTED_FAILURE",
+                      subsystem="identity", stage=stage, outcome=decision,
+                      notification_id=nid, attempt=attempts,
+                      error_type=type(exc).__name__,
+                      elapsed_ms=span.milliseconds(), retryable=retry,
+                      exc_info=True)
         LOG.info("identity notification=%s attempt=%s decision=%s threshold=%s anidb_matches=%s tvdb_candidates=%s issues=%s",
                  nid,attempts,decision,report.get("threshold_pct","n/a"),
                  len(report.get("anidb_candidates",[])),
@@ -551,13 +557,16 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
             except ValueError as exc:
                 LOG.warning("event=VERIFIED_BATCH_CACHE_REVIEW notification=%d reason=%s",
                             nid,type(exc).__name__)
+        event(LOG, logging.INFO, "IDENTITY_FINISHED", subsystem="identity",
+              notification_id=nid, attempt=attempts, outcome=decision,
+              elapsed_ms=span.milliseconds(), retryable=retry)
         LOG.info("identity finalized notification=%s attempt=%s persisted_decision=%s retry=%s",
                  nid,attempts,decision,retry)
         done+=1
     return {"processed":done,"pending_retries":pending_retries}
 
 def main():
-    logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    configure_logging()
     while True:
         try:
             cfg=load_config()
@@ -565,7 +574,9 @@ def main():
                 db.execute("PRAGMA busy_timeout=10000")
                 check_once(db,cfg["settings"],cfg["secrets"])
         except Exception as exc:
-            LOG.warning("Identity triage failed error_type=%s",type(exc).__name__)
+            event(LOG, logging.ERROR, "IDENTITY_LOOP_EXCEPTION",
+                  subsystem="identity", operation="check_once",
+                  error_type=type(exc).__name__, retryable=True, exc_info=True)
         wait_for_change(60)
 
 if __name__=="__main__":
