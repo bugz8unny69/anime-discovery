@@ -61,6 +61,9 @@ class CancelCleanupTests(unittest.TestCase):
     def test_owned_torrent_only_never_deletes_files_and_idempotent(self):
         self.assertEqual(cleanup_torrents(self.db,self.jid,self.qb,approved=True),[(H,"REMOVED")])
         self.assertEqual(self.qb.removed,[H])
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM daemon_job_cleanup_review").fetchone()[0],
+            "TORRENTS_REMOVED")
         self.assertEqual(cleanup_torrents(self.db,self.jid,self.qb,approved=True),[(H,"ALREADY_REMOVED")])
         self.assertEqual(self.qb.removed,[H])
 
@@ -70,6 +73,9 @@ class CancelCleanupTests(unittest.TestCase):
             cleanup_torrents(self.db,self.jid,self.qb,approved=True)
         self.assertEqual(self.db.execute(
             "SELECT state FROM daemon_job_cleanup_attempts").fetchone()[0],"UNCERTAIN")
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM daemon_job_cleanup_review").fetchone()[0],
+            "CLEANUP_NEEDED")
         self.assertEqual(cleanup_torrents(
             self.db,self.jid,self.qb,approved=True),[(H,"ABSENT")])
         self.assertEqual(len(self.qb.removed),1)
