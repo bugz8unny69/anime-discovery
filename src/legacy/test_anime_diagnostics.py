@@ -41,6 +41,24 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertNotIn(forbidden, log)
         self.assertIn("[REDACTED]", log)
 
+    def test_integration_credentials_in_tracebacks(self):
+        credentials = (
+            "X-Emby-Token: jelly-secret",
+            "apikey=prowlarr-secret",
+            "https://user:passwd@internal.example/path?access_token=query-secret&passkey=other-secret",
+            "Authorization: Bearer bearer-secret",
+        )
+        try:
+            raise OSError(" / ".join(credentials))
+        except OSError:
+            event(self.logger, logging.ERROR, "INTEGRATION_FAILURE",
+                  subsystem="integration", error_type="OSError", exc_info=True)
+        log = self.stream.getvalue()
+        self.assertIn("Traceback (most recent call last)", log)
+        for secret in ("jelly-secret", "prowlarr-secret", "passwd",
+                       "query-secret", "other-secret", "bearer-secret"):
+            self.assertNotIn(secret, log)
+
     def test_rejects_untrusted_context(self):
         event(self.logger, logging.INFO, "CHECK", subsystem="worker",
               password="password=secret", job_id="42",
