@@ -216,9 +216,9 @@ def jobs_page(result):
     out=shell("Jobs","Jobs")
     out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
 from receipt through download and completion. Status and activity details refresh every
-five seconds. Retry Now bypasses backoff for deferred jobs. Cancel Job stops
-future retries for waiting jobs only; it does not interrupt running jobs or delete
-torrents or media. Jobs waiting for episode identity have not entered the worker queue.</p><section class="panel">
+five seconds. Retry and Cancel are available only when a job needs review.
+Retry continues the same attempt; Cancel permanently archives it without deleting
+torrents or media. A later webhook can create a fresh attempt.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
@@ -271,29 +271,6 @@ small.textContent=" "+job.message;cell.appendChild(small)}
 tr.appendChild(cell);
 const detail=td(tr,job.activity_detail||"No further activity recorded");
 detail.classList.add("muted");
-if(typeof job.job_id==="number" && !job.batch_download_active){
-  const line=document.createElement("div");
-  line.textContent="Job #"+job.job_id+" · "+(job.job_state||"UNKNOWN")+
-    " · Attempts: "+(job.attempts??0)+
-    (job.last_error?" · Last error: "+job.last_error:"");
-  detail.appendChild(line);
-  if(job.next_retry_at!==null && job.next_retry_at!==undefined){
-    const next=document.createElement("div");
-    next.textContent="Next retry: "+new Date(job.next_retry_at*1000).toLocaleString();
-    detail.appendChild(next);
-  }
-  if(job.lease_until!==null && job.lease_until!==undefined){
-    const lease=document.createElement("div");
-    lease.textContent="Lease expires: "+new Date(job.lease_until*1000).toLocaleString();
-    detail.appendChild(lease);
-  }
-  if(job.last_admin_action){
-    const audit=document.createElement("div");
-    audit.textContent="Last admin action: "+job.last_admin_action.action+
-      " · "+new Date(job.last_admin_action.at*1000).toLocaleString();
-    detail.appendChild(audit);
-  }
-}
 let actions=document.createElement("td");
 if(job.can_resolve){
   let btn=document.createElement("button");btn.type="button";btn.textContent="Resolve";

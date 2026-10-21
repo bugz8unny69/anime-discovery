@@ -150,8 +150,8 @@ class VerifiedBatchTests(unittest.TestCase):
             last_error='QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT'
             WHERE id=?""",(self.job["id"],))
         row=next(x for x in all_jobs(self.db)["items"] if x["id"]==self.nid)
-        self.assertIn("save_path",row["activity_detail"])
-        self.assertIn("storage.download_root",row["activity_detail"])
+        self.assertEqual(row["activity_detail"],"Needs review. Check service logs for technical details.")
+        self.assertEqual(row["last_error"],"QBITTORRENT_SAVE_PATH_OUTSIDE_DOWNLOAD_ROOT")
         self.assertNotIn("BATCH_FILE_MANIFEST_REQUIRED",row["activity_detail"])
         self.assertNotIn("EXACT_IDENTITY_NOT_VERIFIED",row["activity_detail"])
 
