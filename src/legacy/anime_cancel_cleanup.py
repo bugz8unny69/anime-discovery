@@ -253,3 +253,102 @@ def cleanup_torrents(db,job_id,qb,*,approved=False,delete_download_files=False,
         db.execute("""UPDATE daemon_job_cleanup_review SET status=?
             WHERE job_id=?""",(status,job_id))
     return results
+
+def cleanup_rejected_dual_audio(db,job,infohash,qb,*,download_root,trial_root,sonarr_root=None):
+    """Automated cleanup ONLY after a confirmed failed JP+EN media probe.
+
+    Reuses existing qB ownership markers and file-safety preflight. A durable
+    UNCERTAIN checkpoint is written before destructive I/O. Unknown outcomes
+    retain the episode slot for manual reconciliation, never auto-failover.
+    """
+    from anime_cleanup_file_safety import preflight
+    from anime_qb_ownership import CATEGORY
+    from anime_episode_acquisition_guard import ensure_schema as slot_schema
+    if db.in_transaction:
+        raise ValueError("Cleanup requires autocommit")
+    if type(job.get("id")) is not int or type(job.get("lease_token")) is not str:
+        raise ValueError("Active acquisition job lease required")
+    nid=job.get("notification_id")
+    if type(nid) is not int or nid<1:
+        raise ValueError("Verified notification required")
+    stamp=time.time()
+    tabs=_tables(db)
+    if not {"notifications","episode_dispatch","torrent_recovery_records",
+            "anime_batch_authorizations","qb_torrent_ownership","daemon_jobs"} <= tabs:
+        raise ValueError("Incomplete cleanup provenance")
+    lease=db.execute("""SELECT state,lease_token,lease_until,kind,subject_key
+        FROM daemon_jobs WHERE id=?""",(job["id"],)).fetchone()
+    if not lease or lease[0]!="LEASED" or lease[1]!=job["lease_token"] or lease[2]<stamp or lease[3]!="claimed_acquisition" or lease[4]!=str(nid):
+        raise ValueError("Cleanup job lease changed")
+    source=db.execute("SELECT lower(info_hash) FROM notifications WHERE id=?",(nid,)).fetchone()
+    if not source or source[0]!=infohash:
+        raise ValueError("Cleanup hash disagrees with notification")
+    if db.execute("SELECT 1 FROM torrent_recovery_records WHERE notification_id=?",(nid,)).fetchone():
+        raise ValueError("Staged media must never be cleaned as rejected audio")
+    if db.execute("SELECT 1 FROM notifications WHERE lower(info_hash)=? AND id<>?",(infohash,nid)).fetchone():
+        raise ValueError("Shared release hash")
+    if db.execute("SELECT 1 FROM torrent_recovery_records WHERE lower(infohash)=? AND notification_id<>?",(infohash,nid)).fetchone():
+        raise ValueError("Shared staged torrent")
+    if db.execute("SELECT 1 FROM anime_batch_authorizations WHERE lower(infohash)=? AND notification_id<>?",(infohash,nid)).fetchone():
+        raise ValueError("Shared batch torrent")
+    owner=db.execute("SELECT status,marker,category FROM qb_torrent_ownership WHERE infohash=?",(infohash,)).fetchone()
+    if not owner or owner[0]!="OWNED" or owner[2]!=CATEGORY or not owner[1]:
+        raise ValueError("Torrent ownership not proven")
+    slot_schema(db)
+    slot=db.execute("""SELECT 1 FROM anime_episode_acquisition_slots
+        WHERE owner_notification_id=? AND state='ACTIVE'""",(nid,)).fetchone()
+    if not slot:
+        raise ValueError("Rejected release does not own an active episode")
+    ensure_schema(db)
+    db.execute("""CREATE TABLE IF NOT EXISTS anime_rejected_audio_cleanup (
+        job_id INTEGER PRIMARY KEY, infohash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','REMOVED')),
+        paths_json TEXT NOT NULL, updated_at REAL NOT NULL)""")
+    if db.execute("SELECT 1 FROM anime_rejected_audio_cleanup WHERE job_id=?",(job["id"],)).fetchone():
+        raise ValueError("Prior audio cleanup outcome requires reconciliation")
+    # qB mutation is allowed only after durable ownership is established.
+    qb.stop_owned_torrent(infohash)
+    plan=preflight(qb,infohash,download_root=download_root,
+                   trial_root=trial_root,sonarr_root=sonarr_root)
+    if not plan["files"]:
+        raise ValueError("No verified torrent payload paths")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        # Fence a new approval or sharing link across the destructive action.
+        if db.execute("SELECT 1 FROM notifications WHERE lower(info_hash)=? AND id<>?",(infohash,nid)).fetchone():
+            raise ValueError("Torrent became shared")
+        current=qb.torrent_identity(infohash)
+        tags={t.strip() for t in str((current or {}).get("tags") or "").split(",")}
+        if (not current or current.get("hash","").lower()!=infohash or
+            current.get("category")!=CATEGORY or owner[1] not in tags):
+            raise ValueError("Torrent ownership changed")
+        if preflight(qb,infohash,download_root=download_root,
+                     trial_root=trial_root,sonarr_root=sonarr_root)!=plan:
+            raise ValueError("Torrent payload changed")
+        db.execute("""INSERT INTO anime_rejected_audio_cleanup
+            VALUES (?,?,'UNCERTAIN',?,?)""",
+            (job["id"],infohash,json.dumps(plan["files"]),time.time()))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    # An error after UNCERTAIN is intentionally not retried automatically.
+    qb.remove_torrent(infohash,delete_files=True)
+    if qb.torrent_identity(infohash) is not None:
+        raise RuntimeError("qBittorrent removal not confirmed")
+    if any(Path(path).exists() or Path(path).is_symlink() for path in plan["files"]):
+        raise RuntimeError("Torrent payload deletion not confirmed")
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute("""UPDATE anime_rejected_audio_cleanup SET state='REMOVED',
+            updated_at=? WHERE job_id=? AND state='UNCERTAIN'""",
+            (time.time(),job["id"]))
+        changed=db.execute("""DELETE FROM anime_episode_acquisition_slots
+            WHERE owner_notification_id=? AND state='ACTIVE'""",(nid,)).rowcount
+        if changed!=1:
+            raise ValueError("Episode claim changed during cleanup")
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return True
