@@ -22,6 +22,7 @@ from anime_batch_selection import release_scope_hint
 from anime_identity_verify import TITLES_URL,TVDB_URL,tvdb_token,request_json
 from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode
+from anime_tvdb_throttle import tvdb_scope, TVDBDeferred
 
 LOG=logging.getLogger(__name__)
 MAX_TITLES=32*1024*1024
@@ -439,9 +440,10 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                         clientver=aid_cfg.get("clientver",1),
                         metadata_path=Path(settings["daemon"]["database_path"]).parent/"anime-metadata.db")
                 stage="IDENTITY_RESOLUTION"
-                report=investigate(title,settings,secrets,catalog,
-                                   mapping_xml=mapping_xml,anidb_resolve=direct,
-                                   trusted_season=known)
+                with tvdb_scope(Path(settings["daemon"]["database_path"]).parent/"tvdb-throttle.db"):
+                    report=investigate(title,settings,secrets,catalog,
+                                       mapping_xml=mapping_xml,anidb_resolve=direct,
+                                       trusted_season=known)
             decision=report["decision"]
             # The release name alone never authorizes season-pack acquisition.
             # Only this network-backed identity worker can promote a pending
@@ -499,6 +501,14 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 pending_retries+=1
                 LOG.warning("Identity metadata retry notification=%s source=%s error_type=%s",
                             nid,source,type(exc).__name__)
+            elif isinstance(exc,TVDBDeferred):
+                # A shared TVDB cooldown is temporary, never a no-match verdict.
+                attempts-=1
+                decision="LOOKUP_RETRY"
+                report={"decision":decision,"issues":["TVDB_HTTP_COOLDOWN"]}
+                retry=True
+                retry_delay=exc.retry_after_seconds+1
+                pending_retries+=1
             elif isinstance(exc,AniDBLookupDeferred):
                 # A shared AniDB cooldown is a wait, not a failed identity.
                 attempts-=1
