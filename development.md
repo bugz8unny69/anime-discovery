@@ -11,7 +11,7 @@
 - Integration branch: `develop`; repository default is `main`. Do not accidentally base work on `main`.
 - Develop locally on dedicated feature branches and open PRs to `develop`.
 - Never assume a PR merge deploys to the VM.
-- As of this guide, PR #66 (`feat/checkpoint-recovery-review-cleanup`) is draft checkpoint recovery; PR #67 (`feat/application-wide-diagnostics`) is draft diagnostics. **Diagnostics first; do not merge either without passing tests.** Check live GitHub state on each new conversation.
+- Historical note: PR #66 (checkpoint recovery) and PR #67 (diagnostics) were earlier development tracks. Their status in older handoffs may be stale; always query GitHub before treating any PR as open, merged, or deployed.
 - No Docker deployment is used. Native Python/systemd on the Ubuntu `torrents` VM is the current approach.
 
 ## SSH Git access
@@ -130,12 +130,12 @@ Network context: OPNsense segments 14 VLANs; TrueNAS serves NFS; DATA VLAN 14 is
 
 ## Current GitHub Actions and packaging (verified on develop, 2026-10-21)
 
-- `.github/workflows/anime-python-tests.yml`: `push` on `develop`, `feature/**`, `fix/**`; `pull_request` to `develop`; and manual `workflow_dispatch`. Uses `ubuntu-latest`, Python 3.12, `compileall`, and a lengthy explicit offline `unittest` suite. Be mindful that push and PR events can duplicate work.
+- `.github/workflows/anime-python-tests.yml`: after merged PR #79, `push` on `develop` only, `pull_request` targeting `develop`, and manual `workflow_dispatch`. It no longer automatically runs the full suite for each `feature/**` or `fix/**` branch commit. Uses `ubuntu-latest`, Python 3.12, `compileall`, and the explicit offline `unittest` suite. Concurrent runs are scoped by workflow + event + PR number/ref, with `cancel-in-progress: true`. PR and post-merge push checks remain separate.
 - `.github/workflows/publish-archive.yml`: PR #70 removed its push trigger; a manually dispatched historical release-publishing workflow remains. It is **not** used for VM Git upgrades.
 - **Desired next change (not yet implemented):** stop packaging on every `develop` push. Produce release packages only after explicit approval, with a separately reviewed versioning design. Preserve test checks and existing published releases. Do not claim this policy is already enforced.
 - No Docker or GHCR pipeline is planned.
 - Never overwrite immutable release tags; inspect existing tags/version references before adopting SemVer.
-- GitHub Actions quota was reportedly exhausted; earlier PR #66/#67 runs failed without accessible job logs. Re-check billing/CI rather than attributing these failures to Python without evidence.
+- Historical GitHub Actions quota and anomalously long check incidents are not evidence of a current quota or failed tests. Inspect each workflow trigger, *individual PR/push check*, duration, job logs and GitHub billable usage independently. A successful push check does not prove the separate PR check passed.
 
 ## Standalone Git upgrade bootstrapper (proposed; install only after PR review)
 
@@ -180,3 +180,34 @@ Architecture: **Checkpoint → Validate → Resume; or Cancel → Clean up aband
 5. Report separately: coded, PR-open, CI-verified, merged, and deployed. Never conflate them.
 
 **Supporting project notes** (uploaded in conversation; not necessarily in repository): `anime-discovery-pr-handoff-2026-10-21.md`, `gemini-code-1792038645145.md`, `homelab-network-topology.md`, and `server-nas-network-build.md`. Check up-to-date runtime settings against historical notes.
+
+## Recent development handoff — identification and CI efficiency (2026-10-21)
+
+**Check GitHub for current state before acting.** The user merged PRs #75, #76, #77, #78, and #79 into `develop` as observed via GitHub; merging is **not** evidence of deployment to the VM. Do not touch production, media, SQLite, torrents, services or Shoko without explicit approval.
+
+- **PR #75 — AniDB candidate evidence:** New identity evidence retains AniDB IDs, matched titles and alternate titles for readable Matching Details; older ID-only records cannot be retroactively enriched.
+- **PR #76 — fail-closed season agreement:** No fabricated TVDB Season 1 or assumed destination episode when Anime-Lists lacks a unique mapping. Such cases remain `NEEDS_REVIEW` with `SEASON_EPISODE_MAPPING_UNVERIFIED`; explicit season disagreement remains a distinct review reason.
+- **PR #77 — identity retry UI:** The `Retry identification` button lives **inside Matching Details**, not in the compact Jobs table. It calls the existing CSRF-protected `/api/recheck-identity`, requeues eligible `NEEDS_REVIEW` notifications to `IDENTIFYING`, closes the modal on success and refreshes Jobs. This is not acquisition-job `Retry Now`, does not skip verification, and never overrides provider cooldown.
+- **PR #78 — TVDB throttle:** Scoped identity-worker TVDB calls use a shared SQLite request reservation, nominal 1-second spacing, HTTP 429 `Retry-After`, and transient-failure exponential backoff (10 to 600 seconds). Throttle deferrals are `LOOKUP_RETRY` and do not use up identity attempts. This is independent of AniDB's shared 10-second normal request gap and 600-second error backoff. **TVDB token caching and metadata caching were not implemented in PR #78**; do not claim otherwise.
+- **PR #79 — CI efficiency:** Stops full-suite runs on every `feature/**` or `fix/**` push, retains PR-to-`develop` and post-merge `develop` tests, keeps manual dispatch, and cancels superseded runs in their event-specific concurrency group.
+
+### Next priority: season-aware, exact episode identification
+
+Re:ZERO notification #19, release `[ToonsHub] ReZERO -Starting Life in Another World- S04E19 ...`, correctly parsed **release Season 4 Episode 19**, but earlier selected TVDB #305089 ↔ AniDB #11370 and reported mapped Season 1. The title check was 100%; series-title identity is **not** season-specific identity. The previous Season 1 fallback was one cause of potentially misleading evidence, now removed by #76. Investigate whether season-specific AniDB candidates are being overlooked, which Anime-Lists rules resolve the release episode, and whether the correct AniDB record is chosen. The public Anime-Lists records previously examined suggested another AniDB entry for Re:ZERO's fourth TVDB season (candidate #19242); **reverify against the actual XML fixture/validated source** rather than treating that as production-cache evidence. Earlier Saga of Tanya the Evil case similarly had release Season 2 versus mapped Season 1.
+
+**Non-negotiable verification:** correct TVDB series ID, verified TVDB season and episode, correct season-specific AniDB anime ID, Anime-Lists episode relationship (including offsets/explicit rules), and **exact internal AniDB episode database ID** from a verified catalog or reviewed mapping. AniDB episode *number* is not an internal episode *ID*. Never auto-approve on title similarity alone; absent or ambiguous evidence means review, while provider cooldown/unavailability means safe retry. Persist provenance for later Shoko integration. Keep Shoko, torrents and acquisition behavior unchanged until explicitly authorized.
+
+### CI / GitHub workflow rules for future assistants
+
+1. Read `.github/workflows/anime-python-tests.yml` at the active `develop` ref before asserting which triggers or concurrency settings apply. Never assume an older handoff is current.
+2. Avoid unnecessary per-file feature commits. Where supported, **batch related changes into a single commit**, then open the PR. If the GitHub connector requires sequential per-file commits, minimize avoidable churn. Once PR is open, new commits trigger its checks; obsolete runs should be canceled by concurrency configuration.
+3. Use a feature branch based on `develop`, open a PR targeting `develop`, and check **that PR's actual required checks** and final conclusions. Distinguish `push`, `pull_request`, and post-merge `develop` runs. Do not mistake one successful event for another successful event.
+4. **Do not ask for merge based only on a green push run.** Confirm relevant PR checks have completed successfully, including run status and conclusion; GitHub UI may display stale/in-progress checks. Never merge without the user's express approval.
+5. Treat GitHub Actions usage as a resource: queued time and runner execution differ; refer to Actions billable usage to verify costs. A test suite finishing does not prove the workflow job completed. Investigate stalls and redundant workflow triggers rather than repeatedly suggesting long waits.
+6. Every handoff should explicitly state **implemented / CI passed / merged / deployed** as separate states. Updating `develop` by PR does not update a live installation.
+
+### Active next steps
+
+- Prioritize the season-aware candidate discovery and complete AniDB↔TVDB episode-level verification using offline Anime-Lists/AniDB fixtures and tests, keeping fail-closed behavior.
+- Evaluate optional TVDB token and metadata caching separately, with credential and freshness safeguards. Do not conflate this with the already merged throttle.
+- Do not expand the Jobs table for retry controls; identity retry belongs in Matching Details.
