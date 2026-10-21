@@ -7,28 +7,7 @@ import asyncio
 import json
 import sqlite3
 
-from anime_job_lineage import enqueue_linked
 from anime_unified_identity_monitor import check_once
-
-
-def recover_pending(db_path):
-    """Idempotently convert pre-migration pending notifications into jobs.
-
-    The old identity polling process must not run alongside this worker.
-    """
-    with sqlite3.connect(db_path, isolation_level=None, timeout=10) as db:
-        db.execute("PRAGMA busy_timeout=10000")
-        rows = db.execute("""SELECT n.id FROM notifications n
-            WHERE n.status IN ('UNTRUSTED','RECEIVED','IDENTIFYING')
-              AND NOT EXISTS(SELECT 1 FROM episode_dispatch d
-                             WHERE d.notification_id=n.id)
-            ORDER BY n.id""").fetchall()
-        for (nid,) in rows:
-            db.execute("""UPDATE notifications SET status='IDENTIFYING'
-                WHERE id=? AND status IN ('UNTRUSTED','RECEIVED')""", (nid,))
-            enqueue_linked(db, "identity_resolution", "notification:"+str(nid),
-                           json.dumps({"notification_id":nid},sort_keys=True),
-                           notification_id=nid)
 
 
 def handler_factory(db_path, settings_supplier):
