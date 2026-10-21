@@ -106,6 +106,47 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=2000,sender=self.sender)["sent"],1)
         self.assertEqual(self.db.execute("SELECT attempts FROM unified_identity_checks").fetchone()[0],3)
 
+    def test_verified_episode_ten_excluded_and_backfill_queued_once(self):
+        import json
+        report={"decision":"AUTO_VERIFIED","issues":[],
+                "title_queries":["Example Show"],
+                "approval":{"tvdb_id":123,"anidb_id":456,"season":1,"episode":10},
+                "verified_anidb_episode_id":9876}
+        settings={"prowlarr":{"enabled":True}}
+        result=check_once(self.db,settings,{},now=1000,probe=lambda *_:report.copy())
+        self.assertEqual(result["processed"],1)
+        self.assertEqual(result["pending_retries"],0)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications WHERE id=?",(self.nid,)).fetchone()[0],
+            "EXCLUDED_TRIAL_WINDOW")
+        self.assertEqual(self.db.execute(
+            "SELECT decision FROM unified_identity_checks WHERE notification_id=?",
+            (self.nid,)).fetchone()[0],"EPISODE_EXCLUDED")
+        jobs=self.db.execute(
+            "SELECT kind,payload_json FROM daemon_jobs").fetchall()
+        self.assertEqual(len(jobs),1)
+        self.assertEqual(jobs[0][0],"series_gap_search")
+        self.assertEqual(json.loads(jobs[0][1])["up_to"],6)
+        self.assertEqual(check_once(self.db,settings,{},now=1300,
+            probe=lambda *_:report.copy())["processed"],0)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],1)
+
+    def test_excluded_episode_without_configured_search_does_not_retry(self):
+        report={"decision":"AUTO_VERIFIED","issues":[],
+                "title_queries":["Example Show"],
+                "approval":{"tvdb_id":123,"anidb_id":456,"season":2,"episode":12},
+                "verified_anidb_episode_id":9876}
+        self.assertEqual(check_once(self.db,{}, {},now=1000,
+            probe=lambda *_:report.copy())["pending_retries"],0)
+        self.assertEqual(self.db.execute(
+            "SELECT decision FROM unified_identity_checks").fetchone()[0],
+            "EPISODE_EXCLUDED")
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],0)
+        self.assertEqual(self.db.execute(
+            "SELECT status FROM notifications").fetchone()[0],"EXCLUDED_TRIAL_WINDOW")
+
     def test_verified_episode_mapping_queues_only_once(self):
         from anime_dashboard_queries import all_jobs
         report={"decision":"AUTO_VERIFIED","issues":[],
