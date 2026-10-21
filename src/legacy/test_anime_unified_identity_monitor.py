@@ -22,6 +22,20 @@ class TriageTests(unittest.TestCase):
         self.notified=[]
         self.sender=lambda s,k,n,t:self.notified.append(n) or True
 
+    def test_anidb_candidate_evidence_preserves_titles(self):
+        from anime_unified_identity_monitor import investigate
+        from unittest.mock import patch
+        settings={"identity":{"match_threshold_pct":90},
+                  "anidb":{"enabled":True},"tvdb":{"enabled":False}}
+        rows=[{"anidb_id":"11905","matched_titles":["Saga of Tanya the Evil"],
+               "titles":["Saga of Tanya the Evil","Youjo Senki"]}]
+        with patch("anime_unified_identity_monitor.anidb_matches",return_value=(rows,False)):
+            evidence=investigate("Saga of Tanya the Evil - 07",settings,{},Path("unused"))
+        self.assertEqual(evidence["anidb_candidates"],[{
+            "anidb_id":"11905","matched_titles":["Saga of Tanya the Evil"],
+            "titles":["Saga of Tanya the Evil","Youjo Senki"]}])
+        self.assertIn("TVDB_DISABLED_OR_KEY_MISSING",evidence["issues"])
+
     def test_batch_and_special_have_actionable_review_reasons(self):
         # No remote sources or database mutation; actual incident-style names.
         catalog=Path(self.tmp.name)/"titles.xml"
