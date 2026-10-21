@@ -55,8 +55,10 @@ def make_acquisition_handler(db_path, qb_factory, *, download_root, trial_root, 
                 # Restore the slot after a crash between finalization and
                 # recording completion; never start another torrent.
                 slot=reserve(db,payload['notification_id'])
-                if slot=="OWNER":
-                    mark_staged(db,payload['notification_id'])
+                if slot!="OWNER":
+                    job["episode_outcome"]="STAGED_EPISODE_SLOT_CONFLICT"
+                    return {"state":"NEEDS_REVIEW"}
+                mark_staged(db,payload['notification_id'])
                 return {'state':'DONE'}
             if dispatch and dispatch[0]=='NEEDS_REVIEW':
                 return {'state':'NEEDS_REVIEW'}
