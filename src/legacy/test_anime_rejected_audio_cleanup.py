@@ -73,6 +73,12 @@ class AudioCleanupTests(unittest.TestCase):
         self.assertEqual(reserve(self.db,2),"OWNER")
         row=self.db.execute("SELECT state FROM anime_rejected_audio_cleanup WHERE job_id=8").fetchone()
         self.assertEqual(row[0],"REMOVED")
+    def test_cleanup_wakes_existing_held_alternative(self):
+        self.db.execute("""INSERT INTO daemon_jobs VALUES(9,'claimed_acquisition',
+            'DEFERRED',NULL,0,'2',3600,'ON_HOLD')""")
+        self.assertTrue(self.run_cleanup())
+        self.assertEqual(self.db.execute("SELECT available_at FROM daemon_jobs WHERE id=9").fetchone()[0],0)
+        self.assertEqual(reserve(self.db,2),"OWNER")
     def test_uncertain_cleanup_never_releases_owner(self):
         self.qb.fails=True
         with self.assertRaises(RuntimeError):
