@@ -112,7 +112,7 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
         batch_active=bool(batch_stage in ("PROBE","UNLOCKED") and job in ("DEFERRED","LEASED","READY"))
         event=events.get(job_id)
         canceled=job=="BLOCKED" and event is not None and event["action"]=="cancel"
-        if job=="BLOCKED" and error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET":
+        if job=="BLOCKED" and (error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET" or (error or "").startswith("SIZE_REJECTED_")):
             status="CANCELED"
         elif job=="DEFERRED" and error=="ON_HOLD":
             status="ON HOLD"
@@ -169,7 +169,9 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
             explanation=("Canceled: required Japanese and English audio tracks were not both present. "
                          "Owned torrent and payload deletion confirmed."
                          if error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET"
-                         else "Canceled by administrator.")
+                         else ("Canceled: release exceeded trial size restrictions; owned torrent and payload removal confirmed."
+                               if (error or "").startswith("SIZE_REJECTED_")
+                               else "Canceled by administrator."))
         elif status=="ON HOLD":
             explanation="Another release owns this episode; waiting for successful trial staging or confirmed cleanup."
         elif status=="SKIPPED DUPLICATE":
@@ -216,7 +218,7 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
                        "series_title":title,"message":error or "", "activity_detail":explanation,
                        "staged":bool(stage and Path(stage).is_file()),
                        "cleanup_status":("DOWNLOADS_CLEARED" if
-                           status=="CANCELED" and error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET" and
+                           status=="CANCELED" and (error=="DUAL_AUDIO_REQUIREMENTS_NOT_MET" or (error or "").startswith("SIZE_REJECTED_")) and
                            db.execute("""SELECT 1 FROM sqlite_master WHERE type='table'
                                AND name='anime_rejected_audio_cleanup'""").fetchone() and
                            db.execute("""SELECT 1 FROM anime_rejected_audio_cleanup
