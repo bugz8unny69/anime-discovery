@@ -24,6 +24,7 @@ from anime_identity_crosscheck_v3 import explicit_anidb_ids,classify_tvdb
 from anime_identity_mapping_v4 import download as download_anime_lists, resolve_episode as resolve_anime_lists_episode, resolve_tvdb_episode
 from anime_tvdb_throttle import tvdb_scope, TVDBDeferred
 from anime_season_candidate_discovery import season_candidates
+from anime_episode_acquisition_guard import CompetingEpisodeAcquisition
 
 LOG=logging.getLogger(__name__)
 MAX_TITLES=32*1024*1024
@@ -583,7 +584,7 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 pending_retries+=1
                 LOG.warning("Identity metadata retry notification=%s source=%s error_type=%s",
                             nid,source,type(exc).__name__)
-            elif isinstance(exc,__import__("anime_episode_acquisition_guard").CompetingEpisodeAcquisition):
+            elif isinstance(exc,CompetingEpisodeAcquisition):
                 # Another release group already owns the episode. This is
                 # neither an identity failure nor an excuse to try all torrents.
                 decision="NEEDS_REVIEW"
