@@ -329,6 +329,35 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.redirect("/jobs")
                 except (ValueError,TypeError,sqlite3.Error,OSError) as exc:
                     return self.send(409,str(exc),"text/plain")
+            if route=="/api/cleanup-confirm":
+                try:
+                    values=getattr(self,"_cached_form",None) or self.form()
+                    if (type(values.get("job_id")) is not int or values["job_id"]<1 or
+                        values.get("confirmation")!="REMOVE TORRENT ONLY"):
+                        raise ValueError("Explicit torrent-only confirmation required")
+                    if config_dir is None:
+                        raise ValueError("Configured integrations required")
+                    from anime_cancel_cleanup import cleanup_torrents
+                    from anime_qb_api import QBittorrentAPI
+                    cfg=load_config(config_dir)
+                    settings,secrets=cfg["settings"],cfg["secrets"]
+                    qb_settings=settings["qbittorrent"]
+                    qb=QBittorrentAPI(qb_settings["base_url"],allow_writes=True)
+                    qb.login(qb_settings["username"],secrets["qbittorrent_password"])
+                    with self.database() as db:
+                        result=cleanup_torrents(db,values["job_id"],qb,approved=True)
+                    SECURITY_LOG.info("Confirmed torrent-only cleanup job_id=%d",
+                                      values["job_id"])
+                    return self.send(200,json.dumps({"removed":len(result),
+                        "media_files_deleted":False}),"application/json")
+                except (ValueError,TypeError,sqlite3.Error,OSError,RuntimeError,KeyError,
+                        PermissionError) as exc:
+                    # Do not disclose credential-bearing qB exception strings.
+                    SECURITY_LOG.warning("Torrent-only cleanup stopped error_type=%s",
+                                         type(exc).__name__)
+                    return self.send(409,json.dumps({
+                        "error":"Cleanup not confirmed; inspect resource review and service logs."}),
+                        "application/json")
             if route=="/api/manage-job":
                 try:
                     values=getattr(self,"_cached_form",None) or self.form()
