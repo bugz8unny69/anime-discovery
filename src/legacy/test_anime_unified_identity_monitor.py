@@ -276,7 +276,8 @@ class TriageTests(unittest.TestCase):
                 {"tvdb_api_key":"test"},catalog,mapping_xml=xml,
                 search=lambda *_:([{"tvdb_id":"305089","name":"ReZERO"}],[]),
                 login=lambda _:"token",fetch=fetch)
-        self.assertEqual(result["decision"],"NEEDS_REVIEW")
+        self.assertEqual(result["decision"],"SERIES_LINK_VERIFIED_EPISODE_MAPPING_REQUIRED")
+        self.assertIn("VERIFIED_EPISODE_MAPPING_MISSING",result["issues"])
         self.assertIn("19242",[v["anidb_id"] for v in result["season_mapping_candidates"]])
         self.assertNotIn("approval",result)
 
