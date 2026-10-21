@@ -113,6 +113,8 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
         db.execute("""INSERT INTO daemon_job_cleanup_attempts VALUES (?,?,'UNCERTAIN',?)
             ON CONFLICT(job_id,infohash) DO UPDATE SET state='UNCERTAIN',
             updated_at=excluded.updated_at""",(job_id,h,time.time()))
+        db.execute("""UPDATE daemon_job_cleanup_review SET status='CLEANUP_NEEDED'
+            WHERE job_id=?""",(job_id,))
         try:
             qb.remove_torrent(h,delete_files=False)
             if qb.torrent_identity(h) is not None:
@@ -123,4 +125,9 @@ def cleanup_torrents(db,job_id,qb,*,approved=False):
         db.execute("""UPDATE daemon_job_cleanup_attempts SET state='REMOVED',
             updated_at=? WHERE job_id=? AND infohash=?""",(time.time(),job_id,h))
         results.append((h,"REMOVED"))
+    if len(results)==len(preview["records"]) and all(
+            state in ("REMOVED","ABSENT","ALREADY_REMOVED","ALREADY_ABSENT")
+            for _,state in results):
+        db.execute("""UPDATE daemon_job_cleanup_review
+            SET status='TORRENTS_REMOVED' WHERE job_id=?""",(job_id,))
     return results
