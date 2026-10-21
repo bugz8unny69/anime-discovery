@@ -126,6 +126,37 @@ class CancelCleanupTests(unittest.TestCase):
                 [(H,"ALREADY_REMOVED")])
             self.assertEqual(qb.removed,[(H,True)])
 
+    def test_file_replacement_before_final_delete_is_detected(self):
+        with tempfile.TemporaryDirectory() as root:
+            download=Path(root)/"downloads";trial=Path(root)/"trial"
+            download.mkdir();trial.mkdir()
+            target=download/"episode.mkv"
+            target.write_bytes(b"same-size-a")
+            class ChangedQB(MockQB):
+                calls=0
+                def torrent_identity(self,h):
+                    self.calls+=1
+                    if self.calls==2:
+                        target.unlink()
+                        target.write_bytes(b"same-size-b")
+                    return self.record
+                def torrent_details(self,h):
+                    return {"hash":h,"save_path":str(download),"state":"pausedDL"}
+                def torrent_files(self,h):
+                    return [{"name":"episode.mkv","size":11}]
+                def torrent_inventory(self):
+                    return [{"hash":H,"save_path":str(download)}]
+            qb=ChangedQB()
+            with self.assertRaisesRegex(ValueError,"manifest changed"):
+                cleanup_torrents(self.db,self.jid,qb,approved=True,
+                    delete_download_files=True,download_root=download,
+                    trial_root=trial)
+            self.assertEqual(qb.removed,[])
+            self.assertTrue(target.is_file())
+            self.assertEqual(self.db.execute(
+                "SELECT state FROM daemon_job_cleanup_attempts").fetchone()[0],
+                "UNCERTAIN")
+
     def test_file_deletion_refuses_unstopped_torrent_without_side_effects(self):
         with tempfile.TemporaryDirectory() as root:
             download=Path(root)/"downloads"
