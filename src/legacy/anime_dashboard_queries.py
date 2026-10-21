@@ -219,6 +219,7 @@ def all_jobs(db, *,page=1,size=20,status_filter="ALL"):
                 "NOT_VERIFIED":"Canceled; resource cleanup has not been verified.",
                 "CLEANUP_NEEDED":"Canceled; torrent cleanup requires review or retry.",
                 "TORRENTS_REMOVED":"Canceled; torrent entries removed or confirmed absent. Files preserved.",
+                "DOWNLOADS_CLEARED":"Canceled; owned torrents and verified downloads removed. Staged files preserved.",
             }.get(cleanup_status,"Canceled; cleanup status unavailable.")
             result.append({"id":nid,"job_id":jid,"job_state":"BLOCKED",
                 "attempts":attempts,"last_error":old_error,
