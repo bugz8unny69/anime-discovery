@@ -93,6 +93,13 @@ class QBittorrentAPI:
         return any(isinstance(item,dict) and str(item.get("hash","")).lower()==infohash
                    for item in records)
 
+    def torrent_inventory(self):
+        """Read all torrents to detect shared physical download targets."""
+        records=json.loads(self._request("torrents/info"))
+        if not isinstance(records,list):
+            raise ValueError("Invalid qBittorrent torrent inventory")
+        return records
+
     def torrent_files(self, infohash):
         """Read exact per-torrent file inventory; no torrent state change."""
         records=json.loads(self._request("torrents/files?"+urlencode({"hash":_hash(infohash)})))
