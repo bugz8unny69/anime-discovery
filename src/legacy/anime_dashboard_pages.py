@@ -267,7 +267,10 @@ def jobs_page(result):
 <h2 id="match-trace-title">Identification details</h2>
 <p id="match-trace-summary" class="muted" aria-live="polite"></p>
 <div id="match-trace-body" aria-live="polite"></div>
+<div class="inline" style="margin-top:18px">
+<button type="button" id="match-trace-retry" class="hidden">Retry identification</button>
 <button type="button" class="secondary" id="match-trace-close">Close</button>
+</div>
 </dialog>'''
     out+='<script>const initial='+json.dumps(result,separators=(",",":")).replace("<","\\u003c")+';'
     out+=r'''
@@ -362,7 +365,7 @@ if(job.can_retry || job.can_cancel){
 }
 if(typeof job.id==="number" && job.status!=="COMPLETED" && job.status!=="CANCELED"){
   let btn=document.createElement("button");btn.type="button";btn.className="secondary";
-  btn.textContent="Matching details";btn.addEventListener("click",()=>openTrace(job.id));
+  btn.textContent="Matching details";btn.addEventListener("click",()=>openTrace(job.id,job.status==="NEEDS REVIEW"&&job.can_resolve===true));
   actions.appendChild(btn);
 }
 tr.appendChild(actions);tbody.appendChild(tr)}}
@@ -394,8 +397,12 @@ function traceCheck(root,label,state,detail){
   item.appendChild(info);root.appendChild(item);
 }
 function traceYesNo(value){return value===true?"pass":value===false?"fail":"unknown"}
-async function openTrace(notificationId){
+async function openTrace(notificationId,canRetryIdentity=false){
   const dialog=document.getElementById("match-trace-dialog");
+  const retry=document.getElementById("match-trace-retry");
+  retry.classList.toggle("hidden",!canRetryIdentity);
+  retry.disabled=false;
+  retry.onclick=canRetryIdentity?()=>retryIdentity(notificationId,retry,dialog):null;
   const summary=document.getElementById("match-trace-summary");
   const body=document.getElementById("match-trace-body");
   summary.textContent="Notification #"+notificationId+" · Loading evidence…";body.replaceChildren();
@@ -484,6 +491,22 @@ async function openTrace(notificationId){
     summary.textContent="Notification #"+notificationId;
     body.replaceChildren(traceNode("p","muted","Could not load identification details. Try again later."));
   }
+}
+async function retryIdentity(notificationId,button,dialog){
+  button.disabled=true;
+  try{
+    const csrf=document.querySelector('input[name="_csrf"]')?.value;
+    const response=await fetch("/api/recheck-identity",{method:"POST",credentials:"same-origin",
+      headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},
+      body:JSON.stringify({notification_id:notificationId})});
+    const outcome=await response.json();
+    if(!response.ok)throw Error(outcome.error||"Identity retry could not be scheduled");
+    dialog.close();
+    await refresh();
+  }catch(error){
+    alert(error.message);
+    await refresh();
+  }finally{button.disabled=false}
 }
 async function manageJob(job,action,button){
   const subject=job.release+" (job #"+job.job_id+")";
