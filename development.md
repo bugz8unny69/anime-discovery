@@ -51,18 +51,33 @@ git log --oneline HEAD..origin/develop
 
 Before considering a live update, inspect the actual checked-out branch, working tree, target SHA, and PR status. Avoid overwriting local changes.
 
-### Live upgrade — prefer the built-in backed-up path
+### Live upgrade — standalone Git bootstrapper
 
-The README documents this for an **existing Git checkout**:
+After its PR is reviewed and merged, install the independent upgrader once:
 
 ```bash
-cd /opt/anime-discovery
-sudo python3 src/legacy/anime-discovery-admin.py upgrade
+sudo -H python3 /opt/anime-discovery/deploy/anime-discovery-upgrade.py --install
 ```
 
-This path is designed for fast-forward updates from `origin/develop` with an online-safe SQLite backup, service restart and code rollback on restart failure. It does **not** make a draft PR safe for production. Get explicit operator approval before running it; confirm the checkout is appropriate and tests passed.
+Then use:
 
-For fast PR validation, prefer offline tests in a disposable checkout/temp DB, or an isolated test VM; do not switch the live service to a draft branch or point tests at production media/database.
+```bash
+sudo -H /usr/local/sbin/anime-discovery-upgrade
+```
+
+Run as root for SSH authentication, backup, and systemd control. The tool
+reconciles checkout ownership to `anime-discovery` before service startup.
+It uses the pinned private GitHub SSH source, applies fast-forward-only Git
+updates and stores recovery state outside Git. Only run on live VM after
+approval, code review and passing CI.
+
+The general admin CLI no longer offers `upgrade`; the old local
+ZIP/tar.gz upgrader has been deleted. Future **direct online archive**
+download support may be designed later but is not implemented or configured.
+Do not pass a local archive to the standalone Git updater.
+
+For fast PR validation, prefer offline tests in a disposable checkout/temp
+DB or an isolated test VM; do not switch the live service to a draft branch.
 
 ### Read-only service inspection
 
@@ -116,7 +131,7 @@ Network context: OPNsense segments 14 VLANs; TrueNAS serves NFS; DATA VLAN 14 is
 ## Current GitHub Actions and packaging (verified on develop, 2026-10-21)
 
 - `.github/workflows/anime-python-tests.yml`: `push` on `develop`, `feature/**`, `fix/**`; `pull_request` to `develop`; and manual `workflow_dispatch`. Uses `ubuntu-latest`, Python 3.12, `compileall`, and a lengthy explicit offline `unittest` suite. Be mindful that push and PR events can duplicate work.
-- `.github/workflows/publish-archive.yml`: **currently** runs on every push to `develop` and manual `workflow_dispatch`; compiles source; packages both `.tar.gz` and `.zip`; emits SHA256SUMS; and creates a `build-<12-character-commit-sha>` GitHub release.
+- `.github/workflows/publish-archive.yml`: PR #70 removed its push trigger; a manually dispatched historical release-publishing workflow remains. It is **not** used for VM Git upgrades.
 - **Desired next change (not yet implemented):** stop packaging on every `develop` push. Produce release packages only after explicit approval, with a separately reviewed versioning design. Preserve test checks and existing published releases. Do not claim this policy is already enforced.
 - No Docker or GHCR pipeline is planned.
 - Never overwrite immutable release tags; inspect existing tags/version references before adopting SemVer.
@@ -138,7 +153,7 @@ Then future Git upgrades may run:
 sudo -H /usr/local/sbin/anime-discovery-upgrade
 ```
 
-The existing `anime-discovery-admin.py upgrade` delegates to the installed standalone command, if present; archive upgrade with a local ZIP/tar.gz still uses the archive path. The standalone Git upgrader always fetches the pinned `git@github.com:bugz8unny69/anime-discovery.git` over SSH on `develop`. Git is run as root, so **root's effective SSH identity must authenticate**; use `sudo -H`, and do not assume the `anime-discovery` service account's key can be used by root. A one-time test is `sudo -H git ls-remote git@github.com:bugz8unny69/anime-discovery.git HEAD`.
+The general `anime-discovery-admin.py` intentionally has **no** `upgrade` command; use the standalone executable for Git SSH upgrades. Local ZIP/tar.gz upgrades are intentionally removed. The standalone Git upgrader always fetches the pinned `git@github.com:bugz8unny69/anime-discovery.git` over SSH on `develop`. Git is run as root, so **root's effective SSH identity must authenticate**; use `sudo -H`, and do not assume the `anime-discovery` service account's key can be used by root. A one-time test is `sudo -H git ls-remote git@github.com:bugz8unny69/anime-discovery.git HEAD`.
 
 Before activating new code, it records the old and requested Git SHAs to `/var/lib/anime-discovery/upgrade-state.json` and makes an online-safe SQLite backup at the configured path. A successful service health check writes the new healthy SHA atomically. The bootstrapper fetches the new upgrader source from verified fast-forward Git history and executes that copy; it replaces its installed executable **only after success**. Application and Git checkout ownership are reconciled to the existing checkout owner without following symlinks. Do not use a blank/default Git SSH identity if root's key is not configured.
 
@@ -161,7 +176,7 @@ Architecture: **Checkpoint → Validate → Resume; or Cancel → Clean up aband
 1. Read this `development.md`, `README.md`, current workflow YAMLs and the relevant handoff document (if attached).
 2. Query GitHub for current `develop`, PR #66, PR #67 and CI; documentation is not proof that a PR has merged or a deployment occurred.
 3. Ask before performing **live** deployment, SQLite migration, service restart, media deletion or torrent cleanup.
-4. Keep requested work narrow. Current priority: stop automatic package builds from `develop` in a small separate PR, retaining manual release capabilities and testing.
+4. Keep requested work narrow. Git SSH via standalone upgrader is the chosen upgrade method; remove legacy archive inputs. Future internet-hosted archive support is only a documented possibility.
 5. Report separately: coded, PR-open, CI-verified, merged, and deployed. Never conflate them.
 
 **Supporting project notes** (uploaded in conversation; not necessarily in repository): `anime-discovery-pr-handoff-2026-10-21.md`, `gemini-code-1792038645145.md`, `homelab-network-topology.md`, and `server-nas-network-build.md`. Check up-to-date runtime settings against historical notes.
