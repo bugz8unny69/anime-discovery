@@ -70,9 +70,11 @@ class CancelCleanupTests(unittest.TestCase):
             cleanup_torrents(self.db,self.jid,self.qb,approved=True)
         self.assertEqual(self.db.execute(
             "SELECT state FROM daemon_job_cleanup_attempts").fetchone()[0],"UNCERTAIN")
-        with self.assertRaisesRegex(ValueError,"uncertain"):
-            cleanup_torrents(self.db,self.jid,self.qb,approved=True)
+        self.assertEqual(cleanup_torrents(
+            self.db,self.jid,self.qb,approved=True),[(H,"ABSENT")])
         self.assertEqual(len(self.qb.removed),1)
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM daemon_job_cleanup_attempts").fetchone()[0],"ABSENT")
 
     def test_other_notification_hash_blocks_even_without_recovery_row(self):
         self.db.execute("INSERT INTO notifications VALUES (8,?)",(H,))
