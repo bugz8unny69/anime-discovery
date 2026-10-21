@@ -348,7 +348,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         result=cleanup_torrents(db,values["job_id"],qb,approved=True)
                     SECURITY_LOG.info("Confirmed torrent-only cleanup job_id=%d",
                                       values["job_id"])
-                    return self.send(200,json.dumps({"removed":len(result),
+                    return self.send(200,json.dumps({"removed":sum(state=="REMOVED" for _,state in result),
                         "media_files_deleted":False}),"application/json")
                 except (ValueError,TypeError,sqlite3.Error,OSError,RuntimeError,KeyError,
                         PermissionError) as exc:
