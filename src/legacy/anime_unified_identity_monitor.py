@@ -475,7 +475,8 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1,notification_id
         db.commit()
     selected=db.execute("""SELECT n.id,n.release_name,COALESCE(c.attempts,0)
         FROM notifications n LEFT JOIN unified_identity_checks c ON c.notification_id=n.id
-        WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)\n          AND (? IS NULL OR n.id=?)
+        WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)
+          AND (? IS NULL OR n.id=?)
         ORDER BY n.id LIMIT ?""",(now,notification_id,notification_id,limit)).fetchall()
     done=0
     pending_retries=0
