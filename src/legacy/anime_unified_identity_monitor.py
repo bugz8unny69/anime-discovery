@@ -217,7 +217,11 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
             raise InvalidXMLResponse("ANIDB_TITLES_CACHE","ITERPARSE_FAILURE") from None
     report["workflow"].append({"step":"AniDB public titles","returned":len(rows),
                                 "mode":"exact normalized title","truncated":bool(truncated)})
-    report["anidb_candidates"]=[r["anidb_id"] for r in rows]
+    report["anidb_candidates"]=[{
+        "anidb_id":str(r["anidb_id"]),
+        "matched_titles":[t[:180] for t in r.get("matched_titles",[])[:5] if isinstance(t,str)],
+        "titles":[t[:180] for t in r.get("titles",[])[:12] if isinstance(t,str)]
+    } for r in rows]
     if not rows:
         report["issues"].append("NO_ANIDB_EXACT_TITLE_MATCH")
     if truncated:
