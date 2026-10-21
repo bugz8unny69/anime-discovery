@@ -10,6 +10,9 @@ from anime_job_management import latest_events, has_staged_media
 from anime_review_messages import describe_review
 
 PAGE_SIZES=(20,50,100)
+JOB_STATUSES=("RECEIVED","IDENTIFYING","NEEDS REVIEW","QUEUED","RUNNING",
+              "DOWNLOADING","WAITING FOR DOWNLOAD","WAITING FOR SEARCH",
+              "COMPLETED","BLOCKED","CANCELED")
 
 
 def pagination(page=1, size=20):
@@ -58,9 +61,11 @@ def staged_series(db, *, page=1,size=20):
     return _page(list(grouped.values()),page,size)
 
 
-def all_jobs(db, *,page=1,size=20):
+def all_jobs(db, *,page=1,size=20,status="ALL"):
     """One activity entry per incoming release including unmatched webhook events."""
     page,size=pagination(page,size)
+    if status!="ALL" and status not in JOB_STATUSES:
+        raise ValueError("Invalid job status filter")
     events=latest_events(db)
     cleanup_reviews={}
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daemon_job_cleanup_review'").fetchone():
@@ -246,4 +251,4 @@ def all_jobs(db, *,page=1,size=20):
                        "received_at":0,"status":job_status,"season":request["season"],
                        "episode":None,"series_title":request["title"],
                        "message":"","staged":False})
-    return _page(result,page,size)
+    return _page([item for item in result if status=="ALL" or item["status"]==status],page,size) | {"status_filter":status}
