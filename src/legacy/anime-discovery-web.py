@@ -234,7 +234,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                         return self.send(200,self.with_csrf(recognized_page(aliases(),config_dir is not None)))
                     if path=="/":
                         return self.send(200,self.with_csrf(series_page(staged_series(db,page=page,size=size),aliases())))
-                    result=all_jobs(db,page=page,size=size)
+                    result=all_jobs(db,page=page,size=size,\n                                    status=params.get("status",["ALL"])[-1])
                 if path=="/api/jobs":
                     return self.send(200,json.dumps(result),"application/json")
                 return self.send(200,self.with_csrf(jobs_page(result)))
