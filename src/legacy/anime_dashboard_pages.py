@@ -216,9 +216,9 @@ def jobs_page(result):
     out=shell("Jobs","Jobs")
     out+='''<h1>Jobs</h1><p class="muted">Every incoming Autobrr release appears here,
 from receipt through download and completion. Status and activity details refresh every
-five seconds. Retry Now bypasses backoff for deferred jobs. Cancel Job stops
-future retries for waiting jobs only; it does not interrupt running jobs or delete
-torrents or media. Jobs waiting for episode identity have not entered the worker queue.</p><section class="panel">
+five seconds. Retry and Cancel are available only when a job needs review.
+Retry continues the same attempt; Cancel permanently archives it without deleting
+torrents or media. A later webhook can create a fresh attempt.</p><section class="panel">
 <div class="toolbar"><h2>Acquisition activity</h2><div class="inline">
 <span class="status running" id="live-indicator">● Live</span>'''
     out+=pager("/jobs",result)+"</div></div>"
