@@ -122,6 +122,28 @@ Network context: OPNsense segments 14 VLANs; TrueNAS serves NFS; DATA VLAN 14 is
 - Never overwrite immutable release tags; inspect existing tags/version references before adopting SemVer.
 - GitHub Actions quota was reportedly exhausted; earlier PR #66/#67 runs failed without accessible job logs. Re-check billing/CI rather than attributing these failures to Python without evidence.
 
+## Standalone Git upgrade bootstrapper (proposed; install only after PR review)
+
+The independent `deploy/anime-discovery-upgrade.py` uses Python's standard library, Git and systemd; it does **not** import the Anime Discovery dashboard or daemon. Its installed copy lives outside the app at `/usr/local/sbin/anime-discovery-upgrade`. Git is kept **in-place**, not extracted to a second application directory.
+
+After this PR is merged, explicitly install the reviewed bootstrapper **once**:
+
+```bash
+sudo -H python3 /opt/anime-discovery/deploy/anime-discovery-upgrade.py --install
+```
+
+Then future Git upgrades may run:
+
+```bash
+sudo -H /usr/local/sbin/anime-discovery-upgrade
+```
+
+The existing `anime-discovery-admin.py upgrade` delegates to the installed standalone command, if present; archive upgrade with a local ZIP/tar.gz still uses the archive path. The standalone Git upgrader always fetches the pinned `git@github.com:bugz8unny69/anime-discovery.git` over SSH on `develop`. Git is run as root, so **root's effective SSH identity must authenticate**; use `sudo -H`, and do not assume the `anime-discovery` service account's key can be used by root. A one-time test is `sudo -H git ls-remote git@github.com:bugz8unny69/anime-discovery.git HEAD`.
+
+Before activating new code, it records the old and requested Git SHAs to `/var/lib/anime-discovery/upgrade-state.json` and makes an online-safe SQLite backup at the configured path. A successful service health check writes the new healthy SHA atomically. The bootstrapper fetches the new upgrader source from verified fast-forward Git history and executes that copy; it replaces its installed executable **only after success**. Application and Git checkout ownership are reconciled to the existing checkout owner without following symlinks. Do not use a blank/default Git SSH identity if root's key is not configured.
+
+If an interrupted run leaves the checkout exactly at either the recorded old or target SHA **and clean**, the next run first restores the old revision and attempts to restart the service. A dirty or unexpected checkout is **not automatically reset**: it stops and requires review so that unexplained changes are not deleted. This is conservative rerun safety, not a guarantee of automatic recovery from arbitrary filesystem corruption. A failure during an application update may require inspecting the SQLite schema and service logs; code rollback never automatically replaces the live database. This is a Git-only enhancement; no Docker and no automatic release packaging.
+
 ## Recovery and cleanup safety
 
 Architecture: **Checkpoint → Validate → Resume; or Cancel → Clean up abandoned resources → Preserve history.**
