@@ -583,6 +583,13 @@ def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
                 pending_retries+=1
                 LOG.warning("Identity metadata retry notification=%s source=%s error_type=%s",
                             nid,source,type(exc).__name__)
+            elif isinstance(exc,__import__("anime_episode_acquisition_guard").CompetingEpisodeAcquisition):
+                # Another release group already owns the episode. This is
+                # neither an identity failure nor an excuse to try all torrents.
+                decision="NEEDS_REVIEW"
+                report={"decision":decision,"issues":["EPISODE_ACQUISITION_ALREADY_CLAIMED"],
+                        "competing_notification_id":exc.notification_id}
+                retry=False
             elif isinstance(exc,TVDBDeferred):
                 # A shared TVDB cooldown is temporary, never a no-match verdict.
                 attempts-=1
