@@ -463,19 +463,20 @@ def investigate(name,settings,secrets,catalog,*,search=tvdb_candidates,login=tvd
         report["issues"].append("EXACT_IDENTITY_NOT_VERIFIED")
     return report
 
-def check_once(db,settings,secrets,*,now=None,probe=None,limit=1):
+def check_once(db,settings,secrets,*,now=None,probe=None,limit=1,notification_id=None):
     now=int(time.time() if now is None else now)
     ensure_schema(db)
     # Historical unmatched records need the same evidence check, not an
     # immediate notification from the NTFY monitor.
-    db.execute("""UPDATE notifications SET status='IDENTIFYING'
+    if notification_id is None:
+        db.execute("""UPDATE notifications SET status='IDENTIFYING'
         WHERE status IN ('UNTRUSTED','RECEIVED') AND NOT EXISTS
-        (SELECT 1 FROM episode_dispatch d WHERE d.notification_id=notifications.id)""")
-    db.commit()
+            (SELECT 1 FROM episode_dispatch d WHERE d.notification_id=notifications.id)""")
+        db.commit()
     selected=db.execute("""SELECT n.id,n.release_name,COALESCE(c.attempts,0)
         FROM notifications n LEFT JOIN unified_identity_checks c ON c.notification_id=n.id
-        WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)
-        ORDER BY n.id LIMIT ?""",(now,limit)).fetchall()
+        WHERE n.status='IDENTIFYING' AND (c.next_at IS NULL OR c.next_at<=?)\n          AND (? IS NULL OR n.id=?)
+        ORDER BY n.id LIMIT ?""",(now,notification_id,notification_id,limit)).fetchall()
     done=0
     pending_retries=0
     for nid,title,attempts in selected:
