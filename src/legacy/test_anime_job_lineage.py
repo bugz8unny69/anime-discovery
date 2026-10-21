@@ -23,6 +23,45 @@ class HandoffTests(unittest.TestCase):
             VALUES ('autobrr','Example S01E10','event:10',?,123)""", ("a" * 40,))
         self.nid = self.db.execute("SELECT id FROM notifications").fetchone()[0]
 
+    def test_opt_in_webhook_queues_identity_job_with_notification_atomically(self):
+        from anime_webhook_processing import receive
+        values={"source":"autobrr","source_guid":"new-release","release_name":"New Show S01E10",
+                "info_hash":"b"*40}
+        first=receive(self.db,values,identity_jobs_enabled=True)
+        self.assertTrue(first["received"])
+        job=self.db.execute("""SELECT j.state,l.notification_id
+            FROM daemon_jobs j JOIN anime_job_lineage l ON j.id=l.job_id
+            WHERE j.kind='identity_resolution'""").fetchone()
+        self.assertEqual(job,("READY",first["notification_id"]))
+        again=receive(self.db,values,identity_jobs_enabled=True)
+        self.assertTrue(again["duplicate"])
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs WHERE kind='identity_resolution'").fetchone()[0],1)
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM notifications WHERE source_guid='new-release'").fetchone()[0],1)
+
+    def test_default_webhook_keeps_legacy_flow_without_extra_job(self):
+        from anime_webhook_processing import receive
+        receive(self.db,{"source":"autobrr","source_guid":"legacy",
+            "release_name":"New Show S01E10","info_hash":"b"*40})
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],0)
+
+    def test_caller_transaction_can_roll_back_notification_and_job_together(self):
+        from anime_job_lineage import enqueue_linked_in_transaction
+        self.db.execute("BEGIN IMMEDIATE")
+        self.db.execute("""INSERT INTO notifications
+            (source,release_name,source_guid,info_hash,received_at)
+            VALUES ('autobrr','Tmp','rollback',?,123)""",("c"*40,))
+        nid=self.db.execute("SELECT last_insert_rowid()").fetchone()[0]
+        enqueue_linked_in_transaction(self.db,"identity_resolution","notification:"+str(nid),
+                                      '{"notification_id":%d}'%nid,notification_id=nid)
+        self.db.rollback()
+        self.assertIsNone(self.db.execute(
+            "SELECT 1 FROM notifications WHERE id=?",(nid,)).fetchone())
+        self.assertEqual(self.db.execute(
+            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],0)
+
     def test_independent_jobs_and_series_history_preserved(self):
         identity = enqueue_linked(self.db, "identity", "notification:1", "{}",
                                   notification_id=self.nid, now=100)
