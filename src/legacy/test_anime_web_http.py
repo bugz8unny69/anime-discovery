@@ -824,3 +824,14 @@ class DashboardHTTPTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+
+class JobActionPresentationTests(unittest.TestCase):
+    def test_jobs_retains_checkpoint_retry_and_resolve_without_identity_recheck(self):
+        # Assert the actual browser script, not the separate identity API.
+        source=Path(__file__).with_name("anime_dashboard_pages.py").read_text()
+        self.assertNotIn('textContent="Recheck identity"', source)
+        self.assertNotIn('fetch("/api/recheck-identity"', source)
+        self.assertIn('job.can_retry', source)
+        self.assertIn('job.can_resolve', source)
+
