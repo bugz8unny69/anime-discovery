@@ -81,6 +81,8 @@ class SafetyTests(unittest.TestCase):
     def test_sonarr_storage_overlap_is_rejected(self):
         with self.assertRaisesRegex(ValueError,"Sonarr-managed"):
             self.check(sonarr_root=self.download)
+        with self.assertRaisesRegex(ValueError,"cannot be verified"):
+            self.check(sonarr_root=Path(self.tmp.name)/"missing-sonarr")
 
 if __name__=="__main__":
     unittest.main()
