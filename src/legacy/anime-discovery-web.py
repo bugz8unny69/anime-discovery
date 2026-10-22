@@ -526,7 +526,7 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                 with self.database() as db:
                     if route == "/webhook":
                         result = receive(db, values, series_map=aliases(),
-                            gap_search_enabled=(load_config(config_dir)["settings"]["prowlarr"]["enabled"] if config_dir else False),
+                            gap_search_enabled=False,  # Automatic discovery deferred to PR #90.
                             identity_jobs_enabled=True)
                     elif route == "/request-anime":
                         config=load_config(config_dir) if config_dir else {"settings":{"prowlarr":{"enabled":False}}}
