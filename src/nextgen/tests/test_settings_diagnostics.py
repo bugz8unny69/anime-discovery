@@ -17,8 +17,8 @@ class FoundationTests(unittest.TestCase):
 
     def test_defaults_and_override(self):
         config = parse_settings({"logging": {"level": "INFO",
-                                 "components": {"coordinator": "TRACE"}}})
-        self.assertEqual(config.logging.level_for("coordinator"), "TRACE")
+                                 "components": {"worker": "TRACE"}}})
+        self.assertEqual(config.logging.level_for("worker"), "TRACE")
         self.assertEqual(config.logging.level_for("intake"), "INFO")
         self.assertEqual(Settings().logging.level, "INFO")
 
@@ -34,21 +34,21 @@ class FoundationTests(unittest.TestCase):
     def test_settings_file_and_reload_level(self):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "settings.json"
-            file.write_text('{"logging": {"components": {"coordinator": "TRACE"}}}')
+            file.write_text('{"logging": {"components": {"worker": "TRACE"}}}')
             config = load_settings(file)
             logger, stream = self.logger()
-            configure_logging(config, "coordinator", logger=logger)
+            configure_logging(config, "worker", logger=logger)
             self.assertEqual(logger.level, TRACE)
             initial_handlers = len(logger.handlers)
             file.write_text('{"logging": {"level": "WARNING"}}')
-            configure_logging(load_settings(file), "coordinator", logger=logger)
+            configure_logging(load_settings(file), "worker", logger=logger)
             self.assertEqual(logger.level, logging.WARNING)
             self.assertEqual(len(logger.handlers), initial_handlers)
 
     def test_redaction_at_trace_and_exception(self):
         logger, stream = self.logger()
         configure_logging(parse_settings({"logging": {"level": "TRACE"}}),
-                          "coordinator", logger=logger)
+                          "worker", logger=logger)
         logger.log(TRACE, "Bearer secretBearer password=hidden api_key=apikey123 "
                           "https://alice:pass@example.org/?token=querysecret")
         try:

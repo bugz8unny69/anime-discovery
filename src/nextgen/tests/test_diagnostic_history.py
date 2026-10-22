@@ -1,4 +1,4 @@
-"""Transactional diagnostic cases only; no coordinator or live integrations."""
+"""Transactional diagnostic cases only; no worker or live integrations."""
 import io
 import logging
 import sqlite3
@@ -61,7 +61,7 @@ class DiagnosticHistoryTests(unittest.TestCase):
                 self.db.execute("UPDATE jobs SET state='DONE',lease_token=NULL,"
                                 "lease_expires_at_ms=NULL WHERE job_id=?", (job,))
                 append_job_history(self.db, job_id=job, event_code="DONE",
-                                   component="coordinator", occurred_at_ms=2, details={"attempt": 1})
+                                   component="worker", occurred_at_ms=2, details={"attempt": 1})
                 enqueue_job(self.db, component="identity", kind="next", payload={},
                             event_id=event, created_by_job_id=job)
                 raise RuntimeError("fault after all mutations")
@@ -75,7 +75,7 @@ class DiagnosticHistoryTests(unittest.TestCase):
         with transaction(self.db):
             self.db.execute("UPDATE jobs SET state='DONE',attempt_count=1 WHERE job_id=?", (first,))
             completion = append_job_history(
-                self.db, job_id=first, event_code="DONE", component="coordinator",
+                self.db, job_id=first, event_code="DONE", component="worker",
                 occurred_at_ms=3, details={"attempt": 1})
             second = enqueue_job(self.db, component="identity", kind="next", payload={},
                                  event_id=event, created_by_job_id=first)
@@ -110,7 +110,7 @@ class DiagnosticHistoryTests(unittest.TestCase):
                               event_id=event, created_by_job_id=original)
             self.db.execute("UPDATE jobs SET state='RETRY_WAIT',attempt_count=2 WHERE job_id=?", (job,))
             receipt = append_job_history(
-                self.db, job_id=job, component="coordinator", occurred_at_ms=10,
+                self.db, job_id=job, component="worker", occurred_at_ms=10,
                 event_code="RETRY_SCHEDULED", reason_code="PROVIDER_UNAVAILABLE",
                 details={"attempt": 2, "retry_at_ms": 20})
         self.assertEqual((receipt.event_id, receipt.job_id, receipt.created_by_job_id),
@@ -122,12 +122,12 @@ class DiagnosticHistoryTests(unittest.TestCase):
         logger = logging.Logger("history-test")
         stream = io.StringIO()
         logger.addHandler(logging.StreamHandler(stream))
-        configure_logging(parse_settings({"logging": {"level": "CRITICAL"}}), "coordinator", logger=logger)
+        configure_logging(parse_settings({"logging": {"level": "CRITICAL"}}), "worker", logger=logger)
         with transaction(self.db):
-            job = enqueue_job(self.db, component="coordinator", kind="housekeeping", payload={})
+            job = enqueue_job(self.db, component="worker", kind="housekeeping", payload={})
             self.db.execute("UPDATE jobs SET attempt_count=1 WHERE job_id=?", (job,))
             receipt = append_job_history(self.db, job_id=job, event_code="CLAIMED",
-                                         component="coordinator", occurred_at_ms=1, details={"attempt": 1})
+                                         component="worker", occurred_at_ms=1, details={"attempt": 1})
         self.assertFalse(log_history(logger, receipt))
         self.assertEqual(stream.getvalue(), "")
         self.assertIsNone(receipt.event_id)

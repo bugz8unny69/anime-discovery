@@ -2,14 +2,14 @@
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
-API, ADM command, coordinator, supervisor and recovery UI are future consumers.
+API, ADM command, worker, supervisor and recovery UI are future consumers.
 No upgrade or SQL has been executed during development; offline tests are unrun.
 
 ## Separate service responsibilities
 
 The management API authenticates/authorizes an ADM request and calls libraries
 under the service account. It never submits a database upgrade as a normal job.
-The coordinator remains a separate async jobs process. These blocking filesystem,
+The worker remains a separate async jobs process. These blocking filesystem,
 SQLite and flock operations belong in a worker thread, as a whole operation;
 do not hold an exclusive lease in one thread and release it in another coroutine
 before that thread stops. Cancellation must await thread completion before
@@ -33,7 +33,7 @@ belong in their libraries. Nested admissions are prohibited: an outer handler
 passes its admitted context to helpers rather than asking them to admit again.
 
 `admitted_connection(gate)` is a convenience for a complete standalone database
-operation: admit, open an existing current-v6 database with FK enforcement, and
+operation: admit, open an existing current-v7 database with FK enforcement, and
 close it before releasing admission. It never initializes or upgrades. Legacy
 low-level `connect()` remains for explicit bootstrap/offline fixtures; existing
 storage helpers are connection-based and do not secretly take admissions.
@@ -75,7 +75,7 @@ Re-preview after any partial upgrade. A timed-out drain can be abandoned by
 explicitly reacquiring exclusive access and checking readiness before completing;
 it cannot automatically resume while old work still holds admissions.
 Lease deadlines continue to use wall-clock time during maintenance. After resume,
-the future coordinator recovers genuinely expired leases by its normal fenced
+the future worker recovers genuinely expired leases by its normal fenced
 policy; this library never extends/reassigns leases or rewrites job states. This first
 version favors safe draining over immediate cancellation. Configuration updates
 that require only per-operation snapshots need no global drain. Future destructive
@@ -92,12 +92,12 @@ request alone. Stable file lock artifacts remain after successful completion.
 
 ## Version-aware database runner
 
-Only existing, regular, versioned NextGen SQLite databases at v1–v6 are supported.
+Only existing, regular, versioned NextGen SQLite databases at v1–v7 are supported.
 Version 0, unknown/newer versions, schema drift, orphan foreign keys and failed
 integrity checks are refused. An empty new DB uses explicit `initialize()`;
 legacy databases are never detected/imported by guessing table names.
 
-The immutable bundled manifest names 001–006. Preview reports starting/target
+The immutable bundled manifest names 001–007. Preview reports starting/target
 versions, a schema fingerprint and the missing-script SHA-256 values. Preview
 uses a read transaction and read-only database connection; it makes no schema
 changes, backups or implicit database. SQLite may access existing WAL/SHM files;
@@ -120,7 +120,7 @@ executes complete SQL statements without `executescript`'s implicit pre-commit.
 Before each script's COMMIT, it checks resulting version, table/index/constraint
 structure, all foreign keys and database integrity. It always rolls back a failed
 step and restores FK enforcement, particularly for the v5 referenced-table rebuild.
-The final v6 contract is compared with fresh `SCHEMA`.
+The final v7 contract is compared with fresh `SCHEMA`.
 
 **Atomicity is per migration version, not the whole upgrade chain.** If v4 commits
 and v5 fails, the database remains at v4; backup retains the pre-upgrade version,
@@ -129,7 +129,10 @@ its journal/WAL. Re-preview the actual recovered version before continuing.
 No automatic restore, downgrade or deletion of database/WAL/SHM files is allowed.
 A restore requires a separate stopped-service procedure and validated backup.
 
-This adds no tables/columns/indexes or data-shape changes. SQLite stays **v6**;
+SQLite **v7** adds worker to the two history component CHECK vocabularies,
+retaining coordinator solely for historical attribution. Migration 007 preserves
+all rows and indexes; published 001–006 remain unchanged. No job state or payload
+shape changes. The latest fresh schema includes the same constraints;
 configuration schema versions and publication revisions remain independent.
 Operational events/reasons have registered static English messages and translation
 keys; errors expose no raw SQL, filesystem paths or SQLite exception strings.

@@ -8,7 +8,7 @@
 
 AnimeSeries v2 represents a **verified anime-series identity**, optionally including zero or more individually verified episodes. A webhook is not expected to produce one directly. The identification component may accumulate partial evidence in its own work state and MUST call the schema parser/validator before marking **SERIES IDENTIFICATION COMPLETE**. An empty episode list means no individual episode identity is claimed, **not** that the series has no episodes, that a pack is empty, or that every episode of the release is identified.
 
-The schema defines identity information, **not the release's actual contents**. Season-pack labeling may be treated as a provisional clue by the job coordinator. The AniDB episode catalog tells us which episodes may exist for the relevant AniDB anime entry; it does not prove which files the release contains. Those distinctions belong in the SQLite job and release-handling design, not as fields on AnimeSeries.
+The schema defines identity information, **not the release's actual contents**. Season-pack labeling may be treated as a provisional clue by the job worker. The AniDB episode catalog tells us which episodes may exist for the relevant AniDB anime entry; it does not prove which files the release contains. Those distinctions belong in the SQLite job and release-handling design, not as fields on AnimeSeries.
 
 ## RFC-IDENTITY-001 — identity completion gate
 
@@ -64,3 +64,4 @@ Treat the user’s TCP analogy as **reliable delivery and recovery properties at
 6. Scope is infrastructural: no live deployment, no actual provider calls, no acquisition, no Sonarr/Jellyfin/Shoko writes and no merger into the legacy runtime.
 
 **Reliability goal:** no *acknowledged* event silently lost and no single bad identity record taking the pipeline down. Perfect availability, exactly-once processing and immunity to physical data loss cannot be guaranteed; make failures observable and recoverable instead.
+

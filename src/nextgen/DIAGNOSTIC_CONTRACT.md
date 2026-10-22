@@ -2,7 +2,7 @@
 
 Status: implemented on the PR #100 branch; source-reviewed and syntax-checked,
 but **no offline tests or CI have been executed**. This is a shared library,
-not a running operational service. The coordinator remains the next component.
+not a running operational service. The worker remains the next component.
 
 Implementation reuses NextGen settings, stdlib logging/levels, reason messages,
 redaction patterns and storage helpers. Legacy informed the shared-message and
@@ -15,7 +15,7 @@ history committed with its state change. Runtime logs add troubleshooting
 detail; they never replace history or determine retry policy.
 
 This implementation belongs in diagnostic-infrastructure PR #100 before
-coordinator execution. Keep the domain AnimeSeries v2 untouched. No provider,
+worker execution. Keep the domain AnimeSeries v2 untouched. No provider,
 acquisition, dashboard, management API, or process supervision implementation
 is required to prove this foundation.
 
@@ -100,7 +100,7 @@ Display states require state.<entity>.<CODE>.label:
 | incoming_event | IDENTIFIED | Series identified |
 
 The two entities use separate keys even where English text matches. These
-labels cover all states currently permitted by SQLite v6; they add no state.
+labels cover all states currently permitted by SQLite v7; they add no state.
 All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
@@ -108,7 +108,7 @@ Unknown historical event/reason codes must remain readable using generic copy.
 Reject unregistered new event/reason codes at write time.
 LEASE_EXPIRED and the resulting RETRY_SCHEDULED or NEEDS_REVIEW can be separate
 history rows in one transaction; they do not introduce a new job state.
-The coordinator later validates transitions and determines retry eligibility.
+The worker later validates transitions and determines retry eligibility.
 The diagnostic writer validates audit shape, not scheduler business policy.
 CANCELED, BLOCKED and ON_HOLD are now explicit stored states. No FAILED state
 is introduced. Typed activity and its history snapshots are documented in
@@ -130,7 +130,7 @@ is introduced. Typed activity and its history snapshots are documented in
   attempt just concluded, not a pre-incremented future claim.
 - Retry-exhaustion details retain max_attempts and cause_reason_code; the
   top-level reason is JOB_RETRY_EXHAUSTED.
-- Do not store lease tokens in diagnostic history or logs. The coordinator must still use them in
+- Do not store lease tokens in diagnostic history or logs. The worker must still use them in
   conditional state mutations; history insertion does not confer ownership.
 
 ## Durable writer boundary
@@ -180,9 +180,9 @@ by the v5 follow-up. The new
 004 checks its starting version inside its transaction. 005_job_statuses.sql
 then upgrades v4→v5 for job states/activities by rebuilding jobs and preserving
 its references. Its caller must roll back on error and always restore foreign
-keys in finally. initialize() creates a fresh v6 database atomically, accepts
-v6, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
-work; do not start using scripts against any live database.
+keys in finally. initialize() now creates a fresh v7 database atomically, accepts v7, and
+refuses to stamp an older or unversioned existing schema. The explicit version-aware
+runner is documented in storage/MIGRATIONS.md; no live upgrades have been executed.
 
 ## Runtime logging and reload
 
@@ -249,7 +249,7 @@ syntax parsing were performed; neither establishes runtime correctness.
 ## Remaining sequence
 
 Review this implementation, v4/v5/v6 persistence changes and unexecuted offline
-cases. The next component is coordinator ownership, routing, retries and
+cases. The next component is worker ownership, routing, retries and
 atomic completion against this contract. Dashboard, supervisor distribution, management
 API, intake service and provider business logic remain later milestones.
 
@@ -286,7 +286,7 @@ API, intake service and provider business logic remain later milestones.
 
 These writers validate audit shape and registered meaning; they do not enforce
 job transition legality, ownership, expiry or safe external replay. Those are
-coordinator requirements. Never catch a mutation/audit error and then commit
+worker requirements. Never catch a mutation/audit error and then commit
 its enclosing transaction; propagate it so the unit rolls back.
 
 ## Job status follow-up
@@ -298,13 +298,13 @@ activity_code and its static readable label. New ON_HOLD/BLOCKED/CANCELED
 events require registered reasons; ACTIVITY_CHANGED records a snapshot without
 inventing a failure reason. Specific handler reasons are registered when their
 semantics are implemented. No cancellation actions, download ownership logic,
-condition signaling or coordinator loop is implemented by the schema change.
+condition signaling or worker loop is implemented by the schema change.
 
 ## Separate process boundary and final diagnostic review
 
 The future management API has its own process and api component identity.
 It owns request authentication/authorization and invokes shared management
-libraries. The coordinator owns job claiming, dispatch, leases, scheduling and
+libraries. The worker owns job claiming, dispatch, leases, scheduling and
 outcomes. It hosts no public management endpoints, settings persistence or SQL
 migration API. Its small internal async control interface will support pause,
 drain, resume, shutdown and readiness acknowledgment through the later shared
@@ -316,3 +316,15 @@ unchanged. No HTTP API or cross-process control transport is implemented here.
 The final diagnostic review includes API attribution and v6 migration regression
 cases; all offline tests remain unexecuted. Source review, AST syntax parsing
 and diff checks are the only validation performed under current policy.
+
+
+## Worker naming follow-up
+
+The canonical async job process is worker, formerly coordinator. New loggers,
+logging overrides and audit writers use component=worker. SQLite v7 migration
+007 adds worker to history component constraints, preserving old coordinator
+attribution unchanged. Published SQL 001–006 remain immutable. Fresh SCHEMA,
+initialization, migration runner and offline cases use the latest v7 contract.
+Configuration schema v2 explicitly converts coordinator keys to worker; neither
+reading a file nor starting a job silently migrates persistent settings.
+The management API remains a separate process. Tests are included but unexecuted.

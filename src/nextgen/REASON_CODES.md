@@ -14,7 +14,7 @@ not a port of a complete legacy catalog. No runtime dependency on legacy exists.
   false means repeating unchanged work is not the suggested remedy, and null
   means the code alone cannot classify recovery. It never grants retry
   permission, determines a state, sets a delay, or overrides attempt limits.
-  The coordinator and handler outcome decide recovery using actual evidence.
+  The worker and handler outcome decide recovery using actual evidence.
 - Severity describes a condition, not the job state or process health.
   `NEEDS_REVIEW` can represent a normal per-item outcome.
 - `display_reason` supplies static plain-language messages and actions.
@@ -59,7 +59,7 @@ Job states are PENDING, RUNNING, RETRY_WAIT, NEEDS_REVIEW and DONE; event states
 also include IDENTIFIED rather than DONE. States are not reason codes.
 Storage emits ACCEPTED, CREATED and SERIES_IDENTIFIED through the shared
 history writers. messages.py registers the remaining lifecycle codes for
-coordinator integration, plus runtime-only OPERATION_FAILED. The coordinator
+worker integration, plus runtime-only OPERATION_FAILED. The worker
 execution loop itself remains unimplemented.
 
 `IDENTITY_CONFLICT` covers canonical TVDB disagreement, conflicting retry
@@ -103,7 +103,7 @@ accepted. Lists name schema locations without exposing their values.
 Only report episode fields for relevant supplied entries or an operation
 requiring episode evidence, never because a valid series has no episodes.
 These fields explain a condition; canonical scheduling still lives in the
-job row. The helper does not enforce coordinator transition policy.
+job row. The helper does not enforce worker transition policy.
 
 Example: a policy-authorized retry may record
 `event_code=RETRY_SCHEDULED`, `reason_code=PROVIDER_UNAVAILABLE`,
@@ -116,7 +116,7 @@ message text. Exhaustion can retain PROVIDER_UNAVAILABLE as cause_reason_code.
 This PR supplies the reason catalog, presentation helper and detail builder,
 with offline tests authored but **not executed** under the current project
 policy. The reason catalog itself required no SQL change; diagnostic PR #100 adds
-SQLite v4 component attribution. No CI runs, coordinator execution, dashboard,
+SQLite v4 component attribution. No CI runs, worker execution, dashboard,
 management API, journald integration or supervisor reload distribution are
 included. Existing Python logging/settings and central reason copy are reused.
 

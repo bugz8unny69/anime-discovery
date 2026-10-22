@@ -69,7 +69,7 @@ def safe_code(code):
 
 
 def validate_job_activity(state, activity_code):
-    """Validate stored shape, not coordinator transition or claim policy."""
+    """Validate stored shape, not worker transition or claim policy."""
     if type(state) is not str or state not in STATES["job"]:
         raise ValueError("invalid job state")
     if activity_code is None:

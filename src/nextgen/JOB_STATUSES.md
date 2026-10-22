@@ -2,7 +2,7 @@
 
 SQLite v5 adds the missing legacy operational distinctions while keeping
 scheduler lifecycle, activity and reason separate. This is schema/catalog
-support; no coordinator, dashboard or acquisition handler is implemented here.
+support; no worker, dashboard or acquisition handler is implemented here.
 
 ## Stored lifecycle: jobs.state
 
@@ -55,7 +55,7 @@ Every incoming delivery must still be retained independently.
 When moving into a held/review/blocked/canceled state, clear incompatible
 activity in the same UPDATE; SQL rejects invalid state/activity pairs. Updating
 activity, state and corresponding history belongs in the same transaction.
-The coordinator must still fence stale workers and validate transitions.
+The worker must still fence stale workers and validate transitions.
 
 ## Legacy display mapping
 
@@ -110,7 +110,7 @@ users. Because referenced jobs is rebuilt, foreign_keys is disabled before
 BEGIN. The caller must ROLLBACK on error and restore foreign_keys=ON in a
 finally block. The script restores it on success. No production runner is
 implemented or invoked. Historical migrations 001 through 004 stay immutable.
-initialize() creates only a fresh v6 database or accepts v6; older versions
+initialize() creates only a fresh v7 database or accepts v7; older versions
 require explicit upgrades.
 
 Offline tests cover state/activity constraints, messages, historical snapshots,
@@ -119,3 +119,7 @@ restoration. They are committed but not executed. No CI runs or live upgrades.
 
 The subsequent v6 migration only adds api diagnostic attribution; job
 states/activity and their history snapshots retain the v5 meanings above.
+
+
+The job process is now named worker. SQLite v7 only adds that diagnostic emitter
+while retaining historical coordinator attribution; no state/activity changes.

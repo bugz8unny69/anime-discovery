@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 1
+CONFIGURATION_VERSION = 2
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -64,7 +64,7 @@ FIELDS = MappingProxyType({
     "logging.components": FieldDefinition(MappingProxyType({}), "levels", "next_operation"),
     "api.host": FieldDefinition("127.0.0.1", "host", "restart", ("api",)),
     "api.port": FieldDefinition(8765, "integer", "restart", ("api",), 1, 65535),
-    "coordinator.concurrency": FieldDefinition(4, "integer", "restart", ("coordinator",), 1, 32),
+    "worker.concurrency": FieldDefinition(4, "integer", "restart", ("worker",), 1, 32),
     "storage.database_path": FieldDefinition(
         "/var/lib/anime-discovery/nextgen.sqlite", "path", "restart", tuple(sorted(COMPONENTS))),
 })
@@ -217,7 +217,7 @@ def source_version(document):
         if set(document) - {"logging"}:
             raise ConfigurationError()
         try:
-            parse_settings(document)
+            _v1_values(document)
         except (ValueError, TypeError):
             raise ConfigurationError() from None
         return 0
@@ -227,13 +227,56 @@ def source_version(document):
     return version
 
 
+def _v1_values(values):
+    """Validate the published v1 shape without accepting current names there.
+
+    Round-trip through current validation so all unchanged bounds stay strict,
+    then restore historical names. The original v0→v1 output remains v1-shaped.
+    """
+    if type(values) is not dict or "worker" in values:
+        raise ConfigurationError()
+    current = copy.deepcopy(values)
+    if "coordinator" in current:
+        current["worker"] = current.pop("coordinator")
+    logging_values = current.get("logging", {})
+    if type(logging_values) is not dict:
+        raise ConfigurationError()
+    components = logging_values.get("components", {})
+    if type(components) is not dict or "worker" in components:
+        raise ConfigurationError()
+    if "coordinator" in components:
+        components["worker"] = components.pop("coordinator")
+    historical = validate_values(current)
+    historical["coordinator"] = historical.pop("worker")
+    levels = historical["logging"]["components"]
+    if "worker" in levels:
+        levels["coordinator"] = levels.pop("worker")
+    return historical
+
+
 def _v0_to_v1(document):
-    return {"schema_version": 1, "revision": 1, "settings": validate_values(document)}
+    return {"schema_version": 1, "revision": 1, "settings": _v1_values(document)}
+
+
+def _v1_to_v2(document):
+    if (type(document) is not dict
+            or set(document) != {"schema_version", "revision", "settings"}
+            or document["schema_version"] != 1):
+        raise ConfigurationError()
+    current_revision = revision(document["revision"])
+    if current_revision == MAX_REVISION:
+        raise ConfigurationError()
+    values = _v1_values(document["settings"])
+    values["worker"] = values.pop("coordinator")
+    levels = values["logging"]["components"]
+    if "coordinator" in levels:
+        levels["worker"] = levels.pop("coordinator")
+    return {"schema_version": 2, "revision": current_revision + 1, "settings": values}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2})
 
 
 def convert_document(document):

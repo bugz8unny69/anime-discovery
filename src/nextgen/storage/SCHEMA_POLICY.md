@@ -13,11 +13,11 @@ For every change, contributors must:
 5. Update **this document** when table meaning, schema version, relationships, or migration instructions change. Document any new columns and whether they can be NULL, their defaults, and their validation rules.
 6. In the PR description, list the schema version transition, files changed, compatibility considerations, and whether tests have been run. Never describe unrun tests as passing.
 
-This applies to **all** future components, including intake, coordinator, supervisor, identity, dashboard and `m` admin commands. Any program needing a new table or new stored field must accompany that requirement with a versioned schema change; no silent ad-hoc `CREATE TABLE` or `ALTER TABLE` inside runtime components.
+This applies to **all** future components, including intake, worker, supervisor, identity, dashboard and `m` admin commands. Any program needing a new table or new stored field must accompany that requirement with a versioned schema change; no silent ad-hoc `CREATE TABLE` or `ALTER TABLE` inside runtime components.
 
 ## Current NextGen SQLite state (PR #100 implementation)
 
-Latest fresh SQLite version: **6**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **7**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -27,6 +27,7 @@ Latest fresh SQLite version: **6**. The version stored in `PRAGMA user_version` 
 | 4 | `004_diagnostic_components.sql` | Add nullable emitting component to both history tables, retaining historical rows |
 | 5 | `005_job_statuses.sql` | Expand lifecycle states and add typed current/historical activity |
 | 6 | `006_api_diagnostics.sql` | Permit the separate api emitter in both history tables |
+| 7 | `007_worker_component.sql` | Add canonical worker attribution; preserve historical coordinator rows |
 
 **Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`.
 
@@ -42,11 +43,11 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v6 or accepts an existing v6 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v7 or accepts an existing v7 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
-- Keep SQL transactions short and preserve durable event/job writes and history. Do not infer that a schema change implements coordinator runtime behavior.
+- Keep SQL transactions short and preserve durable event/job writes and history. Do not infer that a schema change implements worker runtime behavior.
 
 ## Test preparation policy for the current development phase
 
@@ -73,7 +74,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## v4 diagnostic history fields and writer contract
 
 Both event_history and job_history add component TEXT, nullable with implicit
-NULL default, constrained to supervisor/intake/coordinator/identity/acquisition.
+NULL default, historically constrained to supervisor/intake/coordinator/identity/acquisition.
 NULL denotes unknown origin in historical rows. New history writers require a
 valid non-null component; migration does not invent attribution for old rows.
 All IDs, raw payloads, identities, provenance, histories and indexes are retained.
@@ -102,7 +103,7 @@ jobs.state now permits PENDING, RUNNING, RETRY_WAIT, ON_HOLD, NEEDS_REVIEW,
 DONE, BLOCKED and CANCELED. The default remains PENDING. ON_HOLD denotes a
 condition-based wait, BLOCKED a policy/prerequisite stop, CANCELED an explicit
 terminal cancellation. These states must not be claimed automatically. The
-future coordinator defines validated transitions and wake-up behavior.
+future worker defines validated transitions and wake-up behavior.
 
 jobs.activity_code TEXT and job_history.activity_code TEXT are nullable with
 implicit NULL default, constrained to DOWNLOADING, WAITING_FOR_DOWNLOAD,
@@ -129,9 +130,9 @@ legacy database import. See JOB_STATUSES.md for the display/legacy mapping.
 
 ## v6 separate API diagnostic attribution
 
-The management API is a separate process from the coordinator. Its stable
+The management API is a separate process from the worker. Its stable
 component identifier is api in logging settings, runtime diagnostics and
-both history tables. Using coordinator or supervisor as the API emitter would
+both history tables. Using worker or supervisor as the API emitter would
 misattribute actions and is not a substitute for its own component identity.
 
 006 upgrades v5→v6 by rebuilding event_history and job_history with the expanded
@@ -141,25 +142,43 @@ foreign-key constraints remain enabled throughout. An in-transaction version
 guard and FK check precede the version bump/commit. On any script error the
 caller must ROLLBACK. Published 001-005 remain unchanged.
 
-The current fresh schema and initialize() use v6. This adds attribution only;
-no API server, authentication, configuration writer or coordinator is created.
+At that PR boundary the fresh schema and initialize() used v6. This adds attribution only;
+no API server, authentication, configuration writer or worker is created.
 Offline API logger/audit and v6 preservation/rollback/version cases are included
 but unexecuted. The latest fresh-versus-sequential metadata case includes 006.
 
 
 ## Explicit migration runner and maintenance admission (no schema change)
 
-`migrations.py` implements preview/apply from existing v1–v6, a validated SQLite
+`migrations.py` implements preview/apply from existing v1–v7, a validated SQLite
 backup, per-version transactions and precommit schema/integrity/FK validation.
 `maintenance.py` supplies a durable cooperative process admission barrier;
 `admitted_connection()` is available to future runtime operations. No table,
-column, index or persisted row shape changes: current schema remains v6, and
-001–006 are unchanged. Older paragraphs saying no runner describe the historical
+column or persisted row shape changes were introduced by that runner PR.
+The naming follow-up expands CHECK constraints to worker in v7; 001–006 remain
+unchanged. Older paragraphs saying no runner describe the historical
 PR boundaries; this section and MIGRATIONS.md supersede that implementation status.
 
 All runtime users must be admitted before accessing SQLite, including an entire
 job attempt and its heartbeats/final commit. Apply requires an active exclusive
 lease after drainage; it leaves admission closed for compatibility/readiness
 checks. Partial chains retain their last committed version; failures/crashes keep
-the pending marker, and recovery is explicit. No API/supervisor/coordinator wiring
+the pending marker, and recovery is explicit. No API/supervisor/worker wiring
 or production upgrade is supplied or executed here. Offline tests are unrun.
+
+
+## v7 canonical worker component
+
+The async jobs process is named worker (formerly coordinator). Fresh history
+component constraints include worker and retain coordinator for historical rows
+only. New settings/loggers/audit writers accept worker and reject coordinator.
+No job lifecycle state, field or provenance semantics change.
+
+007 upgrades only v6→v7 with FK enforcement enabled, rebuilding both history
+tables and preserving every row, ID, unknown code, nullable component, activity,
+foreign key and index. The old component text is not rewritten: historical
+attribution remains true. The version guard, rebuild, FK validation and bump
+are in one transaction; failures require rollback. The runner manifest includes
+007; fresh SCHEMA and initialize() use v7. Configuration conversion to schema
+v2 is independent and explicitly renames the settings keys. Offline preservation,
+rollback, guard and fresh/sequential cases are included but unexecuted.

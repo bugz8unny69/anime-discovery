@@ -19,7 +19,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         snapshot = ConfigurationSnapshot(1, {})
         self.assertEqual(snapshot.schema_version, CONFIGURATION_VERSION)
         self.assertEqual(snapshot.logging_settings().logging.level, "INFO")
-        self.assertEqual(snapshot.value("coordinator.concurrency"), 4)
+        self.assertEqual(snapshot.value("worker.concurrency"), 4)
         for definition in FIELDS.values():
             self.assertIn(definition.apply_mode, {"next_operation", "restart"})
             self.assertEqual(bool(definition.restart_components), definition.apply_mode == "restart")
@@ -47,13 +47,13 @@ class ConfigurationSchemaTests(unittest.TestCase):
         startup = ConfigurationSnapshot(1, {})
         newer, _ = patch_snapshot(startup, {
             "logging": {"level": "DEBUG"},
-            "api": {"port": 9999}, "coordinator": {"concurrency": 8}})
+            "api": {"port": 9999}, "worker": {"concurrency": 8}})
         old_operation = for_operation(startup, startup, component="api")
         operation = for_operation(newer, startup, component="api")
         self.assertEqual(old_operation.value("logging.level"), "INFO")
         self.assertEqual(operation.value("logging.level"), "DEBUG")
         self.assertEqual(operation.value("api.port"), 8765)
-        self.assertEqual(operation.value("coordinator.concurrency"), 4)
+        self.assertEqual(operation.value("worker.concurrency"), 4)
         self.assertEqual(operation.pending_restart_fields, ("api.port",))
         self.assertEqual((operation.desired_revision, operation.startup_revision), (2, 1))
         restarted = for_operation(newer, newer, component="api")
@@ -70,9 +70,9 @@ class ConfigurationSchemaTests(unittest.TestCase):
         migrated = convert_document(old)
         self.assertEqual(old, original)
         self.assertEqual(source_version(old), 0)
-        self.assertEqual(migrated.revision, 1)
+        self.assertEqual(migrated.revision, 2)
         self.assertEqual(migrated.value("logging.level"), "DEBUG")
-        self.assertEqual(migrated.value("logging.components")["coordinator"], "TRACE")
+        self.assertEqual(migrated.value("logging.components")["worker"], "TRACE")
         self.assertEqual(convert_document(migrated.to_document()), migrated)
         with self.assertRaises(ConfigurationMigrationRequired):
             load_current(json.dumps(old).encode())
@@ -88,7 +88,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
     def test_unknown_fields_and_bad_values_are_not_silently_dropped(self):
         bad = (
             {"api": {"port": True}}, {"api": {"port": 0}}, {"api": {"port": 65536}},
-            {"coordinator": {"concurrency": 33}}, {"coordinator": {"concurrency": 1.5}},
+            {"worker": {"concurrency": 33}}, {"worker": {"concurrency": 1.5}},
             {"api": {"host": "http://example.invalid/private-token"}},
             {"api": {"host": ":::invalid"}}, {"storage": {"database_path": "relative"}},
             {"storage": {"database_path": "/"}}, {"storage": {"database_path": "/x\nprivate"}},
@@ -108,7 +108,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         candidate, changed = patch_snapshot(initial, {"logging": {"level": "INFO"}})
         self.assertIs(candidate, initial)
         self.assertEqual(changed, ())
-        for version in (True, 0, 2, "1"):
+        for version in (True, 0, 1, 3, "1"):
             with self.subTest(version=version), self.assertRaises(ConfigurationError):
                 document_snapshot({"schema_version": version, "revision": 1, "settings": {}})
         for revision in (True, 0, -1, "1", MAX_REVISION + 1):
