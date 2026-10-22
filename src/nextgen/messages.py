@@ -1,0 +1,147 @@
+"""Shared English diagnostic catalog and translation-ready presentation.
+
+Static sentences only. Translation maps are trusted application resources,
+not provider/user input. No locale loader or dashboard API is implemented.
+"""
+from dataclasses import dataclass
+from types import MappingProxyType
+import re
+import unicodedata
+
+from src.nextgen.reasons import REGISTRY, display_reason, get_reason
+
+
+@dataclass(frozen=True)
+class EventDefinition:
+    code: str
+    scope: str
+    message: str
+    reason_required: bool = False
+    exact_reason: str | None = None
+
+
+_EVENTS = (
+    EventDefinition("ACCEPTED", "incoming_event", "Incoming event accepted."),
+    EventDefinition("SERIES_IDENTIFIED", "incoming_event", "Anime series identification completed."),
+    EventDefinition("CREATED", "job", "Job created."),
+    EventDefinition("CLAIMED", "job", "Job processing started."),
+    EventDefinition("LEASE_EXPIRED", "job", "The processing lease expired before the job completed.",
+                    True, "JOB_LEASE_EXPIRED"),
+    EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
+    EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
+    EventDefinition("DONE", "job", "Job completed."),
+    # A runtime observation, not a persisted job state or lifecycle transition.
+    EventDefinition("OPERATION_FAILED", "runtime", "A processing operation failed.", True),
+)
+EVENTS = MappingProxyType({item.code: item for item in _EVENTS})
+_LABELS = {"PENDING": "Waiting to be processed", "RUNNING": "Processing",
+           "RETRY_WAIT": "Waiting for another attempt", "NEEDS_REVIEW": "Needs review"}
+STATES = MappingProxyType({
+    "job": MappingProxyType({**_LABELS, "DONE": "Completed"}),
+    "incoming_event": MappingProxyType({**_LABELS, "IDENTIFIED": "Series identified"}),
+})
+_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}", re.ASCII)
+
+
+def safe_code(code):
+    return code if type(code) is str and _CODE.fullmatch(code) else "UNKNOWN"
+
+
+def validate_event(code, reason_code=None, *, scope=None):
+    definition = EVENTS.get(code) if type(code) is str else None
+    if definition is None or (scope is not None and definition.scope != scope):
+        raise ValueError("unregistered event or invalid scope")
+    if definition.reason_required:
+        if get_reason(reason_code) is None:
+            raise ValueError("registered reason required")
+        if definition.exact_reason and reason_code != definition.exact_reason:
+            raise ValueError("invalid event reason")
+    elif reason_code is not None:
+        raise ValueError("reason not allowed for event")
+    return definition
+
+
+def _english():
+    values = {f"event.{item.code}.message": item.message for item in _EVENTS}
+    for code, reason in REGISTRY.items():
+        values[f"reason.{code}.message"] = reason.message
+        values[f"reason.{code}.action"] = reason.action
+    for entity, states in STATES.items():
+        for code, label in states.items():
+            values[f"state.{entity}.{code}.label"] = label
+    values.update({
+        "event.UNKNOWN.message": "Additional processing activity was recorded.",
+        "reason.UNKNOWN.message": "Additional processing information is available.",
+        "reason.UNKNOWN.action": "Review the job history.",
+        "state.UNKNOWN.label": "Unknown status",
+    })
+    return values
+
+
+def _validate_text(text):
+    if (type(text) is not str or not text.strip() or len(text) > 512
+            or any(unicodedata.category(char).startswith("C") for char in text)
+            or any(char in text for char in "{}<>")):
+        raise ValueError("invalid static catalog message")
+
+
+ENGLISH = MappingProxyType(_english())
+if len(EVENTS) != len(_EVENTS):
+    raise ValueError("duplicate event code")
+for _text in ENGLISH.values():
+    _validate_text(_text)
+
+
+class MessageCatalog:
+    """Immutable snapshot of optional trusted locale maps; English fallback.
+
+    No interpolation, file watching or network loading. Unknown keys and unsafe
+    translations fail validation before changing any active application state.
+    """
+    def __init__(self, translations=None):
+        if translations is None:
+            translations = {}
+        if type(translations) is not dict:
+            raise ValueError("invalid translations")
+        snapshot = {}
+        for locale, entries in translations.items():
+            if (type(locale) is not str or not re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", locale)
+                    or locale == "en" or type(entries) is not dict):
+                raise ValueError("invalid translation locale")
+            for key, text in entries.items():
+                if type(key) is not str or key not in ENGLISH:
+                    raise ValueError("unregistered translation key")
+                _validate_text(text)
+            snapshot[locale] = MappingProxyType(dict(entries))
+        self._translations = MappingProxyType(snapshot)
+
+    def text(self, key, *, locale="en"):
+        if type(key) is not str or key not in ENGLISH:
+            raise ValueError("unregistered message key")
+        selected = self._translations.get(locale, {}) if type(locale) is str else {}
+        return selected.get(key, ENGLISH[key])
+
+    def event(self, code, *, locale="en"):
+        known = type(code) is str and code in EVENTS
+        key = f"event.{code if known else 'UNKNOWN'}.message"
+        return {"code": safe_code(code), "message_key": key,
+                "message": self.text(key, locale=locale)}
+
+    def reason(self, code, *, locale="en"):
+        result = display_reason(code)
+        known = get_reason(code) is not None
+        prefix = f"reason.{code if known else 'UNKNOWN'}"
+        result.update(message_key=prefix + ".message", action_key=prefix + ".action",
+                      message=self.text(prefix + ".message", locale=locale),
+                      action=self.text(prefix + ".action", locale=locale))
+        return result
+
+    def state(self, entity, code, *, locale="en"):
+        states = STATES.get(entity, {}) if type(entity) is str else {}
+        known = type(code) is str and code in states
+        key = f"state.{entity}.{code}.label" if known else "state.UNKNOWN.label"
+        return {"code": safe_code(code), "message_key": key,
+                "message": self.text(key, locale=locale)}
+
+
+DEFAULT_CATALOG = MessageCatalog()

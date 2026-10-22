@@ -2,7 +2,30 @@
 
 > **Authoritative architecture decision: 2026-10-22.** NextGen is built fresh in `src/nextgen/`. There is **no migration**, compatibility bridge, legacy SQLite reader or transitional data assembler. Legacy `src/legacy/` is reference material for domain lessons and regression tests only.
 >
-> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Run the independent NextGen test batches and record their results before proposing a merge.
+> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
+
+## Current diagnostic implementation — PR #100, 2026-10-22
+
+The PR #100 branch implements shared messages.py event/state catalogs and a
+translation-ready renderer, history.py transaction-bound audit writers, and
+SQLite schema v4 (004_diagnostic_components.sql plus fresh-schema changes).
+Existing settings/logging and reason registry are reused. Logging now resolves
+static English copy, derives correlation from IDs, and emits bounded safe
+exception summaries. Runtime-only OPERATION_FAILED does not add a job state.
+
+Mandatory policy: [every diagnostic marker/error needs human-readable copy](src/nextgen/HUMAN_READABLE_MESSAGES.md).
+Contract/API: [DIAGNOSTIC_CONTRACT.md](src/nextgen/DIAGNOSTIC_CONTRACT.md).
+Schema/version authority: [SCHEMA_POLICY.md](src/nextgen/storage/SCHEMA_POLICY.md).
+These documents supersede older planning snapshots below where status differs.
+PR #100 remains under review; do not assume it merged. Source review and AST
+syntax checks only; offline tests are included but unexecuted, with no CI runs.
+
+Next component: coordinator claims/routing, leases and stale-owner fencing,
+retry/backoff/exhaustion decisions, atomic completion/successor creation, and
+offline lifecycle/concurrency/recovery cases. Diagnostic writers do not enforce
+those transitions. No coordinator loop, supervisor reload distribution, journal
+service integration, dashboard API, deployment or legacy modifications are
+implemented by this diagnostics PR.
 
 ## NextGen settings and diagnostics foundation — 2026-10-22
 
@@ -77,7 +100,7 @@ The clean-slate code uses its **own** tests in `src/nextgen/tests/`. The legacy 
 
 The automatic GitHub Actions **Python test workflow has been removed** on this draft PR branch. Do not automatically run legacy or NextGen tests on pushes or pull requests. Keep the separate manually invoked archive publishing workflow unchanged. If branch protection requires a deleted check, resolve that repository rule explicitly before merging; do not silently bypass it.
 
-Use `python -m src.nextgen.tests.run_batches --match schema` for focused schema work, or `python -m src.nextgen.tests.run_batches` for all NextGen tests, executed in separate groups of up to five test files. Use `--batch-size N`, `--match <filename-part>`, and `--list` as needed. This needs Python 3.12+ and runs **locally/on demand**, never against live services. See `src/nextgen/tests/README.md`. Each new NextGen component gets its own isolated offline tests and sample data in the existing `fixtures/` folder. Before a review/merge, run and document the relevant batches and the complete NextGen suite; no GitHub status check substitutes for this evidence.
+Use `python -m src.nextgen.tests.run_batches --match schema` for focused schema work, or `python -m src.nextgen.tests.run_batches` for all NextGen tests, executed in separate groups of up to five test files. Use `--batch-size N`, `--match <filename-part>`, and `--list` as needed. This needs Python 3.12+ and runs **locally/on demand**, never against live services. See `src/nextgen/tests/README.md`. Each new NextGen component gets its own isolated offline tests and sample data in the existing `fixtures/` folder. Current project policy defers test execution: commit relevant tests and document them as unrun. The commands above are for later explicit authorization.
 
 ## Next PR: delivery and worker reliability (TCP-like, application-level)
 

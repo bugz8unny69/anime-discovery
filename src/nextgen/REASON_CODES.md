@@ -53,13 +53,14 @@ Unsupported work must remain visible; do not silently discard it.
 
 ## Comparison with the current foundations
 
-SQLite v3 allows arbitrary reason text in `last_reason_code`, `event_history`
+SQLite v4 retains arbitrary historical reason text in `last_reason_code`, `event_history`
 and `job_history`; no SQL enum or schema migration is needed for this catalog.
 Job states are PENDING, RUNNING, RETRY_WAIT, NEEDS_REVIEW and DONE; event states
 also include IDENTIFIED rather than DONE. States are not reason codes.
-Current storage emits ACCEPTED and SERIES_IDENTIFIED; CREATED, CLAIMED,
-RETRY_SCHEDULED and similar lifecycle codes are examples for the future
-diagnostic contract, not an implemented registry or coordinator.
+Storage emits ACCEPTED, CREATED and SERIES_IDENTIFIED through the shared
+history writers. messages.py registers the remaining lifecycle codes for
+coordinator integration, plus runtime-only OPERATION_FAILED. The coordinator
+execution loop itself remains unimplemented.
 
 `IDENTITY_CONFLICT` covers canonical TVDB disagreement, conflicting retry
 results and an episode already owned by another AniDB anime. Two AniDB anime
@@ -78,8 +79,9 @@ Historical unknown identifiers remain readable with generic display text.
 The merged diagnostics helper accepts `reason_code` and a boolean
 `retryable` log field. A null catalog classification must be omitted there.
 The logging field should describe a contextual decision, not blindly copy a
-catalog hint. Correlation, durable history writers and event-code validation
-remain the dedicated diagnostic-infrastructure milestone.
+catalog hint. The PR #100 diagnostic infrastructure implements correlation, durable history
+writers, event-code validation and shared English/translation-key rendering.
+See DIAGNOSTIC_CONTRACT.md and HUMAN_READABLE_MESSAGES.md.
 
 Legacy diagnostics contribute bounded correlation, catch-boundary exceptions
 and redaction lessons. Legacy exact episode/TVDB placement gates do not become
@@ -113,5 +115,8 @@ message text. Exhaustion can retain PROVIDER_UNAVAILABLE as cause_reason_code.
 
 This PR supplies the reason catalog, presentation helper and detail builder,
 with offline tests authored but **not executed** under the current project
-policy. No CI runs, SQL changes, coordinator execution, dashboard, management
-API, journald integration or supervisor reload distribution are included.
+policy. The reason catalog itself required no SQL change; diagnostic PR #100 adds
+SQLite v4 component attribution. No CI runs, coordinator execution, dashboard,
+management API, journald integration or supervisor reload distribution are
+included. Existing Python logging/settings and central reason copy are reused.
+

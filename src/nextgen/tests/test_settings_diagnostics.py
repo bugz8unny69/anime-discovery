@@ -54,13 +54,13 @@ class FoundationTests(unittest.TestCase):
         try:
             raise RuntimeError("authorization: abc123")
         except RuntimeError as exc:
-            exception(logger, "JOB_FAILED", exc, job_id=42,
-                      trace_id="AD-2", retryable=False, reason_code="REMOTE_FAILURE")
+            exception(logger, "OPERATION_FAILED", exc, job_id=42,
+                      event_id=2, retryable=False, reason_code="JOB_HANDLER_FAILED")
         content = stream.getvalue()
         for secret in ("secretBearer", "hidden", "apikey123", "alice:pass",
                        "querysecret", "abc123"):
             self.assertNotIn(secret, content)
-        self.assertIn("event=JOB_FAILED", content)
+        self.assertIn("event_code=OPERATION_FAILED", content)
         self.assertIn("job_id=42", content)
         self.assertIn("trace_id=AD-2", content)
         self.assertIn("RuntimeError", content)
@@ -70,7 +70,8 @@ class FoundationTests(unittest.TestCase):
         logger, stream = self.logger()
         logger.setLevel(logging.INFO)
         logger.handlers[0].setFormatter(SafeFormatter("%(message)s"))
-        event(logger, logging.INFO, "JOB_RETRY", job_id=42, attempt=2,
+        event(logger, logging.INFO, "RETRY_SCHEDULED", job_id=42, attempt=2,
+              reason_code="PROVIDER_UNAVAILABLE",
               retryable=True, raw_body="never log this")
         self.assertIn("job_id=42", stream.getvalue())
         self.assertNotIn("never log this", stream.getvalue())
@@ -80,3 +81,4 @@ class FoundationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

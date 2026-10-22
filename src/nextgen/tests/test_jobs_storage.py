@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from src.nextgen.storage.sqlite import (
-    connect, initialize, enqueue_job, accept_event_and_job
+    connect, initialize, enqueue_job, accept_event_and_job, transaction
 )
 
 
@@ -30,9 +30,9 @@ class JobsStorageTests(unittest.TestCase):
     def test_independent_successor_has_only_provenance_reference(self):
         event, first = accept_event_and_job(
             self.db, "autobrr", b"raw", kind="identity", payload={})
-        with self.db:
+        with transaction(self.db):
             successor = enqueue_job(
-                self.db, event_id=event, created_by_job_id=first,
+                self.db, component="identity", event_id=event, created_by_job_id=first,
                 kind="next_stage", payload={"ready": True})
         self.assertEqual(self.db.execute(
             "SELECT created_by_job_id FROM jobs WHERE job_id=?",
@@ -45,8 +45,8 @@ class JobsStorageTests(unittest.TestCase):
         event, first = accept_event_and_job(
             self.db, "autobrr", b"raw", kind="identity", payload={})
         try:
-            with self.db:
-                enqueue_job(self.db, event_id=event, created_by_job_id=first,
+            with transaction(self.db):
+                enqueue_job(self.db, component="identity", event_id=event, created_by_job_id=first,
                             kind="next_stage", payload={})
                 raise RuntimeError("simulated failure")
         except RuntimeError:
@@ -56,8 +56,8 @@ class JobsStorageTests(unittest.TestCase):
 
     def test_unknown_job_source_rejected(self):
         with self.assertRaises(Exception):
-            with self.db:
-                enqueue_job(self.db, created_by_job_id=999,
+            with transaction(self.db):
+                enqueue_job(self.db, component="identity", created_by_job_id=999,
                             kind="identity", payload={})
 
     def test_versioned_sql_from_v1_to_v2_preserves_events(self):
@@ -83,20 +83,20 @@ class JobsStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
                 self.assertEqual(db.execute("SELECT count(*) FROM incoming_events").fetchone()[0], 1)
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+                with self.assertRaises(ValueError):
+                    initialize(db)
+                db.executescript((sql_dir / "004_diagnostic_components.sql").read_text())
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
                 initialize(db)
             finally:
                 db.close()
 
     def test_job_history_is_linked_and_validated(self):
         _, job = accept_event_and_job(self.db, "autobrr", b"raw", kind="identity", payload={})
-        with self.db:
-            self.db.execute(
-                "INSERT INTO job_history(job_id,occurred_at_ms,event_code,details_json) VALUES(?,1,'CREATED',?)",
-                (job, '{"source":"intake"}'))
         self.assertEqual(self.db.execute(
             "SELECT event_code FROM job_history WHERE job_id=?", (job,)).fetchone()[0], "CREATED")
         with self.assertRaises(Exception):
-            with self.db:
+            with transaction(self.db):
                 self.db.execute(
                     "INSERT INTO job_history(job_id,occurred_at_ms,event_code) VALUES(9999,2,'UNKNOWN')")
 
@@ -129,3 +129,4 @@ class JobsStorageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

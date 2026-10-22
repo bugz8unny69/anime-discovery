@@ -1,8 +1,12 @@
-# NextGen diagnostic infrastructure contract — design draft
+# NextGen shared diagnostic infrastructure contract
 
-Status: design prepared after reason registry PR #97 and schema policy PR #99.
-This document proposes the implementation boundary. It does not implement
-durable writers, a coordinator, journald integration, or supervisor reload.
+Status: implemented on the PR #100 branch; source-reviewed and syntax-checked,
+but **no offline tests or CI have been executed**. This is a shared library,
+not a running operational service. The coordinator remains the next component.
+
+Implementation reuses NextGen settings, stdlib logging/levels, reason messages,
+redaction patterns and storage helpers. Legacy informed the shared-message and
+exception-handling design; no legacy runtime is imported or modified.
 
 ## Outcome and scope
 
@@ -10,7 +14,7 @@ Every essential delivery/job transition must have bounded, interpretable audit
 history committed with its state change. Runtime logs add troubleshooting
 detail; they never replace history or determine retry policy.
 
-The implementation belongs in a dedicated diagnostic-infrastructure PR before
+This implementation belongs in diagnostic-infrastructure PR #100 before
 coordinator execution. Keep the domain AnimeSeries v2 untouched. No provider,
 acquisition, dashboard, management API, or process supervision implementation
 is required to prove this foundation.
@@ -25,10 +29,11 @@ Registration must cover normal waiting/progress/success as well as errors.
 Do not synthesize prose by replacing underscores or interpreting exceptions.
 
 The existing reasons.py English messages/actions are the reason source of
-truth. Implement event/state catalogs and the common renderer alongside the
-durable diagnostic writers; translation loading can follow later, using the
-keys defined by the policy. The initial renderer uses complete static English
-sentences and keeps variable facts in separate fields.
+truth. messages.py implements event/state catalogs and the common renderer alongside
+history.py durable writers. MessageCatalog accepts validated trusted locale
+maps as immutable snapshots; missing locale entries fall back to English.
+Translation file loading and user locale configuration remain later work.
+The renderer uses complete static sentences with variable facts kept separate.
 
 ## One contract, two destinations
 
@@ -40,7 +45,7 @@ sentences and keeps variable facts in separate fields.
 | Independent work | job_id FK | job_id |
 | Provenance | jobs.created_by_job_id, nullable | Optional bounded created_by_job_id |
 | Attempt and recovery facts | Validated safe_details fields | Validated attempt and contextual decision |
-| Emitting component | Proposed component column | component |
+| Emitting component | component (nullable only for historical rows) | component |
 | Timing | occurred_at_ms; history_id orders ties | log time, monotonic elapsed_ms when available |
 | Troubleshooting | No raw exception or payload | Catch-boundary exception type/traceback under a defined safe-output policy |
 
@@ -52,7 +57,7 @@ A logging sink failure after commit must not undo or relabel committed work.
 An exception during the transaction rolls back both state and history.
 Storage failure itself may only reach runtime diagnostics until recovery.
 
-## Stable initial lifecycle catalog
+## Stable lifecycle and runtime catalog
 
 Scopes and reason requirements are validated by the shared writer.
 
@@ -66,8 +71,10 @@ Scopes and reason requirements are validated by the shared writer.
 | RETRY_SCHEDULED | job | Required | Another processing attempt has been scheduled. |
 | NEEDS_REVIEW | job | Required | Processing has stopped for review. |
 | DONE | job | Absent | Job completed. |
+| OPERATION_FAILED | runtime log only | Required | A processing operation failed. |
 
-Event message keys are event.<CODE>.message. SERIES_IDENTIFIED does not imply
+OPERATION_FAILED is a catch-boundary observation, not a durable job transition
+or a new FAILED state. Event message keys are event.<CODE>.message. SERIES_IDENTIFIED does not imply
 episode coverage or acquisition. DONE means only this independent job completed;
 successor creation, when required, must still be in the same transaction.
 LEASE_EXPIRED records the observed expiry during ownership-fenced recovery.
@@ -84,7 +91,7 @@ Display states require state.<entity>.<CODE>.label:
 | incoming_event | IDENTIFIED | Series identified |
 
 The two entities use separate keys even where English text matches. These
-labels cover all states currently permitted by SQLite v3; they add no state.
+labels cover all states currently permitted by SQLite v4; they add no state.
 All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
@@ -94,7 +101,7 @@ LEASE_EXPIRED and the resulting RETRY_SCHEDULED or NEEDS_REVIEW can be separate
 history rows in one transaction; they do not introduce a new job state.
 The coordinator later validates transitions and determines retry eligibility.
 The diagnostic writer validates audit shape, not scheduler business policy.
-No FAILED/CANCELLED state or event is invented before those semantics are designed.
+No FAILED/CANCELLED job state or corresponding durable transition is introduced.
 
 ## Correlation and attempts
 
@@ -112,13 +119,12 @@ No FAILED/CANCELLED state or event is invented before those semantics are design
   attempt just concluded, not a pre-incremented future claim.
 - Retry-exhaustion details retain max_attempts and cause_reason_code; the
   top-level reason is JOB_RETRY_EXHAUSTED.
-- Do not store or log lease tokens. The coordinator must still use them in
+- Do not store lease tokens in diagnostic history or logs. The coordinator must still use them in
   conditional state mutations; history insertion does not confer ownership.
 
 ## Durable writer boundary
 
-Proposed shared APIs: append_event_history and append_job_history in a new
-NextGen diagnostic-history module. Each requires a caller-owned active SQLite
+Shared APIs in history.py: append_event_history and append_job_history. Each requires a caller-owned active SQLite
 transaction, validates typed and bounded fields before INSERT, and never
 commits, opens a connection, changes job state, retries SQL, or logs success.
 Reject use outside an active transaction so a history write cannot silently
@@ -132,38 +138,43 @@ validation messages without echoing input. Serialize canonical JSON with
 allow_nan=False. Enforce a small encoded-size cap (4 KiB) in addition to
 per-field bounds. History writers are internal interfaces, not authorization.
 
-Update accept_event, accept_event_and_job, enqueue_job, and save_identity to
-use the common writers while preserving their existing transaction ownership.
-enqueue_job must now insert CREATED in the same transaction as its job row;
-accept_event_and_job must not duplicate that record. Existing save_identity
-idempotent returns must not append duplicate successful transitions.
+accept_event, accept_event_and_job, enqueue_job and save_identity use the
+common writers. The transaction(db) context manager starts BEGIN IMMEDIATE
+and owns commit/rollback, including on autocommit connections; it rejects
+nested ownership. enqueue_job requires an already active transaction and an
+explicit component argument. It inserts CREATED in the same transaction as
+its job row; accept_event_and_job adds no duplicate. save_identity idempotent
+returns do not append duplicate successful transitions.
 An intake-created job's emitting component is intake; a job created by a
 handler records the actual creator component, not an inferred parent role.
 Caller APIs must make component attribution explicit where it is ambiguous.
 
-## SQLite version and compatibility proposal
+## SQLite v4 and compatibility
 
 Durable component attribution cannot be reconstructed reliably from the
-existing v3 rows. The implementation therefore needs a **v4 migration**, not
-an unversioned addition hidden inside a JSON field.
+existing v3 rows. 004_diagnostic_components.sql therefore provides the v3→v4 migration
+rather than hiding an unversioned field in JSON.
 
-Add nullable component TEXT to event_history and job_history, constrained to
+The migration adds nullable component TEXT to event_history and job_history, constrained to
 the same current component vocabulary as settings.py. NULL means historical
 origin was not captured; new shared writers require an explicit valid value.
 Preserve all existing rows and their unknown reason/event text.
 Record attempts using the bounded details fields already introduced by #97.
 No new trace column, provenance relationship, or domain field is necessary.
 
-Include 004_diagnostic_components.sql, a matching fresh SCHEMA and user_version
-update, all storage query/helper changes, SCHEMA_POLICY.md changes, and
-fresh-install plus sequential v1→v2→v3→v4 offline tests in the implementation PR.
-Leave 001/002/003 untouched. A version-aware migration runner remains later
+PR #100 includes 004_diagnostic_components.sql, matching fresh SCHEMA and
+user_version=4, storage helper changes, schema-policy documentation and offline
+fresh-install/sequential-upgrade tests. 001/002/003 are untouched. The new
+script checks starting version inside its transaction. On executescript failure
+the caller must roll back. initialize() creates a fresh v4 database atomically,
+accepts v4, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
 work; do not start using scripts against any live database.
 
 ## Runtime logging and reload
 
-Extend the existing event helper's correlation allowlist deliberately for
-created_by_job_id and use the stable lifecycle event names above.
+The event helper supports created_by_job_id and the registered event names
+above. Correlation trace IDs are derived from validated numeric IDs; supplied
+arbitrary trace strings and other unsafe extra fields are dropped.
 Do not copy catalog retryable into a retry decision: null means undetermined,
 and boolean recovery decisions must reflect actual policy/evidence.
 The audit source must not depend on logger.isEnabledFor.
@@ -173,17 +184,23 @@ capability and validate settings before replacing active configuration.
 Supervisor transport, reload signals, generation distribution and acknowledgments
 are later work; no reload service or file watcher is claimed here.
 
-Review the current regex redaction against legacy lessons: access_token/apikey
-query parameters, x-emby-token, signatures, quoted/space-containing values,
-and exception source lines can expose secrets that simple patterns miss.
-Do not claim arbitrary exception text is secret-free because a formatter ran.
-The implementation must define a bounded safe traceback representation and
-ensure configured sinks receive it without exception locals or raw payloads.
-Static public reason messages never depend on exception strings.
-Journald ingestion is a deployment integration, not a new Python log backend
-already present.
+Exception diagnostics now use bounded safe traceback summaries: a known
+exception type and up to 16 frame line numbers. Raw exception text, paths,
+source lines, custom class names, locals and chained exception content are
+omitted. exception() never passes raw exc_info to handlers, so its output is
+safe even with an unconfigured formatter. SafeFormatter also replaces raw or
+cached exception formatting and stack_info for direct logging calls. Regex
+redaction remains a defense for known credential patterns, not a guarantee
+that arbitrary direct logger messages are safe. Components must use event()
+and exception() with registered codes, not log raw provider values.
 
-## Offline acceptance cases to author, without executing
+log_history uses a registered reason's severity (INFO for unreasoned lifecycle
+entries), and resolves an underlying cause_reason_code to readable text too.
+Runtime output is best-effort. Broken logger sinks return False rather than
+turn committed work into a failure. Journald ingestion and supervisor reload
+distribution remain deployment/future-component work, not implemented features.
+
+## Offline acceptance cases authored, not executed
 
 1. Catalog validation for event scopes, missing/disallowed reasons, unknown
    new codes, valid unknown historical reads, and component validation.
@@ -210,12 +227,47 @@ already present.
     the complete coverage, safe-rendering and locale acceptance requirements.
 
 Tests must be committed with implementation but remain **unexecuted** under
-the current project policy. Do not trigger CI. This design draft contains no
-executable test cases and supplies no evidence of runtime correctness.
+the current project policy. Do not trigger CI. The executable cases in test_messages.py, test_diagnostic_history.py,
+test_diagnostic_logging.py and test_diagnostic_migration.py remain unexecuted.
+Existing storage/settings tests were updated. Only source review and AST
+syntax parsing were performed; neither establishes runtime correctness.
 
 ## Remaining sequence
 
-Implement and review this shared contract with its v4 persistence changes and
-offline test cases. Then implement coordinator ownership, routing, retries and
-atomic completion against it. Dashboard, supervisor distribution, management
+Review this implementation, v4 persistence changes and unexecuted offline
+cases. The next component is coordinator ownership, routing, retries and
+atomic completion against this contract. Dashboard, supervisor distribution, management
 API, intake service and provider business logic remain later milestones.
+
+
+## Using the implemented interfaces
+
+- messages.DEFAULT_CATALOG.event(code), .reason(code), and .state(entity, code)
+  return resolved copy and stable translation keys. An explicit MessageCatalog
+  can hold trusted translated maps; no external file loader is included.
+- diagnostics.configure_logging(settings, component) installs the safe
+  formatter and updates process-local logger/handler thresholds without
+  duplicate handlers. Invalid configuration is rejected before logger changes.
+- diagnostics.event(logger, level, code, reason_code=..., event_id=..., job_id=...)
+  validates registered emissions and adds static English messages. Reasons
+  requiring context do not automatically determine a retryable log decision.
+- diagnostics.exception(logger, "OPERATION_FAILED", exc,
+  reason_code="JOB_HANDLER_FAILED", job_id=...) adds the safe traceback summary.
+- history.append_event_history / append_job_history return frozen insert
+  receipts. Pass safe_details-compatible dictionaries. Job lifecycle audits
+  require an attempt matching the current job counter (CREATED is zero).
+- diagnostics.log_history(logger, receipt) is called only after the outer
+  transaction commits. Discard receipts on rollback. This is an explicit
+  caller obligation, not a transaction hook; no arbitrary SQL history scanner
+  or historical-detail renderer is claimed.
+- storage accept_event / accept_event_and_job / save_identity own transactions
+  and emit their lifecycle logs after commit. enqueue_job requires component
+  and an active caller transaction; it creates its durable audit but performs
+  no logging/commit. Its caller may log CREATED with validated correlation
+  facts after commit. A Python connection context alone does not begin a
+  transaction: use transaction(db) or explicit BEGIN/commit/rollback.
+
+These writers validate audit shape and registered meaning; they do not enforce
+job transition legality, ownership, expiry or safe external replay. Those are
+coordinator requirements. Never catch a mutation/audit error and then commit
+its enclosing transaction; propagate it so the unit rolls back.

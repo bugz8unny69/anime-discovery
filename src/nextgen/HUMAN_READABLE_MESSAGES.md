@@ -6,8 +6,10 @@ operator explanation. This rule applies at every verbosity level, including
 DEBUG and TRACE, and to normal progress/wait/success markers as well as failures.
 
 This policy is a required part of implementing [the diagnostic contract](DIAGNOSTIC_CONTRACT.md).
-It defines the rule now; journal rendering, event/status catalogs, translation
-loading and coverage enforcement are not implemented by this documentation PR.
+PR #100 implements journal rendering, event/status catalogs, registered-write
+validation and offline coverage cases. MessageCatalog supports trusted in-memory
+locale maps with English fallback. Translation file loading, locale settings
+and dashboard/management API integration remain future work.
 The reason catalog in reasons.py already supplies English message and action
 fields. Legacy is reference material, not a runtime dependency to import.
 
@@ -61,8 +63,7 @@ spelling. State labels also need readable text, but they are not errors.
 | state.job | NEEDS_REVIEW | Needs review | state.job.NEEDS_REVIEW.label |
 | state.job | RETRY_WAIT | Waiting for another attempt | state.job.RETRY_WAIT.label |
 
-The event examples are required copy for the proposed lifecycle catalog, not
-a claim that it already exists in executable code. The complete initial event
+The lifecycle catalog and common renderer are implemented in messages.py. The complete initial event
 and state copy is specified in DIAGNOSTIC_CONTRACT.md. Existing reason English
 copy remains owned by reasons.py; do not duplicate it into an independently
 maintained runtime dictionary.
@@ -85,14 +86,14 @@ and state.<entity>.<CODE>.label. These keys are translation identifiers,
 not additional workflow codes. Preserve them when copy changes; never recycle
 a code/key to mean something else.
 
-English is required and is the default journal language. A future configured
+English is required and is the current journal language. A future configured
 journal locale or viewer locale can select translations through the shared
 renderer. An unsupported locale or missing translation falls back to English.
 Changing the viewer locale must not rewrite history or affect retry behavior.
 Missing English entries fail catalog validation before release; defensive
 runtime fallback covers unknown historical data/version mismatches.
 
-For this initial foundation, use complete static sentences with no placeholders.
+This foundation implements complete static sentences with no placeholders.
 Keep IDs, attempt counts and times as separate typed facts. Future variable
 messages require explicitly named and typed, allowlisted parameters, bounds,
 matching placeholder sets in every locale, and proper plural forms; do not
@@ -169,7 +170,7 @@ not a code verified in the inspected files. Prefer precise existing distinctions
 such as client visibility versus missing metadata; do not collapse them into
 one vague error or register future acquisition behavior prematurely.
 
-## Required offline acceptance cases for implementation
+## Offline acceptance cases included for later execution
 
 - Every registered event, reason, display state and newly introduced checkpoint
   has nonblank English copy, a unique namespaced key and documented meaning.
@@ -187,5 +188,8 @@ one vague error or register future acquisition behavior prematurely.
 - Static-message rendering cannot alter scheduler state, retry decisions,
   transaction outcomes or canonical history.
 
-These are test requirements for the upcoming implementation. This policy PR
-adds documentation only; it does not claim those executable tests exist or pass.
+PR #100 includes executable catalog, logging, transaction and migration cases.
+Tests and CI have not been executed; the cases do not establish runtime
+correctness until the later authorized testing phase. Dashboard/CLI agreement
+is currently enabled by the shared renderer, not demonstrated by a live UI.
+

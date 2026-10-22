@@ -2,7 +2,10 @@
 
 NextGen is a clean-slate application. Its tests live in `src/nextgen/tests/` and test only new `src/nextgen/` code. The old tests under `src/legacy/` remain intact as historical regression/reference material; they do **not** run as part of NextGen batches.
 
-## Running tests
+## Commands for the later authorized testing phase
+
+**Current policy: author and commit tests, but do not execute offline tests or
+CI.** The commands below are reference instructions for later authorization.
 
 Run from the **repository root** with Python 3.12+ (standard library only):
 
@@ -31,8 +34,19 @@ Test JSON samples are in `fixtures/`. **Fixtures are sample data used by the tes
 
 - **No GitHub Actions test checks** on pushes or pull requests. The old automatic test workflow is removed in this draft branch. Tests are kept and run locally/on demand in batches, not discarded.
 - Create new offline NextGen tests alongside each NextGen component. They MUST NOT depend on old runtime modules, old databases, or live services. Use temporary SQLite databases, mock providers, and sample inputs as appropriate.
-- Run the focused batch while iterating and the full NextGen batch set before requesting review/merge. Record the command and outcome in the PR description or review comment.
+- Under the current policy, record **not run** in review/PR descriptions. When execution is explicitly authorized later, run focused and complete batches and record actual outcomes.
 - Do not rewrite legacy tests to suit NextGen. Existing legacy code remains untouched. If a historical regression matters, express it as a new NextGen test of the **expected behavior**, not an imported legacy test.
 - No production deploy, live acquisition, or destructive integration is part of this test runner.
 
 **Note:** GitHub branch protection settings may still name an old required check. Removing the workflow does not automatically change those repository settings; check before merging.
+
+
+## Diagnostic-infrastructure cases
+
+PR #100 adds test_messages.py, test_diagnostic_history.py,
+test_diagnostic_logging.py and test_diagnostic_migration.py. These exercise
+catalog coverage/locale fallback, readable safe output at all levels, reload,
+sink failure, transaction coupling, audit rejection, intake/identity rollback,
+independent-job correlation, and SQLite v4 fresh/sequential/failed upgrades.
+They use temporary/in-memory SQLite only; no provider/runtime legacy imports.
+They are authored but unexecuted. AST parsing is a syntax check, not a test run.
