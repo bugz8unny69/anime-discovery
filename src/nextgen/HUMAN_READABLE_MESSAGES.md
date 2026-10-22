@@ -82,7 +82,7 @@ applies to review, completion and external actions.
 
 Use keys derived from the immutable namespace and code, never from English
 wording: event.<CODE>.message, reason.<CODE>.message, reason.<CODE>.action,
-and state.<entity>.<CODE>.label. These keys are translation identifiers,
+and state.<entity>.<CODE>.label. Job activity uses the job_activity entity. These keys are translation identifiers,
 not additional workflow codes. Preserve them when copy changes; never recycle
 a code/key to mean something else.
 
@@ -193,3 +193,9 @@ Tests and CI have not been executed; the cases do not establish runtime
 correctness until the later authorized testing phase. Dashboard/CLI agreement
 is currently enabled by the shared renderer, not demonstrated by a live UI.
 
+
+The v5 job-status follow-up adds readable/translation-key coverage for ON_HOLD,
+BLOCKED, CANCELED and typed download/search/duplicate activities. It also
+registers their lifecycle/activity events. MessageCatalog.job_status chooses
+the display label from a validated pair; see JOB_STATUSES.md. Incoming-event
+PENDING/RUNNING labels are Received/Identifying, distinct from job Queued/Running.

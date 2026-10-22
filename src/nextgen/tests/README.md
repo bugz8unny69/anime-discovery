@@ -50,3 +50,9 @@ sink failure, transaction coupling, audit rejection, intake/identity rollback,
 independent-job correlation, and SQLite v4 fresh/sequential/failed upgrades.
 They use temporary/in-memory SQLite only; no provider/runtime legacy imports.
 They are authored but unexecuted. AST parsing is a syntax check, not a test run.
+
+Job-status follow-up cases in test_job_statuses.py cover all lifecycle states,
+SQL/Python activity-pair consistency, safe readable display selection, historic
+activity snapshots and v4→v5 rebuild preservation/rollback/FK restoration. The
+latest fresh/sequential metadata comparison now includes migration 005. Tests
+remain intentionally unexecuted.

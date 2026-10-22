@@ -71,6 +71,10 @@ Scopes and reason requirements are validated by the shared writer.
 | RETRY_SCHEDULED | job | Required | Another processing attempt has been scheduled. |
 | NEEDS_REVIEW | job | Required | Processing has stopped for review. |
 | DONE | job | Absent | Job completed. |
+| ON_HOLD | job | Required | Job placed on hold. |
+| BLOCKED | job | Required | Job blocked from proceeding. |
+| CANCELED | job | Required | Job canceled. |
+| ACTIVITY_CHANGED | job | Absent | Job activity updated. |
 | OPERATION_FAILED | runtime log only | Required | A processing operation failed. |
 
 OPERATION_FAILED is a catch-boundary observation, not a durable job transition
@@ -83,15 +87,20 @@ Display states require state.<entity>.<CODE>.label:
 
 | Entity | Code | Default English label |
 | --- | --- | --- |
-| job, incoming_event | PENDING | Waiting to be processed |
-| job, incoming_event | RUNNING | Processing |
+| job | PENDING | Queued |
+| incoming_event | PENDING | Received |
+| job | RUNNING | Running |
+| incoming_event | RUNNING | Identifying |
 | job, incoming_event | RETRY_WAIT | Waiting for another attempt |
 | job, incoming_event | NEEDS_REVIEW | Needs review |
 | job | DONE | Completed |
+| job | ON_HOLD | On hold |
+| job | BLOCKED | Blocked |
+| job | CANCELED | Canceled |
 | incoming_event | IDENTIFIED | Series identified |
 
 The two entities use separate keys even where English text matches. These
-labels cover all states currently permitted by SQLite v4; they add no state.
+labels cover all states currently permitted by SQLite v5; they add no state.
 All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
@@ -101,7 +110,9 @@ LEASE_EXPIRED and the resulting RETRY_SCHEDULED or NEEDS_REVIEW can be separate
 history rows in one transaction; they do not introduce a new job state.
 The coordinator later validates transitions and determines retry eligibility.
 The diagnostic writer validates audit shape, not scheduler business policy.
-No FAILED/CANCELLED job state or corresponding durable transition is introduced.
+CANCELED, BLOCKED and ON_HOLD are now explicit stored states. No FAILED state
+is introduced. Typed activity and its history snapshots are documented in
+[JOB_STATUSES.md](JOB_STATUSES.md); they must not mask a terminal/held/review state.
 
 ## Correlation and attempts
 
@@ -149,7 +160,7 @@ An intake-created job's emitting component is intake; a job created by a
 handler records the actual creator component, not an inferred parent role.
 Caller APIs must make component attribution explicit where it is ambiguous.
 
-## SQLite v4 and compatibility
+## SQLite v4/v5 and compatibility
 
 Durable component attribution cannot be reconstructed reliably from the
 existing v3 rows. 004_diagnostic_components.sql therefore provides the v3→v4 migration
@@ -163,11 +174,14 @@ Record attempts using the bounded details fields already introduced by #97.
 No new trace column, provenance relationship, or domain field is necessary.
 
 PR #100 includes 004_diagnostic_components.sql, matching fresh SCHEMA and
-user_version=4, storage helper changes, schema-policy documentation and offline
-fresh-install/sequential-upgrade tests. 001/002/003 are untouched. The new
-script checks starting version inside its transaction. On executescript failure
-the caller must roll back. initialize() creates a fresh v4 database atomically,
-accepts v4, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
+user_version=5, storage helper changes, schema-policy documentation and offline
+fresh-install/sequential-upgrade tests. Published 001/002/003/004 are untouched
+by the v5 follow-up. The new
+004 checks its starting version inside its transaction. 005_job_statuses.sql
+then upgrades v4→v5 for job states/activities by rebuilding jobs and preserving
+its references. Its caller must roll back on error and always restore foreign
+keys in finally. initialize() creates a fresh v5 database atomically, accepts
+v5, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
 work; do not start using scripts against any live database.
 
 ## Runtime logging and reload
@@ -214,8 +228,8 @@ distribution remain deployment/future-component work, not implemented features.
    nullable historical component, and optional created_by_job_id preservation.
 6. History persists at CRITICAL logging; disabled/failed log sinks do not
    suppress committed history. Rolled-back work has no success lifecycle log.
-7. Fresh v4 and sequential upgrades preserve IDs, payloads, foreign keys,
-   indexes, histories and versions; failed upgrade does not claim v4.
+7. Fresh v5 and sequential upgrades preserve IDs, payloads, foreign keys,
+   indexes, histories and versions; failed upgrades do not claim a new version.
 8. Safe exception diagnostics at every supported level, bounded output and
    no secret leakage across known redaction edge cases.
 9. Reapplying validated local logging settings changes verbosity without
@@ -234,7 +248,7 @@ syntax parsing were performed; neither establishes runtime correctness.
 
 ## Remaining sequence
 
-Review this implementation, v4 persistence changes and unexecuted offline
+Review this implementation, v4/v5 persistence changes and unexecuted offline
 cases. The next component is coordinator ownership, routing, retries and
 atomic completion against this contract. Dashboard, supervisor distribution, management
 API, intake service and provider business logic remain later milestones.
@@ -255,7 +269,10 @@ API, intake service and provider business logic remain later milestones.
   reason_code="JOB_HANDLER_FAILED", job_id=...) adds the safe traceback summary.
 - history.append_event_history / append_job_history return frozen insert
   receipts. Pass safe_details-compatible dictionaries. Job lifecycle audits
-  require an attempt matching the current job counter (CREATED is zero).
+  require an attempt matching the current job counter. CREATED is zero;
+  processing events require positive attempts. Hold/review/block/cancel/activity
+  events may record zero when work has not yet been claimed. The writer also
+  captures current activity_code as a typed historical snapshot.
 - diagnostics.log_history(logger, receipt) is called only after the outer
   transaction commits. Discard receipts on rollback. This is an explicit
   caller obligation, not a transaction hook; no arbitrary SQL history scanner
@@ -271,3 +288,14 @@ These writers validate audit shape and registered meaning; they do not enforce
 job transition legality, ownership, expiry or safe external replay. Those are
 coordinator requirements. Never catch a mutation/audit error and then commit
 its enclosing transaction; propagate it so the unit rolls back.
+
+## Job status follow-up
+
+The v5 schema and messages cover legacy operational display distinctions.
+MessageCatalog.job_status(state, activity_code) selects a readable/translated
+label without masking terminal, held or review states. log_history emits both
+activity_code and its static readable label. New ON_HOLD/BLOCKED/CANCELED
+events require registered reasons; ACTIVITY_CHANGED records a snapshot without
+inventing a failure reason. Specific handler reasons are registered when their
+semantics are implemented. No cancellation actions, download ownership logic,
+condition signaling or coordinator loop is implemented by the schema change.

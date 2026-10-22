@@ -11,7 +11,7 @@ import sqlite3
 import time
 
 from src.nextgen.history import component_name, integer, trace_id
-from src.nextgen.messages import DEFAULT_CATALOG, STATES, validate_event
+from src.nextgen.messages import DEFAULT_CATALOG, JOB_ACTIVITIES, STATES, validate_event
 from src.nextgen.reasons import get_reason
 from src.nextgen.settings import Settings
 
@@ -106,6 +106,12 @@ def _message(name, fields):
             raise ValueError("unregistered diagnostic cause")
         parts.extend(("cause_reason_code=" + cause,
                       "cause_message=" + json.dumps(DEFAULT_CATALOG.reason(cause)["message"])))
+    activity = fields.get("activity_code")
+    if activity is not None:
+        if type(activity) is not str or activity not in JOB_ACTIVITIES:
+            raise ValueError("unregistered diagnostic activity")
+        parts.extend(("activity_code=" + activity, "activity_message=" + json.dumps(
+            DEFAULT_CATALOG.state("job_activity", activity)["message"])))
     selected = {}
     for key in ("event_id", "job_id", "created_by_job_id", "attempt", "elapsed_ms"):
         value = fields.get(key)
@@ -125,7 +131,7 @@ def _message(name, fields):
     if type(fields.get("retryable")) is bool:
         selected["retryable"] = str(fields["retryable"]).lower()
     outcome = fields.get("outcome")
-    if type(outcome) is str and any(outcome in states for states in STATES.values()):
+    if type(outcome) is str and any(outcome in STATES[entity] for entity in ("job", "incoming_event")):
         selected["outcome"] = outcome
     error_type = fields.get("error_type")
     if type(error_type) is str and error_type in _ERROR_TYPES.values():
@@ -170,7 +176,7 @@ def log_history(logger, record):
                  reason_code=record.reason_code, component=record.component,
                  event_id=record.event_id, job_id=record.job_id,
                  created_by_job_id=record.created_by_job_id, attempt=details.get("attempt"),
-                 cause_reason_code=details.get("cause_reason_code"))
+                 cause_reason_code=details.get("cause_reason_code"), activity_code=record.activity_code)
 
 
 class Span:

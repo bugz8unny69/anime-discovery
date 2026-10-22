@@ -53,7 +53,7 @@ Unsupported work must remain visible; do not silently discard it.
 
 ## Comparison with the current foundations
 
-SQLite v4 retains arbitrary historical reason text in `last_reason_code`, `event_history`
+SQLite v5 retains arbitrary historical reason text in `last_reason_code`, `event_history`
 and `job_history`; no SQL enum or schema migration is needed for this catalog.
 Job states are PENDING, RUNNING, RETRY_WAIT, NEEDS_REVIEW and DONE; event states
 also include IDENTIFIED rather than DONE. States are not reason codes.
@@ -120,3 +120,6 @@ SQLite v4 component attribution. No CI runs, coordinator execution, dashboard,
 management API, journald integration or supervisor reload distribution are
 included. Existing Python logging/settings and central reason copy are reused.
 
+
+The v5 schema adds held/blocked/canceled lifecycle states and typed activity
+without deriving status from a reason string. See JOB_STATUSES.md.

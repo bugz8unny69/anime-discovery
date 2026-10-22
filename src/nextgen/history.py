@@ -6,7 +6,7 @@ Receipts are safe to log after a successful commit; they are not proof of commit
 from dataclasses import dataclass
 import json
 
-from src.nextgen.messages import validate_event
+from src.nextgen.messages import validate_event, validate_job_activity
 from src.nextgen.reasons import safe_details
 from src.nextgen.settings import COMPONENTS
 
@@ -62,6 +62,7 @@ class HistoryRecord:
     job_id: int | None
     created_by_job_id: int | None
     details_json: str
+    activity_code: str | None = None
 
 
 def _validate(db, scope, target_id, event_code, reason_code, component, occurred_at_ms, details):
@@ -74,8 +75,11 @@ def _validate(db, scope, target_id, event_code, reason_code, component, occurred
     encoded = encode_details(details)
     # Attempts are observations of the current attempt, never scheduling policy.
     attempt = json.loads(encoded).get("attempt")
-    if scope == "job" and event_code != "CREATED" and (attempt is None or attempt < 1):
-        raise ValueError("positive attempt required for job lifecycle event")
+    if scope == "job" and event_code != "CREATED" and attempt is None:
+        raise ValueError("attempt required for job lifecycle event")
+    if (scope == "job" and event_code in {"CLAIMED", "LEASE_EXPIRED", "RETRY_SCHEDULED", "DONE"}
+            and (attempt is None or attempt < 1)):
+        raise ValueError("positive attempt required for processing event")
     if event_code == "CREATED" and attempt not in (None, 0):
         raise ValueError("created job must have zero attempts")
     return encoded
@@ -98,15 +102,16 @@ def append_job_history(db, *, job_id, event_code, component, occurred_at_ms,
                        reason_code=None, details=None):
     encoded = _validate(db, "job", job_id, event_code, reason_code,
                         component, occurred_at_ms, details)
-    row = db.execute("SELECT event_id,created_by_job_id,attempt_count FROM jobs WHERE job_id=?",
+    row = db.execute("SELECT event_id,created_by_job_id,attempt_count,state,activity_code FROM jobs WHERE job_id=?",
                      (job_id,)).fetchone()
     if row is None:
         raise ValueError("unknown job")
     attempt = json.loads(encoded).get("attempt")
     if attempt is not None and attempt != row[2]:
         raise ValueError("audit attempt does not match job")
+    validate_job_activity(row[3], row[4])
     cursor = db.execute("""INSERT INTO job_history
-        (job_id,occurred_at_ms,event_code,reason_code,details_json,component)
-        VALUES(?,?,?,?,?,?)""", (job_id, occurred_at_ms, event_code, reason_code, encoded, component))
+        (job_id,occurred_at_ms,event_code,reason_code,details_json,component,activity_code)
+        VALUES(?,?,?,?,?,?,?)""", (job_id, occurred_at_ms, event_code, reason_code, encoded, component, row[4]))
     return HistoryRecord(cursor.lastrowid, "job", event_code, reason_code, component,
-                         occurred_at_ms, row[0], job_id, row[1], encoded)
+                         occurred_at_ms, row[0], job_id, row[1], encoded, row[4])

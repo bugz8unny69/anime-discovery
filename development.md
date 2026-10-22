@@ -8,12 +8,14 @@
 
 The PR #100 branch implements shared messages.py event/state catalogs and a
 translation-ready renderer, history.py transaction-bound audit writers, and
-SQLite schema v4 (004_diagnostic_components.sql plus fresh-schema changes).
+SQLite schema v5 (004_diagnostic_components.sql, 005_job_statuses.sql and
+fresh-schema changes).
 Existing settings/logging and reason registry are reused. Logging now resolves
 static English copy, derives correlation from IDs, and emits bounded safe
 exception summaries. Runtime-only OPERATION_FAILED does not add a job state.
 
 Mandatory policy: [every diagnostic marker/error needs human-readable copy](src/nextgen/HUMAN_READABLE_MESSAGES.md).
+Job states/activity: [JOB_STATUSES.md](src/nextgen/JOB_STATUSES.md).
 Contract/API: [DIAGNOSTIC_CONTRACT.md](src/nextgen/DIAGNOSTIC_CONTRACT.md).
 Schema/version authority: [SCHEMA_POLICY.md](src/nextgen/storage/SCHEMA_POLICY.md).
 These documents supersede older planning snapshots below where status differs.

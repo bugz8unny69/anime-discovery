@@ -30,21 +30,49 @@ _EVENTS = (
     EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
     EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
     EventDefinition("DONE", "job", "Job completed."),
+    EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
+    EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),
+    EventDefinition("CANCELED", "job", "Job canceled.", True),
+    EventDefinition("ACTIVITY_CHANGED", "job", "Job activity updated."),
     # A runtime observation, not a persisted job state or lifecycle transition.
     EventDefinition("OPERATION_FAILED", "runtime", "A processing operation failed.", True),
 )
 EVENTS = MappingProxyType({item.code: item for item in _EVENTS})
-_LABELS = {"PENDING": "Waiting to be processed", "RUNNING": "Processing",
+JOB_ACTIVITIES = MappingProxyType({
+    "DOWNLOADING": "Downloading",
+    "WAITING_FOR_DOWNLOAD": "Waiting for download",
+    "WAITING_FOR_SEARCH": "Waiting for search",
+    "SKIPPED_DUPLICATE": "Skipped duplicate",
+})
+_LABELS = {"PENDING": "Queued", "RUNNING": "Running",
            "RETRY_WAIT": "Waiting for another attempt", "NEEDS_REVIEW": "Needs review"}
 STATES = MappingProxyType({
-    "job": MappingProxyType({**_LABELS, "DONE": "Completed"}),
-    "incoming_event": MappingProxyType({**_LABELS, "IDENTIFIED": "Series identified"}),
+    "job": MappingProxyType({**_LABELS, "DONE": "Completed", "ON_HOLD": "On hold",
+                             "BLOCKED": "Blocked", "CANCELED": "Canceled"}),
+    "job_activity": JOB_ACTIVITIES,
+    "incoming_event": MappingProxyType({**_LABELS, "PENDING": "Received",
+                                       "RUNNING": "Identifying", "IDENTIFIED": "Series identified"}),
 })
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}", re.ASCII)
 
 
 def safe_code(code):
     return code if type(code) is str and _CODE.fullmatch(code) else "UNKNOWN"
+
+
+def validate_job_activity(state, activity_code):
+    """Validate stored shape, not coordinator transition or claim policy."""
+    if type(state) is not str or state not in STATES["job"]:
+        raise ValueError("invalid job state")
+    if activity_code is None:
+        return
+    if type(activity_code) is not str or activity_code not in JOB_ACTIVITIES:
+        raise ValueError("invalid job activity")
+    allowed = {"DOWNLOADING": {"RUNNING", "RETRY_WAIT"},
+               "WAITING_FOR_DOWNLOAD": {"RETRY_WAIT"},
+               "WAITING_FOR_SEARCH": {"RETRY_WAIT"}, "SKIPPED_DUPLICATE": {"DONE"}}
+    if state not in allowed[activity_code]:
+        raise ValueError("job activity does not match state")
 
 
 def validate_event(code, reason_code=None, *, scope=None):
@@ -142,6 +170,20 @@ class MessageCatalog:
         key = f"state.{entity}.{code}.label" if known else "state.UNKNOWN.label"
         return {"code": safe_code(code), "message_key": key,
                 "message": self.text(key, locale=locale)}
+
+    def job_status(self, state, activity_code=None, *, locale="en"):
+        """Shared read-only display selection; tolerate unknown historical data.
+
+        Terminal/held/review states cannot be masked by a stale activity label.
+        New writes must use validate_job_activity instead of this fallback.
+        """
+        base = self.state("job", state, locale=locale)
+        try:
+            validate_job_activity(state, activity_code)
+        except ValueError:
+            return base
+        return (self.state("job_activity", activity_code, locale=locale)
+                if activity_code is not None else base)
 
 
 DEFAULT_CATALOG = MessageCatalog()

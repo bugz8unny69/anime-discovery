@@ -87,6 +87,14 @@ class JobsStorageTests(unittest.TestCase):
                     initialize(db)
                 db.executescript((sql_dir / "004_diagnostic_components.sql").read_text())
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+                try:
+                    db.executescript((sql_dir / "005_job_statuses.sql").read_text())
+                except BaseException:
+                    db.rollback()
+                    raise
+                finally:
+                    db.execute("PRAGMA foreign_keys=ON")
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
                 initialize(db)
             finally:
                 db.close()

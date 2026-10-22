@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, coordinator, superv
 
 ## Current NextGen SQLite state (PR #100 implementation)
 
-Latest fresh SQLite version: **4**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **5**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -25,6 +25,7 @@ Latest fresh SQLite version: **4**. The version stored in `PRAGMA user_version` 
 | 2 | `002_independent_jobs.sql` | Independent `jobs` and `job_history`; `created_by_job_id` is **optional provenance**, not a parent/child dependency relationship |
 | 3 | `003_incoming_events.sql` | Rename `webhook_events` to `incoming_events`, preserving rows and updating SQLite foreign-key references |
 | 4 | `004_diagnostic_components.sql` | Add nullable emitting component to both history tables, retaining historical rows |
+| 5 | `005_job_statuses.sql` | Expand lifecycle states and add typed current/historical activity |
 
 **Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`.
 
@@ -40,7 +41,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v4 or accepts an existing v4 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3 files require an explicit, future migration component.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v5 or accepts an existing v5 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4 files require an explicit, future migration component.
 - A future runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -93,3 +94,34 @@ only after commit; a broken log sink does not invalidate persisted history.
 
 Offline fresh/upgraded schema, existing-data preservation, wrong-version,
 foreign-key, rollback and component constraint cases are included but unrun.
+
+## v5 job state and activity support
+
+jobs.state now permits PENDING, RUNNING, RETRY_WAIT, ON_HOLD, NEEDS_REVIEW,
+DONE, BLOCKED and CANCELED. The default remains PENDING. ON_HOLD denotes a
+condition-based wait, BLOCKED a policy/prerequisite stop, CANCELED an explicit
+terminal cancellation. These states must not be claimed automatically. The
+future coordinator defines validated transitions and wake-up behavior.
+
+jobs.activity_code TEXT and job_history.activity_code TEXT are nullable with
+implicit NULL default, constrained to DOWNLOADING, WAITING_FOR_DOWNLOAD,
+WAITING_FOR_SEARCH and SKIPPED_DUPLICATE. SQL constrains current activity pairs:
+DOWNLOADING with RUNNING/RETRY_WAIT, either WAITING_* with RETRY_WAIT, and
+SKIPPED_DUPLICATE with DONE. NULL is allowed for any state and all old rows.
+History activities are snapshots; there is no current-state constraint on an
+old history row. The writer captures the job's activity without parsing text.
+
+005 rebuilds jobs at v4→v5, preserving IDs, payloads, attempts, timestamps,
+leases, event/provenance FKs and reasons. It recreates the three jobs indexes,
+adds the history activity column and checks all FKs before committing v5.
+Use only during maintenance with no active transaction and no other DB users.
+Because jobs is referenced by itself and job_history, the script disables FK
+enforcement before BEGIN. Its caller MUST ROLLBACK on an exception and always
+restore PRAGMA foreign_keys=ON in finally, including on failed version/FK guards.
+The script restores enforcement on success. Do not use a connection left with
+FK enforcement disabled. No production runner is supplied by this change.
+
+Fresh SCHEMA and initialize() now use v5. Published 001/002/003/004 remain
+unchanged. No state is inferred from historical reason strings: existing
+NextGen jobs keep their exact state and receive NULL activity. This is not a
+legacy database import. See JOB_STATUSES.md for the display/legacy mapping.

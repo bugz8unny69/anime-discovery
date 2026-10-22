@@ -1,4 +1,4 @@
-"""Fresh v4 and v1->v4 upgrade/rollback cases; no migration runner or live DB."""
+"""Historical v4 and latest sequential upgrade/rollback cases; no migration runner or live DB."""
 from pathlib import Path
 import sqlite3
 import unittest
@@ -67,15 +67,22 @@ class DiagnosticMigrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(), [])
         self.assertEqual(self.db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
-    def test_fresh_and_sequential_schema_metadata_match(self):
+    def test_latest_fresh_and_sequential_schema_metadata_match(self):
         initialize(self.db)
         other = sqlite3.connect(":memory:")
         other.execute("PRAGMA foreign_keys=ON")
         try:
             v3_database(other)
             other.executescript(script("004_diagnostic_components.sql"))
+            try:
+                other.executescript(script("005_job_statuses.sql"))
+            except BaseException:
+                other.rollback()
+                raise
+            finally:
+                other.execute("PRAGMA foreign_keys=ON")
             self.assertEqual(structure(self.db), structure(other))
-            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 5)
         finally:
             other.close()
 

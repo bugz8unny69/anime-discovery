@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS jobs (
  kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
  payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
  state TEXT NOT NULL DEFAULT 'PENDING'
-   CHECK(state IN ('PENDING','RUNNING','RETRY_WAIT','NEEDS_REVIEW','DONE')),
+   CHECK(state IN ('PENDING','RUNNING','RETRY_WAIT','ON_HOLD','NEEDS_REVIEW','DONE','BLOCKED','CANCELED')),
  available_at_ms INTEGER NOT NULL,
  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
  lease_token TEXT,
@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS jobs (
  last_reason_code TEXT,
  created_at_ms INTEGER NOT NULL,
  updated_at_ms INTEGER NOT NULL,
+ activity_code TEXT CHECK(activity_code IS NULL OR activity_code IN
+  ('DOWNLOADING','WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH','SKIPPED_DUPLICATE')),
+ CHECK(activity_code IS NULL OR
+       (activity_code='DOWNLOADING' AND state IN ('RUNNING','RETRY_WAIT')) OR
+       (activity_code IN ('WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH') AND state='RETRY_WAIT') OR
+       (activity_code='SKIPPED_DUPLICATE' AND state='DONE')),
  CHECK(created_by_job_id IS NULL OR created_by_job_id <> job_id),
  CHECK(state <> 'RUNNING' OR
        (lease_token IS NOT NULL AND lease_expires_at_ms IS NOT NULL))
@@ -95,7 +101,9 @@ CREATE TABLE IF NOT EXISTS job_history (
  reason_code TEXT,
  details_json TEXT CHECK(details_json IS NULL OR json_valid(details_json)),
  component TEXT CHECK(component IS NULL OR component IN
-  ('supervisor','intake','coordinator','identity','acquisition'))
+  ('supervisor','intake','coordinator','identity','acquisition')),
+ activity_code TEXT CHECK(activity_code IS NULL OR activity_code IN
+  ('DOWNLOADING','WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH','SKIPPED_DUPLICATE'))
 );
 CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_history(job_id,history_id);
 CREATE INDEX IF NOT EXISTS idx_event_queue ON incoming_events(state,next_run_at_ms);
@@ -115,13 +123,13 @@ def connect(path):
     return db
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v4; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v5; never implicitly upgrade.
 
-    Existing v1/v2/v3 databases require explicit versioned SQL migrations
-    before accessing v4-only storage.
+    Existing v1/v2/v3/v4 databases require explicit versioned SQL migrations
+    before accessing v5-only storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 4:
+    if version == 5:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -131,7 +139,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=4;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=5;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
