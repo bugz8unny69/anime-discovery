@@ -39,25 +39,29 @@ manages independent jobs and a small async pause/drain/resume/shutdown control
 interface. It does not host the public management API, persist settings or run
 schema migrations as ordinary jobs. Supervisor owns process management later.
 
-Configuration audit after diagnostics: NextGen settings.py currently supplies
-only strict logging-section validation, immutable snapshots and JSON loading.
-It does not yet implement a versioned configuration envelope, explicit field
-rename/type conversions, locked atomic persistence, safe credential storage,
-revision/conflict checks, change/restart classification or coordinated reload.
-Therefore the configuration infrastructure is NOT complete. Legacy
-anime_settings_schema.py, anime_shared_settings.py and
-anime_admin_config_migration.py are reusable design/code references: defaults
-and type validation, locked atomic file replacement, backup/preview behavior.
-Their add-missing-defaults migration is not a general versioned converter.
-Legacy modules must not become NextGen runtime dependencies.
+Configuration follow-up: configuration_schema.py and configuration.py implement
+an explicit v0→v1 NextGen logging-file conversion, validated versioned snapshots,
+revision-checked atomic service-owned persistence and migration preview/backups.
+See [CONFIGURATION.md](src/nextgen/CONFIGURATION.md) for the API/library contract.
+Fields explicitly declare next_operation or restart behavior. Each new job
+attempt/API request reads current settings once; running operations keep their
+snapshot. Restart fields stay pinned to process startup values. Process-level
+ports/concurrency/database changes require explicit restart, not a live reload
+broadcast. This library does not implement a credential store, SQLite runner,
+management authentication/transport or automatic runtime application.
 
-Next work order: finish versioned configuration conversion/validation and
-service-owned persistence; implement the shared migration runner and
-cross-process maintenance/readiness contract; define the async job-handler
+Next work order after configuration-library review: implement the SQLite
+migration runner and cross-process maintenance/readiness contract; define the async job-handler
 input/outcome/recovery interface. Implement the separate authenticated
 management API against those services, then the coordinator against its job
 and control contracts. These contracts can be defined together without
 embedding the API in the coordinator. No hook/plugin system is introduced.
+Concurrent jobs for the same anime are allowed: no blanket per-anime
+serialization. Libraries own shared provider pacing and exact-resource
+acquisition gates, returning structured defer/hold/duplicate outcomes. The
+async coordinator applies bounded overall concurrency and registered handler
+execution modes; blocking operations can use threads. No process per job is
+required without a concrete isolation/CPU need.
 The full dashboard, supervisor, provider and acquisition implementations remain
 later work. Configuration/management feature changes belong in focused PRs,
 not extensions that silently enlarge the diagnostics implementation.

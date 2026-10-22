@@ -34,6 +34,11 @@ _EVENTS = (
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),
     EventDefinition("CANCELED", "job", "Job canceled.", True),
     EventDefinition("ACTIVITY_CHANGED", "job", "Job activity updated."),
+    EventDefinition("CONFIGURATION_SAVED", "runtime", "Configuration updated."),
+    EventDefinition("CONFIGURATION_MIGRATED", "runtime", "Configuration upgrade completed."),
+    EventDefinition("CONFIGURATION_SAVE_UNCONFIRMED", "runtime",
+                    "Configuration was updated, but durable storage could not be confirmed.",
+                    True, "CONFIGURATION_DURABILITY_UNCONFIRMED"),
     # A runtime observation, not a persisted job state or lifecycle transition.
     EventDefinition("OPERATION_FAILED", "runtime", "A processing operation failed.", True),
 )

@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Mapping
 from types import MappingProxyType
-import json
 
 LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 COMPONENTS = frozenset({"supervisor", "intake", "coordinator", "identity", "acquisition", "api"})
@@ -43,6 +42,15 @@ def parse_settings(value: dict) -> Settings:
     return Settings(logging=LoggingSettings(**logging_data))
 
 def load_settings(path: str | Path) -> Settings:
-    """Read explicit JSON configuration; missing files/errors fail loudly."""
-    return parse_settings(json.loads(Path(path).read_text(encoding="utf-8")))
+    """Logging-only compatibility view of unversioned or current configuration.
+
+    Full operation/startup snapshots and persistence use ConfigurationStore.
+    Reading an unversioned logging file here never upgrades it on disk.
+    """
+    from src.nextgen.configuration_schema import decode, load_current
+    raw = Path(path).read_bytes()
+    document = decode(raw)
+    if type(document) is dict and "schema_version" in document:
+        return load_current(raw).logging_settings()
+    return parse_settings(document)
 

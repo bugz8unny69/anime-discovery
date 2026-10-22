@@ -1,0 +1,159 @@
+# Shared configuration library and API contract
+
+configuration_schema.py supplies pure validation, conversion and snapshots.
+configuration.py supplies service-side persistence. Existing settings.py
+logging validation is reused. No API server, ADM client, coordinator, SQLite
+runner, credential store or production configuration is created.
+
+## Operation snapshots, not reload broadcasts
+
+Retain a ConfigurationSnapshot at process startup. At the start of each job
+attempt/API operation, call store.operation(startup, component=...) to read
+the current file and obtain a detached immutable view:
+
+- Ordinary fields come from the latest saved revision.
+- Restart fields come from that process's startup snapshot.
+- pending_restart_fields reports saved/startup differences affecting that
+  component. Reverting a desired value to its active value clears the flag.
+- Running operations retain their snapshot; new attempts/requests read again.
+  A saved revision older than process startup is rejected until reconciled.
+- desired_revision and startup_revision identify both contributing versions.
+
+Do not apply desired port/database/concurrency values to already-open resources.
+Use startup/effective values for runtime operations. store.read() intentionally
+returns desired values for editing. The API can show desired and active values
+separately. No config-revision field is added to SQLite history in this PR.
+
+## Central field definitions
+
+| Field | Default | Apply mode | Restart scope |
+| --- | --- | --- | --- |
+| logging.level | INFO | Next operation | None |
+| logging.components | Empty overrides | Next operation | None |
+| api.host | 127.0.0.1 | Restart | API |
+| api.port | 8765 | Restart | API |
+| coordinator.concurrency | 4 | Restart | Coordinator |
+| storage.database_path | /var/lib/anime-discovery/nextgen.sqlite | Restart | All current components |
+
+FIELDS defines defaults, type/range validation and apply metadata.
+field_definitions() returns detached JSON-compatible API metadata. New fields
+must explicitly declare next_operation or restart and affected components.
+Add provider/acquisition fields with their actual consuming components; this
+foundation exposes no speculative nonfunctional integrations.
+
+logging.components patches replace the complete override map. Revision checks
+protect the map the caller edited. snapshot.logging_settings() supplies the
+existing logging helper's Settings type. The library does not change global
+logger thresholds while other operations run: consumers need an appropriate
+operation-scoped adapter or explicit process configuration.
+
+## Independent format version and publication revision
+
+Canonical JSON has schema_version=1, a positive revision, and a settings object
+containing the sections above. Example:
+
+    {
+      "schema_version": 1,
+      "revision": 1,
+      "settings": {
+        "logging": {"level": "INFO", "components": {}},
+        "api": {"host": "127.0.0.1", "port": 8765},
+        "coordinator": {"concurrency": 4},
+        "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite"}
+      }
+    }
+
+Configuration version, publication revision, SQLite v6 and AnimeSeries v2 are
+independent. Effective no-op updates neither increment revision nor rewrite.
+Unversioned NextGen logging-only JSON is source v0. Explicit 0→1 conversion
+preserves its logging values and adds the validated envelope/defaults.
+This is not a legacy production-config import. Unknown keys and unsupported
+versions fail instead of being silently discarded.
+
+CONVERSIONS is an ordered immutable registry of one-version steps. Future
+renames/type conversions require a new explicit step and regression cases;
+do not guess renames or default an incompatible value. No actual NextGen
+field rename is necessary in v1. Store reads never migrate implicitly.
+load_settings() remains a logging-only compatibility view of either format.
+
+## Service library methods
+
+| Method | Behavior |
+| --- | --- |
+| initialize(settings=None) | Explicit first-run publication; never replace existing files |
+| read() | Validate current version; no cache or implicit file creation |
+| operation(startup, component=...) | Fresh operational values, pinned restart values |
+| preview(changes, expected_revision=...) | Validate/classify without writing |
+| update(changes, expected_revision=...) | Lock, re-read, compare revision, atomically publish |
+| preview_migration() | Return fingerprint/version plan without writing lock/backup files |
+| migrate(expected_fingerprint=...) | Verify reviewed source, back up exact bytes, explicitly convert |
+
+Changes are nested section/field dictionaries. Cooperative publishers cannot
+silently overwrite each other's revision. Migration applies the exact previewed
+source using its SHA-256 fingerprint. Manual edits behind the running service
+cannot participate in that revision protocol.
+
+UpdateResult includes changed_fields, restart_fields and restart_components
+as classifications of the edit. These are not proof that runtime needs restart:
+use operation(...).pending_restart_fields against the relevant startup snapshot
+to compute actual pending state. saved and durability_confirmed describe
+publication, never automatic application to running resources.
+
+## API notation: separate process and service-owned files
+
+ADM/dashboard call the future authenticated API, which calls this shared
+library under the service account. Clients must not edit files or invoke write
+methods locally as an alternative management path. The coordinator contains
+neither these management endpoints nor settings-writing responsibilities.
+
+The API must authenticate/authorize, obtain one operation snapshot per request,
+require the editor's expected revision for changes, publish via update(), and
+report the saved revision plus actual pending restart status. Resolve errors
+through the shared reason/message catalog. Migration uses separate preview and
+apply operations tied to the reviewed source fingerprint. No-op apply reports
+saved=false.
+
+Installation must provide an existing writable configuration directory and
+correctly owned files. The library does not become root, loosen access or
+repair installed ownership. Secrets are not supported by this settings schema;
+credential storage and bootstrap authentication remain future work.
+
+## Publication and failure contract
+
+One stable .settings.lock uses flock for cooperative publishers; never lock the
+settings.json inode being replaced. Async consumers must offload these blocking
+filesystem methods to a worker thread. Each read opens the current file.
+Same-directory atomic replacement publishes a complete old or new document.
+
+The final directory, settings and lock symlinks and nonregular files are
+rejected. FIFO checks cannot block waiting for input. JSON size, duplicate keys,
+nonfinite values and unknown settings are validated. Replacement preserves
+existing owner/group/mode; first-run files use mode 0600. The directory must not
+be writable by untrusted actors: cooperative flock is not authorization.
+
+Write/fsync/rename failure before replacement leaves the old file published.
+Migration backups are exclusive exact copies, fsynced before replacement.
+Normal updates do not create a backup for each edit. No automatic backup
+deletion/retention is introduced.
+
+If rename succeeds but directory fsync fails, return saved=true,
+durability_confirmed=false and CONFIGURATION_DURABILITY_UNCONFIRMED.
+The new revision is already visible; read/reconcile it instead of claiming
+rollback or blindly retrying the previous revision. JSON and SQLite are not
+made one transaction by this library.
+
+Runtime markers include component=api and bounded config_revision, never
+configuration values or raw exception text. Logging failure cannot undo
+publication. These logs are not a new durable management-audit database.
+
+## Validation and remaining scope
+
+Offline cases cover conversion/defaults/types/version/revision bounds,
+immutability, startup pinning, concurrent revision conflict, atomic failures,
+directory-fsync uncertainty, metadata, symlink/FIFO rejection and migration
+preview/backup/source conflict. Tests and CI remain unexecuted. Source/AST
+checks are not runtime verification.
+
+SQLite remains v6: no SQLite table, row shape or query changes are required.
+The SQLite runner, maintenance/readiness protocol, authenticated API transport,
+credential store and job-handler/coordinator implementation remain separate.
