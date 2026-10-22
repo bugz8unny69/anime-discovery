@@ -1,0 +1,199 @@
+"""Lease-fenced lifecycle on existing v8 jobs/history; caller holds admission.
+
+Each operation owns a dedicated thread-local connection and short transaction.
+No implicit database creation/migration, external calls or hidden job dispatch.
+"""
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+import inspect
+import json
+import sqlite3
+import time
+import uuid
+
+from src.nextgen.history import append_job_history, integer
+from src.nextgen.job_contracts import Outcome, Policy, Successor, payload_json, parse_payload
+from src.nextgen.messages import validate_job_activity
+from src.nextgen.storage.migrations import _open, LATEST_VERSION
+from src.nextgen.storage.sqlite import enqueue_job_with_receipt, transaction
+
+
+class LeaseLost(RuntimeError):
+    reason_code = "JOB_LEASE_EXPIRED"
+    def __init__(self):
+        super().__init__("Job ownership is no longer valid.")
+
+
+class QueueUnavailable(RuntimeError):
+    reason_code = "STORAGE_UNAVAILABLE"
+    def __init__(self):
+        super().__init__("Job storage is unavailable.")
+
+
+@dataclass(frozen=True)
+class Claim:
+    job_id: int
+    event_id: int | None
+    kind: str
+    payload: str = field(repr=False)
+    attempt: int
+    token: str = field(repr=False)
+
+    def data(self):
+        return parse_payload(self.payload)
+
+
+class JobQueue:
+    def __init__(self, database, *, policy=Policy(), clock=None):
+        self.database, self.policy = database, policy
+        self.clock = clock or (lambda: time.time_ns() // 1000000)
+
+    @contextmanager
+    def connection(self):
+        db = None
+        try:
+            db = _open(self.database, readonly=False)
+            db.execute("PRAGMA busy_timeout=5000")
+            if db.execute("PRAGMA user_version").fetchone()[0] != LATEST_VERSION:
+                raise QueueUnavailable()
+            yield db
+        except (sqlite3.Error, OSError):
+            raise QueueUnavailable() from None
+        finally:
+            if db is not None:
+                db.close()
+
+    def now(self):
+        return integer(self.clock())
+
+    def _owns(self, db, claim, now):
+        row = db.execute("SELECT state,lease_token,lease_expires_at_ms,attempt_count FROM jobs WHERE job_id=?",
+                         (claim.job_id,)).fetchone()
+        if row is None or row[0] != "RUNNING" or row[1] != claim.token or row[2] is None or row[2] <= now or row[3] != claim.attempt:
+            raise LeaseLost()
+
+    def claim(self, halted=None):
+        with self.connection() as db, transaction(db):
+            now = self.now()
+            if halted is not None and halted():
+                return None, ()
+            row = db.execute("SELECT job_id,event_id,kind,payload_json,attempt_count FROM jobs "
+                "WHERE state IN ('PENDING','RETRY_WAIT') AND available_at_ms<=? "
+                "ORDER BY available_at_ms,job_id LIMIT 1", (now,)).fetchone()
+            if row is None:
+                return None, ()
+            token = uuid.uuid4().hex
+            claim = Claim(row[0], row[1], row[2], row[3], row[4]+1, token)
+            db.execute("UPDATE jobs SET state='RUNNING',attempt_count=?,lease_token=?,lease_expires_at_ms=?,"
+                       "activity_code=NULL,updated_at_ms=? WHERE job_id=?",
+                       (claim.attempt,token,now+self.policy.lease_ms,now,claim.job_id))
+            record = append_job_history(db,job_id=claim.job_id,event_code="CLAIMED",component="worker",
+                                        occurred_at_ms=now,details={"attempt":claim.attempt})
+            return claim, (record,)
+
+    def renew(self, claim):
+        with self.connection() as db, transaction(db):
+            now = self.now()
+            self._owns(db, claim, now)
+            db.execute("UPDATE jobs SET lease_expires_at_ms=?,updated_at_ms=? WHERE job_id=?",
+                       (now+self.policy.lease_ms,now,claim.job_id))
+
+    def start(self, claim, spec, invocation, registry):
+        if registry.entries.get(claim.kind) is not spec:
+            raise ValueError("handler does not match claimed kind")
+        with self.connection() as db, transaction(db):
+            now = self.now()
+            self._owns(db,claim,now)
+            return append_job_history(db,job_id=claim.job_id,event_code="HANDLER_STARTED",component="worker",
+                occurred_at_ms=now,details={"attempt":claim.attempt},handler_code=spec.definition.code,
+                invocation_id=invocation,handlers=registry.labels)
+
+    def _transition(self, db, claim, outcome, now):
+        details = {"attempt":claim.attempt}
+        activity = outcome.activity_code
+        reason = outcome.reason_code
+        if outcome.kind == "complete":
+            state, code, available = "DONE", "DONE", now
+        elif outcome.kind in ("retry", "defer"):
+            failures = db.execute("SELECT count(*) FROM job_history WHERE job_id=? AND event_code='RETRY_SCHEDULED'",
+                                  (claim.job_id,)).fetchone()[0]
+            if outcome.kind == "retry" and failures >= self.policy.max_retries:
+                state, code, available, activity = "NEEDS_REVIEW", "NEEDS_REVIEW", now, None
+                details["cause_reason_code"], reason = reason, "JOB_RETRY_EXHAUSTED"
+            else:
+                delay = outcome.delay_ms
+                if outcome.kind == "retry":
+                    delay = max(delay or 0, min(self.policy.max_backoff_ms, self.policy.backoff_ms * 2**min(failures,30)))
+                state, code, available = "RETRY_WAIT", "RETRY_SCHEDULED" if outcome.kind == "retry" else "DEFERRED", now+delay
+        else:
+            state = {"hold":"ON_HOLD","review":"NEEDS_REVIEW","blocked":"BLOCKED"}[outcome.kind]
+            code, available = state, now
+        validate_job_activity(state,activity)
+        db.execute("UPDATE jobs SET state=?,available_at_ms=?,lease_token=NULL,lease_expires_at_ms=NULL,"
+                   "last_reason_code=?,activity_code=?,updated_at_ms=? WHERE job_id=?",
+                   (state,available,reason,activity,now,claim.job_id))
+        return append_job_history(db,job_id=claim.job_id,event_code=code,reason_code=reason,
+                                  component="worker",occurred_at_ms=now,details=details)
+
+    def finish(self, claim, outcome, *, spec, invocation, registry):
+        if type(outcome) is not Outcome:
+            raise ValueError("handler must return a typed outcome")
+        if spec is not None and registry.entries.get(claim.kind) is not spec:
+            raise ValueError("handler does not match claimed kind")
+        with self.connection() as db, transaction(db):
+            now = self.now()
+            self._owns(db,claim,now)
+            records = []
+            if spec is not None:
+                failed = outcome.kind in ("retry", "blocked")
+                records.append(append_job_history(db,job_id=claim.job_id,
+                    event_code="HANDLER_FAILED" if failed else "HANDLER_COMPLETED",component="worker",
+                    reason_code=outcome.reason_code if failed else None,occurred_at_ms=now,
+                    details={"attempt":claim.attempt},handler_code=spec.definition.code,
+                    invocation_id=invocation,handlers=registry.labels))
+            elif outcome.kind != "review" or outcome.reason_code not in {"UNSUPPORTED_JOB_KIND", "JOB_PAYLOAD_INVALID"}:
+                raise ValueError("missing registered handler")
+            if outcome.kind == "complete" and spec is not None:
+                if spec.persist is not None:
+                    # A feature adapter cannot commit/rollback caller-owned work.
+                    db.set_authorizer(lambda action, arg1, arg2, database, source:
+                        sqlite3.SQLITE_DENY if action in (sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT) else sqlite3.SQLITE_OK)
+                    try:
+                        result = spec.persist(db,claim,outcome.value)
+                    finally:
+                        db.set_authorizer(None)
+                    if inspect.isawaitable(result):
+                        if inspect.iscoroutine(result): result.close()
+                        raise ValueError("completion persistence cannot await")
+                successors = () if spec.route is None else spec.route(outcome.value)
+                if type(successors) is not tuple or len(successors) > 32:
+                    if inspect.iscoroutine(successors): successors.close()
+                    raise ValueError("invalid successor plan")
+                for successor in successors:
+                    if type(successor) is not Successor or successor.kind not in spec.successor_kinds:
+                        raise ValueError("successor not allowed by registration")
+                    # enqueue_job owns no transaction/commit; all inserts roll back together.
+                    _, created = enqueue_job_with_receipt(db,component="worker",kind=successor.kind,
+                        payload=json.loads(successor.payload), event_id=claim.event_id,
+                        created_by_job_id=claim.job_id,available_at_ms=now)
+                    records.append(created)
+            now = self.now()
+            self._owns(db,claim,now)
+            records.append(self._transition(db,claim,outcome,now))
+            return tuple(records)
+
+    def recover_expired(self, limit=100):
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise ValueError("invalid lease recovery bound")
+        with self.connection() as db, transaction(db):
+            now = self.now()
+            rows = db.execute("SELECT job_id,event_id,kind,payload_json,attempt_count,lease_token FROM jobs "
+                "WHERE state='RUNNING' AND lease_expires_at_ms<=? ORDER BY lease_expires_at_ms,job_id LIMIT ?",
+                (now,limit)).fetchall()
+            records = []
+            for row in rows:
+                claim = Claim(row[0],row[1],row[2],row[3],row[4],row[5])
+                records.append(append_job_history(db,job_id=claim.job_id,event_code="LEASE_EXPIRED",
+                    reason_code="JOB_LEASE_EXPIRED",component="worker",occurred_at_ms=now,details={"attempt":claim.attempt}))
+                records.append(self._transition(db,claim,Outcome("retry","JOB_LEASE_EXPIRED"),now))
+            return tuple(records)

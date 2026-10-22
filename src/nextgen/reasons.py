@@ -77,6 +77,13 @@ _ENTRIES = (
            "Database upgrade stopped. Maintenance remains active.",
            "Review the current database version and backup before continuing.", "ERROR", None),
 
+    Reason("JOB_WAITING", "A handler deferred a normal prerequisite or external-work wait.",
+           "Work is waiting for a prerequisite.", "Check the recorded waiting condition.", "INFO", None),
+    Reason("JOB_PAYLOAD_INVALID", "A queued payload is invalid or exceeds the worker bound.",
+           "Job information could not be validated.", "Review the queued job before trying again.", "ERROR", False),
+    Reason("WORKER_NOT_READY", "No trusted job handlers are registered for execution.",
+           "The worker is not ready to process jobs.", "Install and register the required job handlers.", "ERROR", False),
+
 )
 REGISTRY = MappingProxyType({item.code: item for item in _ENTRIES})
 if len(REGISTRY) != len(_ENTRIES):

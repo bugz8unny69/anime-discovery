@@ -28,6 +28,7 @@ _EVENTS = (
     EventDefinition("CLAIMED", "job", "Job processing started."),
     EventDefinition("LEASE_EXPIRED", "job", "The processing lease expired before the job completed.",
                     True, "JOB_LEASE_EXPIRED"),
+    EventDefinition("DEFERRED", "job", "Work is waiting for a later check.", True),
     EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
     EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
     EventDefinition("DONE", "job", "Job completed."),

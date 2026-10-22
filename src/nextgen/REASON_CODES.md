@@ -165,3 +165,11 @@ copy; failure requires an existing reason (including JOB_HANDLER_FAILED for an
 unexpected handler exception). Trusted HandlerDefinition labels provide the
 readable handler name and handler.CODE.label translation key. Labels are bounded
 static application metadata, never payload/exception text. See JOB_HANDLERS.md.
+
+
+Worker core additions: JOB_WAITING describes a normal deferred prerequisite,
+JOB_PAYLOAD_INVALID requests review of malformed/oversized queued input, and
+WORKER_NOT_READY reports missing installed handlers. All have readable actions.
+DEFERRED is a registered job event with readable copy, not a new state; it uses
+RETRY_WAIT without spending the failure retry budget. Existing retry/failure/
+lease reasons and lifecycle markers are reused. No raw exceptions are persisted.

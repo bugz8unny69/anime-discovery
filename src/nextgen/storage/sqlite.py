@@ -305,6 +305,11 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
     return job_id, audit
 
 
+def enqueue_job_with_receipt(db, **kwargs):
+    """Worker-owned handoff: return ID and audit receipt; no commit or logging."""
+    return _enqueue_job(db, **kwargs)
+
+
 def enqueue_job(db, *, kind, payload, component, event_id=None,
                 created_by_job_id=None, available_at_ms=None):
     """Insert independent work and CREATED audit inside an active transaction.

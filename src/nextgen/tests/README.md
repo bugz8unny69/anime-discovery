@@ -94,3 +94,10 @@ existing jobs table is unchanged. All these tests remain **unexecuted**.
 Destination settings: test_media_destinations.py covers configuration v3,
 blank defaults, readable field metadata, explicit historical conversion, immutable
 new-operation snapshots and invalid/overlapping roots. Authored but unexecuted.
+
+
+Initial worker core: test_worker_queue.py and test_async_worker.py cover lease
+fencing/recovery, concurrent claims, atomic successor facts/history, normal
+defers versus failure retries, trusted adapter transaction boundaries, fresh
+configuration, same-anime concurrency, maintenance and cancellation-safe drain.
+All tests remain **unexecuted**; no worker or SQL has been run for verification.
