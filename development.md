@@ -4,6 +4,12 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Run the independent NextGen test batches and record their results before proposing a merge.
 
+## NextGen settings and diagnostics foundation — 2026-10-22
+
+Work in branch `nextgen/config-diagnostics-20261022`. Before developing `coordinator`, use the independent `src/nextgen/settings.py` and `src/nextgen/diagnostics.py` foundation. Defaults: logging INFO; supported levels TRACE, DEBUG, INFO, WARNING, ERROR and CRITICAL. Optional validated component overrides for supervisor, intake, coordinator, identity and acquisition. TRACE is custom level 5; higher verbosity NEVER relaxes redaction. The standard library logger writes sanitized, bounded correlation records to stderr/journald, with event/job IDs, attempt, elapsed time and reason code when available. SQLite `event_history` and `job_history` remain separate durable state histories, and coordinator code must persist transitions atomically when implemented.
+
+Configuration currently loads strict JSON into immutable settings wrappers; hot reload, supervisor distribution, dashboard UI, external services, live workers and persistence of configuration are NOT implemented. Unknown keys and unsupported levels fail validation. Never log raw webhook bodies, provider responses, torrent secrets or credentials. Legacy diagnostics (merged PR #67) and legacy settings schema inform this fresh NextGen module only; no dependency on `src/legacy`. Offline tests are committed but deliberately not run yet, and CI remains disabled. Do not merge/deploy without explicit instruction.
+
 ## What is canonical
 
 **Series schema, not processing state.** NextGen uses one versioned `AnimeSeries v2` schema (`src/nextgen/schema/anime_series.py`; detailed RFC at `src/nextgen/schema/README.md`). The series describes **the anime and its episodes**. It MUST NOT include webhook notification IDs, traces, GUIDs, source release names, job IDs, retries, acquisition, staging, evaluation, or export status. That information lives in independent durable operational records connected to the series after identification.
