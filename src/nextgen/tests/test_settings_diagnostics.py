@@ -1,15 +1,23 @@
-"""Offline configuration/diagnostics tests; no systemd, network or CI."""
+"""Offline settings and diagnostics tests; no CI or live components."""
 import io
 import logging
+import tempfile
 import unittest
+from pathlib import Path
 
-from src.nextgen.settings import Settings, parse_settings
-from src.nextgen.diagnostics import TRACE, SafeFormatter, configure_logging, event, redact, Span
+from src.nextgen.settings import Settings, parse_settings, load_settings
+from src.nextgen.diagnostics import TRACE, SafeFormatter, configure_logging, event, exception, Span
 
 class FoundationTests(unittest.TestCase):
+    def logger(self):
+        stream = io.StringIO()
+        logger = logging.Logger("nextgen.test")
+        logger.addHandler(logging.StreamHandler(stream))
+        return logger, stream
+
     def test_defaults_and_override(self):
         config = parse_settings({"logging": {"level": "INFO",
-                          "components": {"coordinator": "TRACE"}}})
+                                 "components": {"coordinator": "TRACE"}}})
         self.assertEqual(config.logging.level_for("coordinator"), "TRACE")
         self.assertEqual(config.logging.level_for("intake"), "INFO")
         self.assertEqual(Settings().logging.level, "INFO")
@@ -19,36 +27,53 @@ class FoundationTests(unittest.TestCase):
                        {"logging": {"components": {"unknown": "TRACE"}}},
                        {"logging": {"components": {"intake": "oops"}}},
                        {"logging": {"quietly_disable_redaction": True}},
-                       {"unexpected": {}}):
+                       {"unexpected": {}}, [], {"logging": []}):
             with self.subTest(config=config), self.assertRaises(ValueError):
                 parse_settings(config)
 
-    def test_redaction_even_at_trace(self):
-        stream = io.StringIO()
-        logger = logging.Logger("nextgen.coordinator.test")
-        handler = logging.StreamHandler(stream)
-        logger.addHandler(handler)
+    def test_settings_file_and_reload_level(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "settings.json"
+            file.write_text('{"logging": {"components": {"coordinator": "TRACE"}}}')
+            config = load_settings(file)
+            logger, stream = self.logger()
+            configure_logging(config, "coordinator", logger=logger)
+            self.assertEqual(logger.level, TRACE)
+            initial_handlers = len(logger.handlers)
+            file.write_text('{"logging": {"level": "WARNING"}}')
+            configure_logging(load_settings(file), "coordinator", logger=logger)
+            self.assertEqual(logger.level, logging.WARNING)
+            self.assertEqual(len(logger.handlers), initial_handlers)
+
+    def test_redaction_at_trace_and_exception(self):
+        logger, stream = self.logger()
         configure_logging(parse_settings({"logging": {"level": "TRACE"}}),
                           "coordinator", logger=logger)
-        self.assertEqual(logger.level, TRACE)
-        logger.log(TRACE, "authorization: abc123 password=hidden https://alice:pass@example.org")
+        logger.log(TRACE, "Bearer secretBearer password=hidden api_key=apikey123 "
+                          "https://alice:pass@example.org/?token=querysecret")
+        try:
+            raise RuntimeError("authorization: abc123")
+        except RuntimeError as exc:
+            exception(logger, "JOB_FAILED", exc, job_id=42,
+                      trace_id="AD-2", retryable=False, reason_code="REMOTE_FAILURE")
         content = stream.getvalue()
-        self.assertNotIn("abc123", content)
-        self.assertNotIn("hidden", content)
-        self.assertNotIn("alice:pass", content)
+        for secret in ("secretBearer", "hidden", "apikey123", "alice:pass",
+                       "querysecret", "abc123"):
+            self.assertNotIn(secret, content)
+        self.assertIn("event=JOB_FAILED", content)
+        self.assertIn("job_id=42", content)
+        self.assertIn("trace_id=AD-2", content)
+        self.assertIn("RuntimeError", content)
+        self.assertIn("Traceback", content)
 
     def test_metadata_allowlist(self):
-        stream = io.StringIO()
-        logger = logging.Logger("nextgen.safe.test")
+        logger, stream = self.logger()
         logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler(stream)
-        handler.setFormatter(SafeFormatter("%(message)s"))
-        logger.addHandler(handler)
+        logger.handlers[0].setFormatter(SafeFormatter("%(message)s"))
         event(logger, logging.INFO, "JOB_RETRY", job_id=42, attempt=2,
               retryable=True, raw_body="never log this")
-        output = stream.getvalue()
-        self.assertIn("job_id=42", output)
-        self.assertNotIn("never log this", output)
+        self.assertIn("job_id=42", stream.getvalue())
+        self.assertNotIn("never log this", stream.getvalue())
 
     def test_span(self):
         self.assertGreaterEqual(Span().milliseconds(), 0)
