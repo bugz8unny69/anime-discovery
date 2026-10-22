@@ -123,3 +123,21 @@ included. Existing Python logging/settings and central reason copy are reused.
 
 The v5 schema adds held/blocked/canceled lifecycle states and typed activity
 without deriving status from a reason string. See JOB_STATUSES.md.
+
+## Configuration-library reasons and markers
+
+| Code | Human-readable meaning |
+| --- | --- |
+| CONFIGURATION_INVALID | Configuration could not be validated. |
+| CONFIGURATION_CONFLICT | Configuration changed before this update could be applied. |
+| CONFIGURATION_MIGRATION_REQUIRED | Configuration needs an upgrade. |
+| CONFIGURATION_STORAGE_FAILED | Configuration storage is unavailable. |
+| CONFIGURATION_DURABILITY_UNCONFIRMED | Configuration was updated, but durable storage could not be confirmed. |
+
+The first three require corrected input, refreshed revision or explicit upgrade,
+not an automatic unchanged retry. Storage outcomes require context; successful
+rename plus failed directory sync does not mean nothing saved. See
+CONFIGURATION.md. CONFIGURATION_SAVED, CONFIGURATION_MIGRATED and
+CONFIGURATION_SAVE_UNCONFIRMED are runtime-only event markers in messages.py.
+Every reason/message/action retains the same stable translation-key contract.
+These additions do not alter SQLite schemas or diagnostic-history detail shapes.

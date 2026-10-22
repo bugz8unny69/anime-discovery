@@ -9,7 +9,12 @@ from src.nextgen.reasons import REGISTRY, display_reason, get_reason, safe_detai
 
 class ReasonTests(unittest.TestCase):
     def test_catalog_is_consistent_and_immutable(self):
-        self.assertEqual(len(REGISTRY), 9)
+        self.assertTrue({"IDENTITY_INCOMPLETE", "IDENTITY_INVALID", "IDENTITY_CONFLICT",
+                         "PROVIDER_UNAVAILABLE", "JOB_LEASE_EXPIRED", "JOB_HANDLER_FAILED",
+                         "JOB_RETRY_EXHAUSTED", "STORAGE_UNAVAILABLE", "UNSUPPORTED_JOB_KIND",
+                         "CONFIGURATION_INVALID", "CONFIGURATION_CONFLICT",
+                         "CONFIGURATION_MIGRATION_REQUIRED", "CONFIGURATION_STORAGE_FAILED",
+                         "CONFIGURATION_DURABILITY_UNCONFIRMED"} <= set(REGISTRY))
         for key, reason in REGISTRY.items():
             with self.subTest(code=key):
                 self.assertEqual(key, reason.code)
@@ -88,3 +93,4 @@ class ReasonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

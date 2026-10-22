@@ -113,12 +113,12 @@ def _message(name, fields):
         parts.extend(("activity_code=" + activity, "activity_message=" + json.dumps(
             DEFAULT_CATALOG.state("job_activity", activity)["message"])))
     selected = {}
-    for key in ("event_id", "job_id", "created_by_job_id", "attempt", "elapsed_ms"):
+    for key in ("event_id", "job_id", "created_by_job_id", "attempt", "elapsed_ms", "config_revision"):
         value = fields.get(key)
         if value is None:
             continue
         try:
-            selected[key] = integer(value, positive=key.endswith("_id"))
+            selected[key] = integer(value, positive=key.endswith("_id") or key == "config_revision")
         except ValueError:
             continue
     correlation = trace_id(event_id=selected.get("event_id"), job_id=selected.get("job_id"))

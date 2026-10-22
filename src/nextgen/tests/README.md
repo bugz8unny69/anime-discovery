@@ -61,3 +61,9 @@ Final diagnostic review adds test_api_diagnostics.py for independent api
 logging and audit attribution, v5→v6 history preservation, index/FK integrity,
 version rejection and rollback. The latest sequential path includes 006.
 No test execution or CI is authorized in the current phase.
+
+Configuration-library cases in test_configuration_schema.py and
+test_configuration_store.py cover versioned conversion and immutable operation
+views, startup-field pinning, revision conflict, atomic publication and failure,
+metadata, migration backup/preview, and safe input/filesystem validation. They
+use temporary directories only. Tests and CI remain intentionally unexecuted.

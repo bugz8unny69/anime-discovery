@@ -44,6 +44,21 @@ _ENTRIES = (
     Reason("UNSUPPORTED_JOB_KIND", "No handler is registered for this job type.",
            "This type of work cannot be processed.", "Check the installed components.",
            "ERROR", False),
+    Reason("CONFIGURATION_INVALID", "Configuration shape, field or value failed validation.",
+           "Configuration could not be validated.", "Review the configuration and supported settings.",
+           "WARNING", False),
+    Reason("CONFIGURATION_CONFLICT", "The saved revision or migration source changed.",
+           "Configuration changed before this update could be applied.",
+           "Refresh the configuration and review the changes again.", "WARNING", False),
+    Reason("CONFIGURATION_MIGRATION_REQUIRED", "An older supported configuration needs explicit conversion.",
+           "Configuration needs an upgrade.", "Preview and apply the configuration migration.",
+           "WARNING", False),
+    Reason("CONFIGURATION_STORAGE_FAILED", "Safe configuration access or publication failed.",
+           "Configuration storage is unavailable.", "Check the service account permissions and storage.",
+           "ERROR", None),
+    Reason("CONFIGURATION_DURABILITY_UNCONFIRMED", "Rename succeeded but directory synchronization failed.",
+           "Configuration was updated, but durable storage could not be confirmed.",
+           "Read the current configuration and check storage before retrying.", "ERROR", None),
 )
 REGISTRY = MappingProxyType({item.code: item for item in _ENTRIES})
 if len(REGISTRY) != len(_ENTRIES):
@@ -108,3 +123,4 @@ def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
             raise ValueError("unregistered cause reason")
         details["cause_reason_code"] = cause.code
     return details
+
