@@ -17,7 +17,7 @@ class DiagnosticLoggingTests(unittest.TestCase):
         stream = io.StringIO()
         logger = logging.Logger("nextgen.test")
         logger.addHandler(logging.StreamHandler(stream))
-        configure_logging(parse_settings({"logging": {"level": level}}), "coordinator", logger=logger)
+        configure_logging(parse_settings({"logging": {"level": level}}), "worker", logger=logger)
         return logger, stream
 
     def test_each_marker_has_readable_copy_and_machine_code(self):
@@ -35,10 +35,10 @@ class DiagnosticLoggingTests(unittest.TestCase):
         event(logger, TRACE, "RETRY_SCHEDULED", reason_code="PROVIDER_UNAVAILABLE",
               event_id=4, job_id=8, created_by_job_id=3, attempt=2,
               trace_id="arbitrary-secret", raw_body="private-body", error_type="private-class",
-              component="coordinator", retryable=True, outcome="RETRY_WAIT")
+              component="worker", retryable=True, outcome="RETRY_WAIT")
         output = stream.getvalue()
         for text in ("event_id=4", "job_id=8", "trace_id=AD-4", "created_by_job_id=3",
-                     "attempt=2", "retryable=true", "component=coordinator"):
+                     "attempt=2", "retryable=true", "component=worker"):
             self.assertIn(text, output)
         for text in ("arbitrary-secret", "private-body", "private-class"):
             self.assertNotIn(text, output)
@@ -124,18 +124,18 @@ class DiagnosticLoggingTests(unittest.TestCase):
 
     def test_reload_changes_threshold_without_mutable_settings_or_new_handlers(self):
         logger, stream = self.make_logger("CRITICAL")
-        overrides = {"coordinator": "TRACE"}
+        overrides = {"worker": "TRACE"}
         settings = Settings(logging=LoggingSettings(components=overrides))
-        overrides["coordinator"] = "CRITICAL"
-        configure_logging(settings, "coordinator", logger=logger)
+        overrides["worker"] = "CRITICAL"
+        configure_logging(settings, "worker", logger=logger)
         event(logger, TRACE, "CREATED", job_id=1)
         self.assertIn("Job created.", stream.getvalue())
         self.assertEqual(len(logger.handlers), 1)
         with self.assertRaises(TypeError):
-            settings.logging.components["coordinator"] = "INFO"
+            settings.logging.components["worker"] = "INFO"
         previous = (logger.level, logger.handlers[0].level, logger.handlers[0].formatter)
         with self.assertRaises(ValueError):
-            configure_logging({"logging": "bad"}, "coordinator", logger=logger)
+            configure_logging({"logging": "bad"}, "worker", logger=logger)
         self.assertEqual(previous, (logger.level, logger.handlers[0].level, logger.handlers[0].formatter))
 
     def test_failed_sink_cannot_turn_committed_work_into_failure(self):

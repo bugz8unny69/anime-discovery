@@ -1,6 +1,6 @@
 """Stable, presentation-ready operational reasons; no dashboard/runtime dependency.
 
-The coordinator decides state/retry timing. Descriptions are never evaluated
+The worker decides state/retry timing. Descriptions are never evaluated
 as workflow instructions. Callers must validate details before persistence.
 """
 from dataclasses import dataclass

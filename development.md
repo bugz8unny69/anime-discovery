@@ -6,23 +6,24 @@
 
 ## SQLite migration and maintenance follow-up — 2026-10-22
 
-The migration/maintenance library builds on draft configuration PR #101; that PR
-is not assumed merged. The follow-up branch contains its prerequisite commits
-and targets NextGen. Review the prerequisite independently before merging either.
+PR #101 (configuration library) and PR #102 (SQLite migrations/maintenance)
+were confirmed merged into NextGen on 2026-10-22 with explicit authorization.
+The canonical job process name is now **worker**, replacing coordinator.
+The separate management API remains responsible for management requests.
 
-Implemented: version-aware SQLite v1–v6 upgrade preview/apply, verified pre-upgrade
-SQLite backup, per-step validation/rollback, a durable cross-process maintenance
-admission gate, and an admitted existing-database connection helper. No schema
-shape changes or v7 migration. Published 001–006 remain unchanged. See
+Implemented libraries: version-aware SQLite upgrade preview/apply, verified
+backup, per-step rollback, durable maintenance admission and current-database
+connections. The naming follow-up adds SQLite v7 (007_worker_component.sql)
+and configuration schema v2. Published SQL 001–006 remain unchanged. See
 [the migration/maintenance contract](src/nextgen/storage/MIGRATIONS.md).
 
 All future runtime DB users and entire job attempts must participate in the gate.
 A request blocks new work while admitted work finishes; queued job states are
 preserved. No automatic resume after success/failure/crash: compatible process
 readiness and explicit completion are required. No supervisor, management API,
-ADM command or coordinator runtime is implemented by these libraries.
+ADM command or worker runtime is implemented by these libraries.
 
-Remaining coordinator preparation: async handler/outcome contract, bounded
+Remaining worker preparation: async handler/outcome contract, bounded
 claim/dispatch and cancellation semantics, lease/retry recovery policy and
 management-to-runtime readiness integration. Keep the API in its own process.
 Tests are included but unexecuted; source/syntax/diff review only, no CI or SQL.
@@ -45,10 +46,10 @@ These documents supersede older planning snapshots below where status differs.
 Use GitHub as the authority for PR #100 publication/merge status. Source review and AST
 syntax checks only; offline tests are included but unexecuted, with no CI runs.
 
-Next component: coordinator claims/routing, leases and stale-owner fencing,
+Next component: worker claims/routing, leases and stale-owner fencing,
 retry/backoff/exhaustion decisions, atomic completion/successor creation, and
 offline lifecycle/concurrency/recovery cases. Diagnostic writers do not enforce
-those transitions. No coordinator loop, supervisor reload distribution, journal
+those transitions. No worker loop, supervisor reload distribution, journal
 service integration, dashboard API, deployment or legacy modifications are
 implemented by this diagnostics PR.
 
@@ -57,32 +58,31 @@ implemented by this diagnostics PR.
 Agreed: the management API runs in a separate process, using diagnostic
 component api. ADM and dashboard are clients of that API. The API owns
 management authentication/authorization and invokes shared services; the
-service account owns its writable files/directories. The coordinator only
+service account owns its writable files/directories. The worker only
 manages independent jobs and a small async pause/drain/resume/shutdown control
 interface. It does not host the public management API, persist settings or run
 schema migrations as ordinary jobs. Supervisor owns process management later.
 
 Configuration follow-up: configuration_schema.py and configuration.py implement
-an explicit v0→v1 NextGen logging-file conversion, validated versioned snapshots,
+an explicit v0→v1→v2 NextGen configuration conversion, validated versioned snapshots,
 revision-checked atomic service-owned persistence and migration preview/backups.
 See [CONFIGURATION.md](src/nextgen/CONFIGURATION.md) for the API/library contract.
 Fields explicitly declare next_operation or restart behavior. Each new job
 attempt/API request reads current settings once; running operations keep their
 snapshot. Restart fields stay pinned to process startup values. Process-level
 ports/concurrency/database changes require explicit restart, not a live reload
-broadcast. This library does not implement a credential store, SQLite runner,
+broadcast. This library does not implement a credential store,
 management authentication/transport or automatic runtime application.
 
-Next work order after configuration-library review: implement the SQLite
-migration runner and cross-process maintenance/readiness contract; define the async job-handler
-input/outcome/recovery interface. Implement the separate authenticated
-management API against those services, then the coordinator against its job
-and control contracts. These contracts can be defined together without
-embedding the API in the coordinator. No hook/plugin system is introduced.
+Next work: define the async job-handler input/outcome/recovery interface and
+implement the worker against its job and maintenance/control contracts. Build
+the separate authenticated management API against the shared services. Process
+readiness/restart integration remains future supervisor work. These contracts can be defined together without
+embedding the API in the worker. No hook/plugin system is introduced.
 Concurrent jobs for the same anime are allowed: no blanket per-anime
 serialization. Libraries own shared provider pacing and exact-resource
 acquisition gates, returning structured defer/hold/duplicate outcomes. The
-async coordinator applies bounded overall concurrency and registered handler
+async worker applies bounded overall concurrency and registered handler
 execution modes; blocking operations can use threads. No process per job is
 required without a concrete isolation/CPU need.
 The full dashboard, supervisor, provider and acquisition implementations remain
@@ -91,7 +91,7 @@ not extensions that silently enlarge the diagnostics implementation.
 
 ## NextGen settings and diagnostics foundation — 2026-10-22
 
-Work in branch `nextgen/config-diagnostics-20261022`. Before developing `coordinator`, use the independent `src/nextgen/settings.py` and `src/nextgen/diagnostics.py` foundation. Defaults: logging INFO; supported levels TRACE, DEBUG, INFO, WARNING, ERROR and CRITICAL. Optional validated component overrides for supervisor, intake, coordinator, identity and acquisition. TRACE is custom level 5; higher verbosity NEVER relaxes redaction. The standard library logger writes sanitized, bounded correlation records to stderr/journald, with event/job IDs, attempt, elapsed time and reason code when available. SQLite `event_history` and `job_history` remain separate durable state histories, and coordinator code must persist transitions atomically when implemented.
+Work in branch `nextgen/config-diagnostics-20261022`. Before developing `worker`, use the independent `src/nextgen/settings.py` and `src/nextgen/diagnostics.py` foundation. Defaults: logging INFO; supported levels TRACE, DEBUG, INFO, WARNING, ERROR and CRITICAL. Optional validated component overrides for supervisor, intake, worker, identity and acquisition. TRACE is custom level 5; higher verbosity NEVER relaxes redaction. The standard library logger writes sanitized, bounded correlation records to stderr/journald, with event/job IDs, attempt, elapsed time and reason code when available. SQLite `event_history` and `job_history` remain separate durable state histories, and worker code must persist transitions atomically when implemented.
 
 Configuration currently loads strict JSON into immutable settings wrappers; hot reload, supervisor distribution, dashboard UI, external services, live workers and persistence of configuration are NOT implemented. Unknown keys and unsupported levels fail validation. Never log raw webhook bodies, provider responses, torrent secrets or credentials. Legacy diagnostics (merged PR #67) and legacy settings schema inform this fresh NextGen module only; no dependency on `src/legacy`. Offline tests are committed but deliberately not run yet, and CI remains disabled. Do not merge/deploy without explicit instruction.
 
@@ -124,13 +124,13 @@ Every published series MUST satisfy a uniform, machine-checkable schema; optiona
 
 **Current work:** dedicated jobs-table SQLite follow-up on branch `nextgen/dedicated-jobs-20261022`, targeting `NextGen`. PR #94 already merged the six-table SQLite foundation and AnimeSeries v2 remains unchanged.
 
-**Agreed design:** Webhook intake and the worker/coordinator are different Linux processes (different PIDs). Intake durably writes the original webhook observation and an initial `jobs` row in a single SQLite transaction, then acknowledges. The worker/coordinator polls `jobs`, atomically leases eligible work, dispatches by `kind`, records outcomes and recovers expired leases. Components can request new independent jobs.
+**Agreed design:** Webhook intake and the worker are different Linux processes (different PIDs). Intake durably writes the original webhook observation and an initial `jobs` row in a single SQLite transaction, then acknowledges. The worker polls `jobs`, atomically leases eligible work, dispatches by `kind`, records outcomes and recovers expired leases. Components can request new independent jobs.
 
 **No parent/child relationship:** `created_by_job_id` is nullable provenance only, not a dependency, hierarchy, sibling relation, execution ordering, or cascading-lifecycle rule. `event_id` is also nullable on jobs for work without a webhook. Every job has an independent lifecycle. Completing a job and creating a follow-up job must be an atomic SQLite transaction when both operations are required.
 
-**Job history:** `job_history` records independent job transitions, attempts, handoffs and reason-coded failures; it is separate from webhook `event_history`. A future coordinator must insert the history record together with the associated job state change.\n\n**SQLite v1 jobs columns:** job_id, nullable event_id, nullable created_by_job_id, kind, payload_json, state (PENDING/RUNNING/RETRY_WAIT/NEEDS_REVIEW/DONE), available_at_ms, attempt_count, nullable lease_token, nullable lease_expires_at_ms, nullable last_reason_code, created_at_ms, updated_at_ms. Multiple jobs may originate from one event. No global UNIQUE(kind, subject) rule should discard independent deliveries. The coordinator must use lease-token and expiry checks to prevent stale owners from committing. A job result does not, by itself, prove acquisition or episode coverage.
+**Job history:** `job_history` records independent job transitions, attempts, handoffs and reason-coded failures; it is separate from webhook `event_history`. A future worker must insert the history record together with the associated job state change.\n\n**SQLite v1 jobs columns:** job_id, nullable event_id, nullable created_by_job_id, kind, payload_json, state (PENDING/RUNNING/RETRY_WAIT/NEEDS_REVIEW/DONE), available_at_ms, attempt_count, nullable lease_token, nullable lease_expires_at_ms, nullable last_reason_code, created_at_ms, updated_at_ms. Multiple jobs may originate from one event. No global UNIQUE(kind, subject) rule should discard independent deliveries. The worker must use lease-token and expiry checks to prevent stale owners from committing. A job result does not, by itself, prove acquisition or episode coverage.
 
-**Incremental compatibility:** PR #94's `webhook_events` includes historical work-state fields and `save_identity` operates on them. This follow-up adds dedicated `jobs` storage; removing old event-state coupling and implementing real workers is distinct later work. Do not mistake the existence of a jobs table for a functioning coordinator.
+**Incremental compatibility:** PR #94's `webhook_events` includes historical work-state fields and `save_identity` operates on them. This follow-up adds dedicated `jobs` storage; removing old event-state coupling and implementing real workers is distinct later work. Do not mistake the existence of a jobs table for a functioning worker.
 
 **Scope:** SQLite schema, basic persistence helpers, documentation, isolated tests in `src/nextgen/tests/`. No intake HTTP service, no daemon, no acquisition, no migration from legacy, no production deployment. Leave automatic paid CI disabled; tests remain tracked, with offline comprehensive testing planned later per user decision. Do not claim unrun tests have passed. No merge/deployment without fresh authorization.
 
@@ -154,7 +154,7 @@ Explicit static components, each with narrow responsibility:
 5. **Staging/Jellyfin:** own staging files and NFO output; require necessary TVDB placement for the particular operation and validate path/filesystem ownership at the moment of use.
 6. **Human review and Sonarr export:** explicit Keep or Reject; exact export is never authorized merely by staging or by an identified series. Preserve existing hard-won mapping and safe import semantics, without linking runtime legacy code.
 
-The coordinator owns bounded durable scheduling, not business-logic decisions. Logging/history uses stable per-delivery Postfix-style `AD-N` trace IDs and independent job IDs, *outside* AnimeSeries. Store structured durable history with safe reason codes, retries, cache activity and component boundaries; protect credentials and other sensitive data in logs.
+The worker owns bounded durable scheduling, not business-logic decisions. Logging/history uses stable per-delivery Postfix-style `AD-N` trace IDs and independent job IDs, *outside* AnimeSeries. Store structured durable history with safe reason codes, retries, cache activity and component boundaries; protect credentials and other sensitive data in logs.
 
 ## NextGen tests: fresh, local batches, no automatic GitHub checks
 

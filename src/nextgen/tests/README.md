@@ -74,3 +74,10 @@ cover versions 1–6, schema/data preservation, validated backups, stale plans,
 rollback and partial-chain recovery, shared admissions, exclusive drainage,
 process death, pending-state persistence and explicit resume. Tests use only
 temporary databases/processes. **Authored but not executed** under current policy.
+
+
+Worker naming follow-up: test_worker_naming.py covers explicit configuration
+v1→v2 key/logging conversion, preserved values/revisions, mixed-name rejection,
+SQLite v6→v7 historical attribution, new worker audits, version guards and
+rollback. Existing runtime diagnostic tests now use worker; sequential migration
+coverage includes 007 and all starting versions v1–v7. Tests remain unexecuted.

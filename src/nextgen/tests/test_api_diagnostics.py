@@ -22,7 +22,7 @@ class ApiDiagnosticsTests(unittest.TestCase):
         logger = logging.Logger("nextgen.api.test")
         stream = io.StringIO()
         logger.addHandler(logging.StreamHandler(stream))
-        settings = parse_settings({"logging": {"components": {"api": "DEBUG", "coordinator": "WARNING"}}})
+        settings = parse_settings({"logging": {"components": {"api": "DEBUG", "worker": "WARNING"}}})
         configure_logging(settings, "api", logger=logger)
         try:
             initialize(db)
@@ -37,9 +37,9 @@ class ApiDiagnosticsTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT component FROM job_history").fetchall(),
                              [("api",), ("api",)])
             self.assertIn("component=api", stream.getvalue())
-            self.assertNotIn("component=coordinator", stream.getvalue())
+            self.assertNotIn("component=worker", stream.getvalue())
             self.assertEqual(logger.level, logging.DEBUG)
-            self.assertEqual(settings.logging.level_for("coordinator"), "WARNING")
+            self.assertEqual(settings.logging.level_for("worker"), "WARNING")
         finally:
             db.close()
 

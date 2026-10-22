@@ -1,4 +1,4 @@
-"""Service-side configuration repository; no HTTP server or coordinator.
+"""Service-side configuration repository; no HTTP server or worker.
 
 Linux/Unix: one stable flock file serializes cooperative publishers. Readers
 open the atomically replaced file for every operation. Use a worker thread

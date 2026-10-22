@@ -2,8 +2,7 @@
 
 configuration_schema.py supplies pure validation, conversion and snapshots.
 configuration.py supplies service-side persistence. Existing settings.py
-logging validation is reused. No API server, ADM client, coordinator, SQLite
-runner, credential store or production configuration is created.
+logging validation is reused. No API server, ADM client, worker, credential store or production configuration is created.
 
 ## Operation snapshots, not reload broadcasts
 
@@ -32,7 +31,7 @@ separately. No config-revision field is added to SQLite history in this PR.
 | logging.components | Empty overrides | Next operation | None |
 | api.host | 127.0.0.1 | Restart | API |
 | api.port | 8765 | Restart | API |
-| coordinator.concurrency | 4 | Restart | Coordinator |
+| worker.concurrency | 4 | Restart | Worker |
 | storage.database_path | /var/lib/anime-discovery/nextgen.sqlite | Restart | All current components |
 
 FIELDS defines defaults, type/range validation and apply metadata.
@@ -49,32 +48,40 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=1, a positive revision, and a settings object
+Canonical JSON has schema_version=2, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "revision": 1,
       "settings": {
         "logging": {"level": "INFO", "components": {}},
         "api": {"host": "127.0.0.1", "port": 8765},
-        "coordinator": {"concurrency": 4},
+        "worker": {"concurrency": 4},
         "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite"}
       }
     }
 
-Configuration version, publication revision, SQLite v6 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v7 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
-Unversioned NextGen logging-only JSON is source v0. Explicit 0→1 conversion
-preserves its logging values and adds the validated envelope/defaults.
+Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
+conversion preserves its logging values and adds the original v1 envelope/defaults.
+The 1→2 step renames coordinator.concurrency to worker.concurrency and the
+logging.components.coordinator override to logging.components.worker, preserving
+values and incrementing the publication revision. A v0→2 chain finishes at
+revision 2. A v1→2 conversion increments its existing revision exactly once;
+revision overflow is refused. Migration previews/backups still use the service
+store; files are never rewritten on read.
 This is not a legacy production-config import. Unknown keys and unsupported
 versions fail instead of being silently discarded.
 
 CONVERSIONS is an ordered immutable registry of one-version steps. Future
 renames/type conversions require a new explicit step and regression cases;
-do not guess renames or default an incompatible value. No actual NextGen
-field rename is necessary in v1. Store reads never migrate implicitly.
-load_settings() remains a logging-only compatibility view of either format.
+do not guess renames or default an incompatible value. The v2 rename rejects mixed historical/current names instead of choosing
+one or dropping a value. Current writes accept only worker, not coordinator.
+Store reads never migrate implicitly; old versioned files require an explicit
+migration. load_settings() reads current versioned files or current logging-only
+objects; historical coordinator overrides require the explicit converter.
 
 ## Service library methods
 
@@ -103,7 +110,7 @@ publication, never automatic application to running resources.
 
 ADM/dashboard call the future authenticated API, which calls this shared
 library under the service account. Clients must not edit files or invoke write
-methods locally as an alternative management path. The coordinator contains
+methods locally as an alternative management path. The worker contains
 neither these management endpoints nor settings-writing responsibilities.
 
 The API must authenticate/authorize, obtain one operation snapshot per request,
@@ -154,6 +161,7 @@ directory-fsync uncertainty, metadata, symlink/FIFO rejection and migration
 preview/backup/source conflict. Tests and CI remain unexecuted. Source/AST
 checks are not runtime verification.
 
-SQLite remains v6: no SQLite table, row shape or query changes are required.
+The worker rename independently requires SQLite v7 history CHECK constraints;
+configuration publication still adds no database fields or configuration rows.
 The SQLite runner, maintenance/readiness protocol, authenticated API transport,
-credential store and job-handler/coordinator implementation remain separate.
+credential store and job-handler/worker implementation remain separate.

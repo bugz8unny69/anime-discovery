@@ -116,11 +116,11 @@ class JobStatusTests(unittest.TestCase):
             with self.subTest(state=state), transaction(self.db):
                 self.db.execute("UPDATE jobs SET state=? WHERE job_id=?", (state, self.job))
                 append_job_history(
-                    self.db, job_id=self.job, event_code=state, component="coordinator",
+                    self.db, job_id=self.job, event_code=state, component="worker",
                     occurred_at_ms=2, reason_code="UNSUPPORTED_JOB_KIND", details={"attempt": 0})
         with self.assertRaises(ValueError), transaction(self.db):
             append_job_history(self.db, job_id=self.job, event_code="CANCELED",
-                               component="coordinator", occurred_at_ms=3, details={"attempt": 0})
+                               component="worker", occurred_at_ms=3, details={"attempt": 0})
 
 
 class JobStatusMigrationTests(unittest.TestCase):
