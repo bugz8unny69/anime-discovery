@@ -54,6 +54,31 @@ CREATE TABLE IF NOT EXISTS result_episode_links (
  FOREIGN KEY(anidb_episode_id,anidb_id)
   REFERENCES identified_episodes(anidb_episode_id,anidb_id)
 );
+
+-- Jobs are independent units of work, not a parent/child dependency graph.
+-- created_by_job_id is optional provenance only.
+CREATE TABLE IF NOT EXISTS jobs (
+ job_id INTEGER PRIMARY KEY,
+ event_id INTEGER REFERENCES webhook_events(event_id),
+ created_by_job_id INTEGER REFERENCES jobs(job_id),
+ kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
+ payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+ state TEXT NOT NULL DEFAULT 'PENDING'
+   CHECK(state IN ('PENDING','RUNNING','RETRY_WAIT','NEEDS_REVIEW','DONE')),
+ available_at_ms INTEGER NOT NULL,
+ attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+ lease_token TEXT,
+ lease_expires_at_ms INTEGER,
+ last_reason_code TEXT,
+ created_at_ms INTEGER NOT NULL,
+ updated_at_ms INTEGER NOT NULL,
+ CHECK(created_by_job_id IS NULL OR created_by_job_id <> job_id),
+ CHECK(state <> 'RUNNING' OR
+       (lease_token IS NOT NULL AND lease_expires_at_ms IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(state,available_at_ms,job_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_expired ON jobs(state,lease_expires_at_ms);
+CREATE INDEX IF NOT EXISTS idx_jobs_event ON jobs(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_queue ON webhook_events(state,next_run_at_ms);
 CREATE INDEX IF NOT EXISTS idx_event_lease ON webhook_events(state,lease_expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_history_event ON event_history(event_id,history_id);
@@ -141,3 +166,39 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
             "INSERT INTO event_history(event_id,occurred_at_ms,event_code)"
             " VALUES(?,?,'SERIES_IDENTIFIED')",(event_id,now))
     return rid
+
+def enqueue_job(db, *, kind, payload, event_id=None, created_by_job_id=None,
+                available_at_ms=None):
+    """Add independent work within a caller-controlled transaction if present.
+
+    The caller can atomically insert a successor and mark its predecessor DONE.
+    This helper deliberately does not commit and does not implement dispatch.
+    """
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("job kind required")
+    raw = json.dumps(payload, allow_nan=False, sort_keys=True)
+    if not isinstance(payload, dict):
+        raise ValueError("job payload must be an object")
+    now = int(time.time() * 1000)
+    available = now if available_at_ms is None else available_at_ms
+    return db.execute(
+        """INSERT INTO jobs(event_id,created_by_job_id,kind,payload_json,
+          available_at_ms,created_at_ms,updated_at_ms)
+          VALUES(?,?,?,?,?,?,?)""",
+        (event_id,created_by_job_id,kind,raw,available,now,now)
+    ).lastrowid
+
+
+def accept_event_and_job(db, source, raw_body, *, kind, payload):
+    """Commit delivery, PENDING job and audit row together before acknowledgment."""
+    if db.in_transaction:
+        raise ValueError("requires a connection outside an active transaction")
+    with db:
+        event_id = db.execute(
+            "INSERT INTO webhook_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
+            (source,raw_body,int(time.time()*1000))).lastrowid
+        job_id = enqueue_job(db,kind=kind,payload=payload,event_id=event_id)
+        db.execute(
+            "INSERT INTO event_history(event_id,occurred_at_ms,event_code) VALUES(?,?,'ACCEPTED')",
+            (event_id,int(time.time()*1000)))
+    return event_id, job_id
