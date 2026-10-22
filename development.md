@@ -1,226 +1,67 @@
-# Anime Discovery — development and homelab guide
+# Anime Discovery — NextGen development handoff
 
-> **Purpose:** Ground future development chats in verified repository paths, host context, and safe commands. This document is not permission to deploy, delete media, alter production SQLite, or merge a PR.
+> **Authoritative architecture decision: 2026-10-22.** NextGen is built fresh in `src/nextgen/`. There is **no migration**, compatibility bridge, legacy SQLite reader or transitional data assembler. Legacy `src/legacy/` is reference material for domain lessons and regression tests only.
 >
-> **Last reviewed:** 2026-10-21. Runtime `/etc/anime-discovery/settings.json` remains authoritative. Infrastructure notes include historical and partially verified details.
+> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `develop` as the PR target and verify CI before proposing merge.
 
-## Repository and branching
+## What is canonical
 
-- Private GitHub repository: `bugz8unny69/anime-discovery`
-- Git SSH remote: `git@github.com:bugz8unny69/anime-discovery.git`
-- Integration branch: `develop`; repository default is `main`. Do not accidentally base work on `main`.
-- Develop locally on dedicated feature branches and open PRs to `develop`.
-- Never assume a PR merge deploys to the VM.
-- Historical note: PR #66 (checkpoint recovery) and PR #67 (diagnostics) were earlier development tracks. Their status in older handoffs may be stale; always query GitHub before treating any PR as open, merged, or deployed.
-- No Docker deployment is used. Native Python/systemd on the Ubuntu `torrents` VM is the current approach.
+**Series schema, not processing state.** NextGen uses one versioned `AnimeSeries v1` schema (`src/nextgen/schema/anime_series.py`; detailed RFC at `src/nextgen/schema/README.md`). The series describes **the anime and its episodes**. It MUST NOT include webhook notification IDs, traces, GUIDs, source release names, job IDs, retries, acquisition, staging, evaluation, or export status. That information lives in independent durable operational records connected to the series after identification.
 
-## SSH Git access
+The identified series's required fields are:
+- `anime.anidb_id`: positive AniDB anime ID (anime and sequel/cour identity).
+- `anime.tvdb_series_id`: positive TVDB **series** ID for Sonarr.
+- `anime.title`: nonblank **identified anime title**, not the original release name.
+- `episodes`: one or more individually identified episodes.
+- `episodes[].anidb_episode_id`: positive exact AniDB episode ID, including Shoko needs.
+- `schema_version`: exactly `1` until a new schema version is approved.
 
-The operator reports uploading a public SSH key to GitHub; **verify the key used by the VM works** before attempting clone/pull. The private key must remain on the VM (or authorized SSH agent). A GitHub *account* SSH key and a *repository deploy key* are different options; deploy keys may be configured read-only. Do not display, copy, or commit private key contents.
+Other series descriptors (alternative/original titles, year, anime type, AniDB episode display numbers, episode title/type, optional `episodes[].tvdb_placement` and `attributes`) are nullable or optional. TVDB *episode-level* IDs and per-episode TVDB season/episode mapping **are not hard identity-completion requirements**. Known placement is represented as `{season, episode}` inside the episode, with season 0 permitted for specials. AniDB episode numbering MAY be continuous or nonstandard. Never infer TVDB season from AniDB ordinal, default unknown to S01/E01, or conflate separately cataloged AniDB sequel entries under one TVDB series.
 
-Run as the existing application checkout/service owner, **not root by default**:
+Every published series MUST satisfy a uniform, machine-checkable schema; optional fields normalize to null/empty object to spare future consumers missing-key crashes. Field docs track meaning, reason, owner, availability, and origin. Breaking changes require explicit schema versioning and permanent offline fixture tests. Structured optional attributes never override the core named fields.
 
-```bash
-ssh -T git@github.com
-```
+### RFC-IDENTITY-001: mandatory completion gate
 
-An SSH greeting confirms authentication (GitHub may return exit code 1 despite successful authentication). For a first-time host-key prompt, verify GitHub's published SSH host-key fingerprint independently before accepting; never disable host-key checking.
+**This gate is at the END of identification, not at the webhook and not at some later acquisition stage.**
 
-### New checkout only
+- The identification component gathers information in its own *incomplete* work state. An unrecognized anime, absent TVDB series link, or missing AniDB episode ID is **not** a completed series.
+- Before changing work state to **IDENTIFIED/COMPLETE**, the identity component MUST validate the full candidate via `AnimeSeries.from_dict` (or the equivalent strict schema checker). Only a passing result may be saved/published as the authoritative series and referenced by downstream work.
+- Failed validation MUST prevent identification from being marked complete and MUST block downstream acquisition. Persist a reason-coded, traceable **INCOMPLETE_IDENTITY** or **INVALID_IDENTITY** outcome in operational job history. The identity work MAY retry when information improves, or enter review. A failed candidate is a normal per-item outcome; it MUST NOT crash workers or lose the original webhook notification.
+- A completed series's identity can be read without repeated identification by downstream components. Components still enforce their own **separate**, integration-specific prerequisites (e.g. exact TVDB episode placement before the NFO/episode import operation that needs it, file ownership/path verification at use time). The RFC is not authorization to acquire or export.
 
-**Check that `/opt/anime-discovery` is absent first. Never clone over an existing installation.** The repository README documents:
+## NextGen processing components
 
-```bash
-git clone --branch develop git@github.com:bugz8unny69/anime-discovery.git /opt/anime-discovery
-cd /opt/anime-discovery
-```
+Explicit static components, each with narrow responsibility:
+1. **Webhook intake:** accept each authenticated, reasonably bounded delivery, retain the supplied release name as-is and write the delivery durably. No anime/episode/GUID/name-based deduplication here. Deliveries are observations, not series.
+2. **Identity and cache:** resolve identified AniDB anime + exact AniDB episode(s), real title and TVDB series link. Reuse previously established cache evidence when applicable, while checking it applies to each input. No provider scoring/voting system and no assumption that altered title means new anime. The **identity gate** validates before marking done.
+3. **Canonical episode claim:** once an exact episode identity exists, atomically determine if work for that episode has already been claimed/handled, preventing duplicate acquisition under parallel submissions. Preserve every source delivery and trace history.
+4. **Acquisition:** own torrent operations, torrent identity/ownership, configured size limits, and Japanese + English audio checks. Do not infer identity from an acquisition job.
+5. **Staging/Jellyfin:** own staging files and NFO output; require necessary TVDB placement for the particular operation and validate path/filesystem ownership at the moment of use.
+6. **Human review and Sonarr export:** explicit Keep or Reject; exact export is never authorized merely by staging or by an identified series. Preserve existing hard-won mapping and safe import semantics, without linking runtime legacy code.
 
-Do **not** run `deploy/install-homelab.py` against an already installed service merely to update code. A fresh installation requires reviewing the README and the existing config/database safeguards.
+The coordinator owns bounded durable scheduling, not business-logic decisions. Logging/history uses stable per-delivery Postfix-style `AD-N` trace IDs and independent job IDs, *outside* AnimeSeries. Store structured durable history with safe reason codes, retries, cache activity and component boundaries; protect credentials and other sensitive data in logs.
 
-### Existing checkout: inspect without changing state
+## Next PR: delivery and worker reliability (TCP-like, application-level)
 
-```bash
-cd /opt/anime-discovery
-git remote -v
-git status --short --branch
-git branch --show-current
-git log -1 --format='%h %s'
-git fetch origin develop
-git log --oneline HEAD..origin/develop
-```
+**Primary goal:** a webhook receipt that got HTTP success must not disappear or be silently unprocessable after a crash. TCP is an analogy for acknowledge/retry/recovery; do not promise literally failure-free or exactly-once execution.
 
-Before considering a live update, inspect the actual checked-out branch, working tree, target SHA, and PR status. Avoid overwriting local changes.
+Scope:
+- Fresh standalone NextGen webhook handler, authenticated/validated/size-bounded, plus **fresh** SQLite durable inbox. Acknowledge successful submissions only **after** durable commit.
+- Commit both the delivery record and its pending identity work marker atomically. This may be one inbox row with `PENDING` status; do not assume a separate executable job row per webhook is required.
+- Bounded processing, leases or recoverable claims, retry/backoff on temporary failure, explicit permanent-error/manual-review state, graceful backpressure/retryable HTTP responses under overload.
+- Every accepted delivery remains independently traceable; no content-based deduplication at intake. Identity caching and *post-completion* episode claims are separate later work. Nothing in the series schema tracks retries, attempts or delivery receipt.
+- Offline fault-injection and concurrency tests: 10,000 requests with duplicate or changed release names, process death between commit and acknowledgment, crash during work, SQLite failure, restart recovery, provider unavailable, poison payload, duplicate acquisition claim protection (when built), log correlation, and bounded resource usage.
+- No production changes, no real provider integrations, no live acquisition, no Jellyfin/Shoko/Sonarr side effects and no migration of legacy data.
 
-### Live upgrade — standalone Git bootstrapper
+Failure semantics: **accepted does not mean identified; identified does not mean acquired.** A validation failure fails *that identification attempt* cleanly. System-wide crashlessness is a design target, not an absolute guarantee; persistence, recovery and visibility are testable service invariants.
 
-After its PR is reviewed and merged, install the independent upgrader once:
+## Regression expectations and PR boundaries
 
-```bash
-sudo -H python3 /opt/anime-discovery/deploy/anime-discovery-upgrade.py --install
-```
+Preserve domain behaviors as test cases, not code bridges: AniDB versus TVDB sequel/cour disagreement, Re:ZERO's verified mapping and exact episode references, season zero/specials, multi-episode releases, ambiguous or duplicate mapping, missing provider data, safe file ownership, dual audio, and explicit human approval.
 
-Then use:
+- **PR #89:** closed without merge, superseded.
+- **PR #90:** independent optional backfill design, **not** automatic backfill for NextGen.
+- **PR #91:** draft exploratory traces/docs from legacy; outdated migration suggestions are superseded. Do not merge a stale handoff.
+- **PR #92:** draft, offline-only AnimeSeries v1 schema and RFC identity-completion tests. No NextGen deployment or background worker included.
 
-```bash
-sudo -H /usr/local/sbin/anime-discovery-upgrade
-```
-
-Run as root for SSH authentication, backup, and systemd control. The tool
-reconciles checkout ownership to `anime-discovery` before service startup.
-It uses the pinned private GitHub SSH source, applies fast-forward-only Git
-updates and stores recovery state outside Git. Only run on live VM after
-approval, code review and passing CI.
-
-The general admin CLI no longer offers `upgrade`; the old local
-ZIP/tar.gz upgrader has been deleted. Future **direct online archive**
-download support may be designed later but is not implemented or configured.
-Do not pass a local archive to the standalone Git updater.
-
-For fast PR validation, prefer offline tests in a disposable checkout/temp
-DB or an isolated test VM; do not switch the live service to a draft branch.
-
-### Read-only service inspection
-
-```bash
-sudo systemctl status anime-discovery.service --no-pager
-sudo journalctl -u anime-discovery.service -n 100 --no-pager
-```
-
-Do not paste credentials or unredacted sensitive journal data into chat.
-
-## VM, configuration, and storage reference
-
-| Purpose | Path or host | Confidence / caution |
-| --- | --- | --- |
-| Application host | `torrents` Ubuntu VM | Infrastructure notes; verify current VM |
-| Git checkout / installation | `/opt/anime-discovery` | Repository README |
-| Settings | `/etc/anime-discovery/settings.json` | Authoritative runtime values |
-| Secrets | `/etc/anime-discovery/secrets.json` | **Never dump or paste contents** |
-| Persistent SQLite database | `/var/lib/anime-discovery/anime-discovery.db` | Operator-confirmed |
-| Persistent state/cache | `/var/lib/anime-discovery/` | Retain; never casually wipe |
-| Torrent download root | `/mnt/media/Torrents/anime/` | Historical config; check `storage.download_root` |
-| Torrent parent | `/mnt/media/Torrents/` | **Case-sensitive** |
-| Anime dataset | `/mnt/media/Anime/` | Separate TrueNAS dataset, 100 GB quota in notes |
-| App staged/trial root | `storage.trial_root` in settings | **Not proven equal** to `/mnt/media/Anime/` |
-| TV series and movies | `/mnt/media/TV Shows/`, `/mnt/media/Movies/` | Documented mounts, not confirmed container mappings |
-| TrueNAS NFS export | `/mnt/store/media` on TrueNAS, `/mnt/media` on Linux clients | Infrastructure notes |
-| Media center | `media-center` Ubuntu VM, Jellyfin and Shoko | Infrastructure notes |
-| Sonarr | Separate Arr host (`sonarr.arr.internal` historically) | Verify endpoint from runtime config |
-| qBittorrent/autobrr | `torrents` VM (`torrents.int.lhprojects.net` historically) | Verify runtime endpoint |
-
-TrueNAS/NFS paths are separate from actual qBittorrent torrent `save_path`, the app's staging root, and Sonarr-managed library files. Do not assume their equivalence.
-
-**Safe non-secret config path query on the `torrents` VM:**
-
-```bash
-sudo python3 - <<'PY'
-import json
-with open("/etc/anime-discovery/settings.json") as f:
-    cfg = json.load(f)
-for section, key in (
-    ("daemon", "database_path"),
-    ("storage", "download_root"),
-    ("storage", "trial_root"),
-):
-    print(f"{section}.{key} = {cfg.get(section, {}).get(key, '<missing>')}")
-PY
-```
-
-Network context: OPNsense segments 14 VLANs; TrueNAS serves NFS; DATA VLAN 14 is documented for MTU-9000 storage, while STORAGE is VLAN 7. Exact VM network mapping and the TrueNAS IPs require runtime verification. No networking changes are part of normal app development.
-
-## Current GitHub Actions and packaging (verified on develop, 2026-10-21)
-
-- `.github/workflows/anime-python-tests.yml`: after merged PR #79, `push` on `develop` only, `pull_request` targeting `develop`, and manual `workflow_dispatch`. It no longer automatically runs the full suite for each `feature/**` or `fix/**` branch commit. Uses `ubuntu-latest`, Python 3.12, `compileall`, and the explicit offline `unittest` suite. Concurrent runs are scoped by workflow + event + PR number/ref, with `cancel-in-progress: true`. PR and post-merge push checks remain separate.
-- `.github/workflows/publish-archive.yml`: PR #70 removed its push trigger; a manually dispatched historical release-publishing workflow remains. It is **not** used for VM Git upgrades.
-- **Desired next change (not yet implemented):** stop packaging on every `develop` push. Produce release packages only after explicit approval, with a separately reviewed versioning design. Preserve test checks and existing published releases. Do not claim this policy is already enforced.
-- No Docker or GHCR pipeline is planned.
-- Never overwrite immutable release tags; inspect existing tags/version references before adopting SemVer.
-- Historical GitHub Actions quota and anomalously long check incidents are not evidence of a current quota or failed tests. Inspect each workflow trigger, *individual PR/push check*, duration, job logs and GitHub billable usage independently. A successful push check does not prove the separate PR check passed.
-
-## Standalone Git upgrade bootstrapper (proposed; install only after PR review)
-
-The independent `deploy/anime-discovery-upgrade.py` uses Python's standard library, Git and systemd; it does **not** import the Anime Discovery dashboard or daemon. Its installed copy lives outside the app at `/usr/local/sbin/anime-discovery-upgrade`. Git is kept **in-place**, not extracted to a second application directory.
-
-After this PR is merged, explicitly install the reviewed bootstrapper **once**:
-
-```bash
-sudo -H python3 /opt/anime-discovery/deploy/anime-discovery-upgrade.py --install
-```
-
-Then future Git upgrades may run:
-
-```bash
-sudo -H /usr/local/sbin/anime-discovery-upgrade
-```
-
-The general `anime-discovery-admin.py` intentionally has **no** `upgrade` command; use the standalone executable for Git SSH upgrades. Local ZIP/tar.gz upgrades are intentionally removed. The standalone Git upgrader always fetches the pinned `git@github.com:bugz8unny69/anime-discovery.git` over SSH on `develop`. Git is run as root, so **root's effective SSH identity must authenticate**; use `sudo -H`, and do not assume the `anime-discovery` service account's key can be used by root. A one-time test is `sudo -H git ls-remote git@github.com:bugz8unny69/anime-discovery.git HEAD`.
-
-Before activating new code, it records the old and requested Git SHAs to `/var/lib/anime-discovery/upgrade-state.json` and makes an online-safe SQLite backup at the configured path. A successful service health check writes the new healthy SHA atomically. The bootstrapper fetches the new upgrader source from verified fast-forward Git history and executes that copy; it replaces its installed executable **only after success**. Application and Git checkout ownership are reconciled to the existing checkout owner without following symlinks. Do not use a blank/default Git SSH identity if root's key is not configured.
-
-If an interrupted run leaves the checkout exactly at either the recorded old or target SHA **and clean**, the next run first restores the old revision and attempts to restart the service. A dirty or unexpected checkout is **not automatically reset**: it stops and requires review so that unexplained changes are not deleted. This is conservative rerun safety, not a guarantee of automatic recovery from arbitrary filesystem corruption. A failure during an application update may require inspecting the SQLite schema and service logs; code rollback never automatically replaces the live database. This is a Git-only enhancement; no Docker and no automatic release packaging.
-
-## Anime trial lifecycle — authoritative meaning of Keep
-
-**Do not conflate audio validation, trial staging, and the user's Keep button.** This distinction has been lost in previous chats and must be preserved in all future implementation, status labels, and PRs.
-
-1. Autobrr/release-group candidates are identified and acquired under an episode-level duplicate guard. Downloaded files are examined using **actual ffprobe evidence** for both Japanese and English audio; the release title's `Dual-Audio` string is not proof.
-2. A candidate that **passes** dual-audio validation is staged into the **anime trial folder served by Jellyfin**, where the user can watch it. **Staging is NOT Keep**, and staging must not import the anime into Sonarr.
-3. **Keep is a later, explicit decision by the user after watching the trial in Jellyfin.** Only then does the established downstream workflow send the anime to Sonarr and continue its normal completion/integration steps. Never automatically press Keep or equate download completion/audio pass with this decision.
-4. If a candidate **fails Japanese+English audio validation**, it must never enter the Jellyfin trial or Sonarr. The desired workflow is to use the **existing verified, ownership-aware qBittorrent cleanup code** to remove that candidate's torrent **and its torrent payload files**, then safely release its episode claim and try **one** alternate release-group candidate. Deleting a failed candidate's owned torrent payload is distinct from deleting verified staged trial media or Sonarr/library files.
-5. Once a valid dual-audio candidate is **successfully staged for trial**, other release-group candidates for that TVDB series/season/episode should be skipped/closed; **do not wait for the user to click Keep** before clearing duplicate waiting jobs. Conversely, an audio failure can promote the next held group **only after cleanup is confirmed**; uncertain ownership, incomplete cleanup, or ambiguous failure must stop for review. Never download all competing groups simultaneously.
-6. All runtime torrent deletion must remain restricted to the existing verified ownership/cleanup gates and explicit authorized application policy. **No direct or unconditional qBittorrent deletion, NFS path deletion, or media cleanup** as a shortcut. User permission to implement this behavior in a PR is not permission to run cleanup on live torrents during development.
-
-**Status semantics:** `ON HOLD` means another candidate owns the episode's active trial acquisition; `SKIPPED DUPLICATE` means a valid candidate has been **staged for Jellyfin trial**, not kept in Sonarr; `NEEDS REVIEW` applies to unsafe/uncertain states. These lifecycle statuses are target behavior and must not be claimed implemented by a PR unless code/tests explicitly provide them.
-
-## Recovery and cleanup safety
-
-Architecture: **Checkpoint → Validate → Resume; or Cancel → Clean up abandoned resources → Preserve history.**
-
-- A verified staged episode is completion evidence, not trash. Repair/reconcile NFO/SQLite after interrupted finalization.
-- qB ownership is distinct from release identity, notification, job and staged episode provenance.
-- Never remove live torrents, torrent payloads, verified staged media, Sonarr-managed files, or reset SQLite without an explicitly reviewed plan and authorization.
-- Use mock qBittorrent/Sonarr and temporary directories/databases for automated tests.
-- Cancel must never be reported as cleanup completed unless the resources have actually been verified/cleaned. Preserve external/shared torrents and immutable canceled history.
-- The incident involving Cyberpunk Edgerunners `LOOKUP_AttributeError` needs tracebacks/reproduction, not speculative changes.
-- PR #66 is unfinished and includes recovery and cleanup work; review its current diff and CI before continuing it.
-
-## Instructions for a new development chat
-
-1. Read this `development.md`, `README.md`, current workflow YAMLs and the relevant handoff document (if attached).
-2. Query GitHub for current `develop`, PR #66, PR #67 and CI; documentation is not proof that a PR has merged or a deployment occurred.
-3. Ask before performing **live** deployment, SQLite migration, service restart, media deletion or torrent cleanup.
-4. Keep requested work narrow. Git SSH via standalone upgrader is the chosen upgrade method; remove legacy archive inputs. Future internet-hosted archive support is only a documented possibility.
-5. Report separately: coded, PR-open, CI-verified, merged, and deployed. Never conflate them.
-
-**Supporting project notes** (uploaded in conversation; not necessarily in repository): `anime-discovery-pr-handoff-2026-10-21.md`, `gemini-code-1792038645145.md`, `homelab-network-topology.md`, and `server-nas-network-build.md`. Check up-to-date runtime settings against historical notes.
-
-## Recent development handoff — identification and CI efficiency (2026-10-21)
-
-**Check GitHub for current state before acting.** The user merged PRs #75, #76, #77, #78, and #79 into `develop` as observed via GitHub; merging is **not** evidence of deployment to the VM. Do not touch production, media, SQLite, torrents, services or Shoko without explicit approval.
-
-- **PR #75 — AniDB candidate evidence:** New identity evidence retains AniDB IDs, matched titles and alternate titles for readable Matching Details; older ID-only records cannot be retroactively enriched.
-- **PR #76 — fail-closed season agreement:** No fabricated TVDB Season 1 or assumed destination episode when Anime-Lists lacks a unique mapping. Such cases remain `NEEDS_REVIEW` with `SEASON_EPISODE_MAPPING_UNVERIFIED`; explicit season disagreement remains a distinct review reason.
-- **PR #77 — identity retry UI:** The `Retry identification` button lives **inside Matching Details**, not in the compact Jobs table. It calls the existing CSRF-protected `/api/recheck-identity`, requeues eligible `NEEDS_REVIEW` notifications to `IDENTIFYING`, closes the modal on success and refreshes Jobs. This is not acquisition-job `Retry Now`, does not skip verification, and never overrides provider cooldown.
-- **PR #78 — TVDB throttle:** Scoped identity-worker TVDB calls use a shared SQLite request reservation, nominal 1-second spacing, HTTP 429 `Retry-After`, and transient-failure exponential backoff (10 to 600 seconds). Throttle deferrals are `LOOKUP_RETRY` and do not use up identity attempts. This is independent of AniDB's shared 10-second normal request gap and 600-second error backoff. **TVDB token caching and metadata caching were not implemented in PR #78**; do not claim otherwise.
-- **PR #79 — CI efficiency:** Stops full-suite runs on every `feature/**` or `fix/**` push, retains PR-to-`develop` and post-merge `develop` tests, keeps manual dispatch, and cancels superseded runs in their event-specific concurrency group.
-
-### Next priority: season-aware, exact episode identification
-
-Re:ZERO notification #19, release `[ToonsHub] ReZERO -Starting Life in Another World- S04E19 ...`, correctly parsed **release Season 4 Episode 19**, but earlier selected TVDB #305089 ↔ AniDB #11370 and reported mapped Season 1. The title check was 100%; series-title identity is **not** season-specific identity. The previous Season 1 fallback was one cause of potentially misleading evidence, now removed by #76. Investigate whether season-specific AniDB candidates are being overlooked, which Anime-Lists rules resolve the release episode, and whether the correct AniDB record is chosen. The public Anime-Lists records previously examined suggested another AniDB entry for Re:ZERO's fourth TVDB season (candidate #19242); **reverify against the actual XML fixture/validated source** rather than treating that as production-cache evidence. Earlier Saga of Tanya the Evil case similarly had release Season 2 versus mapped Season 1.
-
-**Non-negotiable verification:** correct TVDB series ID, verified TVDB season and episode, correct season-specific AniDB anime ID, Anime-Lists episode relationship (including offsets/explicit rules), and **exact internal AniDB episode database ID** from a verified catalog or reviewed mapping. AniDB episode *number* is not an internal episode *ID*. Never auto-approve on title similarity alone; absent or ambiguous evidence means review, while provider cooldown/unavailability means safe retry. Persist provenance for later Shoko integration. Keep Shoko, torrents and acquisition behavior unchanged until explicitly authorized.
-
-### CI / GitHub workflow rules for future assistants
-
-1. Read `.github/workflows/anime-python-tests.yml` at the active `develop` ref before asserting which triggers or concurrency settings apply. Never assume an older handoff is current.
-2. Avoid unnecessary per-file feature commits. Where supported, **batch related changes into a single commit**, then open the PR. If the GitHub connector requires sequential per-file commits, minimize avoidable churn. Once PR is open, new commits trigger its checks; obsolete runs should be canceled by concurrency configuration.
-3. Use a feature branch based on `develop`, open a PR targeting `develop`, and check **that PR's actual required checks** and final conclusions. Distinguish `push`, `pull_request`, and post-merge `develop` runs. Do not mistake one successful event for another successful event.
-4. **Do not ask for merge based only on a green push run.** Confirm relevant PR checks have completed successfully, including run status and conclusion; GitHub UI may display stale/in-progress checks. Never merge without the user's express approval.
-5. Treat GitHub Actions usage as a resource: queued time and runner execution differ; refer to Actions billable usage to verify costs. A test suite finishing does not prove the workflow job completed. Investigate stalls and redundant workflow triggers rather than repeatedly suggesting long waits.
-6. Every handoff should explicitly state **implemented / CI passed / merged / deployed** as separate states. Updating `develop` by PR does not update a live installation.
-
-### Active next steps
-
-- Prioritize the season-aware candidate discovery and complete AniDB↔TVDB episode-level verification using offline Anime-Lists/AniDB fixtures and tests, keeping fail-closed behavior.
-- Evaluate optional TVDB token and metadata caching separately, with credential and freshness safeguards. Do not conflate this with the already merged throttle.
-- Do not expand the Jobs table for retry controls; identity retry belongs in Matching Details.
+The next focused PR implements **durable intake/reliability infrastructure**, not the identity provider algorithm or media integrations.
