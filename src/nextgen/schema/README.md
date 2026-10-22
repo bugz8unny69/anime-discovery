@@ -13,12 +13,12 @@ The schema defines identity information, **not the release's actual contents**. 
 ## RFC-IDENTITY-001 — identity completion gate
 
 - Identity MUST populate `anime.anidb_id` with a positive AniDB anime ID.
-- Identity MAY populate `anime.tvdb_series_id` with a positive TVDB **series** ID for Sonarr. It MUST be a valid positive integer when present; lack of a TVDB link does not invalidate verified AniDB anime identity.
+- Identity MUST populate `anime.tvdb_series_id` with a verified positive TVDB **series** ID for Sonarr. A series is not pipeline-ready without this required series link.
 - Identity MUST populate `anime.title` with the identified anime title, **not the webhook release name**.
 - `episodes` MAY be omitted or empty and then normalizes to an empty array `[]`. When any `episodes[]` entries exist, **every entry MUST have an exact, independently verified positive AniDB episode ID**, for precise AniDB/Shoko episode identity. No placeholder or guessed episode IDs.
 - Identity MUST NOT publish a **completed series identity** if the series fails the V2 requirements. The job MUST record explicit incomplete/invalid-identity outcomes and traceable history, and MAY retry or await review. A **series-only** valid identity with zero episodes MUST NOT be treated as **completed episode/release identification** or authorize episode-specific acquisition completion, Shoko linking, or Sonarr episode import. Those later stages require exact verified episode identities and any additional integration-specific data.
 - Field types MUST be checked; unknown schema fields and incompatible versions MUST be rejected, not silently reinterpreted.
-- Empty optional information MUST be safe: missing `anime.tvdb_series_id` and other optional scalars normalize to `null`, missing `episodes` to `[]`, and missing `attributes` to `{}`. No component MAY silently invent a season number, episode number, AniDB ID or TVDB ID.
+- Empty optional information MUST be safe: missing optional scalars normalize to `null`, missing `episodes` to `[]`, and missing `attributes` to `{}`. Missing `anime.tvdb_series_id` is an identity validation failure, not an optional field. No component MAY silently invent a season number, episode number, AniDB ID or TVDB ID.
 - The schema describes verified **AniDB anime identity and only the episodes actually identified**. Numeric validation alone cannot independently verify a claimed AniDB ID: the identity component MUST establish AniDB identity using provider evidence before building the schema. Original release names are accepted as received and used as identification input; there is no provider voting or generic truth/trust scoring mechanism.
 - An AniDB anime ID may represent one sequel/cour entry while the same TVDB series groups several AniDB anime entries. Never assume a TVDB series ID uniquely determines AniDB anime ID, TVDB season, or episode placement.
 
@@ -28,7 +28,7 @@ The schema defines identity information, **not the release's actual contents**. 
 | --- | --- | --- |
 | `schema_version` | MUST equal 2 | Schema version |
 | `anime.anidb_id` | MUST | Exact AniDB anime identity |
-| `anime.tvdb_series_id` | MAY be null | Optional TVDB series-level link for Sonarr |
+| `anime.tvdb_series_id` | MUST | Verified TVDB series-level link for Sonarr |
 | `anime.title` | MUST | Real identified anime title |
 | `anime.english_title`, `anime.original_title`, `anime.type`, `anime.year` | MAY be null | Additional anime series descriptors |
 | `episodes` | MAY be absent or empty | List of *individually verified* episodes; omitted normalizes to `[]` |
@@ -48,9 +48,9 @@ Every serialized episode has the same field names after parsing/normalization; o
 
 - `src/nextgen/tests/fixtures/anime_series_v2_verified.json`: identified series and episode with optional exact TVDB placement.
 - `src/nextgen/tests/fixtures/anime_series_v2_continuous.json`: continuous AniDB episode numbering without TVDB placement.
-- `src/nextgen/tests/fixtures/anime_series_v2_series_only.json`: series identity with optional TVDB link absent and no identified episodes (such as a season-pack whose contents are not yet known).
+- `src/nextgen/tests/fixtures/anime_series_v2_series_only.json`: series identity with required TVDB series link and no identified episodes (such as a season-pack whose contents are not yet known).
 - `src/nextgen/tests/fixtures/anime_series_v1_*.json`: preserved V1 regression examples, now rejected by V2 validation.
-- `src/nextgen/tests/test_anime_series_schema.py`: checks mandatory AniDB series fields, optional TVDB link, empty/missing episodes, mandatory exact IDs on any populated episode, and unconventional numbering.
+- `src/nextgen/tests/test_anime_series_schema.py`: checks mandatory AniDB and TVDB series IDs, empty/missing episodes, mandatory exact IDs on any populated episode, and unconventional numbering.
 
 ## Next PR — reliability infrastructure, *not* identity provider implementation
 
