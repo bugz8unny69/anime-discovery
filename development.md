@@ -1,62 +1,67 @@
-# Anime Discovery — NextGen development guide
+# Anime Discovery — NextGen development handoff
 
-> **Architecture decision:** 2026-10-22. NextGen starts fresh. This is the authoritative development handoff for the *new* app, not a migration plan or an instruction to modify production.
+> **Authoritative architecture decision: 2026-10-22.** NextGen is built fresh in `src/nextgen/`. There is **no migration**, compatibility bridge, legacy SQLite reader or transitional data assembler. Legacy `src/legacy/` is reference material for domain lessons and regression tests only.
 >
-> **Safety:** Never merge, deploy, restart services, migrate legacy SQLite, download/delete torrents, or alter staged media without explicit approval. Work in branches targeting `develop`. The old `src/legacy/` application stays operational and unmodified.
+> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `develop` as the PR target and verify CI before proposing merge.
 
-## What we are building
+## What is canonical
 
-Build a new, **component-based Anime Discovery** in `src/nextgen/`, using one versioned canonical `ReleaseRecord` schema across the complete lifecycle:
+**Product schema, not processing state.** NextGen uses one versioned `AnimeProduct v1` contract (`src/nextgen/contracts/anime_product.py`; detailed RFC at `src/nextgen/contracts/README.md`). The product describes **the anime and its episodes**. It MUST NOT include webhook notification IDs, traces, GUIDs, source release names, job IDs, retries, acquisition, staging, evaluation, or export status. That information lives in independent durable operational records connected to the product after identification.
 
-1. **Autobrr webhook intake:** authenticate, bound/validate input, persist **each accepted delivery** as a distinct event and record its trace ID. The sender can change names, GUIDs and other fields. **Do not perform release-name, GUID, anime, or episode deduplication at intake.** Source/GUID are historical observations, not identity authority.
-2. **Identity:** identify the **verified AniDB anime ID and verified AniDB episode ID**; independently verify the related **TVDB series ID, exact TVDB season and episode**, with mapping evidence. Prefer AniDB for anime identity; retain tested cross-provider mapping requirements. Do not infer episode equality, TVDB season 1, or a sequel/part/cour mapping from a title.
-3. **Identity evidence cache:** reuse validated anime/episode evidence quickly on repeated submissions, while testing whether a new release actually matches cached identity. Cache keys/provenance must be grounded; a manipulated title or GUID is not proof. Bound simultaneous lookups and external-provider rate limits. Cache cannot replace verification.
-4. **Canonical episode claim:** only **after exact identity has been verified**, check whether the episode is already claimed, acquired, staged, or kept. Implement atomic claim semantics so 10,000 deliveries do not create 10,000 downloads; preserve all notification histories separately. Define equivalence carefully for alternate releases and episodes.
-5. **Acquisition:** enforce existing size, safety, torrent ownership, Japanese and English audio requirements. Never make a new acquisition decision based solely on an unverified incoming payload.
-6. **Staging/Jellyfin:** use verified TVDB ID, season and episode for NFO and Jellyfin compatibility; use AniDB IDs/provenance where helpful. Revalidate source and destination paths, containment, symlinks, permissions, and ownership **at the moment of use**. Never trust a path because a schema field exists.
-7. **Human evaluation:** the user explicitly chooses Keep or Reject; merely reaching staging never means Keep.
-8. **Keep/Sonarr export:** use existing proven exact mapping and safe import behavior. Reject uses ownership-aware cleanup. **Do not defer TVDB reconciliation to this stage**: staging NFOs already require it.
+The identified product's required fields are:
+- `anime.anidb_id`: positive AniDB anime ID (anime and sequel/cour identity).
+- `anime.tvdb_series_id`: positive TVDB **series** ID for Sonarr.
+- `anime.title`: nonblank **identified anime title**, not the original release name.
+- `episodes`: one or more individually identified episodes.
+- `episodes[].anidb_episode_id`: positive exact AniDB episode ID, including Shoko needs.
+- `schema_version`: exactly `1` until a new contract version is approved.
 
-## One canonical versioned schema
+Other product descriptors (alternative/original titles, year, anime type, AniDB episode display numbers, episode title/type, optional `episodes[].tvdb_placement` and `attributes`) are nullable or optional. TVDB *episode-level* IDs and per-episode TVDB season/episode mapping **are not hard identity-completion requirements**. Known placement is represented as `{season, episode}` inside the episode, with season 0 permitted for specials. AniDB episode numbering MAY be continuous or nonstandard. Never infer TVDB season from AniDB ordinal, default unknown to S01/E01, or conflate separately cataloged AniDB sequel entries under one TVDB series.
 
-`ReleaseRecord v1` lives in `src/nextgen/contracts/release_record.py` on draft PR #92. This is **a new schema and storage design**; NextGen must **not** read or migrate production/legacy SQLite through a compatibility assembler. The old code is reference material for tested behavior, algorithms, integration contracts, safety failures and fixtures; there is **no data migration or old-to-new runtime bridge**.
+Every published product MUST satisfy a uniform, machine-checkable contract; optional fields normalize to null/empty object to spare future consumers missing-key crashes. Field docs track meaning, reason, owner, availability, and origin. Breaking changes require explicit schema versioning and permanent offline fixture tests. Structured optional attributes never override the core named fields.
 
-- Keep a single structure throughout the pipeline. Intake creates initial fields; later components populate only their own sections, leaving not-yet-established values explicitly missing.
-- Preserve **both** `identity.anidb_id` (anime identity) and `identity.anidb_episode_id` (exact AniDB episode identity), plus `identity.tvdb_id`, `identity.season`, `identity.episode`, and `identity.mapping_source` (mapping provenance). These values must be verified; no guesses or silent overwrites. Future additional stable provider episode IDs need their own documented contract changes.
-- Keep `notification_id` / `AD-<notification_id>` as *delivery* and trace identities; `anidb_id + anidb_episode_id` and the separately verified TVDB relationship describe *content identity*. Many deliveries can point to the same verified content.
-- Keep job identity, job attempts and identity cache provenance distinct from content identity. Stage outcomes require verified prerequisites; a schema instance itself is **not proof** that a provider verified it.
-- Define field metadata for **meaning, reason, owner, available, trust** (machine-checkable, PHPDoc-like). Schema v1 fixtures and tests must remain available after future version changes. Breaking changes require a new version and explicit contract tests, never silent reinterpretation.
+### RFC-IDENTITY-001: mandatory completion gate
 
-## Component boundaries and orchestration
+**This gate is at the END of identification, not at the webhook and not at some later acquisition stage.**
 
-Components are **static, explicitly called and independently testable**: Intake, Identity, Cache, Episode Claim, Acquisition, Staging, Review, Sonarr Export, and Observability. No runtime plugin discovery, dynamic hook registration, provider voting, or generic hook execution framework.
+- The identification component gathers information in its own *incomplete* work state. An unrecognized anime, absent TVDB series link, or missing AniDB episode ID is **not** a completed product.
+- Before changing work state to **IDENTIFIED/COMPLETE**, the identity component MUST validate the full candidate via `AnimeProduct.from_dict` (or the equivalent strict contract checker). Only a passing result may be saved/published as the authoritative product and referenced by downstream work.
+- Failed validation MUST prevent identification from being marked complete and MUST block downstream acquisition. Persist a reason-coded, traceable **INCOMPLETE_IDENTITY** or **INVALID_IDENTITY** outcome in operational job history. The identity work MAY retry when information improves, or enter review. A failed candidate is a normal per-item outcome; it MUST NOT crash workers or lose the original webhook notification.
+- A completed product's identity can be read without repeated identification by downstream components. Components still enforce their own **separate**, integration-specific prerequisites (e.g. exact TVDB episode placement before the NFO/episode import operation that needs it, file ownership/path verification at use time). The RFC is not authorization to acquire or export.
 
-A thin job coordinator schedules bounded durable work, reloads validated canonical records, and persists each stage's result. Components own their data/logic; the coordinator does not make identity or media-safety decisions. A component needing private extra evidence changes internally; shared record changes require contract review and affected consumer tests.
+## NextGen processing components
 
-Design **fresh NextGen job persistence**, borrowing proven ideas (SQLite transactions, idempotency, independent completion, leases, retries, failure recovery) from the old `anime_async_daemon.py`; don't copy or depend on the legacy runtime for production. Accept an intake request only after durable write. The implementation must sustain bursty intake through bounded queues, backpressure and controlled provider requests. A large backlog is not permission to skip or collapse incoming histories.
+Explicit static components, each with narrow responsibility:
+1. **Webhook intake:** accept each authenticated, reasonably bounded delivery, retain the supplied release name as-is and write the delivery durably. No anime/episode/GUID/name-based deduplication here. Deliveries are observations, not products.
+2. **Identity and cache:** resolve identified AniDB anime + exact AniDB episode(s), real title and TVDB series link. Reuse previously established cache evidence when applicable, while checking it applies to each input. No provider scoring/voting system and no assumption that altered title means new anime. The **identity gate** validates before marking done.
+3. **Canonical episode claim:** once an exact episode identity exists, atomically determine if work for that episode has already been claimed/handled, preventing duplicate acquisition under parallel submissions. Preserve every source delivery and trace history.
+4. **Acquisition:** own torrent operations, torrent identity/ownership, configured size limits, and Japanese + English audio checks. Do not infer identity from an acquisition job.
+5. **Staging/Jellyfin:** own staging files and NFO output; require necessary TVDB placement for the particular operation and validate path/filesystem ownership at the moment of use.
+6. **Human review and Sonarr export:** explicit Keep or Reject; exact export is never authorized merely by staging or by an identified product. Preserve existing hard-won mapping and safe import semantics, without linking runtime legacy code.
 
-## Logging is core infrastructure
+The coordinator owns bounded durable scheduling, not business-logic decisions. Logging/history uses stable per-delivery Postfix-style `AD-N` trace IDs and independent job IDs, *outside* AnimeProduct. Store structured durable history with safe reason codes, retries, cache activity and component boundaries; protect credentials and other sensitive data in logs.
 
-Use structured, sanitized, durable events and journal output with stable Postfix-like trace identifiers. Every stage and job start/finish, cache hit/miss, exact identity determination, episode claim, retry/review, safe reason code, staging result and Keep/Reject result should be traceable. Separate one delivery's trace from canonical episode grouping. Dashboard Activity/History must eventually expose copyable trace and job IDs and ordered history. Avoid leaking secrets, untrusted release payloads, credential URLs or unsafe paths. Journal rotation must not erase persistent activity history.
+## Next PR: delivery and worker reliability (TCP-like, application-level)
 
-## Safety and regression contract
+**Primary goal:** a webhook receipt that got HTTP success must not disappear or be silently unprocessable after a crash. TCP is an analogy for acknowledge/retry/recovery; do not promise literally failure-free or exactly-once execution.
 
-Prior code exposed important season-mapping problems. Preserve tested semantics from `src/legacy/test_anime_unified_identity_monitor.py`, `src/legacy/test_anime_episode_crossref.py` and related tests as **behavioral requirements**, not as migration wiring: correct AniDB-first sequel discovery, independent verified cross-reference, no automatic guessed season or episode, safe handling of specials, split cours, duplicates and absent provider data.
+Scope:
+- Fresh standalone NextGen webhook handler, authenticated/validated/size-bounded, plus **fresh** SQLite durable inbox. Acknowledge successful submissions only **after** durable commit.
+- Commit both the delivery record and its pending identity work marker atomically. This may be one inbox row with `PENDING` status; do not assume a separate executable job row per webhook is required.
+- Bounded processing, leases or recoverable claims, retry/backoff on temporary failure, explicit permanent-error/manual-review state, graceful backpressure/retryable HTTP responses under overload.
+- Every accepted delivery remains independently traceable; no content-based deduplication at intake. Identity caching and *post-completion* episode claims are separate later work. Nothing in the product schema tracks retries, attempts or delivery receipt.
+- Offline fault-injection and concurrency tests: 10,000 requests with duplicate or changed release names, process death between commit and acknowledgment, crash during work, SQLite failure, restart recovery, provider unavailable, poison payload, duplicate acquisition claim protection (when built), log correlation, and bounded resource usage.
+- No production changes, no real provider integrations, no live acquisition, no Jellyfin/Shoko/Sonarr side effects and no migration of legacy data.
 
-Use offline fixture suites for new code: different webhook GUIDs/names for same verified anime/episode, genuine alternate episodes, ambiguous mappings, repeat delivery bursts and concurrent claims, cache evidence reuse and cache-poisoning resistance, provider outages, secure path validation, NFO identity, dual-audio, explicit Keep and restart durability. A schema test validates shape and field metadata; component tests validate *evidence authenticity and behavior*.
+Failure semantics: **accepted does not mean identified; identified does not mean acquired.** A validation failure fails *that identification attempt* cleanly. System-wide crashlessness is a design target, not an absolute guarantee; persistence, recovery and visibility are testable service invariants.
 
-## Delivery and PR status
+## Regression expectations and PR boundaries
 
-- **PR #89:** closed without merge; experimental identity job/hook pipeline superseded.
-- **PR #90:** unrelated discovery/backfill design. Do not add automatic Prowlarr backfill in NextGen infrastructure.
-- **PR #91:** draft tracing/component-boundary exploration; its previous legacy-assembler/migration-oriented handoff is superseded by **this document**. Reconcile or close obsolete PR directions before merging.
-- **PR #92:** draft fresh `ReleaseRecord v1` contract, now requiring exact AniDB episode ID and documentation. **No runtime integration or deployment.**
+Preserve domain behaviors as test cases, not code bridges: AniDB versus TVDB sequel/cour disagreement, Re:ZERO's verified mapping and exact episode references, season zero/specials, multi-episode releases, ambiguous or duplicate mapping, missing provider data, safe file ownership, dual audio, and explicit human approval.
 
-### Next focused work
+- **PR #89:** closed without merge, superseded.
+- **PR #90:** independent optional backfill design, **not** automatic backfill for NextGen.
+- **PR #91:** draft exploratory traces/docs from legacy; outdated migration suggestions are superseded. Do not merge a stale handoff.
+- **PR #92:** draft, offline-only AnimeProduct v1 contract and RFC identity-completion tests. No NextGen deployment or background worker included.
 
-1. Review PR #92's schema contract for **exact AniDB anime and episode ID**, verified TVDB episode mapping, owned fields, and serialization/version tests.
-2. Build a **fresh NextGen webhook intake** against a **fresh NextGen database**, saving every valid delivery (no GUID/title content dedup), with bounded authentication, logging, trace IDs and load tests.
-3. Design identity resolution/cache and post-verification atomic canonical episode claims as separate components before implementing acquisition.
-4. Continue NextGen stage-by-stage. Never migrate historical legacy data or connect NextGen to live systems without a separate explicit authorization and rollout plan.
-
-This guide replaces previous mixed legacy-development notes. For host-specific operational setup, inspect the current repository and runtime configuration independently; **do not treat historical text as a deployment instruction**.
+The next focused PR implements **durable intake/reliability infrastructure**, not the identity provider algorithm or media integrations.
