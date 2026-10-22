@@ -25,8 +25,8 @@ jobs:
           python-version: '3.12'
       - name: Compile Python modules
         run: python -m compileall -q src/legacy src/nextgen
-      - name: Validate NextGen AnimeProduct v1 RFC identity gate
-        run: python -m unittest -v src.nextgen.tests.test_anime_product_contract
+      - name: Validate NextGen AnimeSeries v1 RFC identity gate
+        run: python -m unittest -v src.nextgen.tests.test_anime_series_schema
       - name: Run focused offline integration tests
         env:
           PYTHONPATH: src/legacy
@@ -84,7 +84,7 @@ jobs:
             test_anime_dispatch_claim_recovery \
             test_anime_acquisition_restart_integration \
             test_anime_acquisition_end_to_end \
-            test_anime_shoko_contract \
+            test_anime_shoko_schema \
             test_anime_shoko_link_plan \
             test_anime_fresh_database \
             test_anime_fresh_acquisition_integration \
