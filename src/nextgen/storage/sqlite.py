@@ -99,11 +99,25 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
     aid = anime["anidb_id"]
     now = int(time.time()*1000) if validated_at_ms is None else validated_at_ms
     with db:
+        event = db.execute("SELECT state,lease_token,lease_expires_at_ms FROM webhook_events WHERE event_id=?", (event_id,)).fetchone()
+        if event is None:
+            raise ValueError("unknown event")
+        existing_result = db.execute("SELECT result_id,series_json FROM identity_results WHERE event_id=? AND anidb_id=?", (event_id,aid)).fetchone()
+        if existing_result is not None:
+            if json.loads(existing_result[1]) != payload:
+                raise ValueError("conflicting retry result")
+            return existing_result[0]
+        if event[0] not in ("PENDING","RUNNING","RETRY_WAIT"):
+            raise ValueError("event is not eligible for identity persistence")
+        if event[0] == "RUNNING":
+            raise ValueError("leased work requires explicit ownership verification")
         existing = db.execute(
             "SELECT tvdb_series_id,title FROM identified_anime WHERE anidb_id=?",
             (aid,)).fetchone()
-        if existing and existing != (anime["tvdb_series_id"],anime["title"]):
-            raise ValueError("conflicting canonical anime metadata")
+        if existing and existing[0] != anime["tvdb_series_id"]:
+            raise ValueError("conflicting canonical TVDB identity")
+        if existing and existing[1] != anime["title"]:
+            db.execute("UPDATE identified_anime SET title=? WHERE anidb_id=?", (anime["title"],aid))
         db.execute(
             "INSERT OR IGNORE INTO identified_anime VALUES(?,?,?)",
             (aid,anime["tvdb_series_id"],anime["title"]))
@@ -122,6 +136,7 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
                 "INSERT OR IGNORE INTO identified_episodes VALUES(?,?)",(eid,aid))
             db.execute(
                 "INSERT INTO result_episode_links VALUES(?,?,?)",(rid,aid,eid))
+        db.execute("UPDATE webhook_events SET state='IDENTIFIED', next_run_at_ms=NULL, lease_token=NULL, lease_expires_at_ms=NULL, last_reason_code=NULL WHERE event_id=?", (event_id,))
         db.execute(
             "INSERT INTO event_history(event_id,occurred_at_ms,event_code)"
             " VALUES(?,?,'SERIES_IDENTIFIED')",(event_id,now))
