@@ -106,7 +106,7 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(alerts(self.db,self.settings,{},now=2000,sender=self.sender)["sent"],1)
         self.assertEqual(self.db.execute("SELECT attempts FROM unified_identity_checks").fetchone()[0],3)
 
-    def test_verified_episode_ten_excluded_and_backfill_queued_once(self):
+    def test_verified_episode_ten_excluded_without_automatic_backfill(self):
         import json
         report={"decision":"AUTO_VERIFIED","issues":[],
                 "title_queries":["Example Show"],
@@ -124,9 +124,7 @@ class TriageTests(unittest.TestCase):
             (self.nid,)).fetchone()[0],"EPISODE_EXCLUDED")
         jobs=self.db.execute(
             "SELECT kind,payload_json FROM daemon_jobs").fetchall()
-        self.assertEqual(len(jobs),1)
-        self.assertEqual(jobs[0][0],"series_gap_search")
-        self.assertEqual(json.loads(jobs[0][1])["up_to"],6)
+        self.assertEqual(jobs,[])
         self.assertEqual(check_once(self.db,settings,{},now=1300,
             probe=lambda *_:report.copy())["processed"],0)
         self.assertEqual(self.db.execute(
