@@ -56,3 +56,8 @@ SQL/Python activity-pair consistency, safe readable display selection, historic
 activity snapshots and v4→v5 rebuild preservation/rollback/FK restoration. The
 latest fresh/sequential metadata comparison now includes migration 005. Tests
 remain intentionally unexecuted.
+
+Final diagnostic review adds test_api_diagnostics.py for independent api
+logging and audit attribution, v5→v6 history preservation, index/FK integrity,
+version rejection and rollback. The latest sequential path includes 006.
+No test execution or CI is authorized in the current phase.

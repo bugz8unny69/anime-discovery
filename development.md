@@ -8,8 +8,8 @@
 
 The PR #100 branch implements shared messages.py event/state catalogs and a
 translation-ready renderer, history.py transaction-bound audit writers, and
-SQLite schema v5 (004_diagnostic_components.sql, 005_job_statuses.sql and
-fresh-schema changes).
+SQLite schema v6 (004_diagnostic_components.sql, 005_job_statuses.sql,
+006_api_diagnostics.sql and fresh-schema changes).
 Existing settings/logging and reason registry are reused. Logging now resolves
 static English copy, derives correlation from IDs, and emits bounded safe
 exception summaries. Runtime-only OPERATION_FAILED does not add a job state.
@@ -19,7 +19,7 @@ Job states/activity: [JOB_STATUSES.md](src/nextgen/JOB_STATUSES.md).
 Contract/API: [DIAGNOSTIC_CONTRACT.md](src/nextgen/DIAGNOSTIC_CONTRACT.md).
 Schema/version authority: [SCHEMA_POLICY.md](src/nextgen/storage/SCHEMA_POLICY.md).
 These documents supersede older planning snapshots below where status differs.
-PR #100 remains under review; do not assume it merged. Source review and AST
+Use GitHub as the authority for PR #100 publication/merge status. Source review and AST
 syntax checks only; offline tests are included but unexecuted, with no CI runs.
 
 Next component: coordinator claims/routing, leases and stale-owner fencing,
@@ -28,6 +28,39 @@ offline lifecycle/concurrency/recovery cases. Diagnostic writers do not enforce
 those transitions. No coordinator loop, supervisor reload distribution, journal
 service integration, dashboard API, deployment or legacy modifications are
 implemented by this diagnostics PR.
+
+## Management process boundary and configuration readiness review
+
+Agreed: the management API runs in a separate process, using diagnostic
+component api. ADM and dashboard are clients of that API. The API owns
+management authentication/authorization and invokes shared services; the
+service account owns its writable files/directories. The coordinator only
+manages independent jobs and a small async pause/drain/resume/shutdown control
+interface. It does not host the public management API, persist settings or run
+schema migrations as ordinary jobs. Supervisor owns process management later.
+
+Configuration audit after diagnostics: NextGen settings.py currently supplies
+only strict logging-section validation, immutable snapshots and JSON loading.
+It does not yet implement a versioned configuration envelope, explicit field
+rename/type conversions, locked atomic persistence, safe credential storage,
+revision/conflict checks, change/restart classification or coordinated reload.
+Therefore the configuration infrastructure is NOT complete. Legacy
+anime_settings_schema.py, anime_shared_settings.py and
+anime_admin_config_migration.py are reusable design/code references: defaults
+and type validation, locked atomic file replacement, backup/preview behavior.
+Their add-missing-defaults migration is not a general versioned converter.
+Legacy modules must not become NextGen runtime dependencies.
+
+Next work order: finish versioned configuration conversion/validation and
+service-owned persistence; implement the shared migration runner and
+cross-process maintenance/readiness contract; define the async job-handler
+input/outcome/recovery interface. Implement the separate authenticated
+management API against those services, then the coordinator against its job
+and control contracts. These contracts can be defined together without
+embedding the API in the coordinator. No hook/plugin system is introduced.
+The full dashboard, supervisor, provider and acquisition implementations remain
+later work. Configuration/management feature changes belong in focused PRs,
+not extensions that silently enlarge the diagnostics implementation.
 
 ## NextGen settings and diagnostics foundation — 2026-10-22
 

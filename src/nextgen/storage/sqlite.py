@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS event_history (
  reason_code TEXT,
  details_json TEXT,
  component TEXT CHECK(component IS NULL OR component IN
-  ('supervisor','intake','coordinator','identity','acquisition'))
+  ('supervisor','intake','coordinator','identity','acquisition','api'))
 );
 CREATE TABLE IF NOT EXISTS identified_anime (
  anidb_id INTEGER PRIMARY KEY CHECK(anidb_id > 0),
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS job_history (
  reason_code TEXT,
  details_json TEXT CHECK(details_json IS NULL OR json_valid(details_json)),
  component TEXT CHECK(component IS NULL OR component IN
-  ('supervisor','intake','coordinator','identity','acquisition')),
+  ('supervisor','intake','coordinator','identity','acquisition','api')),
  activity_code TEXT CHECK(activity_code IS NULL OR activity_code IN
   ('DOWNLOADING','WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH','SKIPPED_DUPLICATE'))
 );
@@ -123,13 +123,13 @@ def connect(path):
     return db
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v5; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v6; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4 databases require explicit versioned SQL migrations
-    before accessing v5-only storage.
+    Existing v1/v2/v3/v4/v5 databases require explicit versioned SQL migrations
+    before accessing v6-only storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 5:
+    if version == 6:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -139,7 +139,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=5;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=6;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

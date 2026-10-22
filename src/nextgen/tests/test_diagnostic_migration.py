@@ -81,8 +81,9 @@ class DiagnosticMigrationTests(unittest.TestCase):
                 raise
             finally:
                 other.execute("PRAGMA foreign_keys=ON")
+            other.executescript(script("006_api_diagnostics.sql"))
             self.assertEqual(structure(self.db), structure(other))
-            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 6)
         finally:
             other.close()
 
@@ -116,7 +117,7 @@ class DiagnosticMigrationTests(unittest.TestCase):
         initialize(self.db)
         self.db.execute("INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES('test',X'61',1)")
         self.db.commit()
-        for component in (None, "intake", "coordinator", "identity", "acquisition", "supervisor"):
+        for component in (None, "intake", "coordinator", "identity", "acquisition", "supervisor", "api"):
             with self.db:
                 self.db.execute("INSERT INTO event_history(event_id,occurred_at_ms,event_code,component)"
                                 " VALUES(1,1,'HISTORICAL',?)", (component,))

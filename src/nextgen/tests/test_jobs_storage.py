@@ -95,6 +95,8 @@ class JobsStorageTests(unittest.TestCase):
                 finally:
                     db.execute("PRAGMA foreign_keys=ON")
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 5)
+                db.executescript((sql_dir / "006_api_diagnostics.sql").read_text())
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 6)
                 initialize(db)
             finally:
                 db.close()

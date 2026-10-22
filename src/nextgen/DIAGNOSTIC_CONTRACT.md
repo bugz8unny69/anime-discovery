@@ -100,7 +100,7 @@ Display states require state.<entity>.<CODE>.label:
 | incoming_event | IDENTIFIED | Series identified |
 
 The two entities use separate keys even where English text matches. These
-labels cover all states currently permitted by SQLite v5; they add no state.
+labels cover all states currently permitted by SQLite v6; they add no state.
 All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
@@ -160,7 +160,7 @@ An intake-created job's emitting component is intake; a job created by a
 handler records the actual creator component, not an inferred parent role.
 Caller APIs must make component attribution explicit where it is ambiguous.
 
-## SQLite v4/v5 and compatibility
+## SQLite v4/v5/v6 and compatibility
 
 Durable component attribution cannot be reconstructed reliably from the
 existing v3 rows. 004_diagnostic_components.sql therefore provides the v3→v4 migration
@@ -174,14 +174,14 @@ Record attempts using the bounded details fields already introduced by #97.
 No new trace column, provenance relationship, or domain field is necessary.
 
 PR #100 includes 004_diagnostic_components.sql, matching fresh SCHEMA and
-user_version=5, storage helper changes, schema-policy documentation and offline
+user_version=6, storage helper changes, schema-policy documentation and offline
 fresh-install/sequential-upgrade tests. Published 001/002/003/004 are untouched
 by the v5 follow-up. The new
 004 checks its starting version inside its transaction. 005_job_statuses.sql
 then upgrades v4→v5 for job states/activities by rebuilding jobs and preserving
 its references. Its caller must roll back on error and always restore foreign
-keys in finally. initialize() creates a fresh v5 database atomically, accepts
-v5, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
+keys in finally. initialize() creates a fresh v6 database atomically, accepts
+v6, and refuses to stamp an older or unversioned existing schema. A version-aware migration runner remains later
 work; do not start using scripts against any live database.
 
 ## Runtime logging and reload
@@ -228,7 +228,7 @@ distribution remain deployment/future-component work, not implemented features.
    nullable historical component, and optional created_by_job_id preservation.
 6. History persists at CRITICAL logging; disabled/failed log sinks do not
    suppress committed history. Rolled-back work has no success lifecycle log.
-7. Fresh v5 and sequential upgrades preserve IDs, payloads, foreign keys,
+7. Fresh v6 and sequential upgrades preserve IDs, payloads, foreign keys,
    indexes, histories and versions; failed upgrades do not claim a new version.
 8. Safe exception diagnostics at every supported level, bounded output and
    no secret leakage across known redaction edge cases.
@@ -248,7 +248,7 @@ syntax parsing were performed; neither establishes runtime correctness.
 
 ## Remaining sequence
 
-Review this implementation, v4/v5 persistence changes and unexecuted offline
+Review this implementation, v4/v5/v6 persistence changes and unexecuted offline
 cases. The next component is coordinator ownership, routing, retries and
 atomic completion against this contract. Dashboard, supervisor distribution, management
 API, intake service and provider business logic remain later milestones.
@@ -299,3 +299,20 @@ events require registered reasons; ACTIVITY_CHANGED records a snapshot without
 inventing a failure reason. Specific handler reasons are registered when their
 semantics are implemented. No cancellation actions, download ownership logic,
 condition signaling or coordinator loop is implemented by the schema change.
+
+## Separate process boundary and final diagnostic review
+
+The future management API has its own process and api component identity.
+It owns request authentication/authorization and invokes shared management
+libraries. The coordinator owns job claiming, dispatch, leases, scheduling and
+outcomes. It hosts no public management endpoints, settings persistence or SQL
+migration API. Its small internal async control interface will support pause,
+drain, resume, shutdown and readiness acknowledgment through the later shared
+maintenance protocol. Supervisor owns process launch/restart when implemented.
+
+006_api_diagnostics.sql permits api emitter attribution in both history tables,
+with matching fresh v6 schema and logging overrides. Published 001-005 remain
+unchanged. No HTTP API or cross-process control transport is implemented here.
+The final diagnostic review includes API attribution and v6 migration regression
+cases; all offline tests remain unexecuted. Source review, AST syntax parsing
+and diff checks are the only validation performed under current policy.

@@ -110,9 +110,12 @@ users. Because referenced jobs is rebuilt, foreign_keys is disabled before
 BEGIN. The caller must ROLLBACK on error and restore foreign_keys=ON in a
 finally block. The script restores it on success. No production runner is
 implemented or invoked. Historical migrations 001 through 004 stay immutable.
-initialize() creates only a fresh v5 database or accepts v5; older versions
+initialize() creates only a fresh v6 database or accepts v6; older versions
 require explicit upgrades.
 
 Offline tests cover state/activity constraints, messages, historical snapshots,
 fresh/sequential schema agreement, data preservation and failed migration/FK
 restoration. They are committed but not executed. No CI runs or live upgrades.
+
+The subsequent v6 migration only adds api diagnostic attribution; job
+states/activity and their history snapshots retain the v5 meanings above.

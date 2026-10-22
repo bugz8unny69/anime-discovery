@@ -6,7 +6,7 @@ from types import MappingProxyType
 import json
 
 LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-COMPONENTS = frozenset({"supervisor", "intake", "coordinator", "identity", "acquisition"})
+COMPONENTS = frozenset({"supervisor", "intake", "coordinator", "identity", "acquisition", "api"})
 
 @dataclass(frozen=True)
 class LoggingSettings:

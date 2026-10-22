@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, coordinator, superv
 
 ## Current NextGen SQLite state (PR #100 implementation)
 
-Latest fresh SQLite version: **5**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **6**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ Latest fresh SQLite version: **5**. The version stored in `PRAGMA user_version` 
 | 3 | `003_incoming_events.sql` | Rename `webhook_events` to `incoming_events`, preserving rows and updating SQLite foreign-key references |
 | 4 | `004_diagnostic_components.sql` | Add nullable emitting component to both history tables, retaining historical rows |
 | 5 | `005_job_statuses.sql` | Expand lifecycle states and add typed current/historical activity |
+| 6 | `006_api_diagnostics.sql` | Permit the separate api emitter in both history tables |
 
 **Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`.
 
@@ -41,7 +42,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v5 or accepts an existing v5 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4 files require an explicit, future migration component.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v6 or accepts an existing v6 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5 files require an explicit, future migration component.
 - A future runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -125,3 +126,22 @@ Fresh SCHEMA and initialize() now use v5. Published 001/002/003/004 remain
 unchanged. No state is inferred from historical reason strings: existing
 NextGen jobs keep their exact state and receive NULL activity. This is not a
 legacy database import. See JOB_STATUSES.md for the display/legacy mapping.
+
+## v6 separate API diagnostic attribution
+
+The management API is a separate process from the coordinator. Its stable
+component identifier is api in logging settings, runtime diagnostics and
+both history tables. Using coordinator or supervisor as the API emitter would
+misattribute actions and is not a substitute for its own component identity.
+
+006 upgrades v5→v6 by rebuilding event_history and job_history with the expanded
+component CHECK vocabulary. It preserves every row, history ID, unknown code,
+nullable historical component, typed activity and both history indexes. The
+foreign-key constraints remain enabled throughout. An in-transaction version
+guard and FK check precede the version bump/commit. On any script error the
+caller must ROLLBACK. Published 001-005 remain unchanged.
+
+The current fresh schema and initialize() use v6. This adds attribution only;
+no API server, authentication, configuration writer or coordinator is created.
+Offline API logger/audit and v6 preservation/rollback/version cases are included
+but unexecuted. The latest fresh-versus-sequential metadata case includes 006.

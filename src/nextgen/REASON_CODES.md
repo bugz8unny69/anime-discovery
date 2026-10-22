@@ -53,7 +53,7 @@ Unsupported work must remain visible; do not silently discard it.
 
 ## Comparison with the current foundations
 
-SQLite v5 retains arbitrary historical reason text in `last_reason_code`, `event_history`
+SQLite v6 retains arbitrary historical reason text in `last_reason_code`, `event_history`
 and `job_history`; no SQL enum or schema migration is needed for this catalog.
 Job states are PENDING, RUNNING, RETRY_WAIT, NEEDS_REVIEW and DONE; event states
 also include IDENTIFIED rather than DONE. States are not reason codes.
