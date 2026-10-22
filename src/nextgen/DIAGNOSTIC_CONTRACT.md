@@ -100,7 +100,7 @@ Display states require state.<entity>.<CODE>.label:
 | incoming_event | IDENTIFIED | Series identified |
 
 The two entities use separate keys even where English text matches. These
-labels cover all states currently permitted by SQLite v7; they add no state.
+labels cover all states currently permitted by SQLite v8; they add no state.
 All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
@@ -180,7 +180,7 @@ by the v5 follow-up. The new
 004 checks its starting version inside its transaction. 005_job_statuses.sql
 then upgrades v4→v5 for job states/activities by rebuilding jobs and preserving
 its references. Its caller must roll back on error and always restore foreign
-keys in finally. initialize() now creates a fresh v7 database atomically, accepts v7, and
+keys in finally. initialize() now creates a fresh v8 database atomically, accepts v8, and
 refuses to stamp an older or unversioned existing schema. The explicit version-aware
 runner is documented in storage/MIGRATIONS.md; no live upgrades have been executed.
 
@@ -328,3 +328,15 @@ initialization, migration runner and offline cases use the latest v7 contract.
 Configuration schema v2 explicitly converts coordinator keys to worker; neither
 reading a file nor starting a job silently migrates persistent settings.
 The management API remains a separate process. Tests are included but unexecuted.
+
+
+## Handler invocation history
+
+The existing jobs model is retained. SQLite v8 adds registered handler_code,
+static handler_label snapshot and invocation_id on job_history; ordinary/old
+history entries use NULL. HANDLER_STARTED/HANDLER_COMPLETED/HANDLER_FAILED
+have shared readable messages, with a registered reason required for failure.
+Each invocation stays tied to one job/attempt and can be rendered separately
+from job lifecycle state. See JOB_HANDLERS.md for registration, translation,
+transaction ordering and the requirement for future worker lease fencing.
+No worker runtime, management API or work_items redesign is introduced.

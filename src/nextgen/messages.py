@@ -8,6 +8,7 @@ from types import MappingProxyType
 import re
 import unicodedata
 
+from src.nextgen.handlers import EMPTY_HANDLERS, HandlerCatalog, HandlerDefinition
 from src.nextgen.reasons import REGISTRY, display_reason, get_reason
 
 
@@ -33,6 +34,9 @@ _EVENTS = (
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),
     EventDefinition("CANCELED", "job", "Job canceled.", True),
+    EventDefinition("HANDLER_STARTED", "job", "Job handler started."),
+    EventDefinition("HANDLER_COMPLETED", "job", "Job handler completed."),
+    EventDefinition("HANDLER_FAILED", "job", "Job handler failed.", True),
     EventDefinition("ACTIVITY_CHANGED", "job", "Job activity updated."),
     EventDefinition("CONFIGURATION_SAVED", "runtime", "Configuration updated."),
     EventDefinition("CONFIGURATION_MIGRATED", "runtime", "Configuration upgrade completed."),
@@ -110,6 +114,7 @@ def _english():
         "reason.UNKNOWN.message": "Additional processing information is available.",
         "reason.UNKNOWN.action": "Review the job history.",
         "state.UNKNOWN.label": "Unknown status",
+        "handler.UNKNOWN.label": "Unknown job handler",
     })
     return values
 
@@ -134,7 +139,11 @@ class MessageCatalog:
     No interpolation, file watching or network loading. Unknown keys and unsafe
     translations fail validation before changing any active application state.
     """
-    def __init__(self, translations=None):
+    def __init__(self, translations=None, *, handlers=EMPTY_HANDLERS):
+        if type(handlers) is not HandlerCatalog:
+            raise ValueError("invalid handler catalog")
+        self._handlers = handlers
+        self._english = MappingProxyType({**ENGLISH, **handlers.messages()})
         if translations is None:
             translations = {}
         if type(translations) is not dict:
@@ -145,23 +154,40 @@ class MessageCatalog:
                     or locale == "en" or type(entries) is not dict):
                 raise ValueError("invalid translation locale")
             for key, text in entries.items():
-                if type(key) is not str or key not in ENGLISH:
+                if type(key) is not str or key not in self._english:
                     raise ValueError("unregistered translation key")
                 _validate_text(text)
             snapshot[locale] = MappingProxyType(dict(entries))
         self._translations = MappingProxyType(snapshot)
 
     def text(self, key, *, locale="en"):
-        if type(key) is not str or key not in ENGLISH:
+        if type(key) is not str or key not in self._english:
             raise ValueError("unregistered message key")
         selected = self._translations.get(locale, {}) if type(locale) is str else {}
-        return selected.get(key, ENGLISH[key])
+        return selected.get(key, self._english[key])
 
     def event(self, code, *, locale="en"):
         known = type(code) is str and code in EVENTS
         key = f"event.{code if known else 'UNKNOWN'}.message"
         return {"code": safe_code(code), "message_key": key,
                 "message": self.text(key, locale=locale)}
+
+    def handler(self, code, *, recorded_label=None, locale="en"):
+        """Current translations, or a validated historical static label snapshot."""
+        try:
+            entry = self._handlers.require(code)
+        except ValueError:
+            entry = None
+        if entry is not None:
+            return {"code": entry.code, "message_key": entry.message_key,
+                    "message": self.text(entry.message_key, locale=locale)}
+        try:
+            historical = HandlerDefinition(code, recorded_label)
+        except ValueError:
+            return {"code": safe_code(code), "message_key": "handler.UNKNOWN.label",
+                    "message": self.text("handler.UNKNOWN.label", locale=locale)}
+        return {"code": historical.code, "message_key": historical.message_key,
+                "message": historical.label}
 
     def reason(self, code, *, locale="en"):
         result = display_reason(code)

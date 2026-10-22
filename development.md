@@ -4,6 +4,24 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Handler invocation history follow-up — 2026-10-22
+
+Keep the existing jobs table and independent queued-job model. No work_items or
+to-do table is introduced. A job's kind selects its registered entry handler;
+additional handler calls appear as separate job_history entries, not an array
+on jobs. The history follow-up builds on draft naming PR #103; it is not assumed
+merged. Its implementation is a separate focused PR targeting NextGen.
+
+SQLite v8 adds nullable handler_code, handler_label and invocation_id to
+job_history with paired metadata and invocation indexes. HANDLER_STARTED,
+HANDLER_COMPLETED and HANDLER_FAILED have static readable catalog messages;
+trusted handler registrations supply static labels and translation keys.
+All attempts/calls remain tied to the existing job_id. Historical rows retain
+NULL metadata. Published 001–007 are unchanged. Details and worker transaction/
+lease-fencing requirements: [JOB_HANDLERS.md](src/nextgen/JOB_HANDLERS.md).
+No jobs columns, state policies, API or worker execution loop change here.
+Tests are included but unexecuted; source/AST/diff checks only.
+
 ## SQLite migration and maintenance follow-up — 2026-10-22
 
 PR #101 (configuration library) and PR #102 (SQLite migrations/maintenance)

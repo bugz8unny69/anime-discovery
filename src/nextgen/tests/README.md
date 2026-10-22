@@ -81,3 +81,11 @@ v1→v2 key/logging conversion, preserved values/revisions, mixed-name rejection
 SQLite v6→v7 historical attribution, new worker audits, version guards and
 rollback. Existing runtime diagnostic tests now use worker; sequential migration
 coverage includes 007 and all starting versions v1–v7. Tests remain unexecuted.
+
+
+Handler history follow-up: test_handler_history.py and
+test_handler_history_migration.py cover multiple/repeated calls, attempts,
+start/end matching, reasons, readable labels/logging/translations, caller rollback,
+v7→v8 preservation, indexes/constraints, wrong versions and migration rollback.
+Sequential runner cases include every supported starting version v1–v8. The
+existing jobs table is unchanged. All these tests remain **unexecuted**.

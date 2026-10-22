@@ -83,8 +83,9 @@ class DiagnosticMigrationTests(unittest.TestCase):
                 other.execute("PRAGMA foreign_keys=ON")
             other.executescript(script("006_api_diagnostics.sql"))
             other.executescript(script("007_worker_component.sql"))
+            other.executescript(script("008_handler_history.sql"))
             self.assertEqual(structure(self.db), structure(other))
-            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 8)
         finally:
             other.close()
 

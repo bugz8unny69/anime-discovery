@@ -10,6 +10,7 @@ import re
 import sqlite3
 import time
 
+from src.nextgen.handlers import HANDLER_EVENTS, HandlerDefinition, invocation_id
 from src.nextgen.history import component_name, integer, trace_id
 from src.nextgen.messages import DEFAULT_CATALOG, JOB_ACTIVITIES, STATES, validate_event
 from src.nextgen.reasons import get_reason
@@ -106,6 +107,18 @@ def _message(name, fields):
             raise ValueError("unregistered diagnostic cause")
         parts.extend(("cause_reason_code=" + cause,
                       "cause_message=" + json.dumps(DEFAULT_CATALOG.reason(cause)["message"])))
+    handler = fields.get("handler_code")
+    label = fields.get("handler_label")
+    invocation = fields.get("invocation_id")
+    if name in HANDLER_EVENTS:
+        definition = HandlerDefinition(handler, label)
+        invocation_id(invocation)
+        parts.extend(("handler_code=" + definition.code,
+                      "handler_message=" + json.dumps(DEFAULT_CATALOG.handler(
+                          definition.code, recorded_label=definition.label)["message"]),
+                      "invocation_id=" + invocation))
+    elif any(value is not None for value in (handler, label, invocation)):
+        raise ValueError("handler metadata requires a handler event")
     activity = fields.get("activity_code")
     if activity is not None:
         if type(activity) is not str or activity not in JOB_ACTIVITIES:
@@ -176,7 +189,9 @@ def log_history(logger, record):
                  reason_code=record.reason_code, component=record.component,
                  event_id=record.event_id, job_id=record.job_id,
                  created_by_job_id=record.created_by_job_id, attempt=details.get("attempt"),
-                 cause_reason_code=details.get("cause_reason_code"), activity_code=record.activity_code)
+                 cause_reason_code=details.get("cause_reason_code"), activity_code=record.activity_code,
+                 handler_code=record.handler_code, handler_label=record.handler_label,
+                 invocation_id=record.invocation_id)
 
 
 class Span:

@@ -1,5 +1,7 @@
 # SQLite upgrades and maintenance library
 
+Latest schema: **v8**, including handler invocation history.
+
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
 API, ADM command, worker, supervisor and recovery UI are future consumers.
@@ -33,7 +35,7 @@ belong in their libraries. Nested admissions are prohibited: an outer handler
 passes its admitted context to helpers rather than asking them to admit again.
 
 `admitted_connection(gate)` is a convenience for a complete standalone database
-operation: admit, open an existing current-v7 database with FK enforcement, and
+operation: admit, open an existing current-v8 database with FK enforcement, and
 close it before releasing admission. It never initializes or upgrades. Legacy
 low-level `connect()` remains for explicit bootstrap/offline fixtures; existing
 storage helpers are connection-based and do not secretly take admissions.
@@ -92,12 +94,12 @@ request alone. Stable file lock artifacts remain after successful completion.
 
 ## Version-aware database runner
 
-Only existing, regular, versioned NextGen SQLite databases at v1–v7 are supported.
+Only existing, regular, versioned NextGen SQLite databases at v1–v8 are supported.
 Version 0, unknown/newer versions, schema drift, orphan foreign keys and failed
 integrity checks are refused. An empty new DB uses explicit `initialize()`;
 legacy databases are never detected/imported by guessing table names.
 
-The immutable bundled manifest names 001–007. Preview reports starting/target
+The immutable bundled manifest names 001–008. Preview reports starting/target
 versions, a schema fingerprint and the missing-script SHA-256 values. Preview
 uses a read transaction and read-only database connection; it makes no schema
 changes, backups or implicit database. SQLite may access existing WAL/SHM files;
@@ -120,7 +122,7 @@ executes complete SQL statements without `executescript`'s implicit pre-commit.
 Before each script's COMMIT, it checks resulting version, table/index/constraint
 structure, all foreign keys and database integrity. It always rolls back a failed
 step and restores FK enforcement, particularly for the v5 referenced-table rebuild.
-The final v7 contract is compared with fresh `SCHEMA`.
+The final v8 contract is compared with fresh `SCHEMA`.
 
 **Atomicity is per migration version, not the whole upgrade chain.** If v4 commits
 and v5 fails, the database remains at v4; backup retains the pre-upgrade version,
@@ -149,3 +151,9 @@ stale plans/script changes, scoped/expired leases, backup failure, precommit rol
 and partial-chain recovery, FK restoration, symlinks, cross-process drain, controller
 process death and explicit resume. Tests are authored but **not executed**. No CI,
 SQL execution, deployment, legacy runtime changes or live database access occurred.
+
+
+The handler-history follow-up extends the latest schema to v8 through immutable
+008, rebuilding only job_history. The jobs table and independent queue model
+remain unchanged; handler invocation fields/indexes are described in
+SCHEMA_POLICY.md and ../JOB_HANDLERS.md. Published 001–007 remain unchanged.
