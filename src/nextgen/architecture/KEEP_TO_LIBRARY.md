@@ -225,3 +225,9 @@ Reviewed at repository commit `6051cedddd5a09de0cb3150565288205d5a92aee`:
 These provide behavior constraints, not NextGen runtime dependencies. The draft
 separates import verification from recoverable cleanup rather than copying the
 legacy controller structure or treating all helper code as production wiring.
+
+
+Media destination follow-up: configuration v3 now registers storage.trial_root
+and storage.keep_root. Both are unconfigured by default; Keep's actual Sonarr
+root must agree with keep_root when that integration is implemented. Other
+integration, permissions and retention settings above remain future work.

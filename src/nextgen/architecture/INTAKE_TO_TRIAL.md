@@ -157,9 +157,10 @@ Three roots have different purposes:
 | --- | --- | --- |
 | storage.download_root | Download-client working/source content | Keep torrent source and ownership evidence separate from published files |
 | storage.trial_root | Configurable review destination requested by the user | Stage validated video and required sidecars here; this is not the permanent library |
-| sonarr.root_folder or equivalent library setting | Permanent library destination, discussed in the Keep design | Never select it merely because a torrent completed |
+| storage.keep_root | Permanent library destination, discussed in the Keep design | Never select it merely because a torrent completed |
 
-These settings are **not currently registered** in configuration_schema.py.
+trial_root and keep_root are now registered in configuration v3 with blank
+unconfigured defaults. download_root remains a future acquisition setting.
 Add actual fields, validation/apply metadata and offline cases in their component
 PRs; do not silently assume legacy settings are accepted. Exact keys are proposals.
 Validate directory existence, safe containment, access and effective service

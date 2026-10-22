@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 2
+CONFIGURATION_VERSION = 3
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -55,6 +55,8 @@ class FieldDefinition:
     restart_components: tuple[str, ...] = ()
     minimum: int | None = None
     maximum: int | None = None
+    label: str = ""
+    help_text: str = ""
 
 
 # Register new fields with their actual component; do not expose speculative
@@ -65,6 +67,10 @@ FIELDS = MappingProxyType({
     "api.host": FieldDefinition("127.0.0.1", "host", "restart", ("api",)),
     "api.port": FieldDefinition(8765, "integer", "restart", ("api",), 1, 65535),
     "worker.concurrency": FieldDefinition(4, "integer", "restart", ("worker",), 1, 32),
+    "storage.trial_root": FieldDefinition("", "directory", "next_operation",
+        label="Trial video folder", help_text="Absolute destination for newly staged trial videos. Leave blank until configured. Existing files are not moved."),
+    "storage.keep_root": FieldDefinition("", "directory", "next_operation",
+        label="Keep video folder", help_text="Absolute permanent destination for approved Keep videos. Must agree with the library import target when Sonarr is used."),
     "storage.database_path": FieldDefinition(
         "/var/lib/anime-discovery/nextgen.sqlite", "path", "restart", tuple(sorted(COMPONENTS))),
 })
@@ -100,7 +106,8 @@ def field_definitions():
     """Detached JSON-compatible metadata for the future authenticated API."""
     return {path: {"default": _plain(spec.default), "type": spec.kind,
                    "apply_mode": spec.apply_mode, "restart_components": list(spec.restart_components),
-                   "minimum": spec.minimum, "maximum": spec.maximum}
+                   "minimum": spec.minimum, "maximum": spec.maximum,
+                   "label": spec.label or path, "help": spec.help_text}
             for path, spec in FIELDS.items()}
 
 
@@ -139,6 +146,14 @@ def validate_values(value):
                         or str(PurePosixPath(item)) == "/"
                         or any(ord(char) < 32 or ord(char) == 127 for char in item)):
                     raise ConfigurationError()
+            elif spec.kind == "directory":
+                if type(item) is not str:
+                    raise ConfigurationError()
+                if item and (not PurePosixPath(item).is_absolute() or item.startswith("//")
+                        or item == "/" or str(PurePosixPath(item)) != item
+                        or any(part in (".", "..") for part in item.split("/"))
+                        or any(ord(char) < 32 or ord(char) == 127 for char in item)):
+                    raise ConfigurationError()
             elif spec.kind == "levels":
                 if type(item) is not dict:
                     raise ConfigurationError()
@@ -148,6 +163,13 @@ def validate_values(value):
         parse_settings({"logging": result["logging"]})
     except (ValueError, TypeError):
         raise ConfigurationError() from None
+    roots = [PurePosixPath(result["storage"][key]) for key in ("trial_root", "keep_root")
+             if result["storage"][key]]
+    if len(roots) == 2 and (roots[0].is_relative_to(roots[1]) or roots[1].is_relative_to(roots[0])):
+        raise ConfigurationError()
+    database = PurePosixPath(result["storage"]["database_path"])
+    if any(database.is_relative_to(root) for root in roots):
+        raise ConfigurationError()
     return result
 
 
@@ -246,7 +268,7 @@ def _v1_values(values):
         raise ConfigurationError()
     if "coordinator" in components:
         components["worker"] = components.pop("coordinator")
-    historical = validate_values(current)
+    historical = _v2_values(current)
     historical["coordinator"] = historical.pop("worker")
     levels = historical["logging"]["components"]
     if "worker" in levels:
@@ -274,9 +296,34 @@ def _v1_to_v2(document):
     return {"schema_version": 2, "revision": current_revision + 1, "settings": values}
 
 
+def _v2_values(values):
+    """Freeze published v2 keys/defaults; additions belong only to v3."""
+    if type(values) is not dict:
+        raise ConfigurationError()
+    storage = values.get("storage", {})
+    if type(storage) is not dict or set(storage) & {"trial_root", "keep_root"}:
+        raise ConfigurationError()
+    historical = validate_values(values)
+    del historical["storage"]["trial_root"]
+    del historical["storage"]["keep_root"]
+    return historical
+
+
+def _v2_to_v3(document):
+    if (type(document) is not dict
+            or set(document) != {"schema_version", "revision", "settings"}
+            or document["schema_version"] != 2):
+        raise ConfigurationError()
+    current_revision = revision(document["revision"])
+    if current_revision == MAX_REVISION:
+        raise ConfigurationError()
+    return {"schema_version": 3, "revision": current_revision + 1,
+            "settings": validate_values(_v2_values(document["settings"]))}
+
+
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3})
 
 
 def convert_document(document):
