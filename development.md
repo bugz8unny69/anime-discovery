@@ -29,6 +29,30 @@ Every published series MUST satisfy a uniform, machine-checkable schema; optiona
 - Failed series schema validation MUST prevent completed anime-series identification; missing/unverified episode identities MUST separately block episode-specific acquisition completion, Shoko linking and Sonarr episode import. Persist a reason-coded, traceable **INCOMPLETE_IDENTITY** or **INVALID_IDENTITY** outcome in operational job history. The identity work MAY retry when information improves, or enter review. A failed candidate is a normal per-item outcome; it MUST NOT crash workers or lose the original webhook notification.
 - A series identity, even with no identified episodes, can be read without repeated anime-series identification by downstream components. Components still enforce their own **separate**, integration-specific prerequisites (e.g. exact TVDB episode placement before the NFO/episode import operation that needs it, file ownership/path verification at use time). The RFC is not authorization to acquire or export.
 
+## Job architecture handoff — agreed 2026-10-22 (follow-up to merged PR #94)
+
+**Current work:** dedicated jobs-table SQLite follow-up on branch `nextgen/dedicated-jobs-20261022`, targeting `NextGen`. PR #94 already merged the six-table SQLite foundation and AnimeSeries v2 remains unchanged.
+
+**Agreed design:** Webhook intake and the worker/coordinator are different Linux processes (different PIDs). Intake durably writes the original webhook observation and an initial `jobs` row in a single SQLite transaction, then acknowledges. The worker/coordinator polls `jobs`, atomically leases eligible work, dispatches by `kind`, records outcomes and recovers expired leases. Components can request new independent jobs.
+
+**No parent/child relationship:** `created_by_job_id` is nullable provenance only, not a dependency, hierarchy, sibling relation, execution ordering, or cascading-lifecycle rule. `event_id` is also nullable on jobs for work without a webhook. Every job has an independent lifecycle. Completing a job and creating a follow-up job must be an atomic SQLite transaction when both operations are required.
+
+**Job history:** `job_history` records independent job transitions, attempts, handoffs and reason-coded failures; it is separate from webhook `event_history`. A future coordinator must insert the history record together with the associated job state change.\n\n**SQLite v1 jobs columns:** job_id, nullable event_id, nullable created_by_job_id, kind, payload_json, state (PENDING/RUNNING/RETRY_WAIT/NEEDS_REVIEW/DONE), available_at_ms, attempt_count, nullable lease_token, nullable lease_expires_at_ms, nullable last_reason_code, created_at_ms, updated_at_ms. Multiple jobs may originate from one event. No global UNIQUE(kind, subject) rule should discard independent deliveries. The coordinator must use lease-token and expiry checks to prevent stale owners from committing. A job result does not, by itself, prove acquisition or episode coverage.
+
+**Incremental compatibility:** PR #94's `webhook_events` includes historical work-state fields and `save_identity` operates on them. This follow-up adds dedicated `jobs` storage; removing old event-state coupling and implementing real workers is distinct later work. Do not mistake the existence of a jobs table for a functioning coordinator.
+
+**Scope:** SQLite schema, basic persistence helpers, documentation, isolated tests in `src/nextgen/tests/`. No intake HTTP service, no daemon, no acquisition, no migration from legacy, no production deployment. Leave automatic paid CI disabled; tests remain tracked, with offline comprehensive testing planned later per user decision. Do not claim unrun tests have passed. No merge/deployment without fresh authorization.
+
+## Versioned SQLite SQL files — PR #95
+
+The future **NextGen-only** migration component will read ordered scripts from `src/nextgen/storage/sql/`:
+
+- `001_foundation.sql` creates exactly the initial six-table NextGen foundation and sets `PRAGMA user_version=1`. Use this only on an empty NextGen database.
+- `002_independent_jobs.sql` adds the independent `jobs` and append-only `job_history` tables and their indexes and sets `PRAGMA user_version=2`. Apply this to a version-1 NextGen database. It does not recreate the six existing tables or alter their rows.
+- On a fresh database, run 001 then 002. On an existing verified v1 database, run only 002. At v2, do not reapply either script.
+
+The migration component is **not implemented** in this PR. When built, it must check `PRAGMA user_version`, reject missing/unknown/unexpected versions, apply each SQL script atomically (including its version bump), and verify integrity. A failed migration must roll back without claiming the new version. Never run these scripts against legacy production databases. The Python `initialize()` helper creates v2 on a genuinely empty database and rejects implicit upgrades of v1 rather than silently stamping a later version. Existing `webhook_events` work-state columns remain until a separate compatibility change.
+
 ## NextGen processing components
 
 Explicit static components, each with narrow responsibility:
