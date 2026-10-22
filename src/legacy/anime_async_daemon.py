@@ -138,6 +138,16 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
                 except asyncio.TimeoutError:
                     pass
                 continue
+            # Optional observability: never let history storage stop job execution.
+            from anime_trace_history import trace_for_job, record as record_trace
+            trace_id, trace_notification = "AJ-" + str(job["id"]), None
+            try:
+                with sqlite3.connect(db_path,isolation_level=None,timeout=10) as trace_db:
+                    trace_id,trace_notification=trace_for_job(trace_db,job)
+                    record_trace(trace_db,trace_id,"JOB_STARTED",job_id=job["id"],
+                                 notification_id=trace_notification,stage=job["kind"])
+            except (sqlite3.Error,ValueError):
+                LOG.warning("event=TRACE_RECORD_FAILED job_id=%d",job["id"])
             span = Span()
             event(LOG, logging.INFO, "JOB_STARTED", subsystem="worker",
                   operation=job["kind"], job_id=job["id"], attempt=job["attempts"] + 1)
@@ -206,6 +216,11 @@ async def run_workers(db_path, handlers, *, concurrency=4, poll_seconds=1.0, sto
             with sqlite3.connect(db_path,isolation_level=None,timeout=10) as db:
                 try:
                     finish(db,job["id"],job["lease_token"],outcome,reason=reason)
+                    try:
+                        record_trace(db,trace_id,"JOB_FINISHED",job_id=job["id"],
+                                     notification_id=trace_notification,stage=job["kind"],outcome=outcome)
+                    except (sqlite3.Error,ValueError):
+                        LOG.warning("event=TRACE_RECORD_FAILED job_id=%d",job["id"])
                 except ValueError:
                     # The lease was reclaimed; never overwrite its new owner.
                     pass
