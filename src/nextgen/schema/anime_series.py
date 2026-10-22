@@ -59,9 +59,9 @@ class Anime:
     title: str = documented(meaning="Identified anime title, not webhook release name",
         reason="Describe the series to every consumer", owner="identity",
         available="series identity completion", origin="anime metadata")
-    tvdb_series_id: Optional[int] = optional(meaning="Optional TVDB series ID for Sonarr",
-        reason="Record a verified Sonarr series link when known without requiring it for AniDB identity",
-        owner="identity", available="when independently mapped", origin="TVDB cross-reference")
+    tvdb_series_id: int = documented(meaning="Verified TVDB series ID for Sonarr",
+        reason="Required series-level connection so the downstream Sonarr pipeline can operate",
+        owner="identity", available="series identity completion", origin="TVDB cross-reference")
     english_title: Optional[str] = optional(meaning="English anime title",
         reason="Useful catalog and display data", owner="identity",
         available="when known", origin="anime metadata")
@@ -77,8 +77,7 @@ class Anime:
 
     def __post_init__(self):
         positive(self.anidb_id, "anime.anidb_id")
-        if self.tvdb_series_id is not None:
-            positive(self.tvdb_series_id, "anime.tvdb_series_id")
+        positive(self.tvdb_series_id, "anime.tvdb_series_id")
         if type(self.title) is not str or not self.title.strip():
             raise ValueError("anime.title MUST be nonblank identified anime title")
         for name in ("english_title", "original_title", "type"):
