@@ -284,7 +284,26 @@ for(const job of data.items){
 const tr=document.createElement("tr");
 td(tr,job.received_at?new Date(job.received_at*1000).toLocaleString():"One-time request");
 let title=td(tr,"");let release=document.createElement("span");release.className="job-release";release.textContent=job.release;release.title=job.release;title.appendChild(release);
-if(typeof job.id==="number"){let id=document.createElement("small");id.className="muted";id.textContent=" · Notification #"+job.id;title.appendChild(id)}
+if(typeof job.id==="number"){
+let id=document.createElement("small");id.className="muted";
+id.textContent=" · Notification #"+job.id+" · ";
+title.appendChild(id);
+let trace=document.createElement("button");trace.type="button";trace.className="secondary";
+trace.textContent="Trace AD-"+job.id;
+trace.title="View durable activity history for this notification";
+trace.addEventListener("click",async()=>{
+ try{
+  const response=await fetch("/api/activity-trace?notification_id="+encodeURIComponent(job.id),{cache:"no-store"});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"Trace unavailable");
+  const lines=data.events.map(e=>new Date(e.recorded_at*1000).toLocaleString()+
+   " · "+(e.job_id===null?"":("Job #"+e.job_id+" · "))+
+   (e.hook?e.hook+" · ":"")+e.event+(e.outcome?" · "+e.outcome:""));
+  alert("Trace "+data.trace_id+"\\n"+(lines.length?lines.join("\\n"):"No durable hook events yet"));
+ }catch(error){alert(error.message)}
+});
+title.appendChild(trace);
+}
 if(job.series_title){title.appendChild(document.createElement("br"));
 let small=document.createElement("small");small.className="muted";small.textContent=job.series_title;title.appendChild(small)}
 td(tr,job.source).classList.add("hide-mobile");
