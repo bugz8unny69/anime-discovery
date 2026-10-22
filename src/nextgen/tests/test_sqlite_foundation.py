@@ -60,9 +60,45 @@ class SQLiteFoundationTests(unittest.TestCase):
                                          (event,)).fetchone()[0], "PENDING")
 
     def test_foreign_keys_reject_unknown_event(self):
-        with self.assertRaises(sqlite3.IntegrityError):
+        with self.assertRaises(ValueError):
             save_identity(self.db, 999, self.candidate())
         self.assertEqual(self.db.execute("SELECT count(*) FROM identified_anime").fetchone()[0], 0)
+
+    def test_success_updates_event_state(self):
+        event = accept_event(self.db, "autobrr", b"payload")
+        save_identity(self.db, event, self.candidate())
+        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+                                         (event,)).fetchone()[0], "IDENTIFIED")
+
+    def test_identical_retry_is_idempotent(self):
+        event = accept_event(self.db, "autobrr", b"payload")
+        first = save_identity(self.db, event, self.candidate())
+        again = save_identity(self.db, event, self.candidate())
+        self.assertEqual(first, again)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM identity_results").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM event_history WHERE event_code='SERIES_IDENTIFIED'").fetchone()[0], 1)
+
+    def test_metadata_correction_keeps_old_snapshot(self):
+        first = accept_event(self.db, "autobrr", b"a")
+        save_identity(self.db, first, self.candidate())
+        second = accept_event(self.db, "autobrr", b"b")
+        revised = self.candidate()
+        revised["anime"]["title"] = "Corrected Anime"
+        save_identity(self.db, second, revised)
+        self.assertEqual(self.db.execute("SELECT title FROM identified_anime").fetchone()[0], "Corrected Anime")
+        self.assertIn("Test Anime", self.db.execute(
+            "SELECT series_json FROM identity_results WHERE event_id=?", (first,)).fetchone()[0])
+
+    def test_conflicting_tvdb_identity_is_rejected_atomically(self):
+        save_identity(self.db, accept_event(self.db, "autobrr", b"a"), self.candidate())
+        event = accept_event(self.db, "autobrr", b"b")
+        conflict = self.candidate()
+        conflict["anime"]["tvdb_series_id"] = 999
+        with self.assertRaises(ValueError):
+            save_identity(self.db, event, conflict)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM identity_results").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+                                         (event,)).fetchone()[0], "PENDING")
 
 
 if __name__ == "__main__":
