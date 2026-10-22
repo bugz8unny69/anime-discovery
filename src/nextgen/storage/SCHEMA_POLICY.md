@@ -1,0 +1,67 @@
+# NextGen SQLite schema and change policy
+
+## Mandatory rule: application changes and SQL schema changes go together
+
+**Any PR that adds, removes, renames, or changes a SQLite table, column, index, foreign key, constraint, trigger, or persisted data shape MUST update the NextGen schema in that same PR.** Do not introduce a code-only SQL change that works solely because somebody manually patched a database. Likewise, do not ship a migration that leaves the Python persistence layer or its schema snapshot inconsistent.
+
+For every change, contributors must:
+
+1. Add the next numbered SQL file under `src/nextgen/storage/sql/` for existing database upgrades, with a documented expected starting `PRAGMA user_version`, atomic upgrade semantics, and the new version. **Never edit an already published 001/002/003 migration** to change its meaning.
+2. Update the latest fresh-database `SCHEMA` in `src/nextgen/storage/sqlite.py`, including dependent foreign keys, constraints, indexes and references, and update the fresh-database `user_version`.
+3. Update every matching SQL query, insert/update helper, and model-to-storage mapping used by the component. Do not put business logic or operational/job fields into the `AnimeSeries` domain model merely to avoid a DB change.
+4. Add or update offline tests in `src/nextgen/tests/` for both a **fresh database** and the **sequential upgrade path**, including representative existing rows, referential integrity, and rollback/failure behavior. Commit these tests even when test execution is deferred.
+5. Update **this document** when table meaning, schema version, relationships, or migration instructions change. Document any new columns and whether they can be NULL, their defaults, and their validation rules.
+6. In the PR description, list the schema version transition, files changed, compatibility considerations, and whether tests have been run. Never describe unrun tests as passing.
+
+This applies to **all** future components, including intake, coordinator, supervisor, identity, dashboard and `m` admin commands. Any program needing a new table or new stored field must accompany that requirement with a versioned schema change; no silent ad-hoc `CREATE TABLE` or `ALTER TABLE` inside runtime components.
+
+## Current NextGen SQLite state (as of PR #98)
+
+Latest fresh SQLite version: **3**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+
+| Version | SQL file | Purpose |
+| --- | --- | --- |
+| 1 | `001_foundation.sql` | Historical foundation: accepted events (`webhook_events` at that version), event history, identified anime and episodes, identity results and episode links |
+| 2 | `002_independent_jobs.sql` | Independent `jobs` and `job_history`; `created_by_job_id` is **optional provenance**, not a parent/child dependency relationship |
+| 3 | `003_incoming_events.sql` | Rename `webhook_events` to `incoming_events`, preserving rows and updating SQLite foreign-key references |
+
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`.
+
+- `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
+- `event_history`: event-specific timeline and reasons.
+- `identified_anime` / `identified_episodes`: verified identities and exact AniDB episode ownership; multiple AniDB anime may share a TVDB **series** ID.
+- `identity_results` / `result_episode_links`: validated, versioned identity snapshots and event-specific episode associations. The domain model's optional episode coverage is distinct from operational state.
+- `jobs`: independent queued work with optional original `event_id` and `created_by_job_id` provenance.
+- `job_history`: durable operational job timeline, independent of journald verbosity.
+
+Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alongside these incrementally versioned historical SQL scripts. They **must remain logically equivalent after the full upgrade sequence**, even though their historical names can differ.
+
+## Migration and deployment boundaries
+
+- Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
+- `initialize(db)` currently initializes an empty NextGen database to v3 or accepts an existing v3 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2 files require an explicit, future migration component.
+- A future runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
+- A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
+- SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
+- Keep SQL transactions short and preserve durable event/job writes and history. Do not infer that a schema change implements coordinator runtime behavior.
+
+## Test preparation policy for the current development phase
+
+**Code and offline tests are committed, but CI and offline tests are intentionally not executed right now**, per the project development decision. Test execution and any discovered failures are deferred and must be reported honestly. Keep test fixtures and explicit fresh-schema + migration-path regression cases ready for later local execution. No production deployment is implied by merging.
+
+## PR checklist for any SQLite-affecting change
+
+- [ ] New numbered, immutable-history-preserving SQL migration committed (unless no persistence shape changes)
+- [ ] `src/nextgen/storage/sqlite.py` fresh schema and `user_version` updated
+- [ ] Runtime SQL/queries and all dependent table/column references updated
+- [ ] Fresh-install and sequential-migration tests added/updated
+- [ ] Schema reference and migration notes here updated
+- [ ] Test execution status accurately documented (currently **not run**)
+- [ ] No legacy DB, production service, automatic CI or deployment touched
+
+## Reference PRs
+
+- [#93](https://github.com/bugz8unny69/anime-discovery/pull/93) — Python `AnimeSeries` v2 domain schema; **not** a database migration.
+- [#94](https://github.com/bugz8unny69/anime-discovery/pull/94) — SQLite schema foundation v1.
+- [#95](https://github.com/bugz8unny69/anime-discovery/pull/95) — SQLite jobs foundation v2.
+- [#98](https://github.com/bugz8unny69/anime-discovery/pull/98) — SQLite inbound event naming migration v3.
