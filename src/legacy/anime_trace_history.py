@@ -15,6 +15,27 @@ def for_notification(notification_id):
         raise ValueError("Invalid notification id")
     return "AD-" + str(notification_id)
 
+def trace_for_job(db, job):
+    """Use notification lineage when available, otherwise a stable job-root ID."""
+    kind=job["kind"]
+    key=job["subject_key"]
+    nid=None
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='anime_job_lineage'").fetchone():
+        row=db.execute("SELECT notification_id FROM anime_job_lineage WHERE job_id=?",
+                       (job["id"],)).fetchone()
+        if row and row[0]:
+            nid=row[0]
+    if nid is None and kind in ("claimed_acquisition","verified_batch_acquisition") and str(key).isdigit():
+        nid=int(key)
+    if nid is None and kind=="identity_resolution" and str(key).startswith("notification:"):
+        raw=str(key).split(":",1)[1]
+        if raw.isdigit():
+            nid=int(raw)
+    if nid is not None and db.execute(
+            "SELECT 1 FROM notifications WHERE id=?",(nid,)).fetchone():
+        return for_notification(nid),nid
+    return "AJ-"+str(job["id"]),None
+
 def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS anime_trace_events (
         id INTEGER PRIMARY KEY,
