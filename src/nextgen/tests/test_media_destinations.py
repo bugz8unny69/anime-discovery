@@ -55,3 +55,26 @@ class MediaDestinationTests(unittest.TestCase):
         historical = CONVERSIONS[0]({})
         self.assertNotIn("trial_root", historical["settings"]["storage"])
         self.assertNotIn("keep_root", CONVERSIONS[1](historical)["settings"]["storage"])
+
+
+    def test_restart_pinning_revalidates_media_roots_against_active_database(self):
+        startup = ConfigurationSnapshot(1, {"storage": {
+            "database_path": "/srv/old/queue.sqlite"}})
+        for root_field in ("trial_root", "keep_root"):
+            with self.subTest(root_field=root_field):
+                # Valid after restart, unsafe while the old database is pinned.
+                desired, _ = patch_snapshot(startup, {"storage": {
+                    "database_path": "/srv/new/queue.sqlite", root_field: "/srv/old"}})
+                for component in ("worker", "api"):
+                    with self.subTest(component=component), self.assertRaises(ConfigurationError):
+                        for_operation(desired,startup,component=component)
+                restarted = for_operation(desired,desired,component="worker")
+                self.assertEqual(restarted.value("storage."+root_field),"/srv/old")
+                self.assertEqual(restarted.value("storage.database_path"),"/srv/new/queue.sqlite")
+                self.assertEqual(restarted.pending_restart_fields,())
+                # An unrelated live root can still apply before restart.
+                adjusted, _ = patch_snapshot(desired,{"storage": {root_field: "/media/safe"}})
+                operation = for_operation(adjusted,startup,component="worker")
+                self.assertEqual(operation.value("storage."+root_field),"/media/safe")
+                self.assertEqual(operation.value("storage.database_path"),"/srv/old/queue.sqlite")
+                self.assertIn("storage.database_path",operation.pending_restart_fields)

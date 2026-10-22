@@ -18,7 +18,10 @@ The service/application entry point is `await run_worker(config_directory,
 registrations)`, which reads current validated startup configuration and handles
 SIGTERM/SIGINT by stopping claims and draining admitted work. Startup concurrency
 and database location stay pinned; each attempt reads a fresh immutable operation
-snapshot. Trial/Keep destinations are available through that snapshot but a
+snapshot. The combined view is revalidated after startup fields are pinned;
+a newly saved media root cannot overlap the database still active before restart.
+An invalid effective view fails before claim, leaving pending jobs untouched.
+Trial/Keep destinations are available through that snapshot but a
 publishing handler must validate configuration, real paths/access and recorded
 artifact bindings before acting. The worker itself never moves or deletes media.
 

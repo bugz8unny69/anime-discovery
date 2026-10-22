@@ -7,6 +7,7 @@ import threading
 import unittest
 
 from src.nextgen.configuration import ConfigurationStore
+from src.nextgen.configuration_schema import ConfigurationError
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.job_contracts import Outcome, Policy, Registration, Registry
 from src.nextgen.maintenance import MaintenanceBusy
@@ -251,3 +252,20 @@ class AsyncWorkerTests(unittest.IsolatedAsyncioTestCase):
         worker = self.worker(handler)
         await worker.attempt()
         self.assertEqual(self.rows(),[("NEEDS_REVIEW",1,"JOB_PAYLOAD_INVALID")])
+
+
+    async def test_unsafe_live_destination_and_pinned_database_prevent_claim(self):
+        async def handler(context):
+            self.fail("unsafe effective settings must prevent invocation")
+        self.enqueue()
+        worker = self.worker(handler)
+        self.store.update({"storage": {
+            "database_path":str(self.root.parent/"unopened-nextgen.sqlite"),
+            "trial_root":str(self.root)}},expected_revision=1)
+        with self.assertRaises(ConfigurationError):
+            await worker.attempt()
+        self.assertEqual(self.rows(),[("PENDING",0,None)])
+        # Failure must also release admission, so management can repair/restart.
+        ticket = worker.gate.request()
+        with worker.gate.exclusive(ticket) as lease:
+            lease.complete()

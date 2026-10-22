@@ -407,5 +407,9 @@ def for_operation(latest, startup, *, component):
             effective[section][key] = _plain(startup.value(path))
             if component in spec.restart_components and latest.value(path) != startup.value(path):
                 pending.append(path)
+    # Desired values were validated together, but pinning startup-only fields
+    # creates a different combination. Recheck cross-field constraints before
+    # exposing it (for example media roots versus the still-active database).
+    effective = validate_values(effective)
     return OperationConfiguration(latest.revision, startup.revision, component,
                                   _freeze(effective), tuple(pending))

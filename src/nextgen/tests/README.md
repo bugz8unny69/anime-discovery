@@ -101,3 +101,10 @@ fencing/recovery, concurrent claims, atomic successor facts/history, normal
 defers versus failure retries, trusted adapter transaction boundaries, fresh
 configuration, same-anime concurrency, maintenance and cancellation-safe drain.
 All tests remain **unexecuted**; no worker or SQL has been run for verification.
+
+
+Destination/worker integration review adds cases for saved roots overlapping a
+still-pinned database, safe adjusted roots, post-restart views and rejecting
+unsafe operation snapshots before claim while releasing maintenance admission.
+These cases remain **unexecuted**, along with worker cancellation, embedded close,
+historical zero-attempt recovery and oversized-payload regression cases.
