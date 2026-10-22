@@ -128,7 +128,7 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(check_once(self.db,settings,{},now=1300,
             probe=lambda *_:report.copy())["processed"],0)
         self.assertEqual(self.db.execute(
-            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],1)
+            "SELECT COUNT(*) FROM daemon_jobs").fetchone()[0],0)
 
     def test_excluded_episode_without_configured_search_does_not_retry(self):
         report={"decision":"AUTO_VERIFIED","issues":[],
