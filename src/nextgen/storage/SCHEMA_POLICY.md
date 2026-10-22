@@ -42,8 +42,8 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v6 or accepts an existing v6 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5 files require an explicit, future migration component.
-- A future runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v6 or accepts an existing v6 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
 - Keep SQL transactions short and preserve durable event/job writes and history. Do not infer that a schema change implements coordinator runtime behavior.
@@ -145,3 +145,21 @@ The current fresh schema and initialize() use v6. This adds attribution only;
 no API server, authentication, configuration writer or coordinator is created.
 Offline API logger/audit and v6 preservation/rollback/version cases are included
 but unexecuted. The latest fresh-versus-sequential metadata case includes 006.
+
+
+## Explicit migration runner and maintenance admission (no schema change)
+
+`migrations.py` implements preview/apply from existing v1–v6, a validated SQLite
+backup, per-version transactions and precommit schema/integrity/FK validation.
+`maintenance.py` supplies a durable cooperative process admission barrier;
+`admitted_connection()` is available to future runtime operations. No table,
+column, index or persisted row shape changes: current schema remains v6, and
+001–006 are unchanged. Older paragraphs saying no runner describe the historical
+PR boundaries; this section and MIGRATIONS.md supersede that implementation status.
+
+All runtime users must be admitted before accessing SQLite, including an entire
+job attempt and its heartbeats/final commit. Apply requires an active exclusive
+lease after drainage; it leaves admission closed for compatibility/readiness
+checks. Partial chains retain their last committed version; failures/crashes keep
+the pending marker, and recovery is explicit. No API/supervisor/coordinator wiring
+or production upgrade is supplied or executed here. Offline tests are unrun.

@@ -67,3 +67,10 @@ test_configuration_store.py cover versioned conversion and immutable operation
 views, startup-field pinning, revision conflict, atomic publication and failure,
 metadata, migration backup/preview, and safe input/filesystem validation. They
 use temporary directories only. Tests and CI remain intentionally unexecuted.
+
+
+Migration/admission follow-up: test_migration_runner.py and test_maintenance.py
+cover versions 1–6, schema/data preservation, validated backups, stale plans,
+rollback and partial-chain recovery, shared admissions, exclusive drainage,
+process death, pending-state persistence and explicit resume. Tests use only
+temporary databases/processes. **Authored but not executed** under current policy.

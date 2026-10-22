@@ -14,7 +14,10 @@ class ReasonTests(unittest.TestCase):
                          "JOB_RETRY_EXHAUSTED", "STORAGE_UNAVAILABLE", "UNSUPPORTED_JOB_KIND",
                          "CONFIGURATION_INVALID", "CONFIGURATION_CONFLICT",
                          "CONFIGURATION_MIGRATION_REQUIRED", "CONFIGURATION_STORAGE_FAILED",
-                         "CONFIGURATION_DURABILITY_UNCONFIRMED"} <= set(REGISTRY))
+                         "CONFIGURATION_DURABILITY_UNCONFIRMED", "MAINTENANCE_PENDING",
+                         "MAINTENANCE_BUSY", "MAINTENANCE_FAILED",
+                         "DATABASE_VERSION_UNSUPPORTED", "DATABASE_SCHEMA_INVALID",
+                         "DATABASE_MIGRATION_CONFLICT", "DATABASE_MIGRATION_FAILED"} <= set(REGISTRY))
         for key, reason in REGISTRY.items():
             with self.subTest(code=key):
                 self.assertEqual(key, reason.code)

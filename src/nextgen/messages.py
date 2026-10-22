@@ -39,6 +39,9 @@ _EVENTS = (
     EventDefinition("CONFIGURATION_SAVE_UNCONFIRMED", "runtime",
                     "Configuration was updated, but durable storage could not be confirmed.",
                     True, "CONFIGURATION_DURABILITY_UNCONFIRMED"),
+    EventDefinition("DATABASE_MIGRATED", "runtime", "Database upgrade completed."),
+    EventDefinition("MAINTENANCE_REQUESTED", "runtime", "New work paused for maintenance."),
+    EventDefinition("MAINTENANCE_COMPLETED", "runtime", "Maintenance completed. New work can start."),
     # A runtime observation, not a persisted job state or lifecycle transition.
     EventDefinition("OPERATION_FAILED", "runtime", "A processing operation failed.", True),
 )
