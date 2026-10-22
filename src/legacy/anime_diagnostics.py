@@ -8,7 +8,7 @@ import re
 import time
 
 _FIELDS = frozenset({
-    "subsystem", "stage", "operation", "outcome", "job_id",
+    "subsystem", "stage", "operation", "outcome", "job_id", "trace_id", "hook",
     "notification_id", "attempt", "tvdb_id", "season", "episode",
     "torrent_hash", "checkpoint", "error_code", "error_type",
     "retryable", "elapsed_ms",
