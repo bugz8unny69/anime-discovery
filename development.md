@@ -41,6 +41,14 @@ Explicit static components, each with narrow responsibility:
 
 The coordinator owns bounded durable scheduling, not business-logic decisions. Logging/history uses stable per-delivery Postfix-style `AD-N` trace IDs and independent job IDs, *outside* AnimeSeries. Store structured durable history with safe reason codes, retries, cache activity and component boundaries; protect credentials and other sensitive data in logs.
 
+## NextGen tests: fresh, local batches, no automatic GitHub checks
+
+The clean-slate code uses its **own** tests in `src/nextgen/tests/`. The legacy tests in `src/legacy/` are preserved for history and regression behavior, but MUST NOT gate or be imported by NextGen implementation. The legacy tests need not inherently fail; they simply validate a different runtime.
+
+The automatic GitHub Actions **Python test workflow has been removed** on this draft PR branch. Do not automatically run legacy or NextGen tests on pushes or pull requests. Keep the separate manually invoked archive publishing workflow unchanged. If branch protection requires a deleted check, resolve that repository rule explicitly before merging; do not silently bypass it.
+
+Use `python -m src.nextgen.tests.run_batches --match schema` for focused schema work, or `python -m src.nextgen.tests.run_batches` for all NextGen tests, executed in separate groups of up to five test files. Use `--batch-size N`, `--match <filename-part>`, and `--list` as needed. This needs Python 3.12+ and runs **locally/on demand**, never against live services. See `src/nextgen/tests/README.md`. Each new NextGen component gets its own isolated offline tests and sample data in the existing `fixtures/` folder. Before a review/merge, run and document the relevant batches and the complete NextGen suite; no GitHub status check substitutes for this evidence.
+
 ## Next PR: delivery and worker reliability (TCP-like, application-level)
 
 **Primary goal:** a webhook receipt that got HTTP success must not disappear or be silently unprocessable after a crash. TCP is an analogy for acknowledge/retry/recovery; do not promise literally failure-free or exactly-once execution.
