@@ -141,3 +141,19 @@ CONFIGURATION.md. CONFIGURATION_SAVED, CONFIGURATION_MIGRATED and
 CONFIGURATION_SAVE_UNCONFIRMED are runtime-only event markers in messages.py.
 Every reason/message/action retains the same stable translation-key contract.
 These additions do not alter SQLite schemas or diagnostic-history detail shapes.
+
+
+### Maintenance and database upgrades
+
+The shared libraries add MAINTENANCE_PENDING, MAINTENANCE_BUSY,
+MAINTENANCE_FAILED, DATABASE_VERSION_UNSUPPORTED, DATABASE_SCHEMA_INVALID,
+DATABASE_MIGRATION_CONFLICT and DATABASE_MIGRATION_FAILED. Every entry has a
+static English message/action and translation keys. Retry hints do not schedule
+retries or clear maintenance. The future API catches typed errors and emits
+OPERATION_FAILED with their reason_code, never raw SQLite messages/SQL/paths.
+
+Runtime success markers DATABASE_MIGRATED, MAINTENANCE_REQUESTED and
+MAINTENANCE_COMPLETED resolve the same shared catalog. They do not add job states
+or incoming-event history rows. Durable marker/schema state drives recovery
+independently of logging; a management audit API/table remains future work.
+See storage/MIGRATIONS.md for drain, backup and partial-upgrade behavior.

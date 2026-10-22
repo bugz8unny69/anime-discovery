@@ -4,6 +4,29 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## SQLite migration and maintenance follow-up — 2026-10-22
+
+The migration/maintenance library builds on draft configuration PR #101; that PR
+is not assumed merged. The follow-up branch contains its prerequisite commits
+and targets NextGen. Review the prerequisite independently before merging either.
+
+Implemented: version-aware SQLite v1–v6 upgrade preview/apply, verified pre-upgrade
+SQLite backup, per-step validation/rollback, a durable cross-process maintenance
+admission gate, and an admitted existing-database connection helper. No schema
+shape changes or v7 migration. Published 001–006 remain unchanged. See
+[the migration/maintenance contract](src/nextgen/storage/MIGRATIONS.md).
+
+All future runtime DB users and entire job attempts must participate in the gate.
+A request blocks new work while admitted work finishes; queued job states are
+preserved. No automatic resume after success/failure/crash: compatible process
+readiness and explicit completion are required. No supervisor, management API,
+ADM command or coordinator runtime is implemented by these libraries.
+
+Remaining coordinator preparation: async handler/outcome contract, bounded
+claim/dispatch and cancellation semantics, lease/retry recovery policy and
+management-to-runtime readiness integration. Keep the API in its own process.
+Tests are included but unexecuted; source/syntax/diff review only, no CI or SQL.
+
 ## Current diagnostic implementation — PR #100, 2026-10-22
 
 The PR #100 branch implements shared messages.py event/state catalogs and a

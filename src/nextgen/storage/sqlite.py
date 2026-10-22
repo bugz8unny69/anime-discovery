@@ -122,6 +122,34 @@ def connect(path):
     db.execute("PRAGMA journal_mode=WAL")
     return db
 
+@contextmanager
+def admitted_connection(gate):
+    """New runtime operations use admission, then open/close their connection.
+
+    For an entire job attempt, hold gate.operation() around handler execution
+    instead; that admission also covers short-lived connections and heartbeats.
+    Low-level connect() is retained for explicit bootstrap and offline fixtures.
+    Never nest admissions or use this during exclusive migration maintenance.
+    """
+    with gate.operation():
+        from src.nextgen.storage.migrations import _open, MigrationError, MigrationUnsupported
+        try:
+            db = _open(gate.database, readonly=False)
+        except (OSError, sqlite3.Error):
+            raise MigrationError() from None
+        try:
+            try:
+                if db.execute("PRAGMA user_version").fetchone()[0] != 6:
+                    raise MigrationUnsupported()
+                db.execute("PRAGMA busy_timeout=5000")
+                db.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.Error:
+                raise MigrationError() from None
+            yield db
+        finally:
+            db.close()
+
+
 def initialize(db):
     """Initialize a *new* NextGen database at schema v6; never implicitly upgrade.
 

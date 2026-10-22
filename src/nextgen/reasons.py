@@ -59,6 +59,24 @@ _ENTRIES = (
     Reason("CONFIGURATION_DURABILITY_UNCONFIRMED", "Rename succeeded but directory synchronization failed.",
            "Configuration was updated, but durable storage could not be confirmed.",
            "Read the current configuration and check storage before retrying.", "ERROR", None),
+    Reason("MAINTENANCE_PENDING", "A durable maintenance request blocks new admissions.",
+           "New work is paused for maintenance.", "Wait for maintenance to finish.", "INFO", None),
+    Reason("MAINTENANCE_BUSY", "Existing admissions or another maintenance controller still hold a lock.",
+           "Existing work is still finishing.", "Check maintenance progress before trying again.", "INFO", None),
+    Reason("MAINTENANCE_FAILED", "Maintenance state, ownership or storage needs review.",
+           "Maintenance state needs review.", "Check maintenance status before resuming work.", "ERROR", None),
+    Reason("DATABASE_VERSION_UNSUPPORTED", "The database version is unversioned, newer or outside the supported upgrade path.",
+           "This database version cannot be upgraded by this application.",
+           "Verify the application version and selected database.", "ERROR", False),
+    Reason("DATABASE_SCHEMA_INVALID", "Schema, integrity or foreign-key validation failed.",
+           "The database does not match the expected application structure.",
+           "Keep maintenance active and review database health.", "ERROR", False),
+    Reason("DATABASE_MIGRATION_CONFLICT", "Database structure/version or packaged migration inputs changed after preview.",
+           "The database upgrade plan changed.", "Preview the upgrade again before applying it.", "WARNING", False),
+    Reason("DATABASE_MIGRATION_FAILED", "Upgrade or backup failed; earlier version steps may already be committed.",
+           "Database upgrade stopped. Maintenance remains active.",
+           "Review the current database version and backup before continuing.", "ERROR", None),
+
 )
 REGISTRY = MappingProxyType({item.code: item for item in _ENTRIES})
 if len(REGISTRY) != len(_ENTRIES):
