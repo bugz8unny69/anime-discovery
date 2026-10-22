@@ -198,6 +198,23 @@ button{background:#4f9df8;color:#101827;border:0;margin-top:1.6rem;cursor:pointe
                     return self.send(409,json.dumps({
                         "error":"Cleanup preview unavailable; verify integration and resource evidence."}),
                         "application/json")
+            if path=="/api/activity-trace":
+                try:
+                    from anime_trace_history import history,for_notification
+                    params=parse_qs(route.query)
+                    values=params.get("notification_id",[])
+                    if len(values)!=1 or not values[0].isdigit() or int(values[0])<=0:
+                        raise ValueError("Valid notification ID required")
+                    nid=int(values[0])
+                    with self.database() as db:
+                        if db.execute("SELECT 1 FROM notifications WHERE id=?",(nid,)).fetchone() is None:
+                            return self.send(404,json.dumps({"error":"Notification not found"}),"application/json")
+                        trace_id=for_notification(nid)
+                        events=history(db,trace_id)
+                    return self.send(200,json.dumps({"trace_id":trace_id,
+                        "notification_id":nid,"events":events}),"application/json")
+                except (ValueError,TypeError,sqlite3.Error):
+                    return self.send(400,json.dumps({"error":"Trace unavailable"}),"application/json")
             if path=="/api/identity-trace":
                 try:
                     params=parse_qs(route.query)
