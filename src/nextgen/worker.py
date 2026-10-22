@@ -34,6 +34,14 @@ async def blocking(callable_, *args, executor=None, **kwargs):
             result = await asyncio.shield(task)
             break
         except asyncio.CancelledError:
+            if task.done():
+                # A finished callable may itself raise CancelledError. There is
+                # no outstanding thread to drain; never spin on its result.
+                try:
+                    task.result()
+                except BaseException:
+                    pass
+                raise
             cancelled = True
         except Exception:
             if cancelled:
@@ -82,6 +90,9 @@ class Worker:
         self._halt_claims = threading.Event()
         self._paused = False
         self._tasks = set()
+        self._attempts = set()
+        self._slots = asyncio.Semaphore(self.concurrency)
+        self._close_task = None
         self._running = False
         self._closed = False
         self._control_pool = ThreadPoolExecutor(max_workers=4,thread_name_prefix="nextgen-control")
@@ -90,13 +101,19 @@ class Worker:
         return await blocking(callable_, *args, executor=self._control_pool, **kwargs)
 
     async def close(self):
-        """After awaiting run/attempts, release the dedicated control executor."""
-        if self._running:
+        """Stop and drain embedded attempts before releasing the control pool."""
+        if self._running or asyncio.current_task() in self._attempts:
             raise RuntimeError("stop and await the worker before closing it")
-        if not self._closed:
+        if self._close_task is None:
             self._closed = True
             self.stop()
-            await blocking(self._control_pool.shutdown,wait=True)
+            self._close_task = asyncio.create_task(self._shutdown())
+        await settle((self._close_task,))
+        self._close_task.result()
+
+    async def _shutdown(self):
+        await self.drain()
+        await blocking(self._control_pool.shutdown,wait=True)
 
     def pause(self):
         self._paused = True
@@ -114,8 +131,10 @@ class Worker:
 
     async def drain(self):
         self.pause()
-        while self._tasks:
-            await settle(tuple(self._tasks))
+        if asyncio.current_task() in self._attempts:
+            raise RuntimeError("an attempt cannot drain itself")
+        while self._attempts:
+            await settle(tuple(self._attempts))
 
     def _log_error(self, exc, claim=None):
         reason = getattr(exc, "reason_code", "JOB_HANDLER_FAILED")
@@ -152,7 +171,9 @@ class Worker:
                     raise ValueError("handler did not return a typed outcome")
                 return outcome
             except asyncio.CancelledError:
-                raise
+                if asyncio.current_task().cancelling():
+                    raise
+                return Outcome("retry", "JOB_HANDLER_FAILED")
             except Exception:
                 # Never persist an arbitrary exception string or raw result.
                 return Outcome("retry", "JOB_HANDLER_FAILED")
@@ -165,9 +186,20 @@ class Worker:
             await settle((call,heartbeat))
 
     async def attempt(self):
-        """One admitted claim/attempt. Exposed for embedding and offline tests."""
+        """One bounded claim/attempt, also tracked when embedded directly."""
         if self._closed:
             raise WorkerNotReady()
+        task = asyncio.current_task()
+        if task in self._attempts:
+            raise RuntimeError("an attempt cannot recursively claim work")
+        self._attempts.add(task)
+        try:
+            async with self._slots:
+                return await self._attempt()
+        finally:
+            self._attempts.discard(task)
+
+    async def _attempt(self):
         if self._stop.is_set() or self._paused:
             return False
         try:
@@ -278,10 +310,13 @@ async def run_worker(config_directory, registrations, *, policy=Policy()):
     worker = Worker(store,startup,Registry(registrations),policy=policy)
     import signal
     loop = asyncio.get_running_loop()
-    for selected in (signal.SIGTERM,signal.SIGINT):
-        loop.add_signal_handler(selected,worker.stop)
+    installed = []
     try:
+        for selected in (signal.SIGTERM,signal.SIGINT):
+            loop.add_signal_handler(selected,worker.stop)
+            installed.append(selected)
         await worker.run()
     finally:
-        for selected in (signal.SIGTERM,signal.SIGINT):
+        for selected in installed:
             loop.remove_signal_handler(selected)
+        await worker.close()

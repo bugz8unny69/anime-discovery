@@ -36,7 +36,8 @@ Do not spawn untracked background threads/tasks from a handler.
 
 ## Claiming, invocation and atomic handoff
 
-The async loop bounds active attempts by startup worker.concurrency, checks
+All attempts (including direct embedded calls) share startup worker.concurrency
+slots and tracking. The async loop checks
 expired leases, and claims only due PENDING/RETRY_WAIT rows ordered by readiness
 and ID. Each claim uses BEGIN IMMEDIATE, increments attempt_count, sets a fresh
 lease token/expiry and writes CLAIMED in one transaction. There is no blanket
@@ -47,6 +48,8 @@ final persistence, including offloaded work. Pending maintenance blocks new
 admissions while existing work drains. Idle polling does not retain admission.
 Provider/resource gates still belong in feature libraries.
 
+Enqueue rejects payloads exceeding 64 KiB UTF-8. Claims do not transfer oversized
+historical payloads into Python; their original stored contents remain untouched.
 Before invoking a known handler, the worker validates bounded object payloads
 and commits HANDLER_STARTED. Unknown kinds/invalid payloads go to NEEDS_REVIEW
 with readable reason codes without pretending the handler was called. The
@@ -89,8 +92,9 @@ retry or exhaust to review. No attempt count is added until a new claim. A stale
 invocation can retain its unmatched start; recovery does not invent a successful
 ending. Existing external side effects require feature-specific intent/receipt
 reconciliation before replay. SQLite fencing is not external-service exactly-once.
-Malformed manually created RUNNING rows (for example zero attempts) require
-operator review rather than invented historical claim facts.
+Expired historical RUNNING rows with zero attempts are quarantined in NEEDS_REVIEW
+with JOB_STATE_INVALID, without inventing a claim or lease-expiry observation.
+They do not prevent recovery of other valid rows. Other malformed rows fail closed.
 
 Storage/configuration/completion-adapter failures stop the polling loop and drain
 other tasks; they do not blindly replay uncertain commits. Existing leases can
@@ -109,7 +113,11 @@ authorized before stopping is admitted work and may drain normally.
 Graceful stop does not cancel running jobs. Forced task cancellation waits for
 owned executor work to finish before releasing maintenance admission; repeated
 cancellation cannot abandon a blocking thread in the background. Child cleanup
-is shielded and drained. A noncooperative blocking handler can therefore delay
+is shielded and drained. A handler that independently raises CancelledError is
+recorded as a handler failure; cancellation of the owning attempt leaves recovery
+to its lease. close() stops claims and drains embedded attempts, and concurrent
+close callers wait for the same executor shutdown. An attempt cannot close or
+drain itself. A noncooperative blocking handler can therefore delay
 shutdown/maintenance; process isolation/forced termination would require a
 separate explicit design. Interrupted work keeps its recorded lease/start for
 fenced recovery; the worker does not silently reset it to PENDING.

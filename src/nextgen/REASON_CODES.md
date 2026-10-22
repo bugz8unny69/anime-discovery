@@ -173,3 +173,7 @@ WORKER_NOT_READY reports missing installed handlers. All have readable actions.
 DEFERRED is a registered job event with readable copy, not a new state; it uses
 RETRY_WAIT without spending the failure retry budget. Existing retry/failure/
 lease reasons and lifecycle markers are reused. No raw exceptions are persisted.
+
+JOB_STATE_INVALID reports inconsistent job progress with static readable copy and
+an action to review history. Expired RUNNING jobs with zero recorded attempts are
+quarantined for review without fabricating a historical claim or handler call.

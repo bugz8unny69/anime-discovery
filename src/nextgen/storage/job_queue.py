@@ -77,7 +77,8 @@ class JobQueue:
             now = self.now()
             if halted is not None and halted():
                 return None, ()
-            row = db.execute("SELECT job_id,event_id,kind,payload_json,attempt_count FROM jobs "
+            row = db.execute("SELECT job_id,event_id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=65536 "
+                "THEN payload_json ELSE '' END,attempt_count FROM jobs "
                 "WHERE state IN ('PENDING','RETRY_WAIT') AND available_at_ms<=? "
                 "ORDER BY available_at_ms,job_id LIMIT 1", (now,)).fetchone()
             if row is None:
@@ -187,12 +188,17 @@ class JobQueue:
             raise ValueError("invalid lease recovery bound")
         with self.connection() as db, transaction(db):
             now = self.now()
-            rows = db.execute("SELECT job_id,event_id,kind,payload_json,attempt_count,lease_token FROM jobs "
+            rows = db.execute("SELECT job_id,event_id,kind,'',attempt_count,lease_token FROM jobs "
                 "WHERE state='RUNNING' AND lease_expires_at_ms<=? ORDER BY lease_expires_at_ms,job_id LIMIT ?",
                 (now,limit)).fetchall()
             records = []
             for row in rows:
                 claim = Claim(row[0],row[1],row[2],row[3],row[4],row[5])
+                if claim.attempt == 0:
+                    # Older storage permitted RUNNING without a claim count.
+                    # Quarantine without inventing processing history.
+                    records.append(self._transition(db,claim,Outcome("review","JOB_STATE_INVALID"),now))
+                    continue
                 records.append(append_job_history(db,job_id=claim.job_id,event_code="LEASE_EXPIRED",
                     reason_code="JOB_LEASE_EXPIRED",component="worker",occurred_at_ms=now,details={"attempt":claim.attempt}))
                 records.append(self._transition(db,claim,Outcome("retry","JOB_LEASE_EXPIRED"),now))

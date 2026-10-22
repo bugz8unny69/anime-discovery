@@ -127,3 +127,25 @@ class WorkerQueueTests(unittest.TestCase):
         missing = self.path.with_name("missing.sqlite")
         with self.assertRaises(QueueUnavailable): JobQueue(missing).claim()
         self.assertFalse(missing.exists())
+
+
+    def test_zero_attempt_expired_row_does_not_block_valid_recovery(self):
+        claim = self.started()
+        with self.queue.connection() as db,transaction(db):
+            other = enqueue_job(db,kind="TEST",payload={},component="intake",available_at_ms=0)
+            db.execute("UPDATE jobs SET state='RUNNING',lease_token='historical',lease_expires_at_ms=0 WHERE job_id=?",(other,))
+        self.now = 2000
+        self.queue.recover_expired()
+        self.assertEqual(self.state(),("RETRY_WAIT",1))
+        with self.queue.connection() as db:
+            self.assertEqual(db.execute("SELECT state,attempt_count,last_reason_code,lease_token FROM jobs WHERE job_id=?",(other,)).fetchone(),
+                             ("NEEDS_REVIEW",0,"JOB_STATE_INVALID",None))
+            self.assertEqual(db.execute("SELECT event_code FROM job_history WHERE job_id=? ORDER BY history_id",(other,)).fetchall(),
+                             [("CREATED",),("NEEDS_REVIEW",)])
+        with self.assertRaises(LeaseLost): self.finish(claim,Outcome())
+
+    def test_producer_rejects_oversized_payload_before_insert(self):
+        with self.queue.connection() as db,transaction(db):
+            with self.assertRaises(ValueError):
+                enqueue_job(db,kind="TEST",payload={"value":"x"*65536},component="intake")
+            self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0],1)

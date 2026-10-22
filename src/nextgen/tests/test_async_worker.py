@@ -11,7 +11,7 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.job_contracts import Outcome, Policy, Registration, Registry
 from src.nextgen.maintenance import MaintenanceBusy
 from src.nextgen.storage.sqlite import enqueue_job, initialize, transaction
-from src.nextgen.worker import Worker, WorkerNotReady
+from src.nextgen.worker import Worker, WorkerNotReady, blocking
 
 
 class AsyncWorkerTests(unittest.IsolatedAsyncioTestCase):
@@ -189,3 +189,65 @@ class AsyncWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(peak,2)
         self.assertEqual(sum(row[0]=="DONE" for row in self.rows()),2)
         self.assertEqual(sum(row[0]=="PENDING" for row in self.rows()),4)
+
+
+    async def test_callable_cancelled_error_does_not_spin_and_handler_is_retried(self):
+        def cancelled():
+            raise asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await asyncio.wait_for(blocking(cancelled),2)
+        self.policy = Policy(lease_ms=30000,poll_ms=10,max_retries=0)
+        for mode in ("async", "thread"):
+            async def async_handler(context):
+                raise asyncio.CancelledError()
+            def thread_handler(context):
+                raise asyncio.CancelledError()
+            self.enqueue()
+            worker = self.worker(async_handler if mode == "async" else thread_handler,mode)
+            self.assertTrue(await asyncio.wait_for(worker.attempt(),2))
+        self.assertEqual([row[2] for row in self.rows()],["JOB_HANDLER_FAILED"]*2)
+
+    async def test_embedded_attempts_share_limit_and_close_drains_them(self):
+        entered, release = asyncio.Event(),asyncio.Event()
+        active = 0
+        peak = 0
+        async def handler(context):
+            nonlocal active,peak
+            active += 1
+            peak = max(peak,active)
+            if active == 2: entered.set()
+            try:
+                await release.wait()
+                return Outcome()
+            finally:
+                active -= 1
+        for _ in range(4): self.enqueue()
+        worker = self.worker(handler)
+        attempts = [asyncio.create_task(worker.attempt()) for _ in range(4)]
+        closes = []
+        try:
+            await asyncio.wait_for(entered.wait(),2)
+            self.assertEqual(peak,2)
+            self.assertEqual(sum(row[0]=="RUNNING" for row in self.rows()),2)
+            closes = [asyncio.create_task(worker.close()) for _ in range(2)]
+            await asyncio.sleep(0)
+            self.assertTrue(all(not task.done() for task in closes))
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*attempts,*closes),3)
+        self.assertEqual(peak,2)
+        self.assertEqual([row[0] for row in self.rows()],["DONE","DONE","PENDING","PENDING"])
+
+    async def test_historical_oversized_payload_is_reviewed_without_handler_call(self):
+        async def handler(context):
+            self.fail("invalid payload must not reach handler")
+        job = self.enqueue()
+        db = sqlite3.connect(self.database)
+        try:
+            with db:
+                db.execute("UPDATE jobs SET payload_json=? WHERE job_id=?",('"' + 'x'*65536 + '"',job))
+        finally:
+            db.close()
+        worker = self.worker(handler)
+        await worker.attempt()
+        self.assertEqual(self.rows(),[("NEEDS_REVIEW",1,"JOB_PAYLOAD_INVALID")])

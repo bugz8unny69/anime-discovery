@@ -79,6 +79,8 @@ _ENTRIES = (
 
     Reason("JOB_WAITING", "A handler deferred a normal prerequisite or external-work wait.",
            "Work is waiting for a prerequisite.", "Check the recorded waiting condition.", "INFO", None),
+    Reason("JOB_STATE_INVALID", "A queued job has inconsistent lifecycle bookkeeping.",
+           "Job progress needs review.", "Review the job history before resuming work.", "ERROR", False),
     Reason("JOB_PAYLOAD_INVALID", "A queued payload is invalid or exceeds the worker bound.",
            "Job information could not be validated.", "Review the queued job before trying again.", "ERROR", False),
     Reason("WORKER_NOT_READY", "No trusted job handlers are registered for execution.",
