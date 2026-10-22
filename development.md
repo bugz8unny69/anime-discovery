@@ -4,6 +4,21 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Merged foundations and media destination settings — 2026-10-22
+
+PRs #103, #104 and #105 were confirmed merged into NextGen with explicit user
+authorization. Worker naming, handler history and both architecture documents
+are now integration-branch foundations. The media settings follow-up adds
+storage.trial_root and storage.keep_root with centralized labels/help and
+validation, inspired by the legacy settings registry without runtime coupling.
+Configuration v3 explicitly upgrades v2 with blank/unconfigured destinations;
+new operations see updates while recorded artifact destinations stay bound.
+SQLite remains v8. Tests are included but unexecuted; no CI or live writes.
+
+Next implementation: async worker core, explicit handler registry, lease-fenced
+job lifecycle, atomic successors and maintenance-aware polling/draining.
+Identity/acquisition/staging/Keep handlers remain focused feature PRs.
+
 ## Pipeline architecture drafts — 2026-10-22
 
 Before implementing the worker/business handlers, review the two separate

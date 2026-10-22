@@ -32,6 +32,8 @@ separately. No config-revision field is added to SQLite history in this PR.
 | api.host | 127.0.0.1 | Restart | API |
 | api.port | 8765 | Restart | API |
 | worker.concurrency | 4 | Restart | Worker |
+| storage.trial_root | Unconfigured | Next operation | None |
+| storage.keep_root | Unconfigured | Next operation | None |
 | storage.database_path | /var/lib/anime-discovery/nextgen.sqlite | Restart | All current components |
 
 FIELDS defines defaults, type/range validation and apply metadata.
@@ -48,11 +50,11 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=2, a positive revision, and a settings object
+Canonical JSON has schema_version=3, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 2,
+      "schema_version": 3,
       "revision": 1,
       "settings": {
         "logging": {"level": "INFO", "components": {}},
@@ -169,3 +171,29 @@ credential store and job-handler/worker implementation remain separate.
 
 Handler invocation history subsequently extends SQLite to v8, independently of
 configuration schema v2. The existing jobs table remains unchanged.
+
+
+## Media destinations (configuration v3)
+
+The shared registry borrows the legacy anime_settings_schema.py pattern of
+central defaults, readable labels/help, validation and presentation metadata.
+No legacy daemon import or wholesale legacy setting/secret schema is used.
+`storage.trial_root` is the trial video folder; `storage.keep_root` is the
+permanent destination for approved Keep videos. Both default to an empty,
+unconfigured value. A publishing/import handler must refuse to act until its
+required destination is configured and filesystem access is validated.
+
+Values must be canonical absolute non-root paths when configured, without
+traversal, control characters or trailing separators. The two roots cannot be
+equal/nested, and neither can contain the NextGen database path. Pure validation
+does not resolve symlinks or inspect/make directories; the responsible library
+must recheck real containment, permissions and external service visibility at use.
+When Sonarr handles Keep, its actual registered root must agree with keep_root;
+there is no competing silently selected permanent destination.
+
+Both apply to new operations without restart. Recorded artifact/root bindings
+and already-approved/submitted Keep plans are retained on retry; a saved setting
+never silently moves or retargets existing files. Version 2→3 explicitly adds
+blank destination fields and advances the publication revision. Earlier 0→1→2
+conversions keep their historical key/default shapes, then convert to v3. Unknown
+new fields in an older version are rejected. SQLite remains v8; no SQL change.

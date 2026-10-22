@@ -89,3 +89,8 @@ start/end matching, reasons, readable labels/logging/translations, caller rollba
 v7→v8 preservation, indexes/constraints, wrong versions and migration rollback.
 Sequential runner cases include every supported starting version v1–v8. The
 existing jobs table is unchanged. All these tests remain **unexecuted**.
+
+
+Destination settings: test_media_destinations.py covers configuration v3,
+blank defaults, readable field metadata, explicit historical conversion, immutable
+new-operation snapshots and invalid/overlapping roots. Authored but unexecuted.
