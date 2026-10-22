@@ -1,5 +1,6 @@
 -- NextGen SQLite schema version 1: snapshot of merged PR #94.
 -- Apply only to a fresh NextGen database, not the legacy production database.
+BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS webhook_events (
  event_id INTEGER PRIMARY KEY,
  source TEXT NOT NULL,
@@ -57,3 +58,4 @@ CREATE INDEX IF NOT EXISTS idx_anime_tvdb ON identified_anime(tvdb_series_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_anime ON identified_episodes(anidb_id);
 CREATE INDEX IF NOT EXISTS idx_links_episode ON result_episode_links(anidb_episode_id);
 PRAGMA user_version=1;
+COMMIT;
