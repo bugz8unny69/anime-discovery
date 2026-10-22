@@ -4,6 +4,27 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Pipeline architecture drafts — 2026-10-22
+
+Before implementing the worker/business handlers, review the two separate
+[architecture documents](src/nextgen/architecture/README.md):
+[intake through the configured trial folder](src/nextgen/architecture/INTAKE_TO_TRIAL.md)
+and [Keep through the permanent library](src/nextgen/architecture/KEEP_TO_LIBRARY.md).
+They contain ownership/pipeline graphs, proposed handler boundaries, safety and
+recovery contracts, legacy references and explicit open decisions. They do not
+claim the illustrated components or proposed settings/storage already exist.
+
+The worker owns pipeline advancement: a handler returns a typed outcome, and
+registered feature routing/persistence adapters run under the worker-owned
+lease-checked completion transaction. Persist result facts, completion, allowed
+successor jobs and audit atomically. No independent DONE-then-enqueue sequence,
+startup sweep of all DONE jobs, work_items table or parent/child workflow engine.
+Keep is a separate authorized management request; staging does not authorize
+permanent import. Sonarr-managed copy is the draft final-library assumption,
+with scope, monitoring, retention and exact path/policy choices still to review.
+This documentation-only follow-up builds on PR #104 (and #103); it does not
+merge them or implement any worker, handlers, SQL/configuration or live changes.
+
 ## Handler invocation history follow-up — 2026-10-22
 
 Keep the existing jobs table and independent queued-job model. No work_items or
