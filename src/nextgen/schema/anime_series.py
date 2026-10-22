@@ -1,15 +1,16 @@
-"""AnimeSeries v1: an anime-series schema, validated at identity completion.
+"""AnimeSeries v2: a series identity schema, with optional episode coverage.
 
 No delivery IDs, logging, jobs, acquisition, staging or evaluation state.
-Intake may be incomplete; only a successfully identified series enters this
-schema. A failed schema check is an identity result, not a process crash.
+A series can be identified before episodes in a season pack are resolved.
+Any populated episode still requires an exact AniDB episode ID. A failed schema
+check is an individual identification result, not a process crash.
 """
 from dataclasses import asdict, dataclass, field, fields, MISSING
 import copy
 import json
 from typing import Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 FIELD_DOC_KEYS = frozenset({"meaning", "reason", "owner", "available", "origin"})
 
 
@@ -55,12 +56,12 @@ class Anime:
     anidb_id: int = documented(meaning="Identified AniDB anime ID",
         reason="Canonical anime identity, including distinct sequel entries",
         owner="identity", available="identity completion", origin="AniDB")
-    tvdb_series_id: int = documented(meaning="Identified TVDB series ID",
-        reason="Series-level identity for Sonarr", owner="identity",
-        available="identity completion", origin="TVDB cross-reference")
     title: str = documented(meaning="Identified anime title, not webhook release name",
         reason="Describe the series to every consumer", owner="identity",
-        available="identity completion", origin="anime metadata")
+        available="series identity completion", origin="anime metadata")
+    tvdb_series_id: Optional[int] = optional(meaning="Optional TVDB series ID for Sonarr",
+        reason="Record a verified Sonarr series link when known without requiring it for AniDB identity",
+        owner="identity", available="when independently mapped", origin="TVDB cross-reference")
     english_title: Optional[str] = optional(meaning="English anime title",
         reason="Useful catalog and display data", owner="identity",
         available="when known", origin="anime metadata")
@@ -76,7 +77,8 @@ class Anime:
 
     def __post_init__(self):
         positive(self.anidb_id, "anime.anidb_id")
-        positive(self.tvdb_series_id, "anime.tvdb_series_id")
+        if self.tvdb_series_id is not None:
+            positive(self.tvdb_series_id, "anime.tvdb_series_id")
         if type(self.title) is not str or not self.title.strip():
             raise ValueError("anime.title MUST be nonblank identified anime title")
         for name in ("english_title", "original_title", "type"):
@@ -124,16 +126,18 @@ class Episode:
 
 @dataclass(frozen=True)
 class AnimeSeries:
-    """ONLY a completed, schema-valid identity may be represented here."""
+    """A valid series identity; episode entries are present only when identified."""
     schema_version: int = documented(meaning="Version of the AnimeSeries schema",
         reason="Protect consumers from incompatible schema changes",
         owner="schema", available="always", origin="schema")
     anime: Anime = documented(meaning="Identified anime identity and metadata",
         reason="Share one verified series-level series description",
         owner="identity", available="identity completion", origin="identity result")
-    episodes: tuple[Episode, ...] = documented(meaning="One or more identified AniDB episodes",
-        reason="Represent a single episode or a multi-episode series uniformly",
-        owner="identity", available="identity completion", origin="identity result")
+    episodes: tuple[Episode, ...] = field(default_factory=tuple, metadata=dict(
+        meaning="Zero or more individually identified AniDB episodes",
+        reason="Allow series-only identity for unresolved packs without inventing episodes",
+        owner="identity", available="when individual episodes are verified",
+        origin="AniDB episode identification"))
     attributes: dict = field(default_factory=dict, metadata=dict(
         meaning="Optional JSON-compatible series enrichment keyed by documented meaning",
         reason="Extend series information without adding workflow state",
@@ -144,8 +148,8 @@ class AnimeSeries:
             raise ValueError("Unsupported AnimeSeries schema version")
         if not isinstance(self.anime, Anime):
             raise ValueError("anime MUST be an identified Anime")
-        if type(self.episodes) is not tuple or not self.episodes:
-            raise ValueError("episodes MUST contain at least one episode")
+        if type(self.episodes) is not tuple:
+            raise ValueError("episodes MUST be a tuple of identified episodes")
         if any(not isinstance(e, Episode) for e in self.episodes):
             raise ValueError("episodes MUST contain only identified Episode objects")
         ids = [e.anidb_episode_id for e in self.episodes]
@@ -178,10 +182,10 @@ class AnimeSeries:
         if type(value) is not dict:
             raise ValueError("AnimeSeries MUST be a JSON object")
         allowed = {"schema_version", "anime", "episodes", "attributes"}
-        if set(value) - allowed or not {"schema_version", "anime", "episodes"} <= set(value):
+        if set(value) - allowed or not {"schema_version", "anime"} <= set(value):
             raise ValueError("AnimeSeries: unknown or missing required fields")
         anime = parse(Anime, value["anime"])
-        raw_episodes = value["episodes"]
+        raw_episodes = value.get("episodes", [])
         if type(raw_episodes) is not list:
             raise ValueError("episodes MUST be an array")
         episodes = []
