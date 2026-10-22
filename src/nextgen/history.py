@@ -81,7 +81,7 @@ def _validate(db, scope, target_id, event_code, reason_code, component, occurred
     attempt = json.loads(encoded).get("attempt")
     if scope == "job" and event_code != "CREATED" and attempt is None:
         raise ValueError("attempt required for job lifecycle event")
-    if (scope == "job" and event_code in ({"CLAIMED", "LEASE_EXPIRED", "RETRY_SCHEDULED", "DONE"} | HANDLER_EVENTS)
+    if (scope == "job" and event_code in ({"CLAIMED", "LEASE_EXPIRED", "RETRY_SCHEDULED", "DEFERRED", "DONE"} | HANDLER_EVENTS)
             and (attempt is None or attempt < 1)):
         raise ValueError("positive attempt required for processing event")
     if event_code == "CREATED" and attempt not in (None, 0):

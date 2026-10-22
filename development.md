@@ -4,6 +4,21 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Initial async worker core — 2026-10-22
+
+The worker follow-up builds on draft destination-settings PR #106. It implements
+trusted async/thread handler registration, bounded maintenance-aware polling,
+transactional claims, token/expiry/attempt fencing, heartbeat renewal, expired
+lease recovery, typed outcomes and atomic result/successor/history completion.
+Normal deferred waits are separate from failure retries. Pause/stop drain active
+work; forced cancellation waits for blocking threads before releasing admission.
+See [WORKER.md](src/nextgen/WORKER.md). SQLite remains v8; jobs is unchanged.
+
+No business/provider/trial/Keep handlers are installed: an empty registry fails
+readiness. run_worker is the service entry point for trusted registrations; no
+worker has been run/deployed. The management API and supervisor remain separate.
+Offline lifecycle/concurrency/cancellation cases are included but unexecuted.
+
 ## Merged foundations and media destination settings — 2026-10-22
 
 PRs #103, #104 and #105 were confirmed merged into NextGen with explicit user

@@ -197,3 +197,12 @@ never silently moves or retargets existing files. Version 2→3 explicitly adds
 blank destination fields and advances the publication revision. Earlier 0→1→2
 conversions keep their historical key/default shapes, then convert to v3. Unknown
 new fields in an older version are rejected. SQLite remains v8; no SQL change.
+
+
+Operation snapshots revalidate cross-field constraints after pinning restart-only
+values. A saved future database location cannot make a live media root safe if
+that root contains the database still in use. In that case new operations fail
+with CONFIGURATION_INVALID before work is claimed. Choose compatible roots or
+restart the affected service against the saved database configuration after its
+separate storage/migration readiness checks. Saving settings does not move data,
+create a database or run migrations.

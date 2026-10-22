@@ -288,6 +288,8 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
     if type(payload) is not dict:
         raise ValueError("job payload must be an object")
     raw = json.dumps(payload, allow_nan=False, sort_keys=True)
+    if len(raw.encode("utf-8")) > 65536:
+        raise ValueError("job payload exceeds the storage bound")
     for reference in (event_id, created_by_job_id):
         if reference is not None:
             integer(reference, positive=True)
@@ -303,6 +305,11 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
                                component=component, occurred_at_ms=now,
                                details={"attempt": 0})
     return job_id, audit
+
+
+def enqueue_job_with_receipt(db, **kwargs):
+    """Worker-owned handoff: return ID and audit receipt; no commit or logging."""
+    return _enqueue_job(db, **kwargs)
 
 
 def enqueue_job(db, *, kind, payload, component, event_id=None,
