@@ -1,2 +1,2 @@
-"""Versioned, validated contracts shared between NextGen components."""
-from .release_record import ReleaseRecord, Intake, Identity, Acquisition, Staging, Evaluation, Export
+"""Canonical versioned product contracts shared by NextGen components."""
+from .anime_product import AnimeProduct, Anime, Episode, TVDBPlacement
