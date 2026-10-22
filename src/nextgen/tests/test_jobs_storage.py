@@ -94,6 +94,27 @@ class JobsStorageTests(unittest.TestCase):
                 self.db.execute(
                     "INSERT INTO job_history(job_id,occurred_at_ms,event_code) VALUES(9999,2,'UNKNOWN')")
 
+    def test_version_two_failure_rolls_back_tables_and_version(self):
+        sql_dir = Path(__file__).resolve().parents[1] / "storage" / "sql"
+        v1 = (sql_dir / "001_foundation.sql").read_text(encoding="utf-8")
+        v2 = (sql_dir / "002_independent_jobs.sql").read_text(encoding="utf-8")
+        # Inject a failure after table creation but before user_version changes.
+        bad = v2.replace("PRAGMA user_version=2;", "SELECT * FROM deliberately_missing_table;\\nPRAGMA user_version=2;")
+        with tempfile.TemporaryDirectory() as tmp:
+            db = connect(os.path.join(tmp, "rollback.sqlite"))
+            try:
+                db.executescript(v1)
+                with self.assertRaises(Exception):
+                    db.executescript(bad)
+                db.rollback()
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+                self.assertIsNone(db.execute(
+                    "SELECT name FROM sqlite_master WHERE name='jobs'").fetchone())
+                self.assertIsNone(db.execute(
+                    "SELECT name FROM sqlite_master WHERE name='job_history'").fetchone())
+            finally:
+                db.close()
+
     def test_initialize_refuses_unversioned_existing_schema(self):
         self.db.execute("PRAGMA user_version=0")
         with self.assertRaises(ValueError):
