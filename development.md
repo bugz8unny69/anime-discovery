@@ -43,6 +43,16 @@ Every published series MUST satisfy a uniform, machine-checkable schema; optiona
 
 **Scope:** SQLite schema, basic persistence helpers, documentation, isolated tests in `src/nextgen/tests/`. No intake HTTP service, no daemon, no acquisition, no migration from legacy, no production deployment. Leave automatic paid CI disabled; tests remain tracked, with offline comprehensive testing planned later per user decision. Do not claim unrun tests have passed. No merge/deployment without fresh authorization.
 
+## Versioned SQLite SQL files — PR #95
+
+The future **NextGen-only** migration component will read ordered scripts from `src/nextgen/storage/sql/`:
+
+- `001_foundation.sql` creates exactly the initial six-table NextGen foundation and sets `PRAGMA user_version=1`. Use this only on an empty NextGen database.
+- `002_independent_jobs.sql` adds the independent `jobs` table and its indexes and sets `PRAGMA user_version=2`. Apply this to a version-1 NextGen database. It does not recreate the six existing tables or alter their rows.
+- On a fresh database, run 001 then 002. On an existing verified v1 database, run only 002. At v2, do not reapply either script.
+
+The migration component is **not implemented** in this PR. When built, it must check `PRAGMA user_version`, reject missing/unknown/unexpected versions, apply each SQL script atomically (including its version bump), and verify integrity. A failed migration must roll back without claiming the new version. Never run these scripts against legacy production databases. The Python `initialize()` helper creates v2 on a genuinely empty database and rejects implicit upgrades of v1 rather than silently stamping a later version. Existing `webhook_events` work-state columns remain until a separate compatibility change.
+
 ## NextGen processing components
 
 Explicit static components, each with narrow responsibility:
