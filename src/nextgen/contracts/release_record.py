@@ -8,7 +8,7 @@ availability and trust. v1 keeps absent stage results as None; it never
 infers missing TVDB mappings, paths, media verification or user decisions.
 """
 from dataclasses import dataclass, field, fields, asdict
-from typing import Optional, Tuple
+from typing import Optional
 import json
 
 SCHEMA_VERSION = 1
@@ -153,7 +153,7 @@ class ReleaseRecord:
             if not isinstance(value,dict):
                 raise ValueError(typ.__name__+" must be an object")
             expected={f.name for f in fields(typ)}
-            if set(value)!=expected if typ is Intake or typ is Identity or typ is Acquisition or typ is Staging or typ is Evaluation or typ is Export else False:
+            if set(value) != expected:
                 raise ValueError("Invalid "+typ.__name__+" fields")
             return typ(**value)
         expected={f.name for f in fields(cls)}
