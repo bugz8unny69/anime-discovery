@@ -15,12 +15,27 @@ coordinator execution. Keep the domain AnimeSeries v2 untouched. No provider,
 acquisition, dashboard, management API, or process supervision implementation
 is required to prove this foundation.
 
+## Mandatory human-readable messages
+
+Follow [HUMAN_READABLE_MESSAGES.md](HUMAN_READABLE_MESSAGES.md): **every emitted
+marker, reason/error, checkpoint and displayed state requires central English
+copy and a stable namespaced translation key**. Journal entries include both
+codes and resolved sentences; dashboard and CLI use the same catalog.
+Registration must cover normal waiting/progress/success as well as errors.
+Do not synthesize prose by replacing underscores or interpreting exceptions.
+
+The existing reasons.py English messages/actions are the reason source of
+truth. Implement event/state catalogs and the common renderer alongside the
+durable diagnostic writers; translation loading can follow later, using the
+keys defined by the policy. The initial renderer uses complete static English
+sentences and keeps variable facts in separate fields.
+
 ## One contract, two destinations
 
 | Fact | Durable SQLite history | Runtime structured log |
 | --- | --- | --- |
-| What happened | Registered event_code | Same event_code as the event name |
-| Why, when relevant | Registered reason_code, nullable | Same reason_code |
+| What happened | Registered event_code | Same event_code as the event name plus resolved English event message |
+| Why, when relevant | Registered reason_code, nullable | Same reason_code and resolved reason message |
 | Delivery correlation | event_id FK, directly or through jobs | event_id and derived trace_id when present |
 | Independent work | job_id FK | job_id |
 | Provenance | jobs.created_by_job_id, nullable | Optional bounded created_by_job_id |
@@ -41,16 +56,36 @@ Storage failure itself may only reach runtime diagnostics until recovery.
 
 Scopes and reason requirements are validated by the shared writer.
 
-| event_code | Scope | Reason | Meaning |
+| event_code | Scope | Reason | Default English message |
 | --- | --- | --- | --- |
-| ACCEPTED | incoming event | Absent | Delivery durably accepted |
-| SERIES_IDENTIFIED | incoming event | Absent | Validated series persisted; no claim about acquisition |
-| CREATED | job | Absent | Independent job inserted |
-| CLAIMED | job | Absent | New processing attempt leased |
-| LEASE_EXPIRED | job | JOB_LEASE_EXPIRED | Expired attempt observed during ownership-fenced recovery |
-| RETRY_SCHEDULED | job | Required | Policy selected another attempt and persisted its availability |
-| NEEDS_REVIEW | job | Required | Work stopped for review, including exhausted or unsupported work |
-| DONE | job | Absent | Current job completed; successor creation, if any, is in the same transaction |
+| ACCEPTED | incoming event | Absent | Incoming event accepted. |
+| SERIES_IDENTIFIED | incoming event | Absent | Anime series identification completed. |
+| CREATED | job | Absent | Job created. |
+| CLAIMED | job | Absent | Job processing started. |
+| LEASE_EXPIRED | job | JOB_LEASE_EXPIRED | The processing lease expired before the job completed. |
+| RETRY_SCHEDULED | job | Required | Another processing attempt has been scheduled. |
+| NEEDS_REVIEW | job | Required | Processing has stopped for review. |
+| DONE | job | Absent | Job completed. |
+
+Event message keys are event.<CODE>.message. SERIES_IDENTIFIED does not imply
+episode coverage or acquisition. DONE means only this independent job completed;
+successor creation, when required, must still be in the same transaction.
+LEASE_EXPIRED records the observed expiry during ownership-fenced recovery.
+
+Display states require state.<entity>.<CODE>.label:
+
+| Entity | Code | Default English label |
+| --- | --- | --- |
+| job, incoming_event | PENDING | Waiting to be processed |
+| job, incoming_event | RUNNING | Processing |
+| job, incoming_event | RETRY_WAIT | Waiting for another attempt |
+| job, incoming_event | NEEDS_REVIEW | Needs review |
+| job | DONE | Completed |
+| incoming_event | IDENTIFIED | Series identified |
+
+The two entities use separate keys even where English text matches. These
+labels cover all states currently permitted by SQLite v3; they add no state.
+All reason codes use reasons.py copy and reason.<CODE>.message/action keys.
 
 These are new-emission rules, not a rejection policy for historical reads.
 Unknown historical event/reason codes must remain readable using generic copy.
@@ -168,6 +203,11 @@ already present.
    no secret leakage across known redaction edge cases.
 9. Reapplying validated local logging settings changes verbosity without
    duplicate handlers; invalid settings leave the active logger unchanged.
+10. Every event/reason/state has English copy and stable translation keys;
+    journal includes codes plus sentences, shared presentation resolves the
+    same catalog, unknown history has readable generic text, and missing
+    translations fall back to English. See HUMAN_READABLE_MESSAGES.md for
+    the complete coverage, safe-rendering and locale acceptance requirements.
 
 Tests must be committed with implementation but remain **unexecuted** under
 the current project policy. Do not trigger CI. This design draft contains no
