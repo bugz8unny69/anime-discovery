@@ -2,7 +2,70 @@
 
 > **Purpose:** Ground future development chats in verified repository paths, host context, and safe commands. This document is not permission to deploy, delete media, alter production SQLite, or merge a PR.
 >
-> **Last reviewed:** 2026-10-21. Runtime `/etc/anime-discovery/settings.json` remains authoritative. Infrastructure notes include historical and partially verified details.
+> **Architecture handoff updated:** 2026-10-22. Historical implementation details below may describe the existing legacy application rather than the planned replacement. **Last infrastructure review:** 2026-10-21. Runtime `/etc/anime-discovery/settings.json` remains authoritative. Infrastructure notes include historical and partially verified details.
+
+## Architecture handoff — clean-slate next generation (2026-10-22)
+
+**Decision:** Stop incremental patch-driven feature expansion of the legacy runtime and design a next-generation implementation in `src/nextgen/`. **Start the architecture fresh but reuse verified algorithms, adapters, tests, and the already-merged daemon job infrastructure.** This is a staged replacement, not permission to delete legacy code or migrate production. Existing `src/legacy/` continues to function unchanged until a separately authorized cutover. The next generation must be independently testable before any deployment.
+
+### Why we changed direction
+
+Two weeks of implementing notification, identity, acquisition, staging, Jellyfin, Keep and Sonarr workflows uncovered excessive cross-component coupling. Improving one part often required changes across several modules, and patch fixes accumulated. The desired solution is **one stable, versioned release-record contract plus explicitly bounded components**, not a dynamic plugin system, weighted provider voting, or runtime hook registration.
+
+We considered serialized hooks, registration logs, multiple provider evidence hooks, authoritative merging, and postponing TVDB reconciliation until Sonarr export. Those were **explorations, not adopted architecture**. In particular, postponing TVDB is unsafe without redesigning staging: `anime_trial_staging.py` and `anime_nfo_repair.py` currently require a verified TVDB ID for Jellyfin NFO generation and path/identity validation. Preserve the proven AniDB-first lookup with exact AniDB↔TVDB series, season and episode verification rather than replacing it with a simplistic score.
+
+### End-to-end lifecycle and ownership
+
+1. **Webhook intake (Autobrr):** validate and deduplicate source/GUID; persist immutable release facts and a stable notification/correlation reference. Webhook release names are untrusted hints, not episode proof.
+2. **Identity component:** use existing AniDB-based identity, TVDB, Anime-Lists and exact season/episode reconciliation logic. Preserve sequel, cour, split-season, batch, ambiguous mapping and provider-failure safeguards. No inferred TVDB season 1, no implicit AniDB/TVDB episode-number match. Emit a verified result or a clear RETRY/REVIEW/exclusion decision.
+3. **Acquisition component:** consume only verified/eligible identity and policy, authorize downloads through existing ownership, duplicate, size and Japanese+English audio safeguards. Keep integrations encapsulated.
+4. **Staging component:** consume verified identity, media and configured storage policy; securely validate roots, symlinks, ownership/permissions, paths, NFO and episode metadata at point of use. Supplying a path in the record never makes it trusted. Publish to Anime Trial/Jellyfin only on successful checks.
+5. **Human evaluation:** user reviews staged content, chooses **Keep** or **Reject**; never implicitly Keep.
+6. **Keep/Sonarr export:** require explicit Keep and the existing verified TVDB/season/episode identity; retain import safeguards, idempotency and protective cleanup behavior. Reject follows existing safe ownership/cleanup rules.
+7. **Operational history:** reconstruct activity using the stable notification trace across independently completed jobs, stages, retries and review choices.
+
+### One canonical release record; progressively populated
+
+Use **one versioned application-level schema for the whole journey**, not mutually incompatible payload shapes at each stage and not one enormous database table. At intake, many later fields are absent; components fill only fields they own and persist results durably. A restart reassembles the record from existing normalized SQLite tables. Components use narrow validated views of the same canonical record; they do not need to receive or understand every field.
+
+Proposed groups (contract design to be implemented/tested, not an existing deployed schema):
+- `schema_version`; `notification_id` / stable `trace_id`; source, GUID, received time, release name, info hash and immutable raw-intake references where necessary.
+- `identity`: AniDB/TVDB IDs, verified exact season/episode/episode ID, independently obtained mapping provenance, decision, explicit uncertainty and episode/evaluation window.
+- `acquisition`: authorization, owned torrent/download references, downloaded file identifiers, media/size/audio evidence and job outcome.
+- `staging`: verified staged path, NFO result, secure storage evidence and Jellyfin readiness.
+- `evaluation`: review status and explicit Keep/Reject decision.
+- `sonarr`: protected export result and external identity/import records.
+
+**Ownership:** intake writes intake facts; identity writes verified identity; acquisition writes acquisition/media evidence; staging writes staging metadata; review writes human decision; Sonarr adapter writes import outcome. Every consumer validates prerequisites and fails closed on missing/conflicting inputs. Existing immutable verified decisions may not be silently overwritten by a later component. Extending a component's private implementation should not affect siblings; changing the public record contract requires deliberate schema versioning and contract/regression tests. The coordinator changes only for new workflow transitions, not internal component improvements.
+
+### Coordinator, durable jobs and static boundaries
+
+The existing `src/legacy/anime_async_daemon.py` job infrastructure is **already on develop**: `daemon_jobs` provides SQLite-backed work, leases, retries and independent completion. Do not reinvent it. Future orchestration should be small: choose a stage, load/validate the canonical record, invoke its explicit component interface, persist result and the next durable job/handoff transactionally where appropriate. Each stage has one clear owner; no runtime hook discovery/registration, interchangeable verifier hooks, dynamic priority graph, or arbitrary external plugin mutation. “Detach a component” means replace its implementation behind a stable contract, not disable mandatory identity/audio/Keep security checks. Simple stage-by-stage calls are preferred over a generic orchestration framework.
+
+Notification history must never be deleted as a result of job migration. `notifications` is the persistent incoming release/Series History; `unified_identity_checks` holds legacy identity evidence and independent retry timing; `daemon_jobs` schedules executable work; `episode_dispatch` records verified episode dispatch. **Do not run two competing retry schedulers during a future identity-worker cutover.** The existing polling monitor remains intact until tested migration, rollback and one-time backfill of outstanding pending notifications are separately approved.
+
+### Tracing and dashboard
+
+Use a stable, Postfix-like correlation identifier: `AD-<notification_id>` follows notification-related processing and jobs; `AJ-<root job id>` covers standalone work. Preserve distinct job IDs for attempts, leased work and handoffs. Reuse `anime_diagnostics.event` and the systemd journal with redacted/allowlisted fields; store bounded structured lifecycle events durably in existing SQLite for the Activity/History dashboard, because journal retention is not permanent. Log stage/job start and finish, decision/status, retry or review outcomes, failures and safe reason codes. Avoid raw tokens, credential-bearing URLs and potentially sensitive payloads. The dashboard should display a copyable trace ID, job IDs and an ordered history, eventually searchable without SSH. **Current PR #91 provides only the low-level job tracing foundation; its dashboard timeline is not yet implemented.**
+
+### Reuse and migration guardrails
+
+- Reuse proven algorithms and regression fixtures from `src/legacy/`, rather than translating/reimplementing working AniDB, TVDB and Anime-Lists logic. Extract behind stable contracts after behavior-equivalence tests.
+- Keep Jellyfin NFO metadata identity and safe filesystem behavior intact. A verified TVDB ID currently participates **before** Sonarr Keep, including staging, so no deferred TVDB reconciliation without a distinct design/testing PR.
+- Preserve size limits, verified Japanese+English audio, eligibility window, exact season/episode mapping, explicit Keep, torrent/media ownership rules, and manual review/retry semantics. Uncertain evidence must not become implicit approval.
+- Existing tests, especially `test_anime_unified_identity_monitor.py` and `test_anime_episode_crossref.py`, are release gates for sequel seasons, Anime-Lists mapping absence, duplicate crossrefs, explicit verified episode IDs and fail-closed outcomes.
+- Design first; implement a read-only canonical-record assembler against existing SQLite tables, then add schema contract tests and boundary fixtures. Migrate one isolated component at a time, compare decisions/outputs against legacy, and introduce durable handoff tests (idempotence, crashes, restarts, retry ownership) before moving runtime entry points.
+- Keep new code and tests under `src/nextgen/` (see README); do not bulk-move legacy files just for appearances. Avoid parallel production runners until an explicitly approved cutover plan.
+- Never alter live VM, service state, databases, torrents/media, or merge/deploy based on this note.
+
+### PR and handoff status as of 2026-10-22
+
+- **PR #89:** closed without merge; earlier identity-worker migration, dynamically registered hooks and dashboard tracing experiment superseded. Historical reference only.
+- **PR #91:** draft `infra/component-boundaries-tracing-20261022` → `develop`. Extracts bounded job trace history and logger correlation and documents static boundaries; still requires CI/behavior review. This handoff documentation and `src/nextgen/` skeleton are added to its branch. **Not merged or deployed.**
+- **PR #90:** separate draft for future manual/approval/automatic discovery and backfill design. Do not re-enable automatic Prowlarr backfill in the infrastructure rewrite.
+- **Next chat's focused task:** design `ReleaseRecord v1` field ownership, source-of-truth mapping, required data by stage, immutable provenance, read-only assembler and contract tests; then decide the first real component extraction. Resist an entire-runtime rewrite in one PR.
+
+---
 
 ## Repository and branching
 
