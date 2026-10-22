@@ -3,6 +3,7 @@
 -- The future migration runner must verify version before applying.
 -- Jobs are independent units of work, not a parent/child dependency graph.
 -- created_by_job_id is optional provenance only.
+BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS jobs (
  job_id INTEGER PRIMARY KEY,
  event_id INTEGER REFERENCES webhook_events(event_id),
@@ -43,3 +44,4 @@ CREATE TABLE IF NOT EXISTS job_history (
 CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_history(job_id,history_id);
 
 PRAGMA user_version=2;
+COMMIT;
