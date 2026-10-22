@@ -6,28 +6,28 @@
 
 ## What is canonical
 
-**Series schema, not processing state.** NextGen uses one versioned `AnimeSeries v1` schema (`src/nextgen/schema/anime_series.py`; detailed RFC at `src/nextgen/schema/README.md`). The series describes **the anime and its episodes**. It MUST NOT include webhook notification IDs, traces, GUIDs, source release names, job IDs, retries, acquisition, staging, evaluation, or export status. That information lives in independent durable operational records connected to the series after identification.
+**Series schema, not processing state.** NextGen uses one versioned `AnimeSeries v2` schema (`src/nextgen/schema/anime_series.py`; detailed RFC at `src/nextgen/schema/README.md`). The series describes **the anime and its episodes**. It MUST NOT include webhook notification IDs, traces, GUIDs, source release names, job IDs, retries, acquisition, staging, evaluation, or export status. That information lives in independent durable operational records connected to the series after identification.
 
 The identified series's required fields are:
 - `anime.anidb_id`: positive AniDB anime ID (anime and sequel/cour identity).
-- `anime.tvdb_series_id`: positive TVDB **series** ID for Sonarr.
+- `anime.tvdb_series_id`: positive verified TVDB **series** ID for Sonarr; mandatory for functional downstream integration.
 - `anime.title`: nonblank **identified anime title**, not the original release name.
-- `episodes`: one or more individually identified episodes.
-- `episodes[].anidb_episode_id`: positive exact AniDB episode ID, including Shoko needs.
-- `schema_version`: exactly `1` until a new schema version is approved.
+- `schema_version`: exactly `2` in the V2 validator.
 
-Other series descriptors (alternative/original titles, year, anime type, AniDB episode display numbers, episode title/type, optional `episodes[].tvdb_placement` and `attributes`) are nullable or optional. TVDB *episode-level* IDs and per-episode TVDB season/episode mapping **are not hard identity-completion requirements**. Known placement is represented as `{season, episode}` inside the episode, with season 0 permitted for specials. AniDB episode numbering MAY be continuous or nonstandard. Never infer TVDB season from AniDB ordinal, default unknown to S01/E01, or conflate separately cataloged AniDB sequel entries under one TVDB series.
+The `anime.tvdb_series_id` link is **mandatory**, because the full pipeline needs Sonarr's TVDB series identity. AniDB remains authoritative for anime and episode identities; this requirement does not make TVDB episode/season placement mandatory. `episodes` may be omitted or empty; missing normalizes to `[]`. **Every populated episode** MUST have an exact verified positive `anidb_episode_id` (for Shoko and episode-specific operations). An empty list is a series-only identity, **not** proof a batch contains zero episodes or that episode-level identification is finished.
+
+Other series descriptors (alternative/original titles, year, anime type, AniDB episode display numbers, episode title/type, optional `episodes[].tvdb_placement` and `attributes`) are nullable or optional. TVDB *episode-level* IDs and per-episode TVDB season/episode mapping **are not hard AniDB series-identification requirements**. Known placement is represented as `{season, episode}` inside the episode, with season 0 permitted for specials. AniDB episode numbering MAY be continuous or nonstandard. Never infer TVDB season from AniDB ordinal, default unknown to S01/E01, or conflate separately cataloged AniDB sequel entries under one TVDB series.
 
 Every published series MUST satisfy a uniform, machine-checkable schema; optional fields normalize to null/empty object to spare future consumers missing-key crashes. Field docs track meaning, reason, owner, availability, and origin. Breaking changes require explicit schema versioning and permanent offline fixture tests. Structured optional attributes never override the core named fields.
 
 ### RFC-IDENTITY-001: mandatory completion gate
 
-**This gate is at the END of identification, not at the webhook and not at some later acquisition stage.**
+**This gate is at the END of anime-series identification, not at the webhook.** Series identification and episode/release identification are different: the former MAY succeed without any identified episodes, but that alone MUST NOT authorize episode-specific downstream actions.
 
-- The identification component gathers information in its own *incomplete* work state. An unrecognized anime, absent TVDB series link, or missing AniDB episode ID is **not** a completed series.
-- Before changing work state to **IDENTIFIED/COMPLETE**, the identity component MUST validate the full candidate via `AnimeSeries.from_dict` (or the equivalent strict schema checker). Only a passing result may be saved/published as the authoritative series and referenced by downstream work.
-- Failed validation MUST prevent identification from being marked complete and MUST block downstream acquisition. Persist a reason-coded, traceable **INCOMPLETE_IDENTITY** or **INVALID_IDENTITY** outcome in operational job history. The identity work MAY retry when information improves, or enter review. A failed candidate is a normal per-item outcome; it MUST NOT crash workers or lose the original webhook notification.
-- A completed series's identity can be read without repeated identification by downstream components. Components still enforce their own **separate**, integration-specific prerequisites (e.g. exact TVDB episode placement before the NFO/episode import operation that needs it, file ownership/path verification at use time). The RFC is not authorization to acquire or export.
+- The identification component gathers information in its own *incomplete* work state. An unrecognized AniDB anime is **not** a completed series. An absent TVDB series link is **not** a valid completed AnimeSeries identity. An empty episode array **may** be a valid identified anime series, but MUST NOT be interpreted as completed episode identification or release coverage.
+- Before publishing an identified anime series, the identity component MUST validate the candidate via `AnimeSeries.from_dict` (or equivalent V2 validation). Only a passing result may be recorded as the series identity. A populated episode additionally requires independently verified AniDB episode evidence. Numeric shape validation cannot prove an ID came from AniDB.
+- Failed series schema validation MUST prevent completed anime-series identification; missing/unverified episode identities MUST separately block episode-specific acquisition completion, Shoko linking and Sonarr episode import. Persist a reason-coded, traceable **INCOMPLETE_IDENTITY** or **INVALID_IDENTITY** outcome in operational job history. The identity work MAY retry when information improves, or enter review. A failed candidate is a normal per-item outcome; it MUST NOT crash workers or lose the original webhook notification.
+- A series identity, even with no identified episodes, can be read without repeated anime-series identification by downstream components. Components still enforce their own **separate**, integration-specific prerequisites (e.g. exact TVDB episode placement before the NFO/episode import operation that needs it, file ownership/path verification at use time). The RFC is not authorization to acquire or export.
 
 ## NextGen processing components
 
@@ -70,6 +70,6 @@ Preserve domain behaviors as test cases, not code bridges: AniDB versus TVDB seq
 - **PR #89:** closed without merge, superseded.
 - **PR #90:** independent optional backfill design, **not** automatic backfill for NextGen.
 - **PR #91:** draft exploratory traces/docs from legacy; outdated migration suggestions are superseded. Do not merge a stale handoff.
-- **PR #92:** draft, offline-only AnimeSeries v1 schema and RFC identity-completion tests. No NextGen deployment or background worker included.
+- **PR #92:** merged into `NextGen`, offline-only AnimeSeries v1 schema and RFC identity-completion tests. Superseded by a proposed minimal V2 schema revision; no NextGen deployment or background worker included.
 
-The next focused PR implements **durable intake/reliability infrastructure**, not the identity provider algorithm or media integrations.
+The separate SQLite/webhook-design effort implements **durable intake/reliability infrastructure**, not the identity provider algorithm or media integrations. V2 schema work stays in its own draft feature PR.

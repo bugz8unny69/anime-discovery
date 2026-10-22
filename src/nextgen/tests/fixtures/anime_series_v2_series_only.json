@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "anime": {
+    "anidb_id": 19242,
+    "title": "Example Identified Season-Pack Anime",
+    "tvdb_series_id": 305089,
+    "english_title": null,
+    "original_title": null,
+    "type": "TV",
+    "year": null
+  },
+  "episodes": [],
+  "attributes": {}
+}
