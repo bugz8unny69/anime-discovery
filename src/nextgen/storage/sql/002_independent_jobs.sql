@@ -26,4 +26,20 @@ CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(state,available_at_ms,job_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_expired ON jobs(state,lease_expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_jobs_event ON jobs(event_id);
 
+-- Future runner: verify user_version=1, BEGIN IMMEDIATE, apply this DDL,
+-- set user_version=2 and COMMIT together; ROLLBACK on any failure.
+-- Job completion + successor insert + history must also share one transaction;
+-- verify the RUNNING job's unexpired lease_token before completing it.
+-- Neither this SQL script nor the schema implements those worker operations.
+-- Job history is append-only operational audit, separate from webhook event_history.
+CREATE TABLE IF NOT EXISTS job_history (
+ history_id INTEGER PRIMARY KEY,
+ job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ occurred_at_ms INTEGER NOT NULL,
+ event_code TEXT NOT NULL CHECK(length(trim(event_code)) > 0),
+ reason_code TEXT,
+ details_json TEXT CHECK(details_json IS NULL OR json_valid(details_json))
+);
+CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_history(job_id,history_id);
+
 PRAGMA user_version=2;
