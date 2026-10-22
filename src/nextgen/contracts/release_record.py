@@ -30,7 +30,7 @@ class Intake:
     """Immutable notification facts, never treated as verification evidence."""
     notification_id: int = documented(meaning="Durable notification row ID",reason="Correlates release and permanent history",owner="intake",available="receipt",trust="database-key")
     source: str = documented(meaning="Webhook origin",reason="Identify notification producer",owner="intake",available="receipt",trust="untrusted-origin")
-    source_guid: str = documented(meaning="Original provider event GUID",reason="Deduplicate source events",owner="intake",available="receipt",trust="untrusted")
+    source_guid: str = documented(meaning="Original provider event GUID",reason="Audit original delivery; never use webhook GUID for anime or episode deduplication",owner="intake",available="receipt",trust="untrusted")
     release_name: str = documented(meaning="Original supplied release label",reason="Human audit and identity lookup hint",owner="intake",available="receipt",trust="untrusted")
     info_hash: str = documented(meaning="Received torrent info hash",reason="Correlate acquisition and ownership checks",owner="intake",available="receipt",trust="untrusted")
     received_at: int = documented(meaning="Receipt Unix timestamp",reason="Ordering and historical context",owner="intake",available="receipt",trust="database-recorded")
@@ -48,13 +48,14 @@ class Intake:
 class Identity:
     """Only the identity component may publish verified identity results."""
     anidb_id: int = documented(meaning="Verified AniDB anime ID",reason="Canonical anime identity",owner="identity",available="verified-identity",trust="verified")
+    anidb_episode_id: int = documented(meaning="Verified AniDB episode ID",reason="Identify exact anime episode independently of names and TVDB numbering",owner="identity",available="verified-identity",trust="verified")
     tvdb_id: int = documented(meaning="Verified TVDB series ID",reason="Existing staging NFO and Sonarr compatibility",owner="identity",available="verified-identity",trust="verified")
     season: int = documented(meaning="Verified TVDB season number",reason="Avoid wrong sequel/cour staging",owner="identity",available="verified-identity",trust="verified")
     episode: int = documented(meaning="Verified TVDB episode number",reason="Exact staging and import destination",owner="identity",available="verified-identity",trust="verified")
     mapping_source: str = documented(meaning="Cross-provider episode mapping provenance code",reason="Audit proof without guessing numbering",owner="identity",available="verified-identity",trust="verified-provenance")
 
     def __post_init__(self):
-        for name in ("anidb_id","tvdb_id","episode"):
+        for name in ("anidb_id","anidb_episode_id","tvdb_id","episode"):
             positive(getattr(self,name),name)
         if type(self.season) is not int or self.season < 0:
             raise ValueError("season must be a nonnegative integer")
