@@ -96,8 +96,21 @@ def connect(path):
     return db
 
 def initialize(db):
+    """Initialize a *new* NextGen database at schema v2; never downgrade an existing file.
+
+    Existing v1 databases must apply sql/002_independent_jobs.sql via the
+    future version-aware migration runner before accessing v2-only storage.
+    """
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version == 2:
+        return
+    if version != 0:
+        raise ValueError("existing NextGen database requires versioned SQL upgrade")
+    present = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").fetchone()
+    if present:
+        raise ValueError("database has tables but no schema version; refuse implicit upgrade")
     db.executescript(SCHEMA)
-    db.execute("PRAGMA user_version=1")
+    db.execute("PRAGMA user_version=2")
 
 def accept_event(db, source, raw_body, received_at_ms=None):
     """Every delivery receives its own durable work record."""
