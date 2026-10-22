@@ -76,8 +76,14 @@ class JobsStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT count(*) FROM webhook_events").fetchone()[0], 1)
                 self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0], 0)
                 self.assertEqual(db.execute("SELECT count(*) FROM job_history").fetchone()[0], 0)
+                with self.assertRaises(ValueError):
+                    initialize(db)
+                v3 = (sql_dir / "003_incoming_events.sql").read_text(encoding="utf-8")
+                db.executescript(v3)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
+                self.assertEqual(db.execute("SELECT count(*) FROM incoming_events").fetchone()[0], 1)
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
                 initialize(db)
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
             finally:
                 db.close()
 

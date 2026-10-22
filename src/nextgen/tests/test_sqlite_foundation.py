@@ -27,14 +27,14 @@ class SQLiteFoundationTests(unittest.TestCase):
         a = accept_event(self.db, "autobrr", b"same")
         b = accept_event(self.db, "autobrr", b"same")
         self.assertNotEqual(a, b)
-        self.assertEqual(self.db.execute("SELECT count(*) FROM webhook_events").fetchone()[0], 2)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM incoming_events").fetchone()[0], 2)
         self.assertEqual(self.db.execute("SELECT count(*) FROM event_history").fetchone()[0], 2)
 
     def test_pending_work_survives_database_reopen(self):
         event = accept_event(self.db, "autobrr", b"payload")
         self.db.close()
         self.db = connect(self.path)
-        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+        self.assertEqual(self.db.execute("SELECT state FROM incoming_events WHERE event_id=?",
                                          (event,)).fetchone()[0], "PENDING")
 
     def test_valid_series_without_episodes(self):
@@ -56,7 +56,7 @@ class SQLiteFoundationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_identity(self.db, event, candidate)
         self.assertEqual(self.db.execute("SELECT count(*) FROM identity_results").fetchone()[0], 0)
-        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+        self.assertEqual(self.db.execute("SELECT state FROM incoming_events WHERE event_id=?",
                                          (event,)).fetchone()[0], "PENDING")
 
     def test_foreign_keys_reject_unknown_event(self):
@@ -67,7 +67,7 @@ class SQLiteFoundationTests(unittest.TestCase):
     def test_success_updates_event_state(self):
         event = accept_event(self.db, "autobrr", b"payload")
         save_identity(self.db, event, self.candidate())
-        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+        self.assertEqual(self.db.execute("SELECT state FROM incoming_events WHERE event_id=?",
                                          (event,)).fetchone()[0], "IDENTIFIED")
 
     def test_identical_retry_is_idempotent(self):
@@ -97,7 +97,7 @@ class SQLiteFoundationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_identity(self.db, event, conflict)
         self.assertEqual(self.db.execute("SELECT count(*) FROM identity_results").fetchone()[0], 1)
-        self.assertEqual(self.db.execute("SELECT state FROM webhook_events WHERE event_id=?",
+        self.assertEqual(self.db.execute("SELECT state FROM incoming_events WHERE event_id=?",
                                          (event,)).fetchone()[0], "PENDING")
 
 

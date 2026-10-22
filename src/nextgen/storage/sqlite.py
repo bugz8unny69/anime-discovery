@@ -4,7 +4,7 @@ import sqlite3
 import time
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS webhook_events (
+CREATE TABLE IF NOT EXISTS incoming_events (
  event_id INTEGER PRIMARY KEY,
  source TEXT NOT NULL,
  raw_body BLOB NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 );
 CREATE TABLE IF NOT EXISTS event_history (
  history_id INTEGER PRIMARY KEY,
- event_id INTEGER NOT NULL REFERENCES webhook_events(event_id),
+ event_id INTEGER NOT NULL REFERENCES incoming_events(event_id),
  occurred_at_ms INTEGER NOT NULL,
  event_code TEXT NOT NULL,
  reason_code TEXT,
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS identified_episodes (
 );
 CREATE TABLE IF NOT EXISTS identity_results (
  result_id INTEGER PRIMARY KEY,
- event_id INTEGER NOT NULL REFERENCES webhook_events(event_id),
+ event_id INTEGER NOT NULL REFERENCES incoming_events(event_id),
  anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
  schema_version INTEGER NOT NULL CHECK(schema_version=2),
  series_json TEXT NOT NULL CHECK(json_valid(series_json)),
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS result_episode_links (
 -- created_by_job_id is optional provenance only.
 CREATE TABLE IF NOT EXISTS jobs (
  job_id INTEGER PRIMARY KEY,
- event_id INTEGER REFERENCES webhook_events(event_id),
+ event_id INTEGER REFERENCES incoming_events(event_id),
  created_by_job_id INTEGER REFERENCES jobs(job_id),
  kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
  payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(state,available_at_ms,job_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_expired ON jobs(state,lease_expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_jobs_event ON jobs(event_id);
--- Job history is append-only operational audit, separate from webhook event_history.
+-- Job history is append-only operational audit, separate from incoming event_history.
 CREATE TABLE IF NOT EXISTS job_history (
  history_id INTEGER PRIMARY KEY,
  job_id INTEGER NOT NULL REFERENCES jobs(job_id),
@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS job_history (
  details_json TEXT CHECK(details_json IS NULL OR json_valid(details_json))
 );
 CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_history(job_id,history_id);
-CREATE INDEX IF NOT EXISTS idx_event_queue ON webhook_events(state,next_run_at_ms);
-CREATE INDEX IF NOT EXISTS idx_event_lease ON webhook_events(state,lease_expires_at_ms);
+CREATE INDEX IF NOT EXISTS idx_event_queue ON incoming_events(state,next_run_at_ms);
+CREATE INDEX IF NOT EXISTS idx_event_lease ON incoming_events(state,lease_expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_history_event ON event_history(event_id,history_id);
 CREATE INDEX IF NOT EXISTS idx_anime_tvdb ON identified_anime(tvdb_series_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_anime ON identified_episodes(anidb_id);
@@ -106,13 +106,13 @@ def connect(path):
     return db
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v2; never downgrade an existing file.
+    """Initialize a *new* NextGen database at schema v3; never implicitly upgrade.
 
-    Existing v1 databases must apply sql/002_independent_jobs.sql via the
-    future version-aware migration runner before accessing v2-only storage.
+    Existing v1/v2 databases require explicit versioned SQL migrations
+    before accessing v3-only storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 2:
+    if version == 3:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -120,7 +120,7 @@ def initialize(db):
     if present:
         raise ValueError("database has tables but no schema version; refuse implicit upgrade")
     db.executescript(SCHEMA)
-    db.execute("PRAGMA user_version=2")
+    db.execute("PRAGMA user_version=3")
 
 def accept_event(db, source, raw_body, received_at_ms=None):
     """Every delivery receives its own durable work record."""
@@ -131,7 +131,7 @@ def accept_event(db, source, raw_body, received_at_ms=None):
     now = int(time.time()*1000) if received_at_ms is None else received_at_ms
     with db:
         event_id = db.execute(
-            "INSERT INTO webhook_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
+            "INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
             (source,raw_body,now)).lastrowid
         db.execute(
             "INSERT INTO event_history(event_id,occurred_at_ms,event_code) VALUES(?,?,'ACCEPTED')",
@@ -147,7 +147,7 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
     aid = anime["anidb_id"]
     now = int(time.time()*1000) if validated_at_ms is None else validated_at_ms
     with db:
-        event = db.execute("SELECT state,lease_token,lease_expires_at_ms FROM webhook_events WHERE event_id=?", (event_id,)).fetchone()
+        event = db.execute("SELECT state,lease_token,lease_expires_at_ms FROM incoming_events WHERE event_id=?", (event_id,)).fetchone()
         if event is None:
             raise ValueError("unknown event")
         existing_result = db.execute("SELECT result_id,series_json FROM identity_results WHERE event_id=? AND anidb_id=?", (event_id,aid)).fetchone()
@@ -184,7 +184,7 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
                 "INSERT OR IGNORE INTO identified_episodes VALUES(?,?)",(eid,aid))
             db.execute(
                 "INSERT INTO result_episode_links VALUES(?,?,?)",(rid,aid,eid))
-        db.execute("UPDATE webhook_events SET state='IDENTIFIED', next_run_at_ms=NULL, lease_token=NULL, lease_expires_at_ms=NULL, last_reason_code=NULL WHERE event_id=?", (event_id,))
+        db.execute("UPDATE incoming_events SET state='IDENTIFIED', next_run_at_ms=NULL, lease_token=NULL, lease_expires_at_ms=NULL, last_reason_code=NULL WHERE event_id=?", (event_id,))
         db.execute(
             "INSERT INTO event_history(event_id,occurred_at_ms,event_code)"
             " VALUES(?,?,'SERIES_IDENTIFIED')",(event_id,now))
@@ -218,7 +218,7 @@ def accept_event_and_job(db, source, raw_body, *, kind, payload):
         raise ValueError("requires a connection outside an active transaction")
     with db:
         event_id = db.execute(
-            "INSERT INTO webhook_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
+            "INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
             (source,raw_body,int(time.time()*1000))).lastrowid
         job_id = enqueue_job(db,kind=kind,payload=payload,event_id=event_id)
         db.execute(
