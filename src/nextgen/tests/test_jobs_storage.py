@@ -75,10 +75,24 @@ class JobsStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
                 self.assertEqual(db.execute("SELECT count(*) FROM webhook_events").fetchone()[0], 1)
                 self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0], 0)
+                self.assertEqual(db.execute("SELECT count(*) FROM job_history").fetchone()[0], 0)
                 initialize(db)
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
             finally:
                 db.close()
+
+    def test_job_history_is_linked_and_validated(self):
+        _, job = accept_event_and_job(self.db, "autobrr", b"raw", kind="identity", payload={})
+        with self.db:
+            self.db.execute(
+                "INSERT INTO job_history(job_id,occurred_at_ms,event_code,details_json) VALUES(?,1,'CREATED',?)",
+                (job, '{"source":"intake"}'))
+        self.assertEqual(self.db.execute(
+            "SELECT event_code FROM job_history WHERE job_id=?", (job,)).fetchone()[0], "CREATED")
+        with self.assertRaises(Exception):
+            with self.db:
+                self.db.execute(
+                    "INSERT INTO job_history(job_id,occurred_at_ms,event_code) VALUES(9999,2,'UNKNOWN')")
 
     def test_initialize_refuses_unversioned_existing_schema(self):
         self.db.execute("PRAGMA user_version=0")
