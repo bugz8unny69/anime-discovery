@@ -10,6 +10,8 @@ PR #101 (configuration library) and PR #102 (SQLite migrations/maintenance)
 were confirmed merged into NextGen on 2026-10-22 with explicit authorization.
 The canonical job process name is now **worker**, replacing coordinator.
 The separate management API remains responsible for management requests.
+Job handler modules use the `_job.py` suffix; see
+[JOB_HANDLERS.md](src/nextgen/JOB_HANDLERS.md) for the naming convention.
 
 Implemented libraries: version-aware SQLite upgrade preview/apply, verified
 backup, per-step rollback, durable maintenance admission and current-database
