@@ -1,6 +1,6 @@
 # AnimeSeries v1 — RFC-style series identity schema
 
-**Status:** draft for review on PR #92; offline-only. **Version:** 1. This schema is independent from the seriesion application and from the NextGen scheduler.
+**Status:** draft for review on PR #92; offline-only. **Version:** 1. This schema is independent from the production application and from the NextGen scheduler.
 
 ## Scope
 
