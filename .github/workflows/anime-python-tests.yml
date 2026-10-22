@@ -25,8 +25,8 @@ jobs:
           python-version: '3.12'
       - name: Compile Python modules
         run: python -m compileall -q src/legacy src/nextgen
-      - name: Validate NextGen ReleaseRecord v1 contract
-        run: python -m unittest -v src.nextgen.tests.test_release_record_contract
+      - name: Validate NextGen AnimeProduct v1 RFC identity gate
+        run: python -m unittest -v src.nextgen.tests.test_anime_product_contract
       - name: Run focused offline integration tests
         env:
           PYTHONPATH: src/legacy
