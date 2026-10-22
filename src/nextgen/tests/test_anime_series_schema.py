@@ -40,7 +40,7 @@ class AnimeSeriesSchemaTests(unittest.TestCase):
             lambda x: x["anime"].update(tvdb_series_id=0),
             lambda x: x["anime"].update(title="  "),
             lambda x: x["anime"].pop("title"),
-             lambda x: x["episodes"][0].update(anidb_episode_id=None),
+            lambda x: x["episodes"][0].update(anidb_episode_id=None),
             lambda x: x["episodes"][0].pop("anidb_episode_id"),
         ]
         for i, mutate in enumerate(invalids):
