@@ -37,7 +37,9 @@ class AnimeSeriesSchemaTests(unittest.TestCase):
         data = self.fixture()
         invalids = [
             lambda x: x["anime"].update(anidb_id=None),
+            lambda x: x["anime"].update(tvdb_series_id=None),
             lambda x: x["anime"].update(tvdb_series_id=0),
+            lambda x: x["anime"].pop("tvdb_series_id"),
             lambda x: x["anime"].update(title="  "),
             lambda x: x["anime"].pop("title"),
             lambda x: x["episodes"][0].update(anidb_episode_id=None),
@@ -69,17 +71,16 @@ class AnimeSeriesSchemaTests(unittest.TestCase):
         data = self.fixture("anime_series_v2_series_only.json")
         identified = AnimeSeries.from_dict(data)
         self.assertEqual(identified.episodes, ())
-        self.assertIsNone(identified.anime.tvdb_series_id)
+        self.assertEqual(identified.anime.tvdb_series_id, 305089)
         self.assertEqual(identified.to_dict(), data)
         self.assertEqual(AnimeSeries.from_json(identified.to_json()), identified)
 
-    def test_omitted_episodes_and_tvdb_link_normalize_safely(self):
+    def test_omitted_episodes_normalize_without_loosening_series_identity(self):
         data = self.fixture("anime_series_v2_series_only.json")
         data.pop("episodes")
-        data["anime"].pop("tvdb_series_id")
         identified = AnimeSeries.from_dict(data)
         self.assertEqual(identified.to_dict()["episodes"], [])
-        self.assertIsNone(identified.to_dict()["anime"]["tvdb_series_id"])
+        self.assertEqual(identified.anime.tvdb_series_id, 305089)
         self.assertEqual(identified.anime.anidb_id, 19242)
 
     def test_present_episodes_still_require_exact_anidb_id(self):
@@ -103,14 +104,17 @@ class AnimeSeriesSchemaTests(unittest.TestCase):
             with self.subTest(episodes=invalid), self.assertRaises(ValueError):
                 AnimeSeries.from_dict({**candidate, "episodes": invalid})
 
-    def test_tvdb_link_can_be_missing_but_must_be_valid_when_present(self):
+    def test_tvdb_series_id_is_required_and_must_be_valid(self):
         data = self.fixture("anime_series_v2_series_only.json")
-        for invalid in (0, -1, "305089", True):
+        missing = copy.deepcopy(data)
+        missing["anime"].pop("tvdb_series_id")
+        with self.assertRaises(ValueError):
+            AnimeSeries.from_dict(missing)
+        for invalid in (None, 0, -1, "305089", True):
             with self.subTest(tvdb_id=invalid), self.assertRaises(ValueError):
                 candidate = copy.deepcopy(data)
                 candidate["anime"]["tvdb_series_id"] = invalid
                 AnimeSeries.from_dict(candidate)
-        data["anime"]["tvdb_series_id"] = 305089
         self.assertEqual(AnimeSeries.from_dict(data).anime.tvdb_series_id, 305089)
 
     def test_v1_is_not_mistaken_for_v2(self):
