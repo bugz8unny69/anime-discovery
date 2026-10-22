@@ -103,8 +103,22 @@ CREATE TABLE IF NOT EXISTS job_history (
  component TEXT CHECK(component IS NULL OR component IN
   ('supervisor','intake','coordinator','worker','identity','acquisition','api')),
  activity_code TEXT CHECK(activity_code IS NULL OR activity_code IN
-  ('DOWNLOADING','WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH','SKIPPED_DUPLICATE'))
+  ('DOWNLOADING','WAITING_FOR_DOWNLOAD','WAITING_FOR_SEARCH','SKIPPED_DUPLICATE')),
+ handler_code TEXT,
+ handler_label TEXT,
+ invocation_id TEXT,
+ CHECK((handler_code IS NULL AND handler_label IS NULL AND invocation_id IS NULL) OR
+       (handler_code IS NOT NULL AND handler_label IS NOT NULL AND invocation_id IS NOT NULL
+        AND length(handler_code) BETWEEN 1 AND 64 AND handler_code GLOB '[A-Z]*'
+        AND handler_code NOT GLOB '*[^A-Z0-9_]*'
+        AND length(handler_label) BETWEEN 1 AND 128 AND length(trim(handler_label)) > 0
+        AND length(invocation_id)=32 AND invocation_id NOT GLOB '*[^a-f0-9]*'))
 );
+CREATE INDEX IF NOT EXISTS idx_job_history_invocation ON job_history(invocation_id,history_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_handler_invocation_start ON job_history(invocation_id)
+ WHERE event_code='HANDLER_STARTED';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_handler_invocation_end ON job_history(invocation_id)
+ WHERE event_code IN ('HANDLER_COMPLETED','HANDLER_FAILED');
 CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_history(job_id,history_id);
 CREATE INDEX IF NOT EXISTS idx_event_queue ON incoming_events(state,next_run_at_ms);
 CREATE INDEX IF NOT EXISTS idx_event_lease ON incoming_events(state,lease_expires_at_ms);
@@ -139,7 +153,7 @@ def admitted_connection(gate):
             raise MigrationError() from None
         try:
             try:
-                if db.execute("PRAGMA user_version").fetchone()[0] != 7:
+                if db.execute("PRAGMA user_version").fetchone()[0] != 8:
                     raise MigrationUnsupported()
                 db.execute("PRAGMA busy_timeout=5000")
                 db.execute("PRAGMA journal_mode=WAL")
@@ -151,13 +165,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v7; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v8; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6 databases require explicit versioned SQL migrations
-    before accessing v7-only storage.
+    Existing v1/v2/v3/v4/v5/v6/v7 databases require explicit versioned SQL migrations
+    before accessing v8-only storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 7:
+    if version == 8:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -167,7 +181,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=7;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=8;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

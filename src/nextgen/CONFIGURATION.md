@@ -62,7 +62,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v7 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v8 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -165,3 +165,7 @@ The worker rename independently requires SQLite v7 history CHECK constraints;
 configuration publication still adds no database fields or configuration rows.
 The SQLite runner, maintenance/readiness protocol, authenticated API transport,
 credential store and job-handler/worker implementation remain separate.
+
+
+Handler invocation history subsequently extends SQLite to v8, independently of
+configuration schema v2. The existing jobs table remains unchanged.

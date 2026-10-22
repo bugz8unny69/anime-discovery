@@ -83,6 +83,9 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 7)
         for table, rows in before.items():
             self.assertEqual(self.db.execute("SELECT * FROM " + table).fetchall(), rows)
+        with self.assertRaises(ValueError):
+            initialize(self.db)  # Current storage requires explicit upgrade from v7.
+        self.db.executescript((SQL_DIR / "008_handler_history.sql").read_text())
         with transaction(self.db):
             enqueue_job(self.db, component="worker", kind="new-work", payload={})
         self.assertEqual(self.db.execute("SELECT component FROM job_history ORDER BY history_id").fetchall(),
@@ -90,7 +93,7 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(), [])
         for table, index in (("event_history", "idx_history_event"), ("job_history", "idx_job_history_job")):
             self.assertIn(index, {row[1] for row in self.db.execute("PRAGMA index_list(" + table + ")")})
-        initialize(self.db)  # Latest version is accepted without implicit upgrade.
+        initialize(self.db)  # Latest version accepted without implicit upgrade.
 
     def test_failure_before_version_bump_rolls_back_rows_and_vocabulary(self):
         before = self.db.execute("SELECT * FROM job_history").fetchall()

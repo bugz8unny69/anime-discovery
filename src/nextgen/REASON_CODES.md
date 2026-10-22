@@ -157,3 +157,11 @@ MAINTENANCE_COMPLETED resolve the same shared catalog. They do not add job state
 or incoming-event history rows. Durable marker/schema state drives recovery
 independently of logging; a management audit API/table remains future work.
 See storage/MIGRATIONS.md for drain, backup and partial-upgrade behavior.
+
+
+Handler invocation markers HANDLER_STARTED, HANDLER_COMPLETED and HANDLER_FAILED
+are job-scope observations, not job states. Every marker resolves static readable
+copy; failure requires an existing reason (including JOB_HANDLER_FAILED for an
+unexpected handler exception). Trusted HandlerDefinition labels provide the
+readable handler name and handler.CODE.label translation key. Labels are bounded
+static application metadata, never payload/exception text. See JOB_HANDLERS.md.
