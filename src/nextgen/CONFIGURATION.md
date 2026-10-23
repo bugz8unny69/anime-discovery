@@ -50,24 +50,26 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=5, a positive revision, and a settings object
+Canonical JSON has schema_version=6, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 5,
+      "schema_version": 6,
       "revision": 1,
       "settings": {
+        "qbittorrent": {"base_url": "", "category": "anime-discovery", "timeout_seconds": 30},
+        "acquisition": {"max_episode_mb": 600, "max_plan_mb": 3000},
         "trial": {"backfill_count": 6, "following_count": 1},
         "anidb": {"client_name": "", "client_version": 1},
         "providers": {"timeout_seconds": 30},
         "logging": {"level": "INFO", "components": {}},
         "api": {"host": "127.0.0.1", "port": 8765},
         "worker": {"concurrency": 4},
-        "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite"}
+        "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite", "download_root": "", "trial_root": "", "keep_root": ""}
       }
     }
 
-Configuration version, publication revision, SQLite v13 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v14 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -246,3 +248,11 @@ configuration v5. No new setting or secret is needed for the local episode gate.
 Source inventory preparation uses SQLite v13 and the existing configuration v5
 snapshot. It introduces no client endpoint, credential or download-size setting;
 those remain explicit prerequisites before external submission is implemented.
+
+## Download settings and budgets (v6)
+
+The current configuration version is 6. Explicit v5→v6 adds qbittorrent endpoint,
+category, timeout, storage.download_root and acquisition.max_episode_mb (600) /
+max_plan_mb (3000). They are next-operation fields; existing size budgets retain
+their captured limits. Download/trial/keep roots must be separate and exclude
+the database. See DOWNLOAD_CONFIGURATION.md. Current SQLite version is 14.

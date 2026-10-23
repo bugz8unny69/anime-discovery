@@ -276,3 +276,11 @@ reservation until that library is supplied. Inventory is metadata, not verified
 media or external ownership. Download-size policy, client settings/secrets,
 durable submission/uncertainty states and authoritative reconciliation remain
 prerequisites for a torrent submission route. See ../jobs/PREPARE_ACQUISITION.md.
+
+## Download settings and budget follow-up
+
+Configuration v6 and secrets v2 provide local qBittorrent options/credentials.
+SQLite v14 freezes per-video/selection-plan limits at first preparation and
+atomically counts prepared selected bytes. This is a reservation budget, not
+disk/network accounting. External submission and reconciliation remain separate;
+see ../DOWNLOAD_CONFIGURATION.md.

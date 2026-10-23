@@ -219,7 +219,16 @@ CREATE TABLE IF NOT EXISTS acquisition_plans (
  submission_marker TEXT NOT NULL UNIQUE CHECK(length(submission_marker)=32 AND submission_marker NOT GLOB '*[^a-f0-9]*'),
  state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state='PREPARED'),
  configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
- prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0)
+ prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0),
+ selected_size_bytes INTEGER CHECK(selected_size_bytes IS NULL OR selected_size_bytes>0)
+);
+
+CREATE TABLE IF NOT EXISTS acquisition_budgets (
+ trial_plan_id INTEGER PRIMARY KEY REFERENCES trial_plans(plan_id),
+ max_episode_bytes INTEGER NOT NULL CHECK(max_episode_bytes BETWEEN 1000000 AND 1000000000000 AND max_episode_bytes%1000000=0),
+ max_plan_bytes INTEGER NOT NULL CHECK(max_plan_bytes BETWEEN 1000000 AND 1000000000000 AND max_plan_bytes%1000000=0),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0)
 );
 
 """
@@ -261,13 +270,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v13; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v14; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12 databases require explicit versioned SQL migrations
-    before accessing v13 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13 databases require explicit versioned SQL migrations
+    before accessing v14 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 13:
+    if version == 14:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -277,7 +286,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=13;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=14;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

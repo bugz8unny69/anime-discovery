@@ -119,3 +119,13 @@ packs/aliases/links/piece counts, episode/title mismatch, missing source, racing
 preparations, changed evidence, expired leases, atomic rollback, optional trusted
 composition and v12→v13 preservation/fresh equivalence/constraints/rollback.
 Tests and CI remain unexecuted under project policy.
+
+## Download setting and size-admission follow-up
+
+Configuration v6, private download credentials and SQLite v14 now implement the
+local client settings plus frozen per-video/plan hard limits. PREPARED completion
+records selected bytes and admits them atomically with its plan/marker. Legacy
+v13 unknown sizes require review, not a zero-size assumption. This supersedes
+the earlier size-setting prerequisite; client transport, payload/piece selection
+and durable uncertain/submission/reconciliation states remain future work.
+See ../DOWNLOAD_CONFIGURATION.md.

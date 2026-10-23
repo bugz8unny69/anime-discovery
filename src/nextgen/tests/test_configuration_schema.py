@@ -70,7 +70,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         migrated = convert_document(old)
         self.assertEqual(old, original)
         self.assertEqual(source_version(old), 0)
-        self.assertEqual(migrated.revision, 5)
+        self.assertEqual(migrated.revision, 6)
         self.assertEqual(migrated.value("logging.level"), "DEBUG")
         self.assertEqual(migrated.value("logging.components")["worker"], "TRACE")
         self.assertEqual(convert_document(migrated.to_document()), migrated)
@@ -108,7 +108,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         candidate, changed = patch_snapshot(initial, {"logging": {"level": "INFO"}})
         self.assertIs(candidate, initial)
         self.assertEqual(changed, ())
-        for version in (True, 0, 1, 2, 3, 4, 6, "1"):
+        for version in (True, 0, 1, 2, 3, 4, 5, 7, "1"):
             with self.subTest(version=version), self.assertRaises(ConfigurationError):
                 document_snapshot({"schema_version": version, "revision": 1, "settings": {}})
         for revision in (True, 0, -1, "1", MAX_REVISION + 1):

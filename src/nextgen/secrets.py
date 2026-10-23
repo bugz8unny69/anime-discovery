@@ -10,6 +10,7 @@ from pathlib import Path
 import stat
 import uuid
 
+from src.nextgen.acquisition.settings import DownloadCredentials
 from src.nextgen.configuration import _directory, _writer, _write_bytes
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, decode, revision
 from src.nextgen.providers.errors import ProviderConfigurationError
@@ -21,13 +22,14 @@ NAME = "secrets.json"
 class SecretStorageError(ConfigurationError):
     reason_code = "SECRET_STORAGE_UNAVAILABLE"
     def __init__(self):
-        ValueError.__init__(self,"Provider credentials could not be accessed safely.")
+        ValueError.__init__(self,"Credentials could not be accessed safely.")
 
 
 @dataclass(frozen=True)
 class CredentialStatus:
     revision: int
     tvdb_api_key_configured: bool
+    qbittorrent_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -58,10 +60,16 @@ def _read(fd):
     try:
         document = decode(raw)
         if (type(document) is not dict or set(document)!={"schema_version","revision","credentials"}
-                or type(document["schema_version"]) is not int or document["schema_version"]!=1
-                or type(document["credentials"]) is not dict or set(document["credentials"])!={"tvdb_api_key"}):
-            raise SecretStorageError()
-        return revision(document["revision"]),_value(document["credentials"]["tvdb_api_key"])
+                or type(document["schema_version"]) is not int or document["schema_version"] not in (1,2)
+                or type(document["credentials"]) is not dict):raise SecretStorageError()
+        version=document['schema_version']
+        expected={'tvdb_api_key'} if version==1 else {'tvdb_api_key','qbittorrent_username','qbittorrent_password'}
+        if set(document['credentials'])!=expected:raise SecretStorageError()
+        values={'tvdb_api_key':_value(document['credentials']['tvdb_api_key']),
+                'qbittorrent_username':'','qbittorrent_password':''}
+        if version==2:
+            values.update(_download_values(document['credentials']['qbittorrent_username'],document['credentials']['qbittorrent_password']))
+        return revision(document['revision']),values,version
     except (ValueError,TypeError,KeyError):
         raise SecretStorageError() from None
 
@@ -72,10 +80,10 @@ def _private_directory(fd):
         raise SecretStorageError()
 
 
-def _publish(fd, current_revision, value):
+def _publish(fd, current_revision, values, *, version=2):
     name = ".secrets-"+uuid.uuid4().hex+".tmp"
-    raw = (json.dumps({"schema_version":1,"revision":current_revision,
-                       "credentials":{"tvdb_api_key":value}},sort_keys=True)+"\n").encode()
+    raw = (json.dumps({"schema_version":version,"revision":current_revision,
+                       "credentials":values if version==2 else {"tvdb_api_key":values["tvdb_api_key"]}},sort_keys=True)+"\n").encode()
     try:
         _write_bytes(fd,name,raw)  # Always new service-owned mode 0600.
         os.replace(name,NAME,src_dir_fd=fd,dst_dir_fd=fd)
@@ -85,6 +93,18 @@ def _publish(fd, current_revision, value):
     finally:
         try: os.unlink(name,dir_fd=fd)
         except FileNotFoundError: pass
+
+
+def _download_values(username,password):
+    if type(username) is not str or type(password) is not str:raise SecretStorageError()
+    if username or password:
+        try:DownloadCredentials(username,password)
+        except ValueError:raise SecretStorageError() from None
+    return {'qbittorrent_username':username,'qbittorrent_password':password}
+
+
+def _status(number,values):
+    return CredentialStatus(number,bool(values['tvdb_api_key']),bool(values['qbittorrent_username'] and values['qbittorrent_password']))
 
 
 class SecretStore:
@@ -97,46 +117,54 @@ class SecretStore:
                 _private_directory(fd)
                 return _read(fd)
         except FileNotFoundError:
-            return 0,""  # Read/status never creates anything.
+            return 0,{'tvdb_api_key':'','qbittorrent_username':'','qbittorrent_password':''},2
         except OSError:
             raise SecretStorageError() from None
 
     def status(self):
-        number,value = self._current()
-        return CredentialStatus(number,bool(value))
+        number,values,_ = self._current()
+        return _status(number,values)
 
     def tvdb_credentials(self):
-        _,value = self._current()
-        if not value: raise ProviderConfigurationError()
-        return Credentials(value)
+        _,values,_ = self._current()
+        if not values['tvdb_api_key']:raise ProviderConfigurationError()
+        return Credentials(values['tvdb_api_key'])
 
-    def initialize(self, tvdb_api_key=""):
-        value = _value(tvdb_api_key)
+    def qbittorrent_credentials(self):
+        _,values,_ = self._current()
+        return DownloadCredentials(values['qbittorrent_username'],values['qbittorrent_password'])
+
+    def initialize(self, tvdb_api_key='', *, qbittorrent_username='', qbittorrent_password=''):
+        values={'tvdb_api_key':_value(tvdb_api_key),**_download_values(qbittorrent_username,qbittorrent_password)}
         try:
             with _writer(self.directory) as fd:
                 _private_directory(fd)
-                try: _read(fd)
-                except FileNotFoundError: pass
-                else: raise ConfigurationConflict()
-                durable = _publish(fd,1,value)
-        except OSError:
-            raise SecretStorageError() from None
-        return SecretUpdateResult(CredentialStatus(1,bool(value)),True,durable,
-                                  None if durable else "CONFIGURATION_DURABILITY_UNCONFIRMED")
+                try:_read(fd)
+                except FileNotFoundError:pass
+                else:raise ConfigurationConflict()
+                durable=_publish(fd,1,values)
+        except OSError:raise SecretStorageError() from None
+        return SecretUpdateResult(_status(1,values),True,durable,
+                                  None if durable else 'CONFIGURATION_DURABILITY_UNCONFIRMED')
 
-    def update_tvdb_api_key(self, value, *, expected_revision):
-        """Service-authorized replace/clear; optimistic revision, atomic write."""
-        value = _value(value)
+    def _update(self, changes, *, expected_revision, upgrade=False):
         revision(expected_revision)
         try:
             with _writer(self.directory) as fd:
                 _private_directory(fd)
-                number,old = _read(fd)
-                if number!=expected_revision: raise ConfigurationConflict()
-                if value==old: return SecretUpdateResult(CredentialStatus(number,bool(old)),False,True)
-                number = revision(number+1)
-                durable = _publish(fd,number,value)
-        except OSError:
-            raise SecretStorageError() from None
-        return SecretUpdateResult(CredentialStatus(number,bool(value)),True,durable,
-                                  None if durable else "CONFIGURATION_DURABILITY_UNCONFIRMED")
+                number,old,version=_read(fd)
+                if number!=expected_revision:raise ConfigurationConflict()
+                values={**old,**changes}
+                if values==old:return SecretUpdateResult(_status(number,old),False,True)
+                number=revision(number+1)
+                durable=_publish(fd,number,values,version=2 if upgrade else version)
+        except OSError:raise SecretStorageError() from None
+        return SecretUpdateResult(_status(number,values),True,durable,
+                                  None if durable else 'CONFIGURATION_DURABILITY_UNCONFIRMED')
+
+    def update_tvdb_api_key(self, value, *, expected_revision):
+        return self._update({'tvdb_api_key':_value(value)},expected_revision=expected_revision)
+
+    def update_qbittorrent_credentials(self, username, password, *, expected_revision):
+        """Explicitly replace/clear the pair; v1 upgrades only when this changes it."""
+        return self._update(_download_values(username,password),expected_revision=expected_revision,upgrade=True)

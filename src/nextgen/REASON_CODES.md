@@ -230,3 +230,9 @@ ACQUISITION_PLAN_CONFLICT protects immutable reservation/source/plan facts;
 ACQUISITION_PLAN_READY describes preparation only. Each has a readable message,
 action and translation key. ACQUISITION_PREPARED is a durable after-commit
 logged job marker; neither file names nor tracker data are diagnostic details.
+
+DOWNLOAD_CONFIGURATION_INVALID requires local download settings/credentials
+before client work. ACQUISITION_SIZE_LIMIT reviews an oversized selected video
+or aggregate plan; ACQUISITION_SIZE_EVIDENCE_MISSING reviews unknown historical
+selected-byte evidence. All have bounded static readable messages/actions and
+translation keys, without values or paths in exceptions/history.

@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v13**, adding hash-bound acquisition preparation plans.
+Latest schema: **v14**, adding frozen prepared-video budgets.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -188,3 +188,8 @@ together. Published migrations 001–011 remain unchanged.
 one preparation job/reservation/content hash to inventory and a unique marker.
 Only PREPARED state is supported. Fresh schema and sequential upgrade coverage
 extend through v13. Historical scripts 001–012 remain unchanged.
+
+014_acquisition_budgets.sql upgrades v13→v14 with a frozen per-selection-plan
+budget and nullable selected_size_bytes on prepared plans. Old rows remain NULL
+and require explicit size review before further admission. Fresh DDL and runner
+coverage extend through v14; historical scripts 001–013 remain immutable.

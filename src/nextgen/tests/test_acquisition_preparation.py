@@ -41,8 +41,8 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
         try:return db.execute(sql,args).fetchall()
         finally:db.close()
 
-    def source(self,*,torrent=True):
-        body={'release_name':'Test Anime - 10'}
+    def source(self,*,torrent=True,episode=10):
+        body={'release_name':f'Test Anime - {episode}'}
         if torrent:body['torrent_infohash']=self.digest
         raw=json.dumps(body).encode()
         db=connect(self.database)
@@ -51,11 +51,11 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
             identity=save_identity(db,event,{'schema_version':2,'anime':{'anidb_id':123,'tvdb_series_id':456,'title':'Test Anime'}})
             with transaction(db):
                 db.execute("UPDATE jobs SET state='DONE',attempt_count=1 WHERE job_id=?",(release,))
-                db.execute('INSERT OR IGNORE INTO identified_episodes VALUES(987,123)')
+                db.execute('INSERT OR IGNORE INTO identified_episodes VALUES(?,123)',(900+episode,))
                 db.execute("INSERT INTO release_verifications(job_id,identity_result_id,anidb_id,release_sha256,verification_scope,"
                     "anidb_episode_number,anidb_episode_id,tvdb_series_id,tvdb_season,tvdb_episode,tvdb_episode_id,verified_at_ms) "
-                    "VALUES(?,?,123,?,'DECLARED_SINGLE_EPISODE',10,987,456,1,10,100,1)",
-                    (release,identity,hashlib.sha256(raw).hexdigest()))
+                    "VALUES(?,?,123,?,'DECLARED_SINGLE_EPISODE',?,?,456,1,?,?,1)",
+                    (release,identity,hashlib.sha256(raw).hexdigest(),episode,900+episode,episode,100+episode))
                 evaluation=enqueue_job(db,kind='EVALUATE_TRIAL',payload={'verification_job_id':release},
                     component='worker',event_id=event,created_by_job_id=release,available_at_ms=0)
             return event,evaluation

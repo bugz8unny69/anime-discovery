@@ -18,13 +18,14 @@ Configuration v4 adds these next-operation fields:
 Blank client name supports initial setup but cannot pass identity-worker
 readiness. Explicit v3→v4 conversion adds defaults and increments revision;
 historical v0→v1→v2→v3 outputs retain their original key/default shapes. No
-SQLite change is needed (database is now v10; AnimeSeries remains v2).
+SQLite change is needed (database is now v14; AnimeSeries remains v2).
 
 ## Private credential repository
 
 SecretStore(config_directory) manages a separate secrets.json envelope with
-schema_version=1, a positive independent revision and a credentials object
-containing only tvdb_api_key. An empty key means unconfigured/explicitly cleared.
+schema_version=2, a positive independent revision and a credentials object
+containing tvdb_api_key plus qbittorrent_username and qbittorrent_password.
+Existing v1 TVDB-only files remain readable; see the compatibility section below. An empty key means unconfigured/explicitly cleared.
 This is a new NextGen format, not an automatic import of a legacy secret file.
 The TVDB key is never accepted in settings.json, jobs, diagnostic history or SQL.
 
@@ -33,7 +34,7 @@ The TVDB key is never accepted in settings.json, jobs, diagnostic history or SQL
   not implicitly create secrets or perform network requests.
 - update_tvdb_api_key(value, expected_revision=...) atomically replaces or clears
   the key. Revision conflicts prevent overwrites; unchanged values do not rewrite.
-- status() returns only revision and tvdb_api_key_configured. Mutation results
+- status() returns only revision, tvdb_api_key_configured and qbittorrent_configured. Mutation results
   expose this status plus saved/durability fields; they contain no secret values.
 - tvdb_credentials() is a trusted internal provider method returning a Credentials
   object with its API key hidden from repr. Never serialize this object into an
@@ -91,3 +92,11 @@ The composed identity worker now also installs VERIFY_RELEASE and shares a
 ClientPool across both handlers. Its successful declared-episode verification
 stops before trial policy/resource claims or acquisition. Additional trusted
 registrations remain explicit; no directory scan or payload routing is added.
+
+## Download credential extension
+
+The central store now writes secrets v2 with a qbittorrent username/password pair
+and tvdb_api_key. Public status includes qbittorrent_configured only. v1 remains
+readable and is unchanged by reads/TVDB-only updates; explicit pair changes
+upgrade it atomically. Existing private-file checks and no-backup policy remain.
+See DOWNLOAD_CONFIGURATION.md for exact compatibility and point-of-use capture.

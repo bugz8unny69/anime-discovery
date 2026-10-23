@@ -177,3 +177,9 @@ evidence, expired leases, rollback and optional trusted composition. SQLite
 v13 cases cover preservation/fresh equivalence/unique markers/rollback; the
 existing sequential runner covers every supported starting version.
 All tests remain intentionally unexecuted under project policy.
+
+Download foundation cases cover v6 settings conversions, URL/path/budget bounds,
+private pair updates/v1 compatibility/public redaction/revision and publication
+failures, point-of-use captured contexts, concurrent size admission, frozen
+limits, old unknown-size review, rollback and v13→v14 preservation/equivalence.
+Sequential runner coverage now includes v14. Tests remain unexecuted.

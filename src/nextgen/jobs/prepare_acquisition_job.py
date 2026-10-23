@@ -1,6 +1,7 @@
 """Inspect hash-bound source files and persist an intent; no torrent submission."""
 import inspect
 
+from src.nextgen.acquisition.settings import SizeLimitExceeded, SizeEvidenceMissing, size_limits
 from src.nextgen.acquisition.contracts import AcquisitionProposal
 from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing, parse_metainfo
 from src.nextgen.handlers import HandlerDefinition
@@ -16,7 +17,7 @@ DEFINITION=HandlerDefinition(KIND,'Inspect source files and prepare acquisition'
 
 def _persist(db,claim,value):
     try:return (persist_acquisition(db,claim,value),)
-    except (AcquisitionConflict,MetadataInvalid,SourceMissing) as exc:
+    except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:
         raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
@@ -36,6 +37,6 @@ def registration(read_metainfo):
             validate_declaration(source,manifest)
         except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
-        except (AcquisitionConflict,MetadataInvalid,SourceMissing) as exc:return Outcome('review',exc.reason_code)
-        return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision))
+        except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:return Outcome('review',exc.reason_code)
+        return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision,size_limits(context.configuration)))
     return Registration(KIND,DEFINITION,execute,persist=_persist)

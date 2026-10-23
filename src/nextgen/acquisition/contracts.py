@@ -1,5 +1,6 @@
 """Immutable acquisition preparation inputs. Not download authorization."""
 from dataclasses import dataclass, field
+from src.nextgen.acquisition.settings import SizeLimits
 from src.nextgen.acquisition.metadata import Manifest, infohash
 from src.nextgen.history import integer
 
@@ -28,8 +29,9 @@ class AcquisitionProposal:
     source: AcquisitionInput
     manifest: Manifest = field(repr=False)
     configuration_revision: int
+    limits: SizeLimits = SizeLimits()
     def __post_init__(self):
-        if type(self.source) is not AcquisitionInput or type(self.manifest) is not Manifest:
+        if type(self.source) is not AcquisitionInput or type(self.manifest) is not Manifest or type(self.limits) is not SizeLimits:
             raise ValueError('typed acquisition facts required')
         integer(self.configuration_revision,positive=True)
         if self.source.info_hash!=self.manifest.info_hash:raise ValueError('torrent identity mismatch')

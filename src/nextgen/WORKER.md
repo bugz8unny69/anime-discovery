@@ -189,3 +189,9 @@ selected reservations. It performs metadata reads outside write transactions
 and publishes an immutable PREPARED inventory/marker through the worker's
 ordinary fenced completion adapter. No dynamic hooks or external torrent
 submission/reconciliation transport are added. See jobs/PREPARE_ACQUISITION.md.
+
+Download settings are validated at point of use, not imposed on unrelated
+identity work. Acquisition preparation now atomically admits the selected video
+against its selection plan's frozen per-video/total size caps. A rejected or
+unknown-size admission goes to readable review. No external client transport or
+submission state is introduced. See DOWNLOAD_CONFIGURATION.md.

@@ -4,6 +4,7 @@ import sqlite3
 import time
 import uuid
 
+from src.nextgen.acquisition.settings import SizeLimits, SizeEvidenceMissing
 from src.nextgen.acquisition.contracts import AcquisitionInput, AcquisitionProposal
 from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing, infohash
 from src.nextgen.episode_reservations import ReservationConflict
@@ -64,6 +65,22 @@ def validate_declaration(source,manifest):
     except (ValueError,TypeError,IndexError,ReleaseNotReady):raise MetadataInvalid() from None
 
 
+def _admit_size(db,value,job_id,now):
+    source=value.source
+    plan=db.execute('SELECT plan_id FROM episode_reservations WHERE reservation_id=?',(source.reservation_id,)).fetchone()[0]
+    row=db.execute('SELECT max_episode_bytes,max_plan_bytes FROM acquisition_budgets WHERE trial_plan_id=?',(plan,)).fetchone()
+    limits=value.limits if row is None else SizeLimits(row[0]//1000000,row[1]//1000000)
+    prior=db.execute('SELECT p.job_id,p.selected_size_bytes FROM acquisition_plans p JOIN episode_reservations r '
+                     'ON r.reservation_id=p.reservation_id WHERE r.plan_id=?',(plan,)).fetchall()
+    size=value.manifest.files[value.manifest.selected_index].size
+    if any(n is None or (old_job==job_id and n!=size) for old_job,n in prior):raise SizeEvidenceMissing()
+    limits.admit(size,sum(n for old_job,n in prior if old_job!=job_id))
+    if row is None:
+        db.execute('INSERT INTO acquisition_budgets VALUES(?,?,?,?,?)',
+                   (plan,limits.episode_bytes,limits.plan_bytes,value.configuration_revision,now))
+    return size
+
+
 def persist_acquisition(db,claim,value):
     if not db.in_transaction or type(value) is not AcquisitionProposal:
         raise ValueError('worker transaction and typed acquisition facts required')
@@ -79,9 +96,10 @@ def persist_acquisition(db,claim,value):
     now=integer(time.time_ns()//1000000)
     if rows:
         if len(rows)!=1 or rows[0]!=expected:raise AcquisitionConflict()
-    else:
+    size=_admit_size(db,value,claim.job_id,now)
+    if not rows:
         db.execute("INSERT INTO acquisition_plans(job_id,reservation_id,info_hash,info_sha256,manifest_json,"
-            "submission_marker,configuration_revision,prepared_at_ms) VALUES(?,?,?,?,?,?,?,?)",
-            (*expected[:5],uuid.uuid4().hex,expected[5],now))
+            "submission_marker,configuration_revision,prepared_at_ms,selected_size_bytes) VALUES(?,?,?,?,?,?,?,?,?)",
+            (*expected[:5],uuid.uuid4().hex,expected[5],now,size))
     return append_job_history(db,job_id=claim.job_id,event_code='ACQUISITION_PREPARED',reason_code='ACQUISITION_PLAN_READY',
                               component='worker',occurred_at_ms=now,details={'attempt':claim.attempt})
