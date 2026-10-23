@@ -265,3 +265,21 @@ is descriptive: worker policy and the durable journal decide behavior.
 
 Selection/start uncertainty never authorizes replay. Client completion is not
 local media verification or permission to stage a video.
+
+## Cancellation
+
+All new cancellation events/reasons have static readable English catalog entries,
+with stable translation keys. Cancellation is an explicit operator decision, not
+a reason-code retry flag.
+
+| Code | Message |
+| --- | --- |
+| JOB_CANCELED | This work was canceled. |
+| CANCELLATION_DRAINING | Waiting for active work to stop before cleanup. |
+| CANCELLATION_PENDING | Cancellation cleanup is waiting for confirmation. |
+| CANCELLATION_REVIEW | Cancellation cleanup needs attention. |
+| CANCELLATION_COMPLETE | Cancellation cleanup is complete. |
+
+CANCELLATION_REQUESTED, CANCELLATION_CONTROL_RECORDED and
+CANCELLATION_CLEANUP_CHANGED identify events; reasons explain their outcomes.
+Details never include arbitrary client response bodies or exception strings.

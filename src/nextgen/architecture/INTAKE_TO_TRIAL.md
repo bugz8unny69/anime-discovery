@@ -303,3 +303,15 @@ bytes block for review under the initial zero-overlap policy. The submission
 receipt becomes historical after handoff; the transfer stage checks current ownership.
 The worker stays generic, and jobs defer between reads. No media verification,
 audio check, preview-folder staging or Keep successor is implemented yet.
+
+## Cancellation implementation refinement
+
+Explicit v17 operation membership follows the trusted pipeline handoff without
+turning created_by_job_id into a workflow edge. Cancel covers queued, waiting,
+held, blocked, review and running work, including a completed download with
+unfinished staging. Per-operation drain locks fence owned cleanup after active
+attempts finish; separate durable cleanup state drives management recovery.
+Future staging must register partial-file receipts and publication intent/proof,
+then mark STAGED atomically with successful completion. Published artifacts are
+preserved and STAGED disables Cancel. See ../CANCELLATION.md. The API-facing
+service library exists; authenticated HTTP/dashboard wiring remains future work.

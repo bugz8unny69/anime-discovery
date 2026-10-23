@@ -1,0 +1,74 @@
+"""Future staging integration: precise temporary-file receipts, never directory sweeps."""
+import os
+import re
+from src.nextgen.acquisition.cleanup import directory, parent, fingerprint
+from src.nextgen.cancellation import CancellationError
+from src.nextgen.storage.cancellation import operation
+from src.nextgen.storage.sqlite import transaction
+
+
+def _stage_claim(db,claim):
+    import time
+    row=db.execute('SELECT state,lease_token,attempt_count,lease_expires_at_ms FROM jobs WHERE job_id=?',(claim.job_id,)).fetchone()
+    if (not db.in_transaction or claim.kind!='STAGE_TRIAL_MEDIA' or row is None
+            or row[:3]!=('RUNNING',claim.token,claim.attempt) or row[3]<=time.time_ns()//1000000):raise CancellationError()
+    op=operation(db,claim.job_id)
+    if op[1]!='ACTIVE':raise CancellationError()
+    return op[0]
+
+
+def record_temporary(db,claim,root,name):
+    """After exclusive temp-file creation, before copying; caller holds operation gate.
+
+    A crash before this receipt is durable leaves an unowned file for review,
+    never permission to sweep a folder. Receipt binds directory and file inodes.
+    """
+    op=_stage_claim(db,claim)
+    if type(name) is not str or not re.fullmatch(r'\.ad-[a-f0-9]{32}\.partial',name):raise CancellationError()
+    with directory(root) as fd:
+        info=os.stat(name,dir_fd=fd,follow_symlinks=False)
+        fingerprint(info)
+        folder=os.fstat(fd)
+        return db.execute('INSERT INTO staging_cleanup_artifacts(operation_id,job_id,root_path,relative_path,root_device,root_inode,'
+            "file_device,file_inode,phase) VALUES(?,?,?,?,?,?,?,?,'TEMP')",
+            (op,claim.job_id,root,name,folder.st_dev,folder.st_ino,info.st_dev,info.st_ino)).lastrowid
+
+
+def publication(db,claim,artifact_id,*,confirmed=False):
+    """Record intent before rename, confirmed only after verified publication.
+
+    The future staging library owns filesystem publication/proof. This helper
+    grants no rename or deletion authority and is not a public API action.
+    """
+    op=_stage_claim(db,claim)
+    if type(confirmed) is not bool:raise CancellationError()
+    old,new=('PUBLISH_UNCERTAIN','PUBLISHED') if confirmed else ('TEMP','PUBLISH_UNCERTAIN')
+    changed=db.execute('UPDATE staging_cleanup_artifacts SET phase=? WHERE artifact_id=? AND operation_id=? AND job_id=? AND phase=?',
+                      (new,artifact_id,op,claim.job_id,old)).rowcount
+    if changed!=1:raise CancellationError()
+
+
+def clean_temporaries(queue,operation_id):
+    """Caller holds exclusive OperationGate. Preserve published/uncertain media."""
+    with queue.connection() as db,transaction(db):
+        rows=db.execute('SELECT artifact_id,root_path,relative_path,root_device,root_inode,file_device,file_inode,phase '
+                        'FROM staging_cleanup_artifacts WHERE operation_id=? ORDER BY artifact_id',(operation_id,)).fetchall()
+    for aid,root,name,rdev,rino,fdev,fino,phase in rows:
+        if phase in ('PUBLISHED','REMOVED'):continue
+        if phase=='PUBLISH_UNCERTAIN':raise CancellationError()
+        if not re.fullmatch(r'\.ad-[a-f0-9]{32}\.partial',name):raise CancellationError()
+        with directory(root) as fd:
+            folder=os.fstat(fd)
+            if (folder.st_dev,folder.st_ino)!=(rdev,rino):raise CancellationError()
+            try:info=os.stat(name,dir_fd=fd,follow_symlinks=False)
+            except FileNotFoundError:info=None
+            if info is not None:
+                fingerprint(info)
+                if (info.st_dev,info.st_ino)!=(fdev,fino):raise CancellationError()
+                with queue.connection() as db,transaction(db):
+                    db.execute("UPDATE staging_cleanup_artifacts SET phase='REMOVE_UNCERTAIN' WHERE artifact_id=?",(aid,))
+                fresh=os.stat(name,dir_fd=fd,follow_symlinks=False)
+                if fingerprint(fresh)!=fingerprint(info):raise CancellationError()
+                os.unlink(name,dir_fd=fd);os.fsync(fd)
+        with queue.connection() as db,transaction(db):
+            db.execute("UPDATE staging_cleanup_artifacts SET phase='REMOVED' WHERE artifact_id=?",(aid,))

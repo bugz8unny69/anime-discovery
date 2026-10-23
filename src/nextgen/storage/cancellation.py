@@ -1,0 +1,88 @@
+"""Trusted management-service cancellation library. Caller holds maintenance admission."""
+from src.nextgen.cancellation import CancellationError
+from src.nextgen.history import append_job_history, integer
+from src.nextgen.storage.job_queue import JobQueue
+from src.nextgen.storage.sqlite import transaction
+
+CANCELABLE=frozenset(('PENDING','RETRY_WAIT','ON_HOLD','BLOCKED','NEEDS_REVIEW','RUNNING'))
+
+
+def operation(db,job_id):
+    row=db.execute('SELECT o.operation_id,o.state,o.cleanup_state,o.reason_code FROM job_operations o '
+        'JOIN job_operation_members m USING(operation_id) WHERE m.job_id=?',(job_id,)).fetchone()
+    if row is None:raise CancellationError()
+    return row
+
+
+def unfinished_resources(db,operation_id):
+    return db.execute('SELECT 1 FROM acquisition_plans p JOIN job_operation_members m ON m.job_id=p.job_id '
+                      'WHERE m.operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None or db.execute(
+                      'SELECT 1 FROM staging_cleanup_artifacts WHERE operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
+
+
+def cancel_job(db,job_id,now,component='worker'):
+    row=db.execute('SELECT state,attempt_count FROM jobs WHERE job_id=?',(job_id,)).fetchone()
+    if row is None or row[0] not in CANCELABLE:return ()
+    db.execute("UPDATE jobs SET state='CANCELED',lease_token=NULL,lease_expires_at_ms=NULL,activity_code=NULL,"
+               "last_reason_code='JOB_CANCELED',updated_at_ms=? WHERE job_id=?",(now,job_id))
+    return (append_job_history(db,job_id=job_id,event_code='CANCELED',reason_code='JOB_CANCELED',component=component,
+                              occurred_at_ms=now,details={'attempt':row[1]}),)
+
+
+def mark_staged(db,claim):
+    """Future trusted staging persist callback, in the same fenced completion tx.
+
+    Call only after verified durable publication; not a public management action.
+    Partial staging/refresh failures must not call this. No file proof is invented.
+    """
+    if not db.in_transaction or claim.kind!='STAGE_TRIAL_MEDIA':raise CancellationError()
+    row=db.execute('SELECT state,lease_token,attempt_count,lease_expires_at_ms FROM jobs WHERE job_id=?',(claim.job_id,)).fetchone()
+    import time
+    now=time.time_ns()//1000000
+    if row is None or row[:3]!=('RUNNING',claim.token,claim.attempt) or row[3]<=now:raise CancellationError()
+    op=operation(db,claim.job_id)
+    if op[1]!='ACTIVE':raise CancellationError()
+    phases=db.execute('SELECT phase FROM staging_cleanup_artifacts WHERE operation_id=?',(op[0],)).fetchall()
+    if not phases or any(p[0]!='PUBLISHED' for p in phases):raise CancellationError()
+    if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=? AND j.job_id<>? AND j.state<>'DONE' LIMIT 1",
+                  (op[0],claim.job_id)).fetchone():raise CancellationError()
+    db.execute("UPDATE job_operations SET state='STAGED',updated_at_ms=? WHERE operation_id=?",(now,op[0]))
+
+
+class CancellationStore:
+    def __init__(self,database,*,clock=None):self.queue=JobQueue(database,clock=clock)
+    def status(self,job_id):
+        integer(job_id,positive=True)
+        with self.queue.connection() as db,transaction(db):
+            op=operation(db,job_id)
+            members=db.execute('SELECT j.state FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=?',(op[0],)).fetchall()
+            return {'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
+                    'can_cancel':op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0])),
+                    'can_cleanup':op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE'}
+    def request(self,job_id):
+        integer(job_id,positive=True)
+        with self.queue.connection() as db,transaction(db):
+            op=operation(db,job_id)
+            if op[1] in ('CANCEL_REQUESTED','CANCELED'):return op[0],()
+            members=db.execute('SELECT j.job_id,j.state,j.attempt_count FROM jobs j JOIN job_operation_members m USING(job_id) '
+                               'WHERE m.operation_id=?',(op[0],)).fetchall()
+            if op[1]!='ACTIVE' or not (any(r[1] in CANCELABLE for r in members) or unfinished_resources(db,op[0])):raise CancellationError()
+            now=self.queue.now();receipts=[]
+            db.execute("UPDATE job_operations SET state='CANCEL_REQUESTED',cleanup_state='PENDING',reason_code='CANCELLATION_DRAINING',"
+                       'updated_at_ms=? WHERE operation_id=?',(now,op[0]))
+            for job,state,attempt in members:
+                if state not in CANCELABLE:continue
+                receipts.append(append_job_history(db,job_id=job,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
+                    component='api',occurred_at_ms=now,details={'attempt':attempt}))
+                if state!='RUNNING':receipts.extend(cancel_job(db,job,now,'api'))
+            if not receipts:
+                receipts.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
+                    component='api',occurred_at_ms=now))
+            return op[0],tuple(receipts)
+    def acknowledge(self,claim):
+        with self.queue.connection() as db,transaction(db):
+            op=operation(db,claim.job_id)
+            if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise CancellationError()
+            row=db.execute('SELECT state,lease_token,attempt_count FROM jobs WHERE job_id=?',(claim.job_id,)).fetchone()
+            if row==('RUNNING',claim.token,claim.attempt):return cancel_job(db,claim.job_id,self.queue.now())
+            return ()

@@ -44,7 +44,7 @@ class Client:
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
     def _request(self,path,*,query=None,form=None,body=None,content_type=None,limit=3145728):
-        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume'):raise ValueError('unsupported client operation')
+        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete'):raise ValueError('unsupported client operation')
         url=self.options.base_url+'/api/v2/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'User-Agent':'AnimeDiscoveryNextGen/1','Referer':self.options.base_url+'/','Accept':'application/json'}
@@ -196,3 +196,19 @@ class Client:
         permit.take(fingerprint,'start')
         self._request('torrents/start' if self.major==5 else 'torrents/resume',
                       form={'hashes':intent.plan.manifest.info_hash},limit=4096)
+
+    def cleanup_control(self,intent,fingerprint,permit,action):
+        from src.nextgen.acquisition.cleanup import CleanupPermit, owned
+        from src.nextgen.acquisition.transfers import STOPPED
+        if not self._sid or self.major not in (4,5):raise ClientAuthenticationFailed()
+        if type(permit) is not CleanupPermit or self.options!=intent.options or fingerprint!=intent.fingerprint:raise ClientInvalid()
+        current=owned(intent,self.inspect(intent.plan.manifest.info_hash))
+        if action=='remove' and current.state not in STOPPED:raise ClientInvalid()
+        if action not in ('stop','remove'):raise ClientInvalid()
+        permit.take(fingerprint,action)
+        if action=='stop':
+            self._request('torrents/stop' if self.major==5 else 'torrents/pause',
+                          form={'hashes':intent.plan.manifest.info_hash},limit=4096)
+        else:
+            # Local files are deleted separately with a persisted exact manifest.
+            self._request('torrents/delete',form={'hashes':intent.plan.manifest.info_hash,'deleteFiles':'false'},limit=4096)

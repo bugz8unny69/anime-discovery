@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **16**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **17**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -37,8 +37,9 @@ Latest fresh SQLite version: **16**. The version stored in `PRAGMA user_version`
 | 14 | `014_acquisition_budgets.sql` | Frozen per-video/plan budgets and selected-byte evidence |
 | 15 | `015_torrent_submissions.sql` | One-shot stopped-submission intent and reconciliation progress |
 | 16 | `016_torrent_transfers.sql` | Fixed file selection, one-shot start and selected-file progress |
+| 17 | `017_cancellation.sql` | Explicit cancellation scopes, cleanup intents and staging temporary receipts |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`, `episode_reservations`, `acquisition_plans`, `acquisition_budgets`, `torrent_submissions`, `torrent_transfers`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`, `episode_reservations`, `acquisition_plans`, `acquisition_budgets`, `torrent_submissions`, `torrent_transfers`, `job_operations`, `job_operation_members`, `cancellation_cleanup`, `staging_cleanup_artifacts`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -52,7 +53,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v16 or accepts an existing v16 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v17 or accepts an existing v17 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -319,3 +320,13 @@ submission plan, with creating job/attempt, immutable fingerprint, piece geometr
 bounded progress and readable phase/reason. Historical stopped submission facts
 remain receipts after handoff. Migration 016 and the fresh schema agree; published
 SQL 001–015 is unchanged. See [DOWNLOAD_TORRENT.md](../jobs/DOWNLOAD_TORRENT.md).
+
+## SQLite v17: cancellation and cleanup
+
+Explicit scope membership follows trusted successor handoff; provenance stays
+historical. Requests fence claims/completion, while per-operation OS locks prove
+active work drained before destructive I/O. Cleanup journals retain uncertain
+stop/remove and exact file fingerprints; staging receipts protect publication.
+Migration 017 preserves existing jobs/history and gives old jobs separate scopes,
+without guessing dependencies. Historical SQL 001–016 is unchanged.
+See [CANCELLATION.md](../CANCELLATION.md) for capabilities and recovery limits.

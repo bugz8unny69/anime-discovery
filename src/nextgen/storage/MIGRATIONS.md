@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v16**, adding selected-video transfer control and progress.
+Latest schema: **v17**, adding cancellation scopes and recoverable cleanup.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -205,3 +205,11 @@ coverage extend through v15. Historical scripts 001–014 remain unchanged.
 records separate selection/start authorization and bounded client progress without
 changing prior submission receipts. Fresh DDL and sequential runner coverage extend
 through v16; published SQL 001–015 stays unchanged. Tests remain unexecuted.
+
+## Cancellation scopes and cleanup
+
+017_cancellation.sql upgrades v16→v17, preserving job/history facts and
+backfilling each historical job as an independent cancellation scope. Trusted
+future successor handoffs share explicit scope membership. Fresh schema, runner
+and offline equivalence/preservation cases extend through v17; published SQL
+001–016 remains unchanged. See ../CANCELLATION.md. Tests remain unexecuted.

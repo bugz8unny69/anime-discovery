@@ -123,3 +123,14 @@ states/activity and their history snapshots retain the v5 meanings above.
 
 The job process is now named worker. SQLite v7 only adds that diagnostic emitter
 while retaining historical coordinator attribution; no state/activity changes.
+
+## Cancellation capability (v17)
+
+Cancel is available for ACTIVE operations with PENDING, RETRY_WAIT, ON_HOLD,
+BLOCKED, NEEDS_REVIEW or RUNNING work, and for completed download jobs whose
+acquisition resources remain unstaged. Finished internal jobs remain DONE for
+audit; the operation tracks the cancellation boundary. STAGED disables Cancel.
+Running work drains before cleanup. Cleanup pending/review/complete is separate
+from job lifecycle and its recovery action remains visible. The management library
+returns can_cancel/can_cleanup; no dashboard or HTTP route is installed yet.
+See [CANCELLATION.md](CANCELLATION.md).

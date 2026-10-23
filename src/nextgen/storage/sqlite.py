@@ -276,6 +276,46 @@ CREATE TABLE IF NOT EXISTS torrent_transfers (
        (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
        (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
 );
+CREATE TABLE IF NOT EXISTS job_operations (
+ operation_id INTEGER PRIMARY KEY,
+ state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','CANCEL_REQUESTED','CANCELED','STAGED')),
+ cleanup_state TEXT NOT NULL DEFAULT 'NONE' CHECK(cleanup_state IN ('NONE','PENDING','REVIEW','COMPLETE')),
+ reason_code TEXT,
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((state IN ('ACTIVE','STAGED') AND cleanup_state='NONE' AND reason_code IS NULL) OR
+       (state IN ('CANCEL_REQUESTED','CANCELED') AND
+        ((cleanup_state='PENDING' AND reason_code IN ('CANCELLATION_DRAINING','CANCELLATION_PENDING')) OR
+         (cleanup_state='REVIEW' AND reason_code='CANCELLATION_REVIEW') OR
+         (cleanup_state='COMPLETE' AND reason_code='CANCELLATION_COMPLETE'))))
+);
+CREATE TABLE IF NOT EXISTS job_operation_members (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(job_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_operation_members ON job_operation_members(operation_id);
+CREATE TABLE IF NOT EXISTS cancellation_cleanup (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ files_json TEXT NOT NULL CHECK(length(CAST(files_json AS BLOB)) BETWEEN 2 AND 1048576),
+ phase TEXT NOT NULL CHECK(phase IN ('PREPARED','STOP_UNCERTAIN','REMOVE_UNCERTAIN','FILES','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE TABLE IF NOT EXISTS staging_cleanup_artifacts (
+ artifact_id INTEGER PRIMARY KEY,
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ root_path TEXT NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096),
+ relative_path TEXT NOT NULL CHECK(length(relative_path) BETWEEN 1 AND 128),
+ root_device INTEGER NOT NULL,
+ root_inode INTEGER NOT NULL,
+ file_device INTEGER NOT NULL,
+ file_inode INTEGER NOT NULL,
+ phase TEXT NOT NULL CHECK(phase IN ('TEMP','PUBLISH_UNCERTAIN','PUBLISHED','REMOVE_UNCERTAIN','REMOVED')),
+ UNIQUE(root_path,relative_path)
+);
 """
 
 def connect(path):
@@ -315,13 +355,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v16; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v17; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15 databases require explicit versioned SQL migrations
-    before accessing v16 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16 databases require explicit versioned SQL migrations
+    before accessing v17 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 16:
+    if version == 17:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -331,7 +371,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=16;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=17;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
@@ -457,7 +497,7 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
 
 
 def _enqueue_job(db, *, kind, payload, component, event_id=None,
-                 created_by_job_id=None, available_at_ms=None):
+                 created_by_job_id=None, available_at_ms=None, operation_id=None):
     if not db.in_transaction:
         raise ValueError("enqueue requires an active transaction")
     component_name(component)
@@ -471,6 +511,14 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
     for reference in (event_id, created_by_job_id):
         if reference is not None:
             integer(reference, positive=True)
+    # Source references cannot create another consumer after cancellation has
+    # fenced the referenced operation. These are explicit payload contracts.
+    for key in ('preparation_job_id','evaluation_job_id','verification_job_id'):
+        reference=payload.get(key)
+        if type(reference) is int and db.execute(
+                "SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) "
+                "WHERE m.job_id=? AND o.state<>'ACTIVE'",(reference,)).fetchone():
+            raise ValueError('Referenced work is no longer accepting jobs.')
     now = int(time.time() * 1000)
     available = integer(now if available_at_ms is None else available_at_ms)
     job_id = db.execute(
@@ -479,6 +527,13 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
           VALUES(?,?,?,?,?,?,?)""",
         (event_id,created_by_job_id,kind,raw,available,now,now)
     ).lastrowid
+    if operation_id is None:
+        operation_id=db.execute('INSERT INTO job_operations(created_at_ms,updated_at_ms) VALUES(?,?)',(now,now)).lastrowid
+    else:
+        integer(operation_id,positive=True)
+        if db.execute("SELECT state FROM job_operations WHERE operation_id=?",(operation_id,)).fetchone() != ('ACTIVE',):
+            raise ValueError('Operation is no longer accepting work.')
+    db.execute('INSERT INTO job_operation_members VALUES(?,?)',(job_id,operation_id))
     audit = append_job_history(db, job_id=job_id, event_code="CREATED",
                                component=component, occurred_at_ms=now,
                                details={"attempt": 0})
@@ -491,7 +546,7 @@ def enqueue_job_with_receipt(db, **kwargs):
 
 
 def enqueue_job(db, *, kind, payload, component, event_id=None,
-                created_by_job_id=None, available_at_ms=None):
+                created_by_job_id=None, available_at_ms=None, operation_id=None):
     """Insert independent work and CREATED audit inside an active transaction.
 
     No commit or logging. Caller owns rollback and may emit CREATED with event()
@@ -500,7 +555,7 @@ def enqueue_job(db, *, kind, payload, component, event_id=None,
     """
     return _enqueue_job(db, kind=kind, payload=payload, component=component,
                         event_id=event_id, created_by_job_id=created_by_job_id,
-                        available_at_ms=available_at_ms)[0]
+                        available_at_ms=available_at_ms, operation_id=operation_id)[0]
 
 
 def accept_event_and_job(db, source, raw_body, *, kind, payload):

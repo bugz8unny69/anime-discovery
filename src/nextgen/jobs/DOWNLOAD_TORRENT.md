@@ -114,3 +114,10 @@ fresh equivalence and rollback. **Tests are written but unexecuted.** Source-onl
 review does not establish runtime compatibility. No live client/provider calls,
 application or SQL execution, CI, downloads, media operations or deployment were
 performed for this change.
+
+## Cancellation follow-up
+
+The v17 cancellation service now owns separately authorized stop/removal and
+manifest-only file cleanup. It drains the explicit operation, preserves uncertain
+external ownership and exposes readable cleanup progress. Even if this download
+job is DONE, an unstaged acquisition remains cancelable. See ../CANCELLATION.md.

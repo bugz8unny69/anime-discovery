@@ -17,6 +17,11 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('JOB_CANCELED', 'An operator explicitly canceled unfinished work.', 'This work was canceled.', 'Check cleanup status for any remaining downloads.', 'INFO', False),
+    Reason('CANCELLATION_DRAINING', 'Cancellation is durable; active operation handlers must drain before cleanup.', 'Waiting for active work to stop before cleanup.', 'Wait for the current work to finish stopping.', 'INFO', None),
+    Reason('CANCELLATION_PENDING', 'Cleanup is incomplete; external outcomes are reconciled without repeating uncertain commands.', 'Cancellation cleanup is waiting for confirmation.', 'Check the existing torrent and cleanup status.', 'INFO', None),
+    Reason('CANCELLATION_REVIEW', 'Cleanup ownership, file identity, sharing or external outcome cannot be established safely.', 'Cancellation cleanup needs attention.', 'Review the preserved torrent or files before further cleanup.', 'WARNING', False),
+    Reason('CANCELLATION_COMPLETE', 'Owned-resource and registered temporary-file cleanup completed or no resources existed.', 'Cancellation cleanup is complete.', 'No further cleanup is required for the recorded resources.', 'INFO', None),
     Reason('TORRENT_SELECTION_UNCERTAIN', 'Fixed file selection was authorized once; confirmation is pending.', 'Video file selection is waiting for confirmation.', 'Inspect the existing selection; do not repeat uncertain commands automatically.', 'INFO', None),
     Reason('TORRENT_SELECTION_CONFIRMED', 'Exact selected-video and skipped-sidecar priorities were observed while stopped.', 'The video file is selected and ready to download.', 'Continue with the recorded download start.', 'INFO', None),
     Reason('TORRENT_START_UNCERTAIN', 'A single durable start authorization exists; stopped or checking observations cannot rearm it.', 'Download startup is waiting for confirmation.', 'Inspect the existing download; do not restart it automatically.', 'INFO', None),

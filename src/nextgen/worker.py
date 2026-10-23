@@ -12,6 +12,8 @@ import inspect
 import threading
 import uuid
 
+from src.nextgen.cancellation import OperationGate, CancellationRequested
+from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError
 from src.nextgen.diagnostics import configure_logging, event, log_history
@@ -216,6 +218,7 @@ class Worker:
         except (MaintenanceBusy, MaintenancePending):
             return False
         claim = None
+        operation_admission = None
         try:
             configuration = await self._io(self.config.operation,self.startup,component="worker")
             if self._stop.is_set() or self._paused:
@@ -227,6 +230,10 @@ class Worker:
             claim, audits = await self._io(self.queue.claim,halted=self._halt_claims.is_set)
             if claim is None:
                 return False
+            operation_id=await self._io(self.queue.operation_id,claim)
+            candidate_admission=OperationGate(self.queue.database).hold(operation_id)
+            candidate_admission.__enter__()
+            operation_admission=candidate_admission
             # Separate logger snapshot: one attempt changing verbosity cannot
             # mutate another running attempt's logger threshold/formatter.
             logger = configure_logging(configuration.logging_settings(), "worker",
@@ -262,6 +269,11 @@ class Worker:
         except asyncio.CancelledError:
             # No invented completion. The recorded lease/start is recoverable.
             raise
+        except CancellationRequested:
+            if claim is not None:
+                records=await self._io(CancellationStore(self.queue.database).acknowledge,claim)
+                for record in records:log_history(self.logger,record)
+            return True
         except LeaseLost as exc:
             self._log_error(exc,claim)
             return True
@@ -269,6 +281,7 @@ class Worker:
             self._log_error(exc,claim)
             raise
         finally:
+            if operation_admission is not None:operation_admission.__exit__(None,None,None)
             admission.__exit__(None,None,None)
 
     async def _recover(self):
