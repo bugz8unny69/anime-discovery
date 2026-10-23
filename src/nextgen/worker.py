@@ -13,10 +13,10 @@ import uuid
 
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.diagnostics import configure_logging, event, log_history
-from src.nextgen.job_contracts import Outcome, Policy, Registry, payload_json
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Policy, Registry, payload_json
 from src.nextgen.reasons import get_reason
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceBusy, MaintenancePending
-from src.nextgen.storage.job_queue import JobQueue, LeaseLost
+from src.nextgen.storage.job_queue import JobQueue, LeaseLost, QueueUnavailable
 
 
 class WorkerNotReady(RuntimeError):
@@ -174,6 +174,9 @@ class Worker:
                 if asyncio.current_task().cancelling():
                     raise
                 return Outcome("retry", "JOB_HANDLER_FAILED")
+            except QueueUnavailable:
+                # A storage failure is not a provider/handler retry decision.
+                raise
             except Exception:
                 # Never persist an arbitrary exception string or raw result.
                 return Outcome("retry", "JOB_HANDLER_FAILED")
@@ -236,8 +239,14 @@ class Worker:
                     log_history(logger,started)
                     context = Context(claim,configuration,logger,threading.Event())
                     outcome = await self._invoke(claim,spec,context)
-            records = await self._io(self.queue.finish,claim,outcome,spec=spec,
-                                     invocation=invocation,registry=self.registry)
+            try:
+                records = await self._io(self.queue.finish,claim,outcome,spec=spec,
+                                         invocation=invocation,registry=self.registry)
+            except CompletionRejected as rejection:
+                # The first transaction rolled back all facts/ending/successors.
+                # Record the expected domain decision under the same valid lease.
+                records = await self._io(self.queue.finish,claim,rejection.outcome,spec=spec,
+                                         invocation=invocation,registry=self.registry)
             for record in records:
                 log_history(logger,record)
             return True

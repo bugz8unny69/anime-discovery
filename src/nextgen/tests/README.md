@@ -108,3 +108,11 @@ still-pinned database, safe adjusted roots, post-restart views and rejecting
 unsafe operation snapshots before claim while releasing maintenance admission.
 These cases remain **unexecuted**, along with worker cancellation, embedded close,
 historical zero-attempt recovery and oversized-payload regression cases.
+
+
+Identity job: test_identify_anime_job.py covers bounded durable input, trusted
+resolver injection, invalid data, series-only results, atomic identity/successor
+handoff, post-commit audit receipts, review on canonical/episode conflicts,
+idempotent existing snapshots, stale completion, incoming-event lease protection
+and transaction rollback. test_worker_queue.py adds expected completion rejection
+and invalid audit receipt rollback. Cases are authored but **not executed**.

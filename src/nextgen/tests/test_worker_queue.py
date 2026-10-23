@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from src.nextgen.handlers import HandlerDefinition
-from src.nextgen.job_contracts import Outcome, Policy, Registration, Registry, Successor
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Policy, Registration, Registry, Successor
 from src.nextgen.storage.job_queue import JobQueue, LeaseLost, QueueUnavailable
 from src.nextgen.storage.sqlite import enqueue_job, initialize, transaction
 
@@ -149,3 +149,52 @@ class WorkerQueueTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 enqueue_job(db,kind="TEST",payload={"value":"x"*65536},component="intake")
             self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0],1)
+
+
+    def test_expected_completion_rejection_rolls_back_before_review(self):
+        def persist(db,claim,value):
+            db.execute("INSERT INTO identified_anime VALUES(1,2,'Partial')")
+            raise CompletionRejected(Outcome("review","IDENTITY_CONFLICT"))
+        spec = Registration("TEST",self.spec.definition,no_work,persist=persist)
+        registry = Registry((spec,))
+        claim,_ = self.queue.claim()
+        self.queue.start(claim,spec,"a"*32,registry)
+        with self.assertRaises(CompletionRejected) as rejected:
+            self.queue.finish(claim,Outcome(),spec=spec,invocation="a"*32,registry=registry)
+        with self.queue.connection() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM identified_anime").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT count(*) FROM job_history WHERE event_code='HANDLER_COMPLETED'").fetchone()[0],0)
+        self.queue.finish(claim,rejected.exception.outcome,spec=spec,invocation="a"*32,registry=registry)
+        self.assertEqual(self.state(),("NEEDS_REVIEW",1))
+        for outcome in (Outcome(),Outcome("retry","JOB_HANDLER_FAILED")):
+            with self.assertRaises(ValueError): CompletionRejected(outcome)
+
+    def test_invalid_audit_receipt_contract_rolls_back_adapter_facts(self):
+        def persist(db,claim,value):
+            db.execute("INSERT INTO identified_anime VALUES(1,2,'Partial')")
+            return ("raw private text",)
+        spec = Registration("TEST",self.spec.definition,no_work,persist=persist)
+        registry = Registry((spec,))
+        claim,_ = self.queue.claim()
+        self.queue.start(claim,spec,"a"*32,registry)
+        with self.assertRaises(ValueError):
+            self.queue.finish(claim,Outcome(),spec=spec,invocation="a"*32,registry=registry)
+        with self.queue.connection() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM identified_anime").fetchone()[0],0)
+        self.assertEqual(self.state(),("RUNNING",1))
+
+
+    def test_lease_expiring_inside_persistence_rolls_back_facts_and_ending(self):
+        def persist(db,claim,value):
+            db.execute("INSERT INTO identified_anime VALUES(1,2,'Partial')")
+            self.now += self.policy.lease_ms
+        spec = Registration("TEST",self.spec.definition,no_work,persist=persist)
+        registry = Registry((spec,))
+        claim,_ = self.queue.claim()
+        self.queue.start(claim,spec,"a"*32,registry)
+        with self.assertRaises(LeaseLost):
+            self.queue.finish(claim,Outcome(),spec=spec,invocation="a"*32,registry=registry)
+        with self.queue.connection() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM identified_anime").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT count(*) FROM job_history WHERE event_code='HANDLER_COMPLETED'").fetchone()[0],0)
+        self.assertEqual(self.state(),("RUNNING",1))
