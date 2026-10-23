@@ -7,20 +7,33 @@ mapping/cross-check behavior. It imports no legacy runtime code.
 
 ## Composition and current input
 
-Service composition supplies validated `Options(client_name, client_version)`
-and a thread-safe `credentials()` callback returning `Credentials(api_key, pin)`
-from its secret facility. No credentials are put in public settings or payloads.
-`make_resolver(options, credentials)` returns the async callable consumed by
-`identify_anime_job.registration(resolve, release_kind=...)`. Share that resolver
-across the worker's attempts so its TVDB token/cache survive normal job deferrals.
-The optional release kind must already be installed. No release handler is added.
+`providers.configuration.build_identity_worker(config_directory)` validates the
+required provider configuration and returns an unstarted worker. Close it if not
+serving it. `run_identity_worker(config_directory)` supplies the normal worker
+signal/shutdown entry point. Both providers are always required; there are no
+enable flags and no TVDB PIN field or login parameter. Startup validation checks
+local configuration/credential availability; it sends no HTTP requests and does
+not prove the API key is accepted upstream.
 
-Options are constructor policy, not newly accepted settings.json keys. Timeout is
-bounded to 1–60 seconds (default 30); registered AniDB client name/version are
-required. Service bootstrap, secret-storage UI/API and provider configuration
-schema/management fields remain to be implemented together, with explicit
-conversion when those settings are registered. This PR does not install a
-standalone service or enable provider requests automatically.
+Configuration v4 registers anidb.client_name (blank until configured),
+anidb.client_version (1) and providers.timeout_seconds (30). All apply to new
+operations without restart. A registered AniDB client name and a nonblank TVDB
+API key in the protected SecretStore are required before identity work starts.
+Shared caches/throttle state persist as before. See ../SECRETS.md.
+
+Before each claim the composed worker validates its fresh effective settings
+and credential availability. Failure leaves queued jobs untouched and stops the
+service loop for operator correction. The identity resolver captures its attempt's
+current Options and Credentials(api_key) once before provider work. A later change
+applies to the next attempt; active work retains its captured values. The bounded
+client registry preserves caches across identical options and keeps old in-flight
+clients valid when settings change. TVDB caches remain credential-fingerprint scoped.
+
+Lower-level make_resolver accepts either fixed validated Options or a trusted
+options(configuration) function, plus a thread-safe credentials() callback.
+Share one resolver across attempts. The optional release kind must already be
+installed; this change adds no release handler. There is no environment fallback,
+legacy config/secret import, dashboard/ADM API endpoint or deployed service unit.
 
 The initial default normalizer requires a JSON body containing release_name.
 It does not claim compatibility with every producer's webhook. A future intake
@@ -102,7 +115,7 @@ Schema v9 adds provider_limits and provider_public_cache. The versioned 009
 migration, fresh schema, runner/version guards and offline cases accompany these
 helpers. No runtime CREATE TABLE, implicit migration or legacy metadata import.
 Provider operations require the caller's job admission; HTTP occurs outside
-SQLite transactions. Configuration remains v3 and AnimeSeries remains v2.
+SQLite transactions. Configuration is v4 and AnimeSeries remains v2.
 
 This draft has not contacted providers, run SQL, executed/imported application
 code, run tests/CI or changed media/production. Tests are authored but unexecuted.

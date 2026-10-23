@@ -60,9 +60,9 @@ acquisition. It must not treat the series result as release approval.
 The concrete AniDB-first resolver is now available in providers/identity.py;
 see [Provider libraries](../providers/README.md) for composition, caching,
 throttling and conservative verification gates. Application/service bootstrap,
-provider configuration/secret management fields and producer intake adapters are
-still required before deployment. Constructor Options are not undocumented
-settings.json keys. This change does not enable provider calls automatically.
+producer intake adapters and installed service supervision are still required
+before deployment. Provider settings/SecretStore and validated worker composition
+are now documented in ../SECRETS.md. No service is deployed automatically.
 The default normalizer accepts the explicit release_name JSON input contract;
 it does not promise compatibility with every webhook source.
 
@@ -76,7 +76,7 @@ Reviewed legacy references at adf537ac58dc13826071039cc3c6f11ed4229479:
 Reuse verified identity separation and conflict safeguards; do not import the
 legacy controller, chained worker loops, review flags or runtime SQL. Existing
 NextGen schema/storage code is reused directly. SQLite is now v9 for shared provider cache/pacing; configuration
-v3, AnimeSeries v2. No DDL or numbered migrations change.
+v4, AnimeSeries v2. No DDL or numbered migrations change.
 
 Offline tests cover worker integration, atomic handoff/rollback, post-commit
 receipts, unsafe payloads, invalid results, provider wait/retry, existing/conflicting

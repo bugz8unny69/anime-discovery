@@ -127,3 +127,13 @@ credential isolation, exact ID checks, AniDB-first ordering and ambiguity gates.
 Sequential migration coverage includes every starting version v1–v9. HTTP tests
 use fake responses only. All cases are authored but **unexecuted**; no test/CI,
 SQL execution, application imports, live provider requests or deployment occurred.
+
+
+Required provider configuration: test_provider_configuration.py covers explicit
+v3→v4 conversion with preserved historical shapes, no enable/PIN keys, live
+settings, protected credential reads/writes, presence-only results, revision
+conflicts, unsafe files, publication durability and readiness before claims.
+Worker/resolver cases cover key rotation, stable in-flight credentials and fresh
+options for later attempts. The TVDB login case now asserts API-key-only JSON.
+All tests remain authored but **unexecuted**. No imports/execution of application
+code, SQL, tests/CI, live provider calls, production changes or deployment ran.

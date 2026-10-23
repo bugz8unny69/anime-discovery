@@ -1,4 +1,6 @@
 """Safe provider outcomes shared by clients and job adapters."""
+from src.nextgen.configuration_schema import ConfigurationError
+
 class ProviderUnavailable(RuntimeError):
     reason_code = "PROVIDER_UNAVAILABLE"
     def __init__(self):
@@ -24,3 +26,10 @@ class ProviderAuthenticationFailed(RuntimeError):
     reason_code = "PROVIDER_AUTH_FAILED"
     def __init__(self):
         super().__init__("An information provider could not authorize access.")
+
+
+
+class ProviderConfigurationError(ConfigurationError):
+    reason_code = "PROVIDER_CONFIGURATION_INVALID"
+    def __init__(self):
+        ValueError.__init__(self,"Provider configuration is incomplete or invalid.")

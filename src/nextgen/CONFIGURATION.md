@@ -50,13 +50,15 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=3, a positive revision, and a settings object
+Canonical JSON has schema_version=4, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 3,
+      "schema_version": 4,
       "revision": 1,
       "settings": {
+        "anidb": {"client_name": "", "client_version": 1},
+        "providers": {"timeout_seconds": 30},
         "logging": {"level": "INFO", "components": {}},
         "api": {"host": "127.0.0.1", "port": 8765},
         "worker": {"concurrency": 4},
@@ -64,7 +66,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v8 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v9 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -206,3 +208,19 @@ with CONFIGURATION_INVALID before work is claimed. Choose compatible roots or
 restart the affected service against the saved database configuration after its
 separate storage/migration readiness checks. Saving settings does not move data,
 create a database or run migrations.
+
+
+## Required identity providers (configuration v4)
+
+AniDB and TVDB are always part of identity verification. There are no provider
+enable flags or TVDB PIN settings. v3→v4 explicitly adds blank anidb.client_name,
+anidb.client_version=1 and providers.timeout_seconds=30, advancing revision once.
+Earlier conversion steps retain their published shapes. Blank client name is
+allowed while preparing settings; identity-worker readiness refuses it.
+
+The three new fields apply to new operations without restart. The concrete
+identity-worker composition validates them and the protected TVDB API key at
+startup and before claims. Each attempt captures fresh settings/credentials;
+existing work retains its snapshot. API host/port, worker concurrency and database
+location remain restart-required. Startup validation makes no provider requests.
+See SECRETS.md for private credential publication, status and service entry points.

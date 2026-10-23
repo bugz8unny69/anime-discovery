@@ -8,10 +8,12 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 import logging
 import functools
+import inspect
 import threading
 import uuid
 
 from src.nextgen.configuration import ConfigurationStore
+from src.nextgen.configuration_schema import ConfigurationError
 from src.nextgen.diagnostics import configure_logging, event, log_history
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Policy, Registry, payload_json
 from src.nextgen.reasons import get_reason
@@ -78,9 +80,12 @@ class Context:
 
 
 class Worker:
-    def __init__(self, configuration_store, startup, registry, *, policy=Policy(), logger=None):
+    def __init__(self, configuration_store, startup, registry, *, policy=Policy(), logger=None, prepare=None):
         if type(registry) is not Registry or not registry.entries:
             raise WorkerNotReady()
+        if prepare is not None and (not callable(prepare) or inspect.iscoroutinefunction(prepare)):
+            raise ValueError("worker readiness callback must be synchronous")
+        self._prepare = prepare
         self.config, self.startup, self.registry, self.policy = configuration_store, startup, registry, policy
         self.gate = MaintenanceGate(startup.value("storage.database_path"))
         self.queue = JobQueue(self.gate.database, policy=policy)
@@ -174,8 +179,8 @@ class Worker:
                 if asyncio.current_task().cancelling():
                     raise
                 return Outcome("retry", "JOB_HANDLER_FAILED")
-            except QueueUnavailable:
-                # A storage failure is not a provider/handler retry decision.
+            except (QueueUnavailable,ConfigurationError):
+                # Storage/configuration failure is not a provider retry decision.
                 raise
             except Exception:
                 # Never persist an arbitrary exception string or raw result.
@@ -215,6 +220,10 @@ class Worker:
             configuration = await self._io(self.config.operation,self.startup,component="worker")
             if self._stop.is_set() or self._paused:
                 return False
+            if self._prepare is not None:
+                result = await self._io(self._prepare,configuration)
+                if result is not None:
+                    raise ValueError("readiness callback must not return values")
             claim, audits = await self._io(self.queue.claim,halted=self._halt_claims.is_set)
             if claim is None:
                 return False
@@ -317,6 +326,11 @@ async def run_worker(config_directory, registrations, *, policy=Policy()):
     store = ConfigurationStore(config_directory)
     startup = await blocking(store.read)
     worker = Worker(store,startup,Registry(registrations),policy=policy)
+    await serve_worker(worker)
+
+
+async def serve_worker(worker):
+    """Run a composed worker with service signal handling and guaranteed close."""
     import signal
     loop = asyncio.get_running_loop()
     installed = []

@@ -186,3 +186,12 @@ could not authorize access." and asks for provider access settings to be reviewe
 Both use existing translation keys/catalog resolution. Normal cache misses under
 shared pacing use JOB_WAITING/DEFERRED; provider outages reuse PROVIDER_UNAVAILABLE.
 Raw HTTP errors, URLs, bodies, credentials and tokens are never diagnostic details.
+
+
+PROVIDER_CONFIGURATION_INVALID reports missing/invalid required AniDB client or
+TVDB API-key configuration with "Provider configuration is incomplete or invalid."
+Its action names the required setup without echoing supplied values.
+SECRET_STORAGE_UNAVAILABLE says "Provider credentials could not be accessed
+safely." and requests storage/permissions/format review. Both resolve through the
+shared translation-ready catalog. Credential publication results expose only
+presence/revision and durability; secret values never become diagnostic details.

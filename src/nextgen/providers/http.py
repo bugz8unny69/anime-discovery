@@ -46,16 +46,14 @@ class Options:
 @dataclass(frozen=True)
 class Credentials:
     api_key: str = field(repr=False)
-    pin: str = field(default="",repr=False)
 
     def __post_init__(self):
         if (type(self.api_key) is not str or not self.api_key.strip() or len(self.api_key)>4096
-                or type(self.pin) is not str or len(self.pin)>128
-                or any(ord(char)<32 or ord(char)==127 for char in self.api_key+self.pin)):
+                or any(ord(char)<32 or ord(char)==127 for char in self.api_key)):
             raise ProviderAuthenticationFailed()
 
     def fingerprint(self):
-        return hashlib.sha256(json.dumps([self.api_key,self.pin]).encode()).hexdigest()
+        return hashlib.sha256(json.dumps([self.api_key]).encode()).hexdigest()
 
 
 class MemoryCache:
@@ -232,7 +230,6 @@ class Clients:
         if bearer is None:
             _,reservation = self.store.reserve("tvdb",1000)
             body = {"apikey":credentials.api_key}
-            if credentials.pin: body["pin"]=credentials.pin
             raw = self._fetch("tvdb",reservation,TVDB_URL+"/login",body=json.dumps(body).encode())
             try:
                 document = json_object(raw)

@@ -1,4 +1,5 @@
 """AniDB-first resolver composed for identify_anime_job; no fuzzy approval."""
+from collections import OrderedDict
 import re
 import threading
 
@@ -32,12 +33,18 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
     neither it nor any API key is read from a webhook or public configuration.
     title_extractor is a trusted normalizer, never a payload-selected callable.
     """
-    if type(options) is not Options or not callable(credentials) or not callable(title_extractor):
+    if (type(options) is not Options and not callable(options)) or not callable(credentials) or not callable(title_extractor):
         raise ValueError("provider composition is incomplete")
-    clients,lock = {},threading.Lock()
+    clients,lock = OrderedDict(),threading.Lock()
 
     def identify(request,configuration,cancelled):
         if cancelled.is_set(): raise IdentityNotReady()
+        actual_options = options(configuration) if callable(options) else options
+        if type(actual_options) is not Options: raise ValueError("provider options required")
+        secret = credentials()  # Capture once before contacting either provider.
+        if type(secret) is not Credentials:
+            from src.nextgen.providers.errors import ProviderAuthenticationFailed
+            raise ProviderAuthenticationFailed()
         title = title_extractor(request)
         if type(title) is not str or len(title)>2048: raise IdentityNotReady()
         # The legacy parser removes season labels for candidate discovery.
@@ -49,12 +56,14 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
         if not aliases: raise IdentityNotReady()
         database = configuration.value("storage.database_path")
         with lock:
-            client = clients.get(database)
+            if any(key[0]!=database for key in clients):
+                raise ValueError("resolver database changed; rebuild composition")
+            key = (database,actual_options)
+            client = clients.get(key)
             if client is None:
-                # Startup database fields are pinned; one service composition
-                # must not silently accumulate clients for arbitrary paths.
-                if clients: raise ValueError("resolver database changed; rebuild composition")
-                client = clients[database] = client_factory(database,options)
+                client = clients[key] = client_factory(database,actual_options)
+            clients.move_to_end(key)
+            while len(clients)>4: clients.popitem(last=False)
         candidates = client.title_candidates(aliases)  # AniDB always comes first.
         if len(candidates)!=1: raise IdentityNotReady()
         aid = next(iter(candidates))
@@ -64,10 +73,6 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             raise IdentityConflict()
         tid = client.mapping(aid)  # Explicit Anime-Lists relation, never guessed.
         if cancelled.is_set(): raise IdentityNotReady()
-        secret = credentials()
-        if type(secret) is not Credentials:
-            from src.nextgen.providers.errors import ProviderAuthenticationFailed
-            raise ProviderAuthenticationFailed()
         tvdb = client.series(tid,secret)
         if tvdb["live"]: raise IdentityConflict()
         if not tvdb["animation"]: raise IdentityNotReady()
