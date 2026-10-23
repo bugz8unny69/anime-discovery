@@ -30,8 +30,10 @@ class AcquisitionProposal:
     manifest: Manifest = field(repr=False)
     configuration_revision: int
     limits: SizeLimits = SizeLimits()
+    preparation_job_id: int | None = None
     def __post_init__(self):
         if type(self.source) is not AcquisitionInput or type(self.manifest) is not Manifest or type(self.limits) is not SizeLimits:
             raise ValueError('typed acquisition facts required')
         integer(self.configuration_revision,positive=True)
+        if self.preparation_job_id is not None:integer(self.preparation_job_id,positive=True)
         if self.source.info_hash!=self.manifest.info_hash:raise ValueError('torrent identity mismatch')

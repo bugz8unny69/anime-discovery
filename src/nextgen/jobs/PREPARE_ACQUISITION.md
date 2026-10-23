@@ -129,3 +129,11 @@ v13 unknown sizes require review, not a zero-size assumption. This supersedes
 the earlier size-setting prerequisite; client transport, payload/piece selection
 and durable uncertain/submission/reconciliation states remain future work.
 See ../DOWNLOAD_CONFIGURATION.md.
+
+## Stopped-submission follow-up
+
+Trusted metadata composition now atomically routes preparation to SUBMIT_TORRENT.
+Its SQLite v15 journal pins the request and consumes one send right before a
+possible stopped add. Timeout/crash retries reconcile rather than resubmit.
+Transfer selection/start and a real metainfo retrieval adapter remain separate.
+See SUBMIT_TORRENT.md; PREPARED still does not mean downloaded or externally owned.

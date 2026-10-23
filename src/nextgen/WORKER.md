@@ -195,3 +195,10 @@ identity work. Acquisition preparation now atomically admits the selected video
 against its selection plan's frozen per-video/total size caps. A rejected or
 unknown-size admission goes to readable review. No external client transport or
 submission state is introduced. See DOWNLOAD_CONFIGURATION.md.
+
+SUBMIT_TORRENT now journals a one-shot stopped add and read-only reconciliation.
+Its short journal transactions use the existing attempt-wide maintenance
+admission and current queue lease; no HTTP spans a write transaction. Durable
+external progress can precede final queue completion and survives crashes.
+No replacement send right is granted after expiration/absence. See
+jobs/SUBMIT_TORRENT.md for the external-fencing limitation and next transfer stage.

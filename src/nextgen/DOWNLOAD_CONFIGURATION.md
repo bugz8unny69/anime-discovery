@@ -117,3 +117,11 @@ Next work is the qBittorrent transport and durable submission/reconciliation
 state machine. It must use these settings/credentials and stable captured intent,
 not assume that a prepared inventory, successful response or category proves
 ownership. See jobs/PREPARE_ACQUISITION.md for the boundary.
+
+## Stopped client transport follow-up
+
+The qBittorrent transport and SQLite v15 submission journal now use these captured
+settings and credentials. Persisted endpoint/destination/category/timeout are
+pinned until reconciliation; fresh attempts may read rotated private credentials.
+A one-shot intent can add stopped only; no selection/start/delete controls are
+implemented. See jobs/SUBMIT_TORRENT.md. Existing v6 settings remain unchanged.

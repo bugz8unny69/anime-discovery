@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v14**, adding frozen prepared-video budgets.
+Latest schema: **v15**, adding stopped-submission reconciliation.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -193,3 +193,8 @@ extend through v13. Historical scripts 001–012 remain unchanged.
 budget and nullable selected_size_bytes on prepared plans. Old rows remain NULL
 and require explicit size review before further admission. Fresh DDL and runner
 coverage extend through v14; historical scripts 001–013 remain immutable.
+
+015_torrent_submissions.sql upgrades v14→v15 with one-shot stopped-submission
+intent/progress and constrained reconciliation states. No automatic rearm or
+external client request occurs during migration. Fresh schema and sequential
+coverage extend through v15. Historical scripts 001–014 remain unchanged.

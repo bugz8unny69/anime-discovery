@@ -31,6 +31,8 @@ _EVENTS = (
     EventDefinition("DEFERRED", "job", "Work is waiting for a later check.", True),
     EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
     EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
+    EventDefinition("TORRENT_INTENT_RECORDED", "job", "Torrent submission intent recorded.", True),
+    EventDefinition("TORRENT_RECONCILED", "job", "Torrent submission checked against the download client.", True),
     EventDefinition("ACQUISITION_PREPARED", "job", "Source files inspected and acquisition plan recorded.", True),
     EventDefinition("EPISODE_RESERVATION_CREATED", "job", "Episode reserved for acquisition.", True),
     EventDefinition("EPISODE_RESERVATION_SKIPPED", "job", "Episode reservation was not needed.", True),

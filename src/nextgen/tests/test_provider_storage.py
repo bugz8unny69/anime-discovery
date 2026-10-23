@@ -77,10 +77,11 @@ class ProviderStorageTests(unittest.TestCase):
             db.executescript((SQL_DIR/"012_episode_reservations.sql").read_text())
             db.executescript((SQL_DIR/"013_acquisition_plans.sql").read_text())
             db.executescript((SQL_DIR/"014_acquisition_budgets.sql").read_text())
+            db.executescript((SQL_DIR/"015_torrent_submissions.sql").read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute("SELECT * FROM incoming_events").fetchall(),before)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],14)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],15)
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(),[])
         finally:
             db.close()

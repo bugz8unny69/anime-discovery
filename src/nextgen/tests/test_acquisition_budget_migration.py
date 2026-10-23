@@ -31,13 +31,14 @@ class AcquisitionBudgetMigrationTests(unittest.TestCase):
             db.commit()
             before=db.execute('SELECT * FROM acquisition_plans').fetchone()
             db.executescript((SQL_DIR/'014_acquisition_budgets.sql').read_text())
+            db.executescript((SQL_DIR/'015_torrent_submissions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             row=db.execute('SELECT * FROM acquisition_plans').fetchone()
             self.assertEqual(row[:-1],before)
             self.assertIsNone(row[-1])
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],14)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],15)
         finally:db.close();fresh.close()
 
     def test_wrong_start_and_partial_failure_roll_back_column_and_table(self):

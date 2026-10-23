@@ -6,7 +6,7 @@ from src.nextgen.acquisition.contracts import AcquisitionProposal
 from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing, parse_metainfo
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.providers.errors import ProviderDeferred, ProviderUnavailable
 from src.nextgen.storage.acquisition import load_acquisition_input, persist_acquisition, validate_declaration
 from src.nextgen.worker import blocking
@@ -16,12 +16,17 @@ DEFINITION=HandlerDefinition(KIND,'Inspect source files and prepare acquisition'
 
 
 def _persist(db,claim,value):
+    if type(value) is not AcquisitionProposal or value.preparation_job_id not in (None,claim.job_id):
+        raise ValueError('preparation facts do not match job')
     try:return (persist_acquisition(db,claim,value),)
     except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:
         raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration(read_metainfo):
+def registration(read_metainfo,*,submission_kind=None):
+    if submission_kind is not None and (type(submission_kind) is not str or not submission_kind.strip()
+                                      or len(submission_kind)>64 or submission_kind==KIND):
+        raise ValueError('invalid torrent submission successor')
     # Trusted service callback, never selected by a webhook/job payload.
     if not inspect.iscoroutinefunction(read_metainfo):raise ValueError('async metadata reader required')
     async def execute(context):
@@ -38,5 +43,10 @@ def registration(read_metainfo):
         except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
         except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:return Outcome('review',exc.reason_code)
-        return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision,size_limits(context.configuration)))
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+        return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision,size_limits(context.configuration),context.claim.job_id))
+    def route(value):
+        if submission_kind is None:return ()
+        if value.preparation_job_id is None:raise ValueError('preparation job identity required')
+        return (Successor.create(submission_kind,{'preparation_job_id':value.preparation_job_id}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if submission_kind is None else (submission_kind,))

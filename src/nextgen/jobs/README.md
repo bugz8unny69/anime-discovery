@@ -105,3 +105,10 @@ PREPARE_ACQUISITION / prepare_acquisition_job.py records hash-bound single-video
 metadata and a stable submission marker after a reservation. It is composed only
 when the application supplies a trusted async metadata reader. No reader/client
 transport or external submission is installed by default. See PREPARE_ACQUISITION.md.
+
+## Stopped submission and reconciliation
+
+SUBMIT_TORRENT / submit_torrent_job.py follows preparation in trusted metadata
+composition. It has one durable send authorization per plan, adds stopped, and
+reconciles pinned client provenance/inventory. It never starts or deletes data.
+See SUBMIT_TORRENT.md for supported versions, states and failure boundaries.

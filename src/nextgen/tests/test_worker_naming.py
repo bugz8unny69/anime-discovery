@@ -99,6 +99,7 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.db.executescript((SQL_DIR / "012_episode_reservations.sql").read_text())
         self.db.executescript((SQL_DIR / "013_acquisition_plans.sql").read_text())
         self.db.executescript((SQL_DIR / "014_acquisition_budgets.sql").read_text())
+        self.db.executescript((SQL_DIR / "015_torrent_submissions.sql").read_text())
         initialize(self.db)  # Latest version accepted without implicit upgrade.
 
     def test_failure_before_version_bump_rolls_back_rows_and_vocabulary(self):

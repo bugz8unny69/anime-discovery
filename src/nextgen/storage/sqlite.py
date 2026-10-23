@@ -231,6 +231,27 @@ CREATE TABLE IF NOT EXISTS acquisition_budgets (
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0)
 );
 
+CREATE TABLE IF NOT EXISTS torrent_submissions (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ first_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ first_attempt INTEGER NOT NULL CHECK(first_attempt>0),
+ base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
+ save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 1 AND 4096),
+ category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 64),
+ timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
+ api_major INTEGER NOT NULL CHECK(api_major IN (4,5)),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED')),
+ reason_code TEXT NOT NULL,
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((state='UNCERTAIN' AND reason_code='TORRENT_SUBMISSION_UNCERTAIN') OR
+       (state='EXTERNAL' AND reason_code='TORRENT_ALREADY_PRESENT') OR
+       (state='REVIEW' AND reason_code='TORRENT_PROVENANCE_CONFLICT') OR
+       (state='OWNED_STOPPED' AND reason_code='TORRENT_STOPPED_CONFIRMED'))
+);
+
 """
 
 def connect(path):
@@ -270,13 +291,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v14; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v15; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13 databases require explicit versioned SQL migrations
-    before accessing v14 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14 databases require explicit versioned SQL migrations
+    before accessing v15 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 14:
+    if version == 15:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -286,7 +307,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=14;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=15;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

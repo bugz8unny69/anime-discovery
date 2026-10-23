@@ -183,3 +183,9 @@ private pair updates/v1 compatibility/public redaction/revision and publication
 failures, point-of-use captured contexts, concurrent size admission, frozen
 limits, old unknown-size review, rollback and v13→v14 preservation/equivalence.
 Sequential runner coverage now includes v14. Tests remain unexecuted.
+
+Stopped submission offline cases cover version-specific forms, auth/redirect/
+response bounds, exact inventory/provenance, one-use permits, timeout/crash/absence
+without replay, pinned options, external torrents, changed state and expired
+authorization/confirmation. Migration preservation/fresh equivalence/rollback
+and existing sequential coverage extend through SQLite v15. No tests or CI run.

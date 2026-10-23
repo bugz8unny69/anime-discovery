@@ -236,3 +236,11 @@ before client work. ACQUISITION_SIZE_LIMIT reviews an oversized selected video
 or aggregate plan; ACQUISITION_SIZE_EVIDENCE_MISSING reviews unknown historical
 selected-byte evidence. All have bounded static readable messages/actions and
 translation keys, without values or paths in exceptions/history.
+
+DOWNLOAD_CLIENT_UNAVAILABLE/AUTH_FAILED/RESPONSE_INVALID/UNSUPPORTED describe
+bounded transport failures without response bodies or credential values.
+TORRENT_SUBMISSION_UNCERTAIN defers read-only reconciliation; TORRENT_ALREADY_PRESENT
+protects externally present torrents; TORRENT_PROVENANCE_CONFLICT reviews changed
+provenance/state/files; TORRENT_STOPPED_CONFIRMED describes a stopped snapshot
+only. TORRENT_INTENT_RECORDED and TORRENT_RECONCILED are durable job markers with
+readable messages/actions/translation keys and after-commit logging.

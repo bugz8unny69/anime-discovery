@@ -69,7 +69,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v14 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v15 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -255,4 +255,8 @@ The current configuration version is 6. Explicit v5→v6 adds qbittorrent endpoi
 category, timeout, storage.download_root and acquisition.max_episode_mb (600) /
 max_plan_mb (3000). They are next-operation fields; existing size budgets retain
 their captured limits. Download/trial/keep roots must be separate and exclude
-the database. See DOWNLOAD_CONFIGURATION.md. Current SQLite version is 14.
+the database. See DOWNLOAD_CONFIGURATION.md. Current SQLite version is 15.
+
+Stopped torrent submission now uses SQLite v15 journal state. Configuration stays
+v6; persisted external requests pin their original target/options across live
+setting changes. See jobs/SUBMIT_TORRENT.md.

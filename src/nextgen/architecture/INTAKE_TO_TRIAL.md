@@ -284,3 +284,12 @@ SQLite v14 freezes per-video/selection-plan limits at first preparation and
 atomically counts prepared selected bytes. This is a reservation budget, not
 disk/network accounting. External submission and reconciliation remain separate;
 see ../DOWNLOAD_CONFIGURATION.md.
+
+## Stopped submission implementation refinement
+
+Trusted metadata composition now extends PREPARE_ACQUISITION → SUBMIT_TORRENT.
+SQLite v15 records a one-shot uncertain send intent before a possible stopped
+add and reconciles exact marker/destination/management/files against the pinned
+client. Pre-existing torrents remain external. Queue DONE here means confirmed
+stopped, not downloading or staged. Selection/start/progress and media verification
+remain future work; see ../jobs/SUBMIT_TORRENT.md.
