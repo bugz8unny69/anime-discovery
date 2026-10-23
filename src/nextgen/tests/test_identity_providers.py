@@ -146,3 +146,18 @@ class IdentityProviderTests(unittest.TestCase):
         self.responses.append(Response(b'{"data":{"token":"new-token"}}'))
         with self.assertRaises(ProviderDeferred): self.client.series(456,secret)
         self.assertEqual(self.calls[-1].full_url,"https://api4.thetvdb.com/v4/login")
+
+
+    def test_official_episode_pages_reuse_auth_scope_cache_and_never_follow_next_urls(self):
+        secret=Credentials("private-key")
+        self.memory.put(("token",secret.fingerprint()),"private-token",1800)
+        document={"data":{"episodes":[{"id":100,"seriesId":456,"seasonNumber":0,"number":1}]},
+                  "links":{"next":"https://untrusted.invalid/never-follow"}}
+        self.responses.append(Response(json.dumps(document).encode()))
+        self.assertEqual(self.client.episode_page(456,0,secret),(((100,0,1),),True))
+        self.assertEqual(self.client.episode_page(456,0,secret),(((100,0,1),),True))
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.calls[0].full_url,"https://api4.thetvdb.com/v4/series/456/episodes/official?page=0")
+        from src.nextgen.providers.parsing import tvdb_episode_page
+        document["data"]["episodes"][0]["seriesId"]=999
+        with self.assertRaises(ProviderInvalidResponse): tvdb_episode_page(document,456)

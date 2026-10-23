@@ -25,7 +25,25 @@ def delivery_title(request):
     return value
 
 
-def make_resolver(options, credentials, *, title_extractor=delivery_title, client_factory=Clients):
+class ClientPool:
+    """Share bounded option-specific clients across identity and release jobs."""
+    def __init__(self, factory=Clients):
+        self.factory,self.clients,self.lock=factory,OrderedDict(),threading.Lock()
+
+    def get(self, database, options):
+        if type(options) is not Options: raise ValueError("provider options required")
+        with self.lock:
+            if any(key[0]!=database for key in self.clients):
+                raise ValueError("resolver database changed; rebuild composition")
+            key=(database,options)
+            client=self.clients.get(key)
+            if client is None: client=self.clients[key]=self.factory(database,options)
+            self.clients.move_to_end(key)
+            while len(self.clients)>4: self.clients.popitem(last=False)
+            return client
+
+
+def make_resolver(options, credentials, *, title_extractor=delivery_title, client_factory=Clients, client_pool=None):
     """Return an async resolver with shared clients/caches for all its attempts.
 
     Options are trusted service composition, not undocumented settings keys.
@@ -35,7 +53,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
     """
     if (type(options) is not Options and not callable(options)) or not callable(credentials) or not callable(title_extractor):
         raise ValueError("provider composition is incomplete")
-    clients,lock = OrderedDict(),threading.Lock()
+    pool = client_pool or ClientPool(client_factory)
 
     def identify(request,configuration,cancelled):
         if cancelled.is_set(): raise IdentityNotReady()
@@ -55,15 +73,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
         aliases,_ = release_title(title)
         if not aliases: raise IdentityNotReady()
         database = configuration.value("storage.database_path")
-        with lock:
-            if any(key[0]!=database for key in clients):
-                raise ValueError("resolver database changed; rebuild composition")
-            key = (database,actual_options)
-            client = clients.get(key)
-            if client is None:
-                client = clients[key] = client_factory(database,actual_options)
-            clients.move_to_end(key)
-            while len(clients)>4: clients.popitem(last=False)
+        client = pool.get(database,actual_options)
         candidates = client.title_candidates(aliases)  # AniDB always comes first.
         if len(candidates)!=1: raise IdentityNotReady()
         aid = next(iter(candidates))

@@ -48,7 +48,8 @@ back every tentative write before the worker records NEEDS_REVIEW under its
 still-valid lease. Storage errors still stop/drain the worker; uncertain commits
 are never blindly replayed. A stale worker cannot persist facts or successors.
 
-The default has no successor because VERIFY_RELEASE is not implemented yet.
+The standalone registration has no successor by default. The concrete worker
+composition now installs VERIFY_RELEASE and routes identity completion to it.
 Only application composition can supply a release kind, and Registry requires
 that kind to be installed. Its payload contains `anidb_id`; the successor retains
 the same event_id and created_by_job_id provenance. That pair selects the durable
@@ -66,8 +67,9 @@ are now documented in ../SECRETS.md. No service is deployed automatically.
 The default normalizer accepts the explicit release_name JSON input contract;
 it does not promise compatibility with every webhook source.
 
-Release-verification, intake service, trial/acquisition and Keep handlers remain
-future work. Later PRs follow the architecture documents and settle their open
+Declared single-episode release verification is now in verify_release_job.py;
+see VERIFY_RELEASE.md. Intake service, exact file-manifest verification,
+trial/acquisition and Keep handlers remain future work. Later PRs follow the architecture documents and settle their open
 policy questions before acquisition, publication or deletion is implemented.
 
 Reviewed legacy references at adf537ac58dc13826071039cc3c6f11ed4229479:
@@ -75,7 +77,7 @@ Reviewed legacy references at adf537ac58dc13826071039cc3c6f11ed4229479:
 `anime_identity_rejection_gate.py` and `anime_identity_worker_v16.py`.
 Reuse verified identity separation and conflict safeguards; do not import the
 legacy controller, chained worker loops, review flags or runtime SQL. Existing
-NextGen schema/storage code is reused directly. SQLite is now v9 for shared provider cache/pacing; configuration
+NextGen schema/storage code is reused directly. SQLite is now v10 for shared provider cache/pacing; configuration
 v4, AnimeSeries v2. No DDL or numbered migrations change.
 
 Offline tests cover worker integration, atomic handoff/rollback, post-commit

@@ -31,8 +31,8 @@ clients valid when settings change. TVDB caches remain credential-fingerprint sc
 
 Lower-level make_resolver accepts either fixed validated Options or a trusted
 options(configuration) function, plus a thread-safe credentials() callback.
-Share one resolver across attempts. The optional release kind must already be
-installed; this change adds no release handler. There is no environment fallback,
+Share one resolver across attempts. The default composed pipeline now installs VERIFY_RELEASE after IDENTIFY_ANIME.
+A custom release kind must be explicitly installed. There is no environment fallback,
 legacy config/secret import, dashboard/ADM API endpoint or deployed service unit.
 
 The initial default normalizer requires a JSON body containing release_name.
@@ -115,8 +115,27 @@ Schema v9 adds provider_limits and provider_public_cache. The versioned 009
 migration, fresh schema, runner/version guards and offline cases accompany these
 helpers. No runtime CREATE TABLE, implicit migration or legacy metadata import.
 Provider operations require the caller's job admission; HTTP occurs outside
-SQLite transactions. Configuration is v4 and AnimeSeries remains v2.
+SQLite transactions. Schema is now v10 for release evidence; configuration is v4
+and AnimeSeries remains v2.
 
 This draft has not contacted providers, run SQL, executed/imported application
 code, run tests/CI or changed media/production. Tests are authored but unexecuted.
 Integration/operational confidence is deferred under current project policy.
+
+
+## Declared episode verifier
+
+providers/releases.py shares the same ClientPool with the identity resolver in
+the composed worker, reusing AniDB XML/mapping state, TVDB tokens and caches.
+It adapts legacy explicit/offset mapping rules without assuming that missing
+offsets are zero or that AniDB numbering equals TVDB numbering. TVDB episode
+records are queried in explicit official order, cached per page/credentials for
+five minutes and enumerated across at most 20 pages/10000 records. Next links are
+opaque continuation signals; they never become request URLs. Every request is
+built from the fixed endpoint and a bounded local page number. All pages must
+complete before a unique episode match is accepted; duplicate IDs/matches,
+wrong-series records and excessive pagination fail closed.
+
+Normal pacing can defer between pages; the next attempt reuses already cached
+pages. The resulting scope is DECLARED_SINGLE_EPISODE, not actual torrent/media
+file coverage. See ../jobs/VERIFY_RELEASE.md for the deliberately limited stage.

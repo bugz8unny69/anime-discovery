@@ -66,7 +66,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v9 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v10 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.

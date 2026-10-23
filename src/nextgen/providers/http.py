@@ -218,11 +218,11 @@ class Clients:
         # missing regular number remains missing until the 24-hour refresh.
         return parsing.episode_catalog(self._anime_payload(aid),aid)
 
-    def series(self, tid, credentials):
+    def _tvdb(self, tid, credentials, key_parts, path, parse, ttl):
         parsing.positive_text(str(tid))
         if type(credentials) is not Credentials: raise ProviderAuthenticationFailed()
         fingerprint = credentials.fingerprint()
-        key = ("series",tid,fingerprint)
+        key = (*key_parts,tid,fingerprint)
         cached = self.memory.get(key)
         if cached is not None: return cached
         token_key = ("token",fingerprint)
@@ -245,15 +245,29 @@ class Clients:
         # the in-memory token instead of repeatedly authenticating.
         _,reservation = self.store.reserve("tvdb",1000)
         try:
-            raw = self._fetch("tvdb",reservation,TVDB_URL+"/series/"+str(tid)+"/extended?meta=translations",bearer=bearer)
+            raw = self._fetch("tvdb",reservation,TVDB_URL+path,bearer=bearer)
         except (ProviderUnavailable,ProviderAuthenticationFailed):
             self.memory.forget(token_key)
             raise
         try:
-            value = parsing.tvdb_record(json_object(raw),tid)
+            value = parse(json_object(raw))
         except ProviderInvalidResponse:
             self.store.failure("tvdb")
             raise
-        self.memory.put(key,value,900)
+        self.memory.put(key,value,ttl)
         self.store.success("tvdb",reservation)
         return value
+
+
+    def series(self, tid, credentials):
+        return self._tvdb(tid,credentials,("series",),"/series/"+str(tid)+"/extended?meta=translations",
+                          lambda data:parsing.tvdb_record(data,tid),900)
+
+    def episode_page(self, tid, page, credentials):
+        if type(page) is not int or not 0<=page<20: raise ValueError("invalid episode page")
+        return self._tvdb(tid,credentials,("episodes_official",page),"/series/"+str(tid)+"/episodes/official?page="+str(page),
+                          lambda data:parsing.tvdb_episode_page(data,tid),300)
+
+    def mapping_xml(self):
+        return self._public("anime_lists","mapping",MAPPING_URL,limit=16777216,gap=60000,
+                            validate=lambda value:parsing.xml(value,"anime-list",limit=16777216))
