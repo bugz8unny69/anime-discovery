@@ -26,6 +26,13 @@ class ConfigurationError(ValueError):
         super().__init__("Configuration is invalid.")
 
 
+class ConfigurationEpisodeSelectionError(ConfigurationError):
+    reason_code = "TRIAL_COUNTS_INVALID"
+
+    def __init__(self):
+        ValueError.__init__(self, "Set backfill or episodes starting with the received episode to at least 1.")
+
+
 class ConfigurationConflict(ConfigurationError):
     reason_code = "CONFIGURATION_CONFLICT"
 
@@ -63,9 +70,9 @@ class FieldDefinition:
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
     "trial.backfill_count": FieldDefinition(6, "integer", "next_operation", minimum=0, maximum=1000,
-        label="Backfill first episodes", help_text="First X episodes of the verified season. Zero disables backfill. New trial plans only."),
+        label="Backfill first episodes", help_text="First X episodes of the verified season. Zero disables backfill; the other count must then be at least 1. New selection plans only."),
     "trial.following_count": FieldDefinition(1, "integer", "next_operation", minimum=0, maximum=1000,
-        label="Episodes starting with the received episode", help_text="Includes the triggering episode: 1 keeps only that episode; 2 includes the next. Zero disables this window. New trial plans only."),
+        label="Episodes starting with the received episode", help_text="Includes the triggering episode: 1 keeps only that episode; 2 includes the next. Zero disables this window; backfill must then be at least 1. New selection plans only."),
     "anidb.client_name": FieldDefinition("", "client_name", "next_operation",
         label="AniDB client name", help_text="Registered AniDB HTTP client name. Required before identity work can start."),
     "anidb.client_version": FieldDefinition(1, "integer", "next_operation", minimum=1, maximum=999999,
@@ -183,6 +190,8 @@ def validate_values(value):
     database = PurePosixPath(result["storage"]["database_path"])
     if any(database.is_relative_to(root) for root in roots):
         raise ConfigurationError()
+    if result["trial"]["backfill_count"] == 0 and result["trial"]["following_count"] == 0:
+        raise ConfigurationEpisodeSelectionError()
     return result
 
 

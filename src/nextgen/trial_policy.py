@@ -9,6 +9,12 @@ class TrialConflict(ValueError):
     def __init__(self):super().__init__("The trial plan needs review.")
 
 
+class InvalidEpisodeCounts(ValueError):
+    reason_code="TRIAL_COUNTS_INVALID"
+    def __init__(self):
+        super().__init__("Set backfill or episodes starting with the received episode to at least 1.")
+
+
 @dataclass(frozen=True)
 class Window:
     backfill_count: int = 6
@@ -17,6 +23,9 @@ class Window:
     def __post_init__(self):
         for value in (self.backfill_count,self.following_count):
             if type(value) is not int or not 0<=value<=1000: raise ValueError("invalid trial episode count")
+
+        if self.backfill_count == 0 and self.following_count == 0:
+            raise InvalidEpisodeCounts()
 
     def episodes(self, anchor):
         integer(anchor,positive=True)

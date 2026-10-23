@@ -54,7 +54,7 @@ def persist_trial(db,claim,proposal):
                          proposal.window.backfill_count,proposal.window.following_count,proposal.configuration_revision,now)).lastrowid
         row=(plan,source.tvdb_episode,proposal.window.backfill_count,proposal.window.following_count)
     if row is None:
-        plan,selected,reason=None,False,'TRIAL_DISABLED'
+        raise TrialConflict()
     else:
         plan,anchor,backfill,following=row
         selected=source.tvdb_episode in Window(backfill,following).episodes(anchor)

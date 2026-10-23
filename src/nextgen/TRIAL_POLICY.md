@@ -23,7 +23,7 @@ independent allowances and overlapping positions count once.
 | 10 | 0 | 6 | 10–15 (6 episodes) |
 | 3 | 6 | 2 | 1–6 (6 episodes, with overlap deduplicated) |
 | 10 | 6 | 0 | 1–6; episode 10 is outside the window |
-| 10 | 0 | 0 | No new plan; selection disabled |
+| 10 | 0 | 0 | Invalid configuration; at least one count must be positive |
 
 ## Stable plan and season boundary
 
@@ -41,11 +41,10 @@ sharing a TVDB series remain separate identity scopes; they are not merged.
 
 Settings changes apply to new plans. Existing plans retain their recorded counts,
 anchor and revision; changing settings is not an implicit replan/reset. Explicit
-replanning, lifecycle/retention and management controls are future work. With
-both counts zero and no existing plan, a disabled evaluation is recorded without
-creating an anchor; enabling a count later allows a new plan to be established.
-An existing plan is still evaluated using its frozen values even if current
-settings change to zero.
+replanning, lifecycle/retention and management controls are future work. Both
+counts zero is rejected during configuration conversion, validation and update,
+and by the standalone window contract. At least one count must be positive.
+A rejected update leaves the saved settings and existing plans unchanged.
 
 All requested positions stay within the recorded season scope. Numeric intent
 does not assert that a future episode already exists, has aired or belongs to
@@ -66,7 +65,8 @@ The worker rechecks evidence and records the immutable plan plus per-job decisio
 inside its lease-fenced completion transaction. Plan creation, decision,
 TRIAL_EVALUATED audit, handler ending and job completion commit together. A failed
 or stale completion cannot leave a plan behind. Evaluations store selected and
-one of TRIAL_SELECTED, TRIAL_OUTSIDE_WINDOW or TRIAL_DISABLED. Every code resolves
+TRIAL_SELECTED or TRIAL_OUTSIDE_WINDOW. TRIAL_DISABLED remains registered only
+for historical compatibility; new evaluations never emit it. Every code resolves
 static readable messages/actions and translation keys. The history marker is durable regardless of logging verbosity. Its application-log
 receipt is emitted only after commit and respects the configured logging level.
 

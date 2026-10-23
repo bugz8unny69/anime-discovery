@@ -157,3 +157,7 @@ readable audit, failed completion rollback and stale leases. test_trial_migratio
 covers v10→v11 preservation/fresh equivalence and wrong-version/failure rollback.
 Existing migration paths include v1–v11. All tests remain **unexecuted**; no tests/
 CI, application imports, SQL, live providers, acquisition/media or deployment ran.
+
+Episode-selection regression cases reject 0/0 during conversion, snapshot
+construction and settings updates, preserve saved settings on failure, and allow
+6/0 and 0/1. Tests remain unexecuted under project policy.

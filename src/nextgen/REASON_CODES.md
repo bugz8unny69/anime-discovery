@@ -212,3 +212,8 @@ and translation-ready catalog key. TRIAL_PLAN_CONFLICT requests plan/evidence
 review. TRIAL_EVALUATED is a readable job marker requiring a registered reason;
 its durable audit and selection facts commit together and log only after commit.
 Selection success never means download, staging or permanent Keep completed.
+
+TRIAL_COUNTS_INVALID rejects two zero episode-selection counts during settings
+conversion/validation. Its public message asks for at least one positive count
+without requiring users to understand the internal word trial. TRIAL_DISABLED
+is retained for historical records only; new policy evaluations do not emit it.

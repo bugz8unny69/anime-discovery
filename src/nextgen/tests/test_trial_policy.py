@@ -13,7 +13,7 @@ from src.nextgen.jobs.evaluate_trial_job import registration
 from src.nextgen.storage.job_queue import LeaseLost
 from src.nextgen.storage.sqlite import connect, initialize, accept_event_and_job, save_identity, enqueue_job, transaction
 from src.nextgen.storage.trials import load_trial_source
-from src.nextgen.trial_policy import Window, TrialProposal
+from src.nextgen.trial_policy import Window, TrialProposal, InvalidEpisodeCounts
 from src.nextgen.worker import Worker
 
 
@@ -25,10 +25,21 @@ class TrialWindowTests(unittest.TestCase):
         self.assertEqual(Window(0,6).episodes(10),(10,11,12,13,14,15))
         self.assertEqual(Window(6,2).episodes(3),(1,2,3,4,5,6))
         self.assertEqual(Window(6,0).episodes(10),(1,2,3,4,5,6))
-        self.assertEqual(Window(0,0).episodes(10),())
+        with self.assertRaises(InvalidEpisodeCounts):Window(0,0)
         for value in (-1,True,1.5,1001):
             with self.assertRaises(ValueError):Window(value,1)
         self.assertEqual(len(Window(100,100).episodes(200)),200)
+
+    def test_zero_zero_rejected_for_snapshot_and_conversion(self):
+        settings={'trial':{'backfill_count':0,'following_count':0}}
+        for make in (lambda:ConfigurationSnapshot(1,settings),
+                     lambda:convert_document({'schema_version':5,'revision':1,'settings':settings})):
+            with self.assertRaises(ConfigurationError) as error:make()
+            self.assertEqual(error.exception.reason_code,'TRIAL_COUNTS_INVALID')
+            self.assertIn('at least 1',str(error.exception))
+        for backfill,following in ((6,0),(0,1)):
+            snapshot=ConfigurationSnapshot(1,{'trial':{'backfill_count':backfill,'following_count':following}})
+            self.assertEqual(snapshot.value('trial.following_count'),following)
 
     def test_v4_upgrade_adds_defaults_without_changing_historical_shapes(self):
         document={}
@@ -117,17 +128,14 @@ class TrialEvaluationTests(unittest.IsolatedAsyncioTestCase):
                          [(1,10,2,2),(2,20,100,3)])
         self.assertEqual(self.rows('SELECT selected FROM trial_evaluations ORDER BY evaluation_id'),[(1,),(1,),(0,),(1,)])
 
-    async def test_zero_counts_record_disabled_without_freezing_a_plan(self):
-        self.store.update({'trial':{'backfill_count':0,'following_count':0}},expected_revision=1)
-        worker=self.worker()
-        self.source(10)
-        await worker.attempt()
+    async def test_zero_counts_rejected_before_saving_or_creating_work(self):
+        before=self.store.read()
+        with self.assertRaises(ConfigurationError) as error:
+            self.store.update({'trial':{'backfill_count':0,'following_count':0}},expected_revision=1)
+        self.assertEqual(error.exception.reason_code,'TRIAL_COUNTS_INVALID')
+        self.assertEqual(self.store.read(),before)
         self.assertEqual(self.rows('SELECT count(*) FROM trial_plans'),[(0,)])
-        self.assertEqual(self.rows('SELECT plan_id,reason_code FROM trial_evaluations'),[(None,'TRIAL_DISABLED')])
-        self.store.update({'trial':{'following_count':1}},expected_revision=2)
-        self.source(11)
-        await worker.attempt()
-        self.assertEqual(self.rows('SELECT anchor_episode FROM trial_plans'),[(11,)])
+        self.assertEqual(self.rows('SELECT count(*) FROM trial_evaluations'),[(0,)])
 
     async def test_concurrent_evaluations_create_one_plan_and_one_anchor(self):
         self.store.update({'trial':{'backfill_count':0,'following_count':1}},expected_revision=1)
