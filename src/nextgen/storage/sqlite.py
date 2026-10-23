@@ -558,7 +558,7 @@ def enqueue_job(db, *, kind, payload, component, event_id=None,
                         available_at_ms=available_at_ms, operation_id=operation_id)[0]
 
 
-def accept_event_and_job(db, source, raw_body, *, kind, payload):
+def accept_event_and_job(db, source, raw_body, *, kind, payload, component="intake", logger=None):
     """Commit delivery, PENDING job and both audit rows before acknowledgment."""
     _delivery(source, raw_body)
     now = int(time.time()*1000)
@@ -567,9 +567,11 @@ def accept_event_and_job(db, source, raw_body, *, kind, payload):
             "INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
             (source,raw_body,now)).lastrowid
         event_audit = append_event_history(db, event_id=event_id, event_code="ACCEPTED",
-                                          component="intake", occurred_at_ms=now)
+                                          component=component, occurred_at_ms=now)
         job_id, job_audit = _enqueue_job(db, kind=kind, payload=payload,
-                                       component="intake", event_id=event_id)
-    _log(event_audit)
-    _log(job_audit)
+                                       component=component, event_id=event_id)
+    if logger is None:
+        _log(event_audit);_log(job_audit)
+    else:
+        log_history(logger,event_audit);log_history(logger,job_audit)
     return event_id, job_id

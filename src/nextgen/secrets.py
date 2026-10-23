@@ -6,6 +6,7 @@ credential object explicitly; values never appear in repr, history or logs.
 from dataclasses import dataclass
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import uuid
@@ -30,6 +31,8 @@ class CredentialStatus:
     revision: int
     tvdb_api_key_configured: bool
     qbittorrent_configured: bool = False
+    webhook_configured: bool = False
+    management_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,23 @@ class SecretUpdateResult:
     saved: bool
     durability_confirmed: bool
     reason_code: str | None = None
+
+
+@dataclass(frozen=True,repr=False)
+class AccessCredentials:
+    webhook_token: str
+    management_token: str
+
+
+def _access_value(value):
+    if type(value) is not str or value and not re.fullmatch(r'[A-Za-z0-9_-]{32,256}',value):raise SecretStorageError()
+    return value
+
+
+def _access_values(webhook,management):
+    result={'webhook_token':_access_value(webhook),'management_token':_access_value(management)}
+    if webhook and management and webhook==management:raise SecretStorageError()
+    return result
 
 
 def _value(value):
@@ -60,15 +80,17 @@ def _read(fd):
     try:
         document = decode(raw)
         if (type(document) is not dict or set(document)!={"schema_version","revision","credentials"}
-                or type(document["schema_version"]) is not int or document["schema_version"] not in (1,2)
+                or type(document["schema_version"]) is not int or document["schema_version"] not in (1,2,3)
                 or type(document["credentials"]) is not dict):raise SecretStorageError()
         version=document['schema_version']
         expected={'tvdb_api_key'} if version==1 else {'tvdb_api_key','qbittorrent_username','qbittorrent_password'}
+        if version==3:expected|={'webhook_token','management_token'}
         if set(document['credentials'])!=expected:raise SecretStorageError()
         values={'tvdb_api_key':_value(document['credentials']['tvdb_api_key']),
-                'qbittorrent_username':'','qbittorrent_password':''}
-        if version==2:
+                'qbittorrent_username':'','qbittorrent_password':'','webhook_token':'','management_token':''}
+        if version>=2:
             values.update(_download_values(document['credentials']['qbittorrent_username'],document['credentials']['qbittorrent_password']))
+        if version==3:values.update(_access_values(document['credentials']['webhook_token'],document['credentials']['management_token']))
         return revision(document['revision']),values,version
     except (ValueError,TypeError,KeyError):
         raise SecretStorageError() from None
@@ -82,8 +104,11 @@ def _private_directory(fd):
 
 def _publish(fd, current_revision, values, *, version=2):
     name = ".secrets-"+uuid.uuid4().hex+".tmp"
+    keys={'tvdb_api_key'}
+    if version>=2:keys|={'qbittorrent_username','qbittorrent_password'}
+    if version>=3:keys|={'webhook_token','management_token'}
     raw = (json.dumps({"schema_version":version,"revision":current_revision,
-                       "credentials":values if version==2 else {"tvdb_api_key":values["tvdb_api_key"]}},sort_keys=True)+"\n").encode()
+                       "credentials":{key:values[key] for key in keys}},sort_keys=True)+"\n").encode()
     try:
         _write_bytes(fd,name,raw)  # Always new service-owned mode 0600.
         os.replace(name,NAME,src_dir_fd=fd,dst_dir_fd=fd)
@@ -104,7 +129,8 @@ def _download_values(username,password):
 
 
 def _status(number,values):
-    return CredentialStatus(number,bool(values['tvdb_api_key']),bool(values['qbittorrent_username'] and values['qbittorrent_password']))
+    return CredentialStatus(number,bool(values['tvdb_api_key']),bool(values['qbittorrent_username'] and values['qbittorrent_password']),
+                            bool(values.get('webhook_token')),bool(values.get('management_token')))
 
 
 class SecretStore:
@@ -117,7 +143,7 @@ class SecretStore:
                 _private_directory(fd)
                 return _read(fd)
         except FileNotFoundError:
-            return 0,{'tvdb_api_key':'','qbittorrent_username':'','qbittorrent_password':''},2
+            return 0,{'tvdb_api_key':'','qbittorrent_username':'','qbittorrent_password':'','webhook_token':'','management_token':''},2
         except OSError:
             raise SecretStorageError() from None
 
@@ -134,20 +160,25 @@ class SecretStore:
         _,values,_ = self._current()
         return DownloadCredentials(values['qbittorrent_username'],values['qbittorrent_password'])
 
-    def initialize(self, tvdb_api_key='', *, qbittorrent_username='', qbittorrent_password=''):
-        values={'tvdb_api_key':_value(tvdb_api_key),**_download_values(qbittorrent_username,qbittorrent_password)}
+    def access_credentials(self):
+        _,values,_=self._current()
+        return AccessCredentials(values['webhook_token'],values['management_token'])
+
+    def initialize(self, tvdb_api_key='', *, qbittorrent_username='', qbittorrent_password='', webhook_token='', management_token=''):
+        values={'tvdb_api_key':_value(tvdb_api_key),**_download_values(qbittorrent_username,qbittorrent_password),
+                **_access_values(webhook_token,management_token)}
         try:
             with _writer(self.directory) as fd:
                 _private_directory(fd)
                 try:_read(fd)
                 except FileNotFoundError:pass
                 else:raise ConfigurationConflict()
-                durable=_publish(fd,1,values)
+                durable=_publish(fd,1,values,version=3 if webhook_token or management_token else 2)
         except OSError:raise SecretStorageError() from None
         return SecretUpdateResult(_status(1,values),True,durable,
                                   None if durable else 'CONFIGURATION_DURABILITY_UNCONFIRMED')
 
-    def _update(self, changes, *, expected_revision, upgrade=False):
+    def _update(self, changes, *, expected_revision, upgrade=False, minimum_version=1):
         revision(expected_revision)
         try:
             with _writer(self.directory) as fd:
@@ -155,9 +186,10 @@ class SecretStore:
                 number,old,version=_read(fd)
                 if number!=expected_revision:raise ConfigurationConflict()
                 values={**old,**changes}
+                _access_values(values['webhook_token'],values['management_token'])
                 if values==old:return SecretUpdateResult(_status(number,old),False,True)
                 number=revision(number+1)
-                durable=_publish(fd,number,values,version=2 if upgrade else version)
+                durable=_publish(fd,number,values,version=max(version,2 if upgrade else minimum_version))
         except OSError:raise SecretStorageError() from None
         return SecretUpdateResult(_status(number,values),True,durable,
                                   None if durable else 'CONFIGURATION_DURABILITY_UNCONFIRMED')
@@ -168,3 +200,6 @@ class SecretStore:
     def update_qbittorrent_credentials(self, username, password, *, expected_revision):
         """Explicitly replace/clear the pair; v1 upgrades only when this changes it."""
         return self._update(_download_values(username,password),expected_revision=expected_revision,upgrade=True)
+
+    def update_access_tokens(self, webhook_token, management_token, *, expected_revision):
+        return self._update(_access_values(webhook_token,management_token),expected_revision=expected_revision,minimum_version=3)

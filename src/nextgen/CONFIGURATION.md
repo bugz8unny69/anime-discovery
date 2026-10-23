@@ -260,3 +260,13 @@ the database. See DOWNLOAD_CONFIGURATION.md. Current SQLite version is 15.
 Stopped torrent submission now uses SQLite v15 journal state. Configuration stays
 v6; persisted external requests pin their original target/options across live
 setting changes. See jobs/SUBMIT_TORRENT.md.
+
+## API v1 implementation
+
+A separate ASGI API now reads one operation snapshot for settings/management work
+and writes through ConfigurationStore with expected revisions. GET settings
+returns desired/effective values, restart fields and shared field metadata.
+Host/port/database path remain pinned until restart. Public browser origin is an
+explicit server startup option, not a live settings override. See
+[api/README.md](api/README.md). No implicit settings/SQL migration or service restart
+is exposed; those management routes remain future work. Configuration stays v6.

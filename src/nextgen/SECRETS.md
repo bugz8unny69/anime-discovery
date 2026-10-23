@@ -100,3 +100,20 @@ and tvdb_api_key. Public status includes qbittorrent_configured only. v1 remains
 readable and is unchanged by reads/TVDB-only updates; explicit pair changes
 upgrade it atomically. Existing private-file checks and no-backup policy remain.
 See DOWNLOAD_CONFIGURATION.md for exact compatibility and point-of-use capture.
+
+## API access keys: secrets v3
+
+Explicit initialize/update_access_tokens adds distinct webhook_token and
+management_token fields (32–256 URL-safe characters, or blank to disable).
+access_credentials() is trusted private access with hidden repr; status() exposes
+only presence flags/revision. Values live in the same private secrets.json, never
+settings, environment fallback or public GET responses. Existing v1/v2 reads do
+not write; adding access keys explicitly upgrades to v3 and later provider updates
+preserve it. Empty access keys retain old document shapes when no upgrade occurs.
+
+The webhook key grants intake only. Management Bearer access or an authenticated
+browser session grants management; the API never promotes a webhook credential
+to an administrator password. Browser mutation requires Origin and session-bound
+CSRF. Rotation is read on every request and revokes old-key browser sessions on
+next use. Bootstrap is local and explicit, without echoing keys. See
+[API v1](api/README.md) for the supported token locations and proxy log rules.

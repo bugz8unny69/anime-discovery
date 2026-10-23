@@ -1,9 +1,9 @@
 # Cancellation and owned-resource cleanup
 
 Cancel is a capability of unfinished work, not a special response to one reason
-code. The trusted management library returns capabilities for the future API and
-its dashboard/ADM clients. There is no HTTP server or dashboard implementation in
-this change, and no browser button has been added. Never invoke this library from
+code. The trusted management library returns capabilities through API v1 for
+future dashboard/ADM clients. Dashboard HTML and its buttons remain future work.
+Never invoke this library from
 an unauthenticated route or accept a caller-provided torrent hash, path or manifest.
 
 ## State and capabilities
@@ -169,3 +169,12 @@ and DDL/text checks are permitted for this change; no live cleanup was performed
 
 Official transport references: [qBittorrent 5 API](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-5.0%29)
 and [qBittorrent 4 API](https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-%28qBittorrent-4.1%29).
+
+## API v1 wiring
+
+The API now exposes authenticated GET cancellation status and POST cancel/cleanup
+at /api/v1/jobs/{id}/..., using this service library. Management Bearer or browser
+session plus Origin/CSRF is required; webhook credentials cannot reach cleanup.
+No GET performs cleanup, and a canceled command may return 202 for pending/review
+cleanup. Blocking service work is drained on the API executor. Dashboard HTML and
+automatic episode-slot release remain separate. See [API v1](api/README.md).

@@ -315,3 +315,15 @@ Future staging must register partial-file receipts and publication intent/proof,
 then mark STAGED atomically with successful completion. Published artifacts are
 preserved and STAGED disables Cancel. See ../CANCELLATION.md. The API-facing
 service library exists; authenticated HTTP/dashboard wiring remains future work.
+
+## HTTP intake adapter and management API v1
+
+The separate API process now exposes /api/v1/webhook with the legacy Autobrr body,
+Bearer and query token contract, using a dedicated intake credential. It delegates
+normalized durable acceptance/initial enqueue to the storage library, then returns
+event/job IDs after commit; identity and acquisition remain Worker libraries.
+No provider verification or workflow execution runs in the HTTP handler. The API
+serves dashboard-ready settings, job/history/cancellation data through separate
+management authentication with cookie CSRF protection. A dedicated intake process,
+dashboard HTML and later publication/Keep routes are not claimed here. See
+../api/README.md for authentication, process and logging boundaries.

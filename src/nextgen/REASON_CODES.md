@@ -283,3 +283,15 @@ a reason-code retry flag.
 CANCELLATION_REQUESTED, CANCELLATION_CONTROL_RECORDED and
 CANCELLATION_CLEANUP_CHANGED identify events; reasons explain their outcomes.
 Details never include arbitrary client response bodies or exception strings.
+
+## Versioned HTTP API
+
+API v1 responses carry registered reason codes, readable messages/actions and
+translation keys. API_REQUEST_REJECTED and API_TRANSPORT_NOTICE are runtime events;
+API_SESSION_CREATED, API_SESSION_CLOSED and API_CREDENTIALS_UPDATED are readable
+operational notices. No request URL, query, header, cookie, body or raw exception
+is used as a message. The catalog includes API_AUTH_REQUIRED, API_AUTH_UNCONFIGURED,
+API_CSRF_REQUIRED, API_ORIGIN_INVALID, API_REQUEST_INVALID, API_WEBHOOK_INVALID,
+API_BODY_TOO_LARGE, API_MEDIA_TYPE_INVALID, API_ROUTE_NOT_FOUND, API_METHOD_INVALID,
+API_RATE_LIMITED and API_UNAVAILABLE. See api/README.md for HTTP mappings and
+credential separation. These reasons do not dictate Worker retry policy.

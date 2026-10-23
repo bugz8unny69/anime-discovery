@@ -7,11 +7,11 @@ import asyncio
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 import logging
-import functools
 import inspect
 import threading
 import uuid
 
+from src.nextgen.async_io import blocking
 from src.nextgen.cancellation import OperationGate, CancellationRequested
 from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.configuration import ConfigurationStore
@@ -29,31 +29,6 @@ class WorkerNotReady(RuntimeError):
         super().__init__("The worker is not ready to process jobs.")
 
 
-async def blocking(callable_, *args, executor=None, **kwargs):
-    """Cancellation waits for the thread before admission or ownership is dropped."""
-    task = asyncio.get_running_loop().run_in_executor(executor, functools.partial(callable_, *args, **kwargs))
-    cancelled = False
-    while True:
-        try:
-            result = await asyncio.shield(task)
-            break
-        except asyncio.CancelledError:
-            if task.done():
-                # A finished callable may itself raise CancelledError. There is
-                # no outstanding thread to drain; never spin on its result.
-                try:
-                    task.result()
-                except BaseException:
-                    pass
-                raise
-            cancelled = True
-        except Exception:
-            if cancelled:
-                raise asyncio.CancelledError() from None
-            raise
-    if cancelled:
-        raise asyncio.CancelledError()
-    return result
 
 
 async def settle(tasks):

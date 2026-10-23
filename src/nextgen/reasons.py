@@ -17,6 +17,18 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('API_AUTH_REQUIRED', 'Request credentials are missing, invalid or conflicting.', 'Authentication is required.', 'Use the credential required for this API route.', 'WARNING', False),
+    Reason('API_AUTH_UNCONFIGURED', 'Required route-specific access credentials are not configured.', 'API access has not been configured.', 'Initialize the separate management and webhook access keys locally.', 'WARNING', False),
+    Reason('API_CSRF_REQUIRED', 'A browser mutation lacks the session-bound anti-forgery token.', 'This browser request could not be verified.', 'Refresh your session and try again.', 'WARNING', False),
+    Reason('API_ORIGIN_INVALID', 'Request origin or host differs from the configured application origin.', 'This request came from an unexpected address.', 'Use the configured dashboard address.', 'WARNING', False),
+    Reason('API_REQUEST_INVALID', 'Request framing, JSON structure, fields or pagination failed validation.', 'The API request is invalid.', 'Review the required request fields.', 'WARNING', False),
+    Reason('API_WEBHOOK_INVALID', 'Release name or supported v1 hash is missing, ambiguous or invalid.', 'The incoming release details are incomplete or invalid.', 'Send a release name and matching 40-character torrent hash.', 'WARNING', False),
+    Reason('API_BODY_TOO_LARGE', 'The request exceeds the bounded body size.', 'The request is too large.', 'Send a smaller request.', 'WARNING', False),
+    Reason('API_MEDIA_TYPE_INVALID', 'Unsupported request content type or encoding.', 'This request format is not supported.', 'Send UTF-8 JSON.', 'WARNING', False),
+    Reason('API_ROUTE_NOT_FOUND', 'No versioned route or requested resource exists.', 'The requested API resource was not found.', 'Check the API address and resource identifier.', 'INFO', False),
+    Reason('API_METHOD_INVALID', 'The HTTP method is not supported by this route.', 'This action is not supported at this address.', 'Use the documented API method.', 'WARNING', False),
+    Reason('API_RATE_LIMITED', 'A bounded authentication or session limit was reached.', 'Too many requests; try again shortly.', 'Wait before trying again.', 'WARNING', None),
+    Reason('API_UNAVAILABLE', 'An API operation failed without safely exposing internal error text.', 'The API is temporarily unavailable.', 'Check service status and try again later.', 'ERROR', None),
     Reason('JOB_CANCELED', 'An operator explicitly canceled unfinished work.', 'This work was canceled.', 'Check cleanup status for any remaining downloads.', 'INFO', False),
     Reason('CANCELLATION_DRAINING', 'Cancellation is durable; active operation handlers must drain before cleanup.', 'Waiting for active work to stop before cleanup.', 'Wait for the current work to finish stopping.', 'INFO', None),
     Reason('CANCELLATION_PENDING', 'Cleanup is incomplete; external outcomes are reconciled without repeating uncertain commands.', 'Cancellation cleanup is waiting for confirmation.', 'Check the existing torrent and cleanup status.', 'INFO', None),

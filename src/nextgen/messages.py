@@ -22,6 +22,11 @@ class EventDefinition:
 
 
 _EVENTS = (
+    EventDefinition("API_SESSION_CREATED", "runtime", "A management browser session was created."),
+    EventDefinition("API_SESSION_CLOSED", "runtime", "A management browser session was closed."),
+    EventDefinition("API_CREDENTIALS_UPDATED", "runtime", "Private service credentials were updated."),
+    EventDefinition("API_REQUEST_REJECTED", "runtime", "An API request could not be completed.", True),
+    EventDefinition("API_TRANSPORT_NOTICE", "runtime", "The API transport needs attention."),
     EventDefinition("ACCEPTED", "incoming_event", "Incoming event accepted."),
     EventDefinition("SERIES_IDENTIFIED", "incoming_event", "Anime series identification completed."),
     EventDefinition("CREATED", "job", "Job created."),
