@@ -1,7 +1,9 @@
 # Async worker core
 
 Implemented core only: worker.py, job_contracts.py and storage/job_queue.py.
-There are no identity, download, trial, Keep or provider handlers bundled.
+An opt-in identity handler/persistence adapter is now in jobs/identify_anime_job.py;
+its concrete verified-identity resolver is still required at composition time.
+No download, trial, Keep or concrete provider implementations are bundled.
 The separate management API/supervisor remain future consumers; the worker has
 no HTTP server and does not launch subprocesses. The default empty handler
 registry fails readiness before claiming work. No worker has been run or deployed.
@@ -138,3 +140,19 @@ defer budgeting, atomic facts/successors, adapter transaction escapes, current
 configuration snapshots, same-anime concurrency, handler failures, maintenance,
 shutdown and blocking cancellation. These tests are authored but **unexecuted**.
 No CI, application/worker, SQL, production or media operations have been executed.
+
+
+## Feature persistence results and expected rejection
+
+A synchronous persistence adapter may return None or a tuple of HistoryRecord
+receipts for histories it wrote inside the worker transaction. These are emitted
+only after the whole completion commits; arbitrary text/results are rejected.
+Adapters must not log tentative history themselves. The identity adapter uses
+this for the existing incoming-event SERIES_IDENTIFIED audit.
+
+An adapter can raise CompletionRejected with a review/hold/blocked Outcome for
+an expected domain conflict. The first completion transaction rolls back facts,
+handler ending and successors. The worker then rechecks the same lease and records
+that outcome in a new transaction without invoking persistence/routing again.
+It never converts storage or unexpected adapter exceptions into successful
+completion. See jobs/README.md for the first feature adapter and its limitations.

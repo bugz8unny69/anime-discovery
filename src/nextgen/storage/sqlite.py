@@ -225,58 +225,86 @@ def accept_event(db, source, raw_body, received_at_ms=None):
     _log(audit)
     return event_id
 
-def save_identity(db, event_id, candidate, validated_at_ms=None):
-    """Store validated AnimeSeries v2; zero episodes are allowed."""
+class IdentityConflict(ValueError):
+    reason_code = "IDENTITY_CONFLICT"
+
+    def __init__(self):
+        super().__init__("Conflicting anime information needs review.")
+
+
+class IdentityNotReady(ValueError):
+    reason_code = "IDENTITY_INCOMPLETE"
+
+    def __init__(self):
+        super().__init__("Anime identification is incomplete.")
+
+
+def persist_identity(db, event_id, candidate, validated_at_ms=None):
+    """Return result ID/audit inside caller transaction; never commit or log.
+
+    Worker adapters must hold/fence their job lease. Existing incoming-event
+    leases are deliberately not bypassed by this job-based persistence path.
+    """
+    if not db.in_transaction:
+        raise ValueError("identity persistence requires an active transaction")
     from src.nextgen.schema.anime_series import AnimeSeries
     validated = AnimeSeries.from_dict(candidate)
     payload = validated.to_dict()
     anime = payload["anime"]
     aid = anime["anidb_id"]
-    now = integer(int(time.time()*1000) if validated_at_ms is None else validated_at_ms)
+    now = integer(int(time.time() * 1000) if validated_at_ms is None else validated_at_ms)
     integer(event_id, positive=True)
-    with transaction(db):
-        event = db.execute("SELECT state,lease_token,lease_expires_at_ms FROM incoming_events WHERE event_id=?", (event_id,)).fetchone()
-        if event is None:
-            raise ValueError("unknown event")
-        existing_result = db.execute("SELECT result_id,series_json FROM identity_results WHERE event_id=? AND anidb_id=?", (event_id,aid)).fetchone()
-        if existing_result is not None:
-            if json.loads(existing_result[1]) != payload:
-                raise ValueError("conflicting retry result")
-            return existing_result[0]
-        if event[0] not in ("PENDING","RUNNING","RETRY_WAIT"):
-            raise ValueError("event is not eligible for identity persistence")
-        if event[0] == "RUNNING":
-            raise ValueError("leased work requires explicit ownership verification")
-        existing = db.execute(
-            "SELECT tvdb_series_id,title FROM identified_anime WHERE anidb_id=?",
-            (aid,)).fetchone()
-        if existing and existing[0] != anime["tvdb_series_id"]:
-            raise ValueError("conflicting canonical TVDB identity")
-        if existing and existing[1] != anime["title"]:
-            db.execute("UPDATE identified_anime SET title=? WHERE anidb_id=?", (anime["title"],aid))
+    event = db.execute("SELECT state,lease_token,lease_expires_at_ms FROM incoming_events WHERE event_id=?", (event_id,)).fetchone()
+    if event is None:
+        raise IdentityNotReady()
+    existing_result = db.execute("SELECT result_id,series_json FROM identity_results WHERE event_id=? AND anidb_id=?", (event_id,aid)).fetchone()
+    if existing_result is not None:
+        if json.loads(existing_result[1]) != payload:
+            raise IdentityConflict()
+        return existing_result[0], None
+    if event[0] not in ("PENDING","RUNNING","RETRY_WAIT"):
+        raise IdentityNotReady()
+    if event[0] == "RUNNING":
+        raise IdentityNotReady()
+    existing = db.execute(
+        "SELECT tvdb_series_id,title FROM identified_anime WHERE anidb_id=?",
+        (aid,)).fetchone()
+    if existing and existing[0] != anime["tvdb_series_id"]:
+        raise IdentityConflict()
+    if existing and existing[1] != anime["title"]:
+        db.execute("UPDATE identified_anime SET title=? WHERE anidb_id=?", (anime["title"],aid))
+    db.execute(
+        "INSERT OR IGNORE INTO identified_anime VALUES(?,?,?)",
+        (aid,anime["tvdb_series_id"],anime["title"]))
+    rid = db.execute(
+        "INSERT INTO identity_results(event_id,anidb_id,schema_version,series_json,validated_at_ms)"
+        " VALUES(?,?,?,?,?)",
+        (event_id,aid,2,json.dumps(payload,sort_keys=True),now)).lastrowid
+    for episode in payload["episodes"]:
+        eid = episode["anidb_episode_id"]
+        owner = db.execute(
+            "SELECT anidb_id FROM identified_episodes WHERE anidb_episode_id=?",
+            (eid,)).fetchone()
+        if owner and owner[0] != aid:
+            raise IdentityConflict()
         db.execute(
-            "INSERT OR IGNORE INTO identified_anime VALUES(?,?,?)",
-            (aid,anime["tvdb_series_id"],anime["title"]))
-        rid = db.execute(
-            "INSERT INTO identity_results(event_id,anidb_id,schema_version,series_json,validated_at_ms)"
-            " VALUES(?,?,?,?,?)",
-            (event_id,aid,2,json.dumps(payload,sort_keys=True),now)).lastrowid
-        for episode in payload["episodes"]:
-            eid = episode["anidb_episode_id"]
-            owner = db.execute(
-                "SELECT anidb_id FROM identified_episodes WHERE anidb_episode_id=?",
-                (eid,)).fetchone()
-            if owner and owner[0] != aid:
-                raise ValueError("episode belongs to another anime")
-            db.execute(
-                "INSERT OR IGNORE INTO identified_episodes VALUES(?,?)",(eid,aid))
-            db.execute(
-                "INSERT INTO result_episode_links VALUES(?,?,?)",(rid,aid,eid))
-        db.execute("UPDATE incoming_events SET state='IDENTIFIED', next_run_at_ms=NULL, lease_token=NULL, lease_expires_at_ms=NULL, last_reason_code=NULL WHERE event_id=?", (event_id,))
-        audit = append_event_history(db, event_id=event_id, event_code="SERIES_IDENTIFIED",
-                                     component="identity", occurred_at_ms=now)
-    _log(audit)
+            "INSERT OR IGNORE INTO identified_episodes VALUES(?,?)",(eid,aid))
+        db.execute(
+            "INSERT INTO result_episode_links VALUES(?,?,?)",(rid,aid,eid))
+    db.execute("UPDATE incoming_events SET state='IDENTIFIED', next_run_at_ms=NULL, lease_token=NULL, lease_expires_at_ms=NULL, last_reason_code=NULL WHERE event_id=?", (event_id,))
+    audit = append_event_history(db, event_id=event_id, event_code="SERIES_IDENTIFIED",
+                                 component="identity", occurred_at_ms=now)
+    return rid, audit
+
+
+def save_identity(db, event_id, candidate, validated_at_ms=None):
+    """Store validated AnimeSeries v2; zero episodes are allowed."""
+    with transaction(db):
+        rid, audit = persist_identity(db,event_id,candidate,validated_at_ms)
+    if audit is not None:
+        _log(audit)
     return rid
+
 
 def _enqueue_job(db, *, kind, payload, component, event_id=None,
                  created_by_job_id=None, available_at_ms=None):

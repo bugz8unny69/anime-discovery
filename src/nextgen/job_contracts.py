@@ -98,6 +98,16 @@ class Outcome:
         validate_job_activity(_STATES[self.kind], self.activity_code)
 
 
+class CompletionRejected(ValueError):
+    """Expected domain rejection; worker rolls back facts then records outcome."""
+    def __init__(self, outcome):
+        if type(outcome) is not Outcome or outcome.kind not in ("review", "hold", "blocked"):
+            raise ValueError("invalid completion rejection")
+        self.outcome = outcome
+        self.reason_code = outcome.reason_code
+        super().__init__("Completion requires review of its recorded reason.")
+
+
 @dataclass(frozen=True)
 class Registration:
     kind: str

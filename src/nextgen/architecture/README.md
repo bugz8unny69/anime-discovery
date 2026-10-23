@@ -21,3 +21,9 @@ Current queue/diagnostic/configuration/migration libraries are foundations only.
 These drafts add no job handlers, worker loop, SQL, settings fields, management
 API, deployment, imports, torrent operations or filesystem media changes. No
 CI/tests/application code/SQL have been executed for this documentation change.
+
+
+Implementation progress: PRs #103–#107 are merged. The async worker and trial/Keep
+settings are foundations. The first opt-in handler adapter is documented in
+[Job handlers](../jobs/README.md); its live identity/provider library remains
+unimplemented. Neither the trial nor Keep pipeline is operational yet.

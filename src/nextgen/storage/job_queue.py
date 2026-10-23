@@ -11,7 +11,7 @@ import sqlite3
 import time
 import uuid
 
-from src.nextgen.history import append_job_history, integer
+from src.nextgen.history import HistoryRecord, append_job_history, integer
 from src.nextgen.job_contracts import Outcome, Policy, Successor, payload_json, parse_payload
 from src.nextgen.messages import validate_job_activity
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
@@ -166,6 +166,10 @@ class JobQueue:
                     if inspect.isawaitable(result):
                         if inspect.iscoroutine(result): result.close()
                         raise ValueError("completion persistence cannot await")
+                    if result is not None:
+                        if type(result) is not tuple or any(type(item) is not HistoryRecord for item in result):
+                            raise ValueError("completion persistence must return audit receipts or None")
+                        records.extend(result)
                 successors = () if spec.route is None else spec.route(outcome.value)
                 if type(successors) is not tuple or len(successors) > 32:
                     if inspect.iscoroutine(successors): successors.close()
