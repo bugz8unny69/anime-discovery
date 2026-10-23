@@ -3,7 +3,8 @@
 Implemented core only: worker.py, job_contracts.py and storage/job_queue.py.
 An opt-in identity handler/persistence adapter is now in jobs/identify_anime_job.py;
 its concrete verified-identity resolver is still required at composition time.
-No download, trial, Keep or concrete provider implementations are bundled.
+Concrete provider libraries now support opt-in identity composition (see
+providers/README.md); no download, trial or Keep handlers are bundled.
 The separate management API/supervisor remain future consumers; the worker has
 no HTTP server and does not launch subprocesses. The default empty handler
 registry fails readiness before claiming work. No worker has been run or deployed.
@@ -74,7 +75,7 @@ The worker returns/logs successor CREATED receipts only after the same commit.
 Persisted completion is not reconstructed by repeatedly scanning all DONE jobs.
 A stale or repeated completion fails ownership checks, preventing a second
 successor handoff. No work_items table, parent/child workflow engine, new jobs
-columns or SQLite migration is needed for these operations; schema remains v8.
+columns or SQLite migration is needed for these operations; the queue/history shapes remain unchanged (provider tables bring schema to v9).
 
 ## Waiting, retries and failures
 

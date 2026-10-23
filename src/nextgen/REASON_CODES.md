@@ -177,3 +177,12 @@ lease reasons and lifecycle markers are reused. No raw exceptions are persisted.
 JOB_STATE_INVALID reports inconsistent job progress with static readable copy and
 an action to review history. Expired RUNNING jobs with zero recorded attempts are
 quarantined for review without fabricating a historical claim or handler call.
+
+
+Provider library reasons: PROVIDER_RESPONSE_INVALID has the static message
+"An information provider returned an unusable response." and requests a later
+retry or provider review. PROVIDER_AUTH_FAILED says "An information provider
+could not authorize access." and asks for provider access settings to be reviewed.
+Both use existing translation keys/catalog resolution. Normal cache misses under
+shared pacing use JOB_WAITING/DEFERRED; provider outages reuse PROVIDER_UNAVAILABLE.
+Raw HTTP errors, URLs, bodies, credentials and tokens are never diagnostic details.

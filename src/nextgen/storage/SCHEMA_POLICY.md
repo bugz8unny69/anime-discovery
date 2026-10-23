@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **8**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **9**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -29,8 +29,9 @@ Latest fresh SQLite version: **8**. The version stored in `PRAGMA user_version` 
 | 6 | `006_api_diagnostics.sql` | Permit the separate api emitter in both history tables |
 | 7 | `007_worker_component.sql` | Add canonical worker attribution; preserve historical coordinator rows |
 | 8 | `008_handler_history.sql` | Record individual handler invocations within existing jobs |
+| 9 | `009_provider_cache.sql` | Shared provider pacing and bounded public AniDB/mapping cache |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -44,7 +45,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v8 or accepts an existing v8 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v9 or accepts an existing v9 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -212,3 +213,24 @@ runner validates before COMMIT. Fresh SCHEMA/initialize/admitted connections
 and the runner manifest use v8. Published 001–007 remain unchanged. The separate
 configuration schema remains v2. Preservation, constraints, rollback, wrong
 version and all-version sequential cases are included but unexecuted.
+
+
+## Provider operational state (v9)
+
+provider_limits has one row per allowlisted provider: anidb, anidb_titles,
+anime_lists or tvdb. next_allowed_at_ms is a nonnegative UTC-millisecond
+reservation/cooldown boundary; failures defaults to zero and is bounded 0–16.
+reservation_token is a required opaque 32-character publication-generation token,
+not an authentication credential. No row is created until a request is reserved.
+
+provider_public_cache has a composite (provider,cache_key) primary key, required
+fetched_at_ms/expires_at_ms (expiry after fetch), a required public XML BLOB up to
+64 MiB, and an expiry index. Only AniDB HTTP, AniDB title dump and Anime-Lists
+mapping payloads are allowed. Helpers bound the complete cache to 130 rows and
+128 MiB, evicting oldest fetches; expired/future-dated entries are not reused.
+No TVDB responses, credentials or bearer tokens can be stored through this API.
+TVDB data/token caching is process-local and authorization-scoped.
+
+Runtime helpers never create tables or migrate. Provider requests run outside
+short reservation/cache transactions while the job retains maintenance admission.
+Old numbered scripts 001–008 remain immutable. See ../providers/README.md.

@@ -126,6 +126,22 @@ CREATE INDEX IF NOT EXISTS idx_history_event ON event_history(event_id,history_i
 CREATE INDEX IF NOT EXISTS idx_anime_tvdb ON identified_anime(tvdb_series_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_anime ON identified_episodes(anidb_id);
 CREATE INDEX IF NOT EXISTS idx_links_episode ON result_episode_links(anidb_episode_id);
+CREATE TABLE IF NOT EXISTS provider_limits (
+ provider TEXT PRIMARY KEY CHECK(provider IN ('anidb','anidb_titles','anime_lists','tvdb')),
+ next_allowed_at_ms INTEGER NOT NULL CHECK(next_allowed_at_ms >= 0),
+ failures INTEGER NOT NULL DEFAULT 0 CHECK(failures BETWEEN 0 AND 16),
+ reservation_token TEXT NOT NULL CHECK(length(reservation_token)=32)
+);
+CREATE TABLE IF NOT EXISTS provider_public_cache (
+ provider TEXT NOT NULL CHECK(provider IN ('anidb','anidb_titles','anime_lists')),
+ cache_key TEXT NOT NULL CHECK(length(cache_key) BETWEEN 1 AND 64),
+ fetched_at_ms INTEGER NOT NULL CHECK(fetched_at_ms >= 0),
+ expires_at_ms INTEGER NOT NULL CHECK(expires_at_ms > fetched_at_ms),
+ payload BLOB NOT NULL CHECK(typeof(payload)='blob' AND length(payload) BETWEEN 1 AND 67108864),
+ PRIMARY KEY(provider,cache_key)
+);
+CREATE INDEX IF NOT EXISTS idx_provider_cache_expiry ON provider_public_cache(expires_at_ms);
+
 """
 
 def connect(path):
@@ -146,14 +162,14 @@ def admitted_connection(gate):
     Never nest admissions or use this during exclusive migration maintenance.
     """
     with gate.operation():
-        from src.nextgen.storage.migrations import _open, MigrationError, MigrationUnsupported
+        from src.nextgen.storage.migrations import _open, LATEST_VERSION, MigrationError, MigrationUnsupported
         try:
             db = _open(gate.database, readonly=False)
         except (OSError, sqlite3.Error):
             raise MigrationError() from None
         try:
             try:
-                if db.execute("PRAGMA user_version").fetchone()[0] != 8:
+                if db.execute("PRAGMA user_version").fetchone()[0] != LATEST_VERSION:
                     raise MigrationUnsupported()
                 db.execute("PRAGMA busy_timeout=5000")
                 db.execute("PRAGMA journal_mode=WAL")
@@ -165,13 +181,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v8; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v9; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7 databases require explicit versioned SQL migrations
-    before accessing v8-only storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8 databases require explicit versioned SQL migrations
+    before accessing v9 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 8:
+    if version == 9:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -181,7 +197,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=8;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=9;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

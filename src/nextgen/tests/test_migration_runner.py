@@ -34,7 +34,7 @@ class MigrationRunnerTests(unittest.TestCase):
             return migrations.apply(self.path, plan, lease=lease)
 
     def test_all_supported_versions_reach_fresh_schema_and_current_is_noop(self):
-        for version in range(1, 9):
+        for version in range(1, migrations.LATEST_VERSION+1):
             with self.subTest(version=version):
                 path = self.path.with_name(str(version) + ".sqlite")
                 historical(path, version)
@@ -44,7 +44,7 @@ class MigrationRunnerTests(unittest.TestCase):
                 ticket = gate.request()
                 with gate.exclusive(ticket) as lease:
                     result = migrations.apply(path, plan, lease=lease)
-                self.assertEqual(result.applied_versions, tuple(range(version+1, 9)))
+                self.assertEqual(result.applied_versions, tuple(range(version+1, migrations.LATEST_VERSION+1)))
                 self.assertEqual(gate.status(), ticket)  # No implicit resume.
                 upgraded = sqlite3.connect(path)
                 fresh = sqlite3.connect(":memory:")
@@ -53,7 +53,7 @@ class MigrationRunnerTests(unittest.TestCase):
                     self.assertEqual(migrations._structure(upgraded), migrations._structure(fresh))
                     self.assertEqual(upgraded.execute("PRAGMA foreign_key_check").fetchall(), [])
                     self.assertEqual(upgraded.execute("PRAGMA integrity_check").fetchall(), [("ok",)])
-                    if version < 8:
+                    if version < migrations.LATEST_VERSION:
                         backup = sqlite3.connect(path.with_name(result.backup_name))
                         try:
                             self.assertEqual(backup.execute("PRAGMA user_version").fetchone()[0], version)
@@ -103,7 +103,7 @@ class MigrationRunnerTests(unittest.TestCase):
         with self.assertRaises(migrations.MigrationError):
             migrations.preview(self.path)
         self.assertFalse(self.path.exists())
-        for version in (0, 9, 99):
+        for version in (0, migrations.LATEST_VERSION+1, 99):
             db = sqlite3.connect(self.path)
             db.execute("PRAGMA user_version=" + str(version))
             db.close()
@@ -152,7 +152,7 @@ class MigrationRunnerTests(unittest.TestCase):
             db.close()
         # Explicit re-preview and recovery can continue from the committed version.
         result = self.run_upgrade(migrations.preview(self.path))
-        self.assertEqual(result.applied_versions, (5, 6, 7, 8))
+        self.assertEqual(result.applied_versions, tuple(range(5,migrations.LATEST_VERSION+1)))
 
     def test_backup_failure_never_applies_a_migration(self):
         historical(self.path, 3)
@@ -174,7 +174,7 @@ class MigrationRunnerTests(unittest.TestCase):
         with self.gate.exclusive(ticket) as lease:
             lease.complete()  # Simulates management compatibility/readiness checks.
         with admitted_connection(self.gate) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], migrations.LATEST_VERSION)
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
 
     def test_bad_foreign_keys_are_refused(self):

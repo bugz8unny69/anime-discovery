@@ -12,8 +12,10 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor, parse_payload, payload_json
 from src.nextgen.schema.anime_series import AnimeSeries
+from src.nextgen.providers.errors import (ProviderUnavailable, ProviderDeferred,
+    ProviderInvalidResponse, ProviderAuthenticationFailed)
 from src.nextgen.storage.job_queue import QueueUnavailable
-from src.nextgen.storage.migrations import LATEST_VERSION, _open
+from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
 from src.nextgen.storage.sqlite import IdentityConflict, IdentityNotReady, persist_identity
 from src.nextgen.worker import blocking
 
@@ -27,23 +29,6 @@ class IdentityRequest:
     source: str
     raw_body: bytes = field(repr=False)
 
-
-class ProviderUnavailable(RuntimeError):
-    reason_code = "PROVIDER_UNAVAILABLE"
-
-    def __init__(self):
-        super().__init__("An information provider is temporarily unavailable.")
-
-
-class ProviderDeferred(RuntimeError):
-    """A normal rate-limit wait, separate from an unsuccessful request."""
-    reason_code = "JOB_WAITING"
-
-    def __init__(self, delay_ms):
-        if type(delay_ms) is not int or not 1 <= delay_ms <= 86400000:
-            raise ValueError("invalid provider wait")
-        self.delay_ms = delay_ms
-        super().__init__("Work is waiting for a prerequisite.")
 
 
 @dataclass(frozen=True)
@@ -77,7 +62,7 @@ def _request(database, event_id):
                 or row[2] not in ("PENDING", "RETRY_WAIT", "IDENTIFIED")):
             raise IdentityNotReady()
         return IdentityRequest(event_id,row[0],row[1])
-    except (sqlite3.Error, OSError):
+    except (sqlite3.Error, OSError, MigrationError):
         raise QueueUnavailable() from None
     finally:
         if db is not None:
@@ -120,8 +105,10 @@ def registration(resolve, *, release_kind=None):
             candidate = await resolve(request,context.configuration,context.cancelled)
         except ProviderDeferred as exc:
             return Outcome("defer","JOB_WAITING",delay_ms=exc.delay_ms)
-        except ProviderUnavailable:
-            return Outcome("retry","PROVIDER_UNAVAILABLE")
+        except (ProviderUnavailable, ProviderInvalidResponse) as exc:
+            return Outcome("retry",exc.reason_code)
+        except ProviderAuthenticationFailed:
+            return Outcome("review","PROVIDER_AUTH_FAILED")
         except (IdentityNotReady, IdentityConflict) as exc:
             return Outcome("review",exc.reason_code)
         try:
