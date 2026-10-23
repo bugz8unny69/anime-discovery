@@ -245,4 +245,6 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         composed=await build_identity_worker(self.root,read_metainfo=reader)
         self.addAsyncCleanup(composed.close)
         self.assertIn('PREPARE_ACQUISITION',composed.registry.entries)
+        self.assertIn('DOWNLOAD_TORRENT',composed.registry.entries)
+        self.assertEqual(composed.registry.entries['SUBMIT_TORRENT'].successor_kinds,('DOWNLOAD_TORRENT',))
         self.assertEqual(composed.registry.entries['RESERVE_EPISODE'].successor_kinds,('PREPARE_ACQUISITION',))

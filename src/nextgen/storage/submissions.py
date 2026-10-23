@@ -67,6 +67,18 @@ class SubmissionJournal:
             self.queue._owns(db,claim,self.queue.now())
             return plan,intent
 
+    def handed_off(self,claim,intent):
+        """Submission is a historical stopped receipt once transfer takes ownership."""
+        with self.queue.connection() as db, transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            plan=_plan(db,intent.plan.preparation_job_id,claim.event_id)
+            current=_intent(db,plan)
+            if current is None or current.fingerprint!=intent.fingerprint:raise AcquisitionConflict()
+            result=current.state=='OWNED_STOPPED' and db.execute(
+                'SELECT 1 FROM torrent_transfers WHERE plan_id=?',(plan.plan_id,)).fetchone() is not None
+            self.queue._owns(db,claim,self.queue.now())
+            return result
+
     def authorize(self,claim,plan,options,api_major,present,configuration_revision):
         if type(present) is not bool or type(api_major) is not int or api_major not in (4,5):raise ValueError('validated inventory/client version required')
         integer(configuration_revision,positive=True)
@@ -108,6 +120,9 @@ class SubmissionJournal:
             if current is None or current.fingerprint!=intent.fingerprint:raise AcquisitionConflict()
             if current.state in ('EXTERNAL','REVIEW'):
                 return current.state,'TORRENT_ALREADY_PRESENT' if current.state=='EXTERNAL' else 'TORRENT_PROVENANCE_CONFLICT',()
+            if current.state=='OWNED_STOPPED' and db.execute(
+                    'SELECT 1 FROM torrent_transfers WHERE plan_id=?',(plan.plan_id,)).fetchone() is not None:
+                return 'OWNED_STOPPED','TORRENT_STOPPED_CONFIRMED',()
             state,reason=classify(current,observation)
             records=()
             if state!=current.state:

@@ -291,5 +291,15 @@ Trusted metadata composition now extends PREPARE_ACQUISITION → SUBMIT_TORRENT.
 SQLite v15 records a one-shot uncertain send intent before a possible stopped
 add and reconciles exact marker/destination/management/files against the pinned
 client. Pre-existing torrents remain external. Queue DONE here means confirmed
-stopped, not downloading or staged. Selection/start/progress and media verification
-remain future work; see ../jobs/SUBMIT_TORRENT.md.
+stopped, not downloading or staged. Selection/start/progress now belongs to the following stage; see
+../jobs/DOWNLOAD_TORRENT.md. Media verification and staging remain future work.
+
+## Selected-video download implementation refinement
+
+SUBMIT_TORRENT atomically advances to DOWNLOAD_TORRENT in trusted metadata
+composition. SQLite v16 separates one fixed selection and one possible normal
+start, then journals client progress. All other files are skipped and shared-piece
+bytes block for review under the initial zero-overlap policy. The submission
+receipt becomes historical after handoff; the transfer stage checks current ownership.
+The worker stays generic, and jobs defer between reads. No media verification,
+audio check, preview-folder staging or Keep successor is implemented yet.

@@ -8,16 +8,29 @@ from src.nextgen.acquisition.qbittorrent import Client
 from src.nextgen.diagnostics import log_history
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.providers.errors import ProviderDeferred, ProviderUnavailable
-from src.nextgen.storage.submissions import SubmissionJournal, target_options
+from src.nextgen.storage.submissions import SubmissionJournal, target_options, _plan, _intent
 from src.nextgen.worker import blocking
 
 KIND='SUBMIT_TORRENT'
 DEFINITION=HandlerDefinition(KIND,'Submit stopped torrent and reconcile ownership')
 
 
-def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=SubmissionJournal):
+def _persist(db,claim,value):
+    try:
+        plan=_plan(db,integer(value,positive=True),claim.event_id)
+        intent=_intent(db,plan)
+        if intent is None or intent.state!='OWNED_STOPPED':raise AcquisitionConflict()
+    except (ValueError,TypeError) as exc:
+        reason=getattr(exc,'reason_code','TORRENT_PROVENANCE_CONFLICT')
+        raise CompletionRejected(Outcome('review',reason)) from None
+
+
+def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=SubmissionJournal,transfer_kind=None):
+    if transfer_kind is not None and (type(transfer_kind) is not str or not transfer_kind.strip()
+                                     or len(transfer_kind)>64 or transfer_kind==KIND):
+        raise ValueError('invalid download successor')
     if not inspect.iscoroutinefunction(read_metainfo):raise ValueError('trusted async metadata reader required')
     async def execute(context):
         payload=context.data()
@@ -30,6 +43,8 @@ def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=S
             plan,prior=await blocking(journal.load,context.claim,preparation)
             if prior is not None and prior.state in ('EXTERNAL','REVIEW'):
                 return Outcome('review','TORRENT_ALREADY_PRESENT' if prior.state=='EXTERNAL' else 'TORRENT_PROVENANCE_CONFLICT')
+            if prior is not None and prior.state=='OWNED_STOPPED' and await blocking(journal.handed_off,context.claim,prior):
+                return Outcome(value=preparation)
             options=prior.options if prior is not None else target_options(download_options(context.configuration),plan)
             credentials=await blocking(secrets.qbittorrent_credentials)
             raw=None
@@ -56,7 +71,7 @@ def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=S
             after=await blocking(client.inspect,plan.manifest.info_hash)
             state,reason,records=await blocking(journal.observe,context.claim,intent,after)
             for record in records:log_history(context.logger,record)
-            if state=='OWNED_STOPPED':return Outcome()
+            if state=='OWNED_STOPPED':return Outcome(value=preparation)
             if state in ('EXTERNAL','REVIEW'):return Outcome('review',reason)
             return Outcome('defer',reason,delay_ms=60000)
         except ClientUnavailable:return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
@@ -64,4 +79,7 @@ def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=S
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
         except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeEvidenceMissing,DownloadConfigurationError,
                 ClientInvalid,ClientAuthenticationFailed,ClientUnsupported) as exc:return Outcome('review',exc.reason_code)
-    return Registration(KIND,DEFINITION,execute)
+    def route(value):
+        return () if transfer_kind is None else (Successor.create(transfer_kind,{'preparation_job_id':value}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if transfer_kind is None else (transfer_kind,))

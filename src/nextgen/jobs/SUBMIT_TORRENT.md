@@ -4,8 +4,9 @@ SUBMIT_TORRENT / submit_torrent_job.py extends the explicitly composed metadata
 pipeline after PREPARE_ACQUISITION. It adds a hash-bound .torrent stopped and
 checks the result. DONE means only that a stopped torrent matches the saved
 provenance and file inventory. It does not mean downloaded, audio-verified,
-staged or kept. There is no start, stop-existing, file-priority, delete, re-add,
-category-creation or metadata-fetch transport in this implementation.
+staged or kept. This handler does not start, stop, set priorities, delete or re-add torrents.
+The separately authorized DOWNLOAD_TORRENT stage now owns selection/start/progress;
+see [DOWNLOAD_TORRENT.md](DOWNLOAD_TORRENT.md).
 
 ## Composition and client transport
 
@@ -137,3 +138,12 @@ provenance field mismatches, one-use permits, success/timeout/absence/crash path
 pinned settings, pre-existing torrents, changed state and stale authorization/
 confirmation, v14→v15 preservation/equivalence/rollback and sequential migration
 coverage. Tests and CI remain intentionally unexecuted under project policy.
+
+## Transfer handoff refinement
+
+In trusted metadata composition, stopped confirmation now carries preparation_job_id
+into fenced atomic completion and DOWNLOAD_TORRENT successor creation. Standalone
+registration can omit that successor. Once a transfer journal exists, the saved
+OWNED_STOPPED row is historical evidence, not a demand that the client stay stopped.
+Duplicate submission jobs preserve it without client commands. Fresh ongoing
+ownership and state validation belongs to the transfer stage.

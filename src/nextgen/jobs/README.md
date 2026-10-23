@@ -112,3 +112,12 @@ SUBMIT_TORRENT / submit_torrent_job.py follows preparation in trusted metadata
 composition. It has one durable send authorization per plan, adds stopped, and
 reconciles pinned client provenance/inventory. It never starts or deletes data.
 See SUBMIT_TORRENT.md for supported versions, states and failure boundaries.
+
+## Selected-video download
+
+DOWNLOAD_TORRENT / download_torrent_job.py follows stopped submission in trusted
+metadata composition. It durably selects the video, starts once and defers between
+progress checks. Shared boundary pieces require review under the initial zero-overlap
+policy. Client completion ends this stage; media verification/staging remains next.
+See [DOWNLOAD_TORRENT.md](DOWNLOAD_TORRENT.md). Current SQLite is v16, configuration
+v6, secrets v2 and AnimeSeries v2. Earlier sections describe incremental milestones.

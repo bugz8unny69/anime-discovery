@@ -252,6 +252,30 @@ CREATE TABLE IF NOT EXISTS torrent_submissions (
        (state='OWNED_STOPPED' AND reason_code='TORRENT_STOPPED_CONFIRMED'))
 );
 
+CREATE TABLE IF NOT EXISTS torrent_transfers (
+ plan_id INTEGER PRIMARY KEY REFERENCES torrent_submissions(plan_id),
+ selection_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ selection_attempt INTEGER NOT NULL CHECK(selection_attempt>0),
+ start_job_id INTEGER REFERENCES jobs(job_id),
+ start_attempt INTEGER CHECK(start_attempt IS NULL OR start_attempt>0),
+ selected_index INTEGER NOT NULL CHECK(selected_index>=0),
+ piece_size INTEGER NOT NULL CHECK(piece_size BETWEEN 1 AND 67108864),
+ overlap_bytes INTEGER NOT NULL DEFAULT 0 CHECK(overlap_bytes=0),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('SELECT_UNCERTAIN','SELECTED','START_UNCERTAIN','ACTIVE','COMPLETE','REVIEW')),
+ reason_code TEXT NOT NULL,
+ selected_progress REAL NOT NULL DEFAULT 0 CHECK(selected_progress BETWEEN 0 AND 1),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((start_job_id IS NULL AND start_attempt IS NULL) OR (start_job_id IS NOT NULL AND start_attempt IS NOT NULL)),
+ CHECK(phase NOT IN ('START_UNCERTAIN','ACTIVE') OR start_job_id IS NOT NULL),
+ CHECK((phase='SELECT_UNCERTAIN' AND reason_code='TORRENT_SELECTION_UNCERTAIN') OR
+       (phase='SELECTED' AND reason_code='TORRENT_SELECTION_CONFIRMED') OR
+       (phase='START_UNCERTAIN' AND reason_code='TORRENT_START_UNCERTAIN') OR
+       (phase='ACTIVE' AND reason_code='TORRENT_DOWNLOAD_IN_PROGRESS') OR
+       (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
+       (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
+);
 """
 
 def connect(path):
@@ -291,13 +315,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v15; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v16; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14 databases require explicit versioned SQL migrations
-    before accessing v15 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15 databases require explicit versioned SQL migrations
+    before accessing v16 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 15:
+    if version == 16:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -307,7 +331,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=15;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=16;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

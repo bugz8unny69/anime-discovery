@@ -17,6 +17,15 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('TORRENT_SELECTION_UNCERTAIN', 'Fixed file selection was authorized once; confirmation is pending.', 'Video file selection is waiting for confirmation.', 'Inspect the existing selection; do not repeat uncertain commands automatically.', 'INFO', None),
+    Reason('TORRENT_SELECTION_CONFIRMED', 'Exact selected-video and skipped-sidecar priorities were observed while stopped.', 'The video file is selected and ready to download.', 'Continue with the recorded download start.', 'INFO', None),
+    Reason('TORRENT_START_UNCERTAIN', 'A single durable start authorization exists; stopped or checking observations cannot rearm it.', 'Download startup is waiting for confirmation.', 'Inspect the existing download; do not restart it automatically.', 'INFO', None),
+    Reason('TORRENT_DOWNLOAD_IN_PROGRESS', 'The client reports active transfer with exact selection and ownership.', 'The selected video is downloading.', 'Wait for the download to finish.', 'INFO', None),
+    Reason('TORRENT_DOWNLOAD_COMPLETE', 'The client reports selected-file progress of one with matching provenance.', 'The download client reports that the selected video is complete.', 'Verify the local video before making it available.', 'INFO', None),
+    Reason('TORRENT_DOWNLOAD_WAITING', 'The owned torrent is absent from a current authoritative inventory observation.', 'Waiting for the existing download to appear.', 'Check the download client; do not add another torrent automatically.', 'INFO', None),
+    Reason('TORRENT_TRANSFER_CONFLICT', 'Transfer ownership, priorities, piece geometry, state or immutable evidence contradicts the journal.', 'Download details changed and need review.', 'Review ownership, selected files and the existing download before continuing.', 'WARNING', False),
+    Reason('TORRENT_PIECE_OVERLAP', 'Selected video shares boundary pieces with unwanted file bytes; zero-overlap policy blocks start.', 'This video shares download pieces with files that are not selected.', 'Review the torrent layout or choose a source containing only the video.', 'WARNING', False),
+    Reason('TORRENT_SNAPSHOT_CHANGED', 'Client state changed during inspection or is temporarily checking or moving.', 'The download is changing or being checked.', 'Wait for a stable status check.', 'INFO', None),
     Reason("IDENTITY_INCOMPLETE", "Required provider-verified identity facts are missing.",
            "Anime identification is incomplete.", "Review the missing identification details.",
            "WARNING", None),

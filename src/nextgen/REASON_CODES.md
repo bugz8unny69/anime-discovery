@@ -244,3 +244,24 @@ protects externally present torrents; TORRENT_PROVENANCE_CONFLICT reviews change
 provenance/state/files; TORRENT_STOPPED_CONFIRMED describes a stopped snapshot
 only. TORRENT_INTENT_RECORDED and TORRENT_RECONCILED are durable job markers with
 readable messages/actions/translation keys and after-commit logging.
+
+## Selected-video transfers
+
+Every new transfer event and reason has a static English message in the shared
+catalog; translations use stable codes, never exception text. Retry classification
+is descriptive: worker policy and the durable journal decide behavior.
+
+| Reason | Message |
+| --- | --- |
+| TORRENT_SELECTION_UNCERTAIN | Video file selection is waiting for confirmation. |
+| TORRENT_SELECTION_CONFIRMED | The video file is selected and ready to download. |
+| TORRENT_START_UNCERTAIN | Download startup is waiting for confirmation. |
+| TORRENT_DOWNLOAD_IN_PROGRESS | The selected video is downloading. |
+| TORRENT_DOWNLOAD_COMPLETE | The download client reports that the selected video is complete. |
+| TORRENT_DOWNLOAD_WAITING | Waiting for the existing download to appear. |
+| TORRENT_TRANSFER_CONFLICT | Download details changed and need review. |
+| TORRENT_PIECE_OVERLAP | This video shares download pieces with files that are not selected. |
+| TORRENT_SNAPSHOT_CHANGED | The download is changing or being checked. |
+
+Selection/start uncertainty never authorizes replay. Client completion is not
+local media verification or permission to stage a video.

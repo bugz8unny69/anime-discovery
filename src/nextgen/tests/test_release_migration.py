@@ -36,11 +36,12 @@ class ReleaseMigrationTests(unittest.TestCase):
             self.db.executescript((SQL_DIR/'013_acquisition_plans.sql').read_text())
             self.db.executescript((SQL_DIR/'014_acquisition_budgets.sql').read_text())
             self.db.executescript((SQL_DIR/'015_torrent_submissions.sql').read_text())
+            self.db.executescript((SQL_DIR/'016_torrent_transfers.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(self.db),_structure(fresh))
         finally:fresh.close()
         for table,rows in before.items():self.assertEqual(self.db.execute('SELECT * FROM '+table).fetchall(),rows)
-        self.assertEqual(self.db.execute('PRAGMA user_version').fetchone()[0],15)
+        self.assertEqual(self.db.execute('PRAGMA user_version').fetchone()[0],16)
         self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(),[])
 
     def insert(self,scope='DECLARED_SINGLE_EPISODE',eid=987):

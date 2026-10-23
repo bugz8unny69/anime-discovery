@@ -15,10 +15,11 @@ class TorrentSubmissionMigrationTests(unittest.TestCase):
             db.commit()
             before=db.execute('SELECT * FROM incoming_events').fetchall()
             db.executescript((SQL_DIR/'015_torrent_submissions.sql').read_text())
+            db.executescript((SQL_DIR/'016_torrent_transfers.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],15)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],16)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 

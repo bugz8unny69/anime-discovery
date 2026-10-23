@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v15**, adding stopped-submission reconciliation.
+Latest schema: **v16**, adding selected-video transfer control and progress.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -198,3 +198,10 @@ coverage extend through v14; historical scripts 001–013 remain immutable.
 intent/progress and constrained reconciliation states. No automatic rearm or
 external client request occurs during migration. Fresh schema and sequential
 coverage extend through v15. Historical scripts 001–014 remain unchanged.
+
+## Selected-video transfer journal
+
+016_torrent_transfers.sql upgrades v15→v16. The new constrained transfer journal
+records separate selection/start authorization and bounded client progress without
+changing prior submission receipts. Fresh DDL and sequential runner coverage extend
+through v16; published SQL 001–015 stays unchanged. Tests remain unexecuted.

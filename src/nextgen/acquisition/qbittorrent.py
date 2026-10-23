@@ -44,7 +44,7 @@ class Client:
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
     def _request(self,path,*,query=None,form=None,body=None,content_type=None,limit=3145728):
-        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add'):raise ValueError('unsupported client operation')
+        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume'):raise ValueError('unsupported client operation')
         url=self.options.base_url+'/api/v2/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'User-Agent':'AnimeDiscoveryNextGen/1','Referer':self.options.base_url+'/','Accept':'application/json'}
@@ -140,3 +140,59 @@ class Client:
         # Consume before the single transport call. Never retry, even on HTTP error.
         permit.take(intent)
         self._request('torrents/add',body=b''.join(chunks),content_type='multipart/form-data; boundary='+boundary,limit=4096)
+
+    def inspect_transfer(self,expected_hash):
+        from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
+        before=self.inspect(expected_hash)
+        if before is None:return None
+        raw,_=self._request('torrents/files',query={'hash':expected_hash})
+        files=_json(raw)
+        if type(files) is not list or len(files)!=len(before.files):raise ClientInvalid()
+        rows=[]
+        try:
+            for row in files:
+                if type(row) is not dict:raise ClientInvalid()
+                item=TorrentFile(row.get('index'),row.get('name'),row.get('size'))
+                ranges=row.get('piece_range')
+                if type(ranges) is not list or len(ranges)!=2:raise ClientInvalid()
+                rows.append((item,row.get('priority'),row.get('progress'),tuple(ranges)))
+            rows.sort(key=lambda r:r[0].index)
+        except ValueError:raise ClientInvalid() from None
+        if tuple(r[0] for r in rows)!=before.files:raise SnapshotChanged()
+        raw,_=self._request('torrents/properties',query={'hash':expected_hash})
+        properties=_json(raw)
+        if type(properties) is not dict:raise ClientInvalid()
+        after=self.inspect(expected_hash)
+        if before!=after:raise SnapshotChanged()
+        return TransferSnapshot(after,tuple(r[1] for r in rows),tuple(r[2] for r in rows),
+                                properties.get('piece_size'),tuple(r[3] for r in rows))
+
+    def apply_selection(self,intent,fingerprint,permit,action):
+        if not self._sid or self.major not in (4,5):raise ClientAuthenticationFailed()
+        from src.nextgen.acquisition.transfers import (TransferPermit, TransferConflict, STOPPED, verify_snapshot, selection_fingerprint)
+        if type(permit) is not TransferPermit or self.options!=intent.options:raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.plan.manifest.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_snapshot(intent,snapshot)
+        if selection_fingerprint(intent,snapshot.piece_size)!=fingerprint:raise TransferConflict()
+        if snapshot.observation.state not in STOPPED:raise TransferConflict()
+        selected=intent.plan.manifest.selected_index
+        if action=='skip':indices=[i for i in range(len(snapshot.priorities)) if i!=selected];priority=0
+        elif action=='wanted':indices=[selected];priority=1
+        else:raise TransferConflict()
+        permit.take(fingerprint,action)
+        if indices:self._request('torrents/filePrio',form={'hash':intent.plan.manifest.info_hash,
+            'id':'|'.join(map(str,indices)),'priority':priority},limit=4096)
+
+    def start_selected(self,intent,fingerprint,permit):
+        if not self._sid or self.major not in (4,5):raise ClientAuthenticationFailed()
+        from src.nextgen.acquisition.transfers import (TransferPermit, TransferConflict, STOPPED, verify_snapshot, exact_selection, selection_fingerprint)
+        if type(permit) is not TransferPermit or self.options!=intent.options:raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.plan.manifest.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_snapshot(intent,snapshot)
+        if selection_fingerprint(intent,snapshot.piece_size)!=fingerprint:raise TransferConflict()
+        if snapshot.observation.state not in STOPPED or not exact_selection(intent,snapshot):raise TransferConflict()
+        permit.take(fingerprint,'start')
+        self._request('torrents/start' if self.major==5 else 'torrents/resume',
+                      form={'hashes':intent.plan.manifest.info_hash},limit=4096)
