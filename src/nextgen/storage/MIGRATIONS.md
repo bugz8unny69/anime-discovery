@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v8**, including handler invocation history.
+Latest schema: **v9**, adding shared provider pacing and public AniDB/mapping cache.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -157,3 +157,11 @@ The handler-history follow-up extends the latest schema to v8 through immutable
 008, rebuilding only job_history. The jobs table and independent queue model
 remain unchanged; handler invocation fields/indexes are described in
 SCHEMA_POLICY.md and ../JOB_HANDLERS.md. Published 001–007 remain unchanged.
+
+
+009_provider_cache.sql upgrades v8 to v9 atomically under the same explicit
+maintenance protocol. It adds provider_limits and provider_public_cache with an
+expiry index, preserving existing job/event/identity/history rows. Fresh schema
+and runtime version guards now require v9. It runs no provider HTTP requests,
+imports no legacy metadata and persists no authentication tokens. A provider
+library never initializes or upgrades a database implicitly.

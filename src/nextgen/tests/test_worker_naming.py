@@ -93,6 +93,7 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(), [])
         for table, index in (("event_history", "idx_history_event"), ("job_history", "idx_job_history_job")):
             self.assertIn(index, {row[1] for row in self.db.execute("PRAGMA index_list(" + table + ")")})
+        self.db.executescript((SQL_DIR / "009_provider_cache.sql").read_text())
         initialize(self.db)  # Latest version accepted without implicit upgrade.
 
     def test_failure_before_version_bump_rolls_back_rows_and_vocabulary(self):

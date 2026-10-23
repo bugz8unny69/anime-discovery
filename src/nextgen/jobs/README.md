@@ -57,21 +57,25 @@ acquisition. It must not treat the series result as release approval.
 
 ## Current boundary and next work
 
-This is a handler and persistence adapter, not a live identity implementation.
-No concrete AniDB/TVDB resolver, provider settings/secrets, webhook normalizer,
-release-verification handler, intake server or runnable service is installed.
-Implement/review the shared identity/provider library next, including durable
-verified evidence if its design needs additional storage, versioned migrations,
-configuration and offline cases in the same PR. Later handler PRs follow the
-intake/trial and Keep architecture documents and resolve their open policy
-questions before acquisition, publication or deletion behavior is implemented.
+The concrete AniDB-first resolver is now available in providers/identity.py;
+see [Provider libraries](../providers/README.md) for composition, caching,
+throttling and conservative verification gates. Application/service bootstrap,
+provider configuration/secret management fields and producer intake adapters are
+still required before deployment. Constructor Options are not undocumented
+settings.json keys. This change does not enable provider calls automatically.
+The default normalizer accepts the explicit release_name JSON input contract;
+it does not promise compatibility with every webhook source.
+
+Release-verification, intake service, trial/acquisition and Keep handlers remain
+future work. Later PRs follow the architecture documents and settle their open
+policy questions before acquisition, publication or deletion is implemented.
 
 Reviewed legacy references at adf537ac58dc13826071039cc3c6f11ed4229479:
 `anime_identity_verify.py`, `anime_identity_persistence_v8.py`,
 `anime_identity_rejection_gate.py` and `anime_identity_worker_v16.py`.
 Reuse verified identity separation and conflict safeguards; do not import the
 legacy controller, chained worker loops, review flags or runtime SQL. Existing
-NextGen schema/storage code is reused directly. SQLite remains v8, configuration
+NextGen schema/storage code is reused directly. SQLite is now v9 for shared provider cache/pacing; configuration
 v3, AnimeSeries v2. No DDL or numbered migrations change.
 
 Offline tests cover worker integration, atomic handoff/rollback, post-commit

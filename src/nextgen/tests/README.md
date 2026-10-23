@@ -116,3 +116,14 @@ handoff, post-commit audit receipts, review on canonical/episode conflicts,
 idempotent existing snapshots, stale completion, incoming-event lease protection
 and transaction rollback. test_worker_queue.py adds expected completion rejection
 and invalid audit receipt rollback. Cases are authored but **not executed**.
+
+
+Identity providers: test_provider_storage.py, test_identity_providers.py and
+test_anidb_first_resolver.py cover SQLite v8→v9 preservation/rollback/fresh-schema
+equivalence, shared concurrent request reservation, restart cooldowns, stale
+publication tokens, bounded/expiring public cache, compressed response limits,
+provider failure/authentication outcomes, token/response memory caching,
+credential isolation, exact ID checks, AniDB-first ordering and ambiguity gates.
+Sequential migration coverage includes every starting version v1–v9. HTTP tests
+use fake responses only. All cases are authored but **unexecuted**; no test/CI,
+SQL execution, application imports, live provider requests or deployment occurred.

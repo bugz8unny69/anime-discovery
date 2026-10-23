@@ -101,6 +101,8 @@ class JobsStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 7)
                 db.executescript((sql_dir / "008_handler_history.sql").read_text())
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 8)
+                db.executescript((sql_dir / "009_provider_cache.sql").read_text())
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 9)
                 initialize(db)
             finally:
                 db.close()
