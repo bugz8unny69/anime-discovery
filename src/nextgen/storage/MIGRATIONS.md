@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v10**, adding declared release-verification evidence.
+Latest schema: **v11**, adding immutable trial-window intents and evaluations.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -172,3 +172,9 @@ release_verifications and its identity-reference index. It preserves provider,
 job, event, identity and history rows. The runner supports all starting versions
 v1–v10; runtime initialization/version guards use v10. Historical scripts 001–009
 remain immutable. No migration, SQL or database upgrade was executed in development.
+
+
+011_trial_windows.sql upgrades v10→v11 atomically under explicit maintenance.
+It adds trial_plans/trial_evaluations with constrained counts/decisions and a plan
+history index. Fresh schema, runtime guards and v1–v11 sequential cases accompany
+the migration. Earlier scripts 001–010 remain unchanged. No SQL was executed.

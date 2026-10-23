@@ -245,3 +245,14 @@ need further evidence and go to review. Trial eligibility and exact resource
 claims must be implemented before any acquisition handoff; the installed verifier
 therefore completes without an acquisition successor. The identity-worker
 composition routes successful identification to this installed verifier.
+
+
+## Implemented trial-window policy
+
+EVALUATE_TRIAL now follows verified declared-episode identity. The accepted policy
+uses trial.backfill_count (default 6) and trial.following_count (default 1), where
+following includes the triggering episode. Windows form a deduplicated union and
+never slide on later arrivals. First committed evaluation fixes a season-scoped
+plan and configuration revision. See ../TRIAL_POLICY.md. This implements numeric
+selection intents only; exact resource claims, search/file evidence and acquisition
+are still required before downloads can be scheduled.

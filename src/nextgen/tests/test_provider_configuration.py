@@ -45,7 +45,7 @@ class ProviderConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 convert_document({**document,"settings":{**document["settings"],"anidb":{"client_name":"new"}}})
         current = convert_document(third)
-        self.assertEqual((current.schema_version,current.revision),(4,4))
+        self.assertEqual((current.schema_version,current.revision),(5,5))
         self.assertEqual(current.value("anidb.client_name"),"")
         self.assertEqual(current.value("providers.timeout_seconds"),30)
 
@@ -223,7 +223,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         db=connect(self.database)
         try:
             self.assertEqual(db.execute('SELECT kind,state,event_id,created_by_job_id FROM jobs ORDER BY job_id').fetchall(),
-                             [('IDENTIFY_ANIME','DONE',self.event,None),('VERIFY_RELEASE','DONE',self.event,self.job)])
+                             [('IDENTIFY_ANIME','DONE',self.event,None),('VERIFY_RELEASE','DONE',self.event,self.job),('EVALUATE_TRIAL','PENDING',self.event,self.job+1)])
             self.assertEqual(db.execute('SELECT verification_scope FROM release_verifications').fetchall(),[('DECLARED_SINGLE_EPISODE',)])
-            self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0],2)
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0],3)
         finally:db.close()

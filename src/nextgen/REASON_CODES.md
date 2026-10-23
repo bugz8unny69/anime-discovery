@@ -203,3 +203,12 @@ RELEASE_CONFLICT says "Release episode information conflicts." and asks for the
 identifiers/mapping evidence to be checked. Both have static messages/actions and
 translation keys through the shared catalog. Neither a provider title nor raw
 release name/payload is placed in diagnostic history.
+
+
+Trial policy records TRIAL_SELECTED ("This episode is selected for the trial."),
+TRIAL_OUTSIDE_WINDOW ("This episode is outside the trial selection.") and
+TRIAL_DISABLED ("Trial episode selection is disabled."). Each has a static action
+and translation-ready catalog key. TRIAL_PLAN_CONFLICT requests plan/evidence
+review. TRIAL_EVALUATED is a readable job marker requiring a registered reason;
+its durable audit and selection facts commit together and log only after commit.
+Selection success never means download, staging or permanent Keep completed.

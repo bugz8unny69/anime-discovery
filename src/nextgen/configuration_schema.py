@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 4
+CONFIGURATION_VERSION = 5
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -62,6 +62,10 @@ class FieldDefinition:
 # Register new fields with their actual component; do not expose speculative
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
+    "trial.backfill_count": FieldDefinition(6, "integer", "next_operation", minimum=0, maximum=1000,
+        label="Backfill first episodes", help_text="First X episodes of the verified season. Zero disables backfill. New trial plans only."),
+    "trial.following_count": FieldDefinition(1, "integer", "next_operation", minimum=0, maximum=1000,
+        label="Episodes starting with the received episode", help_text="Includes the triggering episode: 1 keeps only that episode; 2 includes the next. Zero disables this window. New trial plans only."),
     "anidb.client_name": FieldDefinition("", "client_name", "next_operation",
         label="AniDB client name", help_text="Registered AniDB HTTP client name. Required before identity work can start."),
     "anidb.client_version": FieldDefinition(1, "integer", "next_operation", minimum=1, maximum=999999,
@@ -334,7 +338,7 @@ def _v3_values(values):
     """Validate published v3 without adding or accepting v4 provider sections."""
     if type(values) is not dict or set(values) & {"anidb", "providers"}:
         raise ConfigurationError()
-    historical = validate_values(values)
+    historical = _v4_values(values)
     del historical["anidb"]
     del historical["providers"]
     return historical
@@ -346,12 +350,28 @@ def _v3_to_v4(document):
         raise ConfigurationError()
     current = revision(document["revision"])
     if current == MAX_REVISION: raise ConfigurationError()
-    return {"schema_version":4,"revision":current+1,"settings":validate_values(_v3_values(document["settings"]))}
+    return {"schema_version":4,"revision":current+1,"settings":_v4_values(_v3_values(document["settings"]))}
+
+
+def _v4_values(values):
+    """Keep published v4 output free of new trial settings."""
+    if type(values) is not dict or "trial" in values: raise ConfigurationError()
+    historical=validate_values(values)
+    del historical["trial"]
+    return historical
+
+
+def _v4_to_v5(document):
+    if (type(document) is not dict or set(document)!={"schema_version","revision","settings"}
+            or document["schema_version"]!=4): raise ConfigurationError()
+    current=revision(document["revision"])
+    if current==MAX_REVISION: raise ConfigurationError()
+    return {"schema_version":5,"revision":current+1,"settings":validate_values(_v4_values(document["settings"]))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5})
 
 
 def convert_document(document):

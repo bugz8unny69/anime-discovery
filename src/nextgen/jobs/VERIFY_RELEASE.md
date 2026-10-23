@@ -47,7 +47,8 @@ Original AnimeSeries JSON and optional episode coverage remain untouched.
 Every row is constrained to verification_scope=DECLARED_SINGLE_EPISODE and
 TVDB order official. It records a declaration's provider-verified identity, not
 an inspected file list, downloaded media proof, trial eligibility, user approval
-or acquisition authorization. This job has no acquisition successor. Its DONE
+or acquisition authorization. The composed worker advances to EVALUATE_TRIAL; there is no acquisition
+successor. Its DONE
 means only this explicitly scoped step completed.
 
 The next work is trial eligibility policy and exact-resource claim design,

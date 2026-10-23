@@ -148,3 +148,12 @@ test_release_migration.py covers v9→v10 preservation, fresh equivalence, scope
 foreign-key/unique constraints and failed/wrong-version rollback. The sequential
 runner covers every v1–v10 starting point. All tests are **authored but unexecuted**;
 no tests/CI, application imports, SQL, live providers or media operations ran.
+
+
+Trial-window policy: test_trial_policy.py covers backfill/following union,
+inclusive trigger count, zero/overlap/bounds, explicit v5 conversion, live settings
+for new plans, immutable anchors, season scope, concurrent creation, post-commit
+readable audit, failed completion rollback and stale leases. test_trial_migration.py
+covers v10→v11 preservation/fresh equivalence and wrong-version/failure rollback.
+Existing migration paths include v1–v11. All tests remain **unexecuted**; no tests/
+CI, application imports, SQL, live providers, acquisition/media or deployment ran.

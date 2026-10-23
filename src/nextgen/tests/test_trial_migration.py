@@ -1,0 +1,38 @@
+"""Offline v10→v11 preservation, fresh equivalence and rollback; unexecuted."""
+import sqlite3
+import unittest
+from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
+from src.nextgen.storage.sqlite import initialize
+
+
+class TrialMigrationTests(unittest.TestCase):
+    def test_upgrade_matches_fresh_and_preserves_old_rows(self):
+        db=sqlite3.connect(':memory:')
+        fresh=sqlite3.connect(':memory:')
+        try:
+            for script in SCRIPTS[:10]:db.executescript((SQL_DIR/script).read_text())
+            db.execute("INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES('test',X'61',1)")
+            db.commit()
+            before=db.execute('SELECT * FROM incoming_events').fetchall()
+            db.executescript((SQL_DIR/'011_trial_windows.sql').read_text())
+            initialize(fresh)
+            self.assertEqual(_structure(db),_structure(fresh))
+            self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],11)
+            self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
+        finally:
+            db.close()
+            fresh.close()
+
+    def test_failure_and_wrong_starting_versions_are_atomic(self):
+        for version in (9,10,11):
+            db=sqlite3.connect(':memory:')
+            try:
+                db.execute('PRAGMA user_version='+str(version))
+                sql=(SQL_DIR/'011_trial_windows.sql').read_text()
+                if version==10:sql=sql.replace('PRAGMA user_version=11;','SELECT * FROM missing;\nPRAGMA user_version=11;')
+                with self.assertRaises(sqlite3.Error):db.executescript(sql)
+                db.rollback()
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],version)
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='trial_plans'").fetchone())
+            finally:db.close()
