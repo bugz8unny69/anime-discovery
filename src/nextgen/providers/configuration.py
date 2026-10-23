@@ -5,9 +5,11 @@ from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError
 from src.nextgen.job_contracts import Policy, Registry
 from src.nextgen.jobs.identify_anime_job import registration
+from src.nextgen.jobs.verify_release_job import KIND as RELEASE_KIND, registration as release_registration
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
-from src.nextgen.providers.identity import make_resolver
+from src.nextgen.providers.identity import ClientPool, make_resolver
+from src.nextgen.providers.releases import make_verifier
 from src.nextgen.secrets import SecretStore
 from src.nextgen.worker import Worker, blocking, serve_worker
 
@@ -39,8 +41,11 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     startup = await blocking(store.read)
     prepare = partial(validate_provider_configuration,secrets=secrets)
     await blocking(prepare,startup)  # Missing configuration fails before claims.
-    resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials)
-    registry = Registry((registration(resolve,release_kind=release_kind),*additional_registrations))
+    pool=ClientPool()
+    resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
+    verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
+    registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
+                         release_registration(verify),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
 

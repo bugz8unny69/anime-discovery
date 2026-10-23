@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v9**, adding shared provider pacing and public AniDB/mapping cache.
+Latest schema: **v10**, adding declared release-verification evidence.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -165,3 +165,10 @@ expiry index, preserving existing job/event/identity/history rows. Fresh schema
 and runtime version guards now require v9. It runs no provider HTTP requests,
 imports no legacy metadata and persists no authentication tokens. A provider
 library never initializes or upgrades a database implicitly.
+
+
+010_release_verification.sql upgrades v9→v10 under explicit maintenance, adding
+release_verifications and its identity-reference index. It preserves provider,
+job, event, identity and history rows. The runner supports all starting versions
+v1–v10; runtime initialization/version guards use v10. Historical scripts 001–009
+remain immutable. No migration, SQL or database upgrade was executed in development.

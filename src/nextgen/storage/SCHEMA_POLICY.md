@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **9**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **10**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -30,8 +30,9 @@ Latest fresh SQLite version: **9**. The version stored in `PRAGMA user_version` 
 | 7 | `007_worker_component.sql` | Add canonical worker attribution; preserve historical coordinator rows |
 | 8 | `008_handler_history.sql` | Record individual handler invocations within existing jobs |
 | 9 | `009_provider_cache.sql` | Shared provider pacing and bounded public AniDB/mapping cache |
+| 10 | `010_release_verification.sql` | Bound declared single-episode verification to its job and identity snapshot |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -45,7 +46,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v9 or accepts an existing v9 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v10 or accepts an existing v10 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -234,3 +235,22 @@ TVDB data/token caching is process-local and authorization-scoped.
 Runtime helpers never create tables or migrate. Provider requests run outside
 short reservation/cache transactions while the job retains maintenance admission.
 Old numbered scripts 001–008 remain immutable. See ../providers/README.md.
+
+
+## Declared release verification (v10)
+
+release_verifications binds one immutable verification row to a unique job_id,
+identity_result_id and AniDB anime/episode ownership. verification_id is the
+primary key; idx_release_identity indexes the identity snapshot reference.
+Composite foreign keys enforce that the identity result and AniDB episode belong
+to the recorded anime. The helper also verifies the job's incoming event,
+unchanged source bytes/hash, canonical TVDB identity and source snapshot before
+inserting within the fenced worker transaction.
+
+All columns are nonnullable. The row stores release_sha256 (64 lowercase hex),
+positive AniDB episode number/ID and TVDB series/episode record IDs, a nonnegative
+TVDB season, a positive TVDB episode number and nonnegative verified_at_ms.
+tvdb_order defaults to and is constrained to official. verification_scope is
+constrained to DECLARED_SINGLE_EPISODE. This is declared-release identity evidence,
+not a verified file manifest, trial eligibility or acquisition permission.
+The existing AnimeSeries snapshot is preserved and no job/state redesign occurs.

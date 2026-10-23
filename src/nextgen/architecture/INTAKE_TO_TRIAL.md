@@ -233,3 +233,15 @@ Reviewed at repository commit `6051cedddd5a09de0cb3150565288205d5a92aee`:
 These include conservative/reference helpers; this review does not assert that
 all were registered in the legacy live daemon. Reuse validated behavior and
 focused libraries where suitable, not its daemon architecture or SQL tables.
+
+
+## Implementation refinement: declared episode verification
+
+verify_release_job.py now implements the bounded DECLARED_SINGLE_EPISODE identity
+portion of VERIFY_RELEASE. It preserves the original series snapshot and records
+separate declared-episode facts. It does not prove torrent/file contents or apply
+the legacy hardcoded six-episode window. Batch/multi-episode/ambiguous declarations
+need further evidence and go to review. Trial eligibility and exact resource
+claims must be implemented before any acquisition handoff; the installed verifier
+therefore completes without an acquisition successor. The identity-worker
+composition routes successful identification to this installed verifier.

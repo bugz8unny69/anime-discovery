@@ -72,10 +72,11 @@ class ProviderStorageTests(unittest.TestCase):
             db.commit()
             before = db.execute("SELECT * FROM incoming_events").fetchall()
             db.executescript((SQL_DIR/"009_provider_cache.sql").read_text())
+            db.executescript((SQL_DIR/"010_release_verification.sql").read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute("SELECT * FROM incoming_events").fetchall(),before)
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],9)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],10)
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(),[])
         finally:
             db.close()

@@ -157,7 +157,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
     async def test_composed_worker_finishes_with_current_settings_and_no_network_at_startup(self):
         self.secrets.initialize("private-key")
         seen = []
-        def factory(options,credentials):
+        def factory(options,credentials,**kwargs):
             async def resolve(request,configuration,cancelled):
                 seen.append((options(configuration).client_version,credentials().api_key))
                 return {"schema_version":2,"anime":{"anidb_id":123,"tvdb_series_id":456,"title":"Test Anime"}}
@@ -202,3 +202,28 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         await resolver(request,for_operation(current,startup,component="worker"),threading.Event())
         self.assertEqual(seen,[(1,"old-private-key"),(2,"new-private-key")])
         self.assertEqual([item.client_version for item in constructed],[1,2])
+
+
+    async def test_default_composition_advances_identity_to_release_only(self):
+        from src.nextgen.release_contracts import VerifiedRelease
+        self.secrets.initialize("private-key")
+        def identity_factory(*args,**kwargs):
+            async def resolve(source,*rest):
+                return {"schema_version":2,"anime":{"anidb_id":123,"tvdb_series_id":456,"title":"Test Anime"}}
+            return resolve
+        def release_factory(*args,**kwargs):
+            async def verify(source,*rest): return VerifiedRelease(source,1,987,0,1,100)
+            return verify
+        with patch("src.nextgen.providers.configuration.make_resolver",side_effect=identity_factory), \
+             patch("src.nextgen.providers.configuration.make_verifier",side_effect=release_factory):
+            worker=await build_identity_worker(self.root)
+        self.addAsyncCleanup(worker.close)
+        await worker.attempt()
+        await worker.attempt()
+        db=connect(self.database)
+        try:
+            self.assertEqual(db.execute('SELECT kind,state,event_id,created_by_job_id FROM jobs ORDER BY job_id').fetchall(),
+                             [('IDENTIFY_ANIME','DONE',self.event,None),('VERIFY_RELEASE','DONE',self.event,self.job)])
+            self.assertEqual(db.execute('SELECT verification_scope FROM release_verifications').fetchall(),[('DECLARED_SINGLE_EPISODE',)])
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0],2)
+        finally:db.close()

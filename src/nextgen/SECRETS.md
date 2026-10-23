@@ -18,7 +18,7 @@ Configuration v4 adds these next-operation fields:
 Blank client name supports initial setup but cannot pass identity-worker
 readiness. Explicit v3→v4 conversion adds defaults and increments revision;
 historical v0→v1→v2→v3 outputs retain their original key/default shapes. No
-SQLite change is needed (database remains v9; AnimeSeries remains v2).
+SQLite change is needed (database is now v10; AnimeSeries remains v2).
 
 ## Private credential repository
 
@@ -85,3 +85,9 @@ the service account with their own authentication/authorization.
 
 Offline cases are authored but unexecuted under project policy. No application
 imports/execution, SQL, CI/tests, live provider calls or deployment occurred.
+
+
+The composed identity worker now also installs VERIFY_RELEASE and shares a
+ClientPool across both handlers. Its successful declared-episode verification
+stops before trial policy/resource claims or acquisition. Additional trusted
+registrations remain explicit; no directory scan or payload routing is added.

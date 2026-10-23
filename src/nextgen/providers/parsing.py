@@ -187,3 +187,29 @@ def episode_catalog(payload, aid):
         ids.add(eid)
         if len(episodes)>10000: raise ProviderInvalidResponse()
     return episodes
+
+
+def tvdb_episode_page(document, tid):
+    if type(document) is not dict: raise ProviderInvalidResponse()
+    data=document.get("data")
+    items=data.get("episodes") if type(data) is dict else data
+    if type(items) is not list or len(items)>1000: raise ProviderInvalidResponse()
+    links=document.get("links",{})
+    if type(links) is not dict: raise ProviderInvalidResponse()
+    next_page=links.get("next")
+    if next_page is not None and (type(next_page) is not str or len(next_page)>2048):
+        raise ProviderInvalidResponse()
+    records=[]
+    seen=set()
+    for item in items:
+        if type(item) is not dict or type(item.get("id")) is not int or item["id"]<=0:
+            raise ProviderInvalidResponse()
+        if type(item.get("seriesId")) is not int or item["seriesId"]!=tid: raise ProviderInvalidResponse()
+        if item["id"] in seen: raise ProviderInvalidResponse()
+        seen.add(item["id"])
+        season,number=item.get("seasonNumber"),item.get("number")
+        if season is None or number is None or number==0: continue  # Unassigned metadata is not evidence.
+        if type(season) is not int or season<0 or type(number) is not int or number<1:
+            raise ProviderInvalidResponse()
+        records.append((item["id"],season,number))
+    return tuple(records),bool(next_page)

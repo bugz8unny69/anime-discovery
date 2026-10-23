@@ -195,3 +195,11 @@ SECRET_STORAGE_UNAVAILABLE says "Provider credentials could not be accessed
 safely." and requests storage/permissions/format review. Both resolve through the
 shared translation-ready catalog. Credential publication results expose only
 presence/revision and durability; secret values never become diagnostic details.
+
+
+RELEASE_UNRESOLVED says "The release's episode coverage needs review." and asks
+for the declared episode and exact release-file evidence to be reviewed.
+RELEASE_CONFLICT says "Release episode information conflicts." and asks for the
+identifiers/mapping evidence to be checked. Both have static messages/actions and
+translation keys through the shared catalog. Neither a provider title nor raw
+release name/payload is placed in diagnostic history.

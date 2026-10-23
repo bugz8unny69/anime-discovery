@@ -137,3 +137,14 @@ Worker/resolver cases cover key rotation, stable in-flight credentials and fresh
 options for later attempts. The TVDB login case now asserts API-key-only JSON.
 All tests remain authored but **unexecuted**. No imports/execution of application
 code, SQL, tests/CI, live provider calls, production changes or deployment ran.
+
+
+Declared release verification: test_release_verification.py covers conservative
+single-episode parsing, offset/reverse/season-zero mapping, unresolved batch and
+split rules, provider pagination/duplicates/cancellation, durable worker facts,
+source-change rejection, stale leases and defer/review outcomes. HTTP provider
+cases add official-order episode-page cache scoping and never following next URLs.
+test_release_migration.py covers v9→v10 preservation, fresh equivalence, scope/
+foreign-key/unique constraints and failed/wrong-version rollback. The sequential
+runner covers every v1–v10 starting point. All tests are **authored but unexecuted**;
+no tests/CI, application imports, SQL, live providers or media operations ran.
