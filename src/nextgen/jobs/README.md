@@ -92,3 +92,9 @@ EVALUATE_TRIAL records immutable plan/evaluation facts and readable decisions;
 see ../TRIAL_POLICY.md. It never schedules acquisition. Configuration is v5,
 SQLite v11 and AnimeSeries v2. Trial targets remain intents until later exact
 resource/provider inventory and publishing prerequisites are implemented.
+
+## Exact episode gate
+
+The default composition now follows selection with RESERVE_EPISODE /
+reserve_episode_job.py. See RESERVE_EPISODE.md for scope, hold/review behavior and
+the durable reservation lifetime. No external acquisition successor is installed.

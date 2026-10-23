@@ -7,6 +7,7 @@ from src.nextgen.job_contracts import Policy, Registry
 from src.nextgen.jobs.identify_anime_job import registration
 from src.nextgen.jobs.verify_release_job import KIND as RELEASE_KIND, registration as release_registration
 from src.nextgen.jobs.evaluate_trial_job import KIND as TRIAL_KIND, registration as trial_registration
+from src.nextgen.jobs.reserve_episode_job import KIND as RESERVE_KIND, registration as reserve_registration
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
 from src.nextgen.providers.identity import ClientPool, make_resolver
@@ -46,7 +47,7 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
-                         release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(),*additional_registrations))
+                         release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
 

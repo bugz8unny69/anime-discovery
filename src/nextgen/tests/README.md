@@ -161,3 +161,11 @@ CI, application imports, SQL, live providers, acquisition/media or deployment ra
 Episode-selection regression cases reject 0/0 during conversion, snapshot
 construction and settings updates, preserve saved settings on failure, and allow
 6/0 and 0/1. Tests remain unexecuted under project policy.
+
+Episode reservation offline cases cover atomic handoff, selected and skipped
+gates, same-episode competition, independent episodes, identity conflict,
+wrong-event references, changed source, stale lease and post-insert rollback.
+Migration cases extend fresh equivalence through SQLite v12 and check slot
+uniqueness metadata, preservation and failed/wrong-version rollback. Existing
+sequential migration-runner coverage includes all v1–v12 starting points.
+Tests remain intentionally unexecuted under project policy.

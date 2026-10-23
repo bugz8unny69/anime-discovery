@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v11**, adding immutable trial-window intents and evaluations.
+Latest schema: **v12**, adding durable exact-episode reservations.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -178,3 +178,8 @@ remain immutable. No migration, SQL or database upgrade was executed in developm
 It adds trial_plans/trial_evaluations with constrained counts/decisions and a plan
 history index. Fresh schema, runtime guards and v1–v11 sequential cases accompany
 the migration. Earlier scripts 001–010 remain unchanged. No SQL was executed.
+
+Latest SQLite version: **12**. 012_episode_reservations.sql upgrades v11→v12
+with exact-episode gates. Use the existing explicit maintenance migration path;
+no runtime helper creates the table. Fresh DDL and versioned SQL are updated
+together. Published migrations 001–011 remain unchanged.

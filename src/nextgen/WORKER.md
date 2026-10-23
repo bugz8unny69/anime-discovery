@@ -177,3 +177,9 @@ Feature-owned completion adapters atomically freeze trial windows and decisions;
 the generic worker remains concerned only with execution, fencing and auditing.
 TRIAL_EVALUATED receipts are logged only after commit. No acquisition handler or
 resource lease is supplied by numeric selection policy. See TRIAL_POLICY.md.
+
+The default provider composition now includes RESERVE_EPISODE after evaluation.
+Its feature adapter reserves one exact verified episode inside the ordinary
+fenced completion transaction. Busy slots become held jobs; inconsistent
+evidence becomes review. It adds no whole-anime scheduling lock, external
+client call or acquisition successor. See jobs/RESERVE_EPISODE.md.

@@ -256,3 +256,13 @@ never slide on later arrivals. First committed evaluation fixes a season-scoped
 plan and configuration revision. See ../TRIAL_POLICY.md. This implements numeric
 selection intents only; exact resource claims, search/file evidence and acquisition
 are still required before downloads can be scheduled.
+
+## Exact-episode gate implementation refinement
+
+SQLite v12 adds a durable episode reservation after selection. The installed
+flow now ends at RESERVE_EPISODE, with outside-window evaluations skipped and
+selected received episodes reserved under lease-fenced completion. Different
+episodes remain independent. Existing reservations do not expire with worker
+leases or imply a downloaded/staged artifact. Source/file inventory, external
+operation intent, torrent ownership/reconciliation, backfill discovery and
+staging are the next separate work. See ../jobs/RESERVE_EPISODE.md.

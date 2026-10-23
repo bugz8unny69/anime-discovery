@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **11**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **12**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -32,8 +32,9 @@ Latest fresh SQLite version: **11**. The version stored in `PRAGMA user_version`
 | 9 | `009_provider_cache.sql` | Shared provider pacing and bounded public AniDB/mapping cache |
 | 10 | `010_release_verification.sql` | Bound declared single-episode verification to its job and identity snapshot |
 | 11 | `011_trial_windows.sql` | Immutable season-scoped trial windows and per-job selection decisions |
+| 12 | `012_episode_reservations.sql` | Durable exact-episode reservations bound to selected verification evidence |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`, `episode_reservations`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -47,7 +48,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v11 or accepts an existing v11 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v12 or accepts an existing v12 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -272,3 +273,12 @@ TRIAL_DISABLED with selected=0; other decisions reference a plan and have matchi
 selected/reason semantics. idx_trial_evaluations_plan supports plan history.
 Neither table grants an acquisition lease or proves file/provider availability.
 Backfill/following numbers are requested season positions, not invented episode IDs.
+
+## SQLite v12: exact episode reservation
+
+012_episode_reservations.sql adds episode_reservations. The table binds its
+unique owner job to evaluation, verification, plan and provider identities.
+Unique official TVDB season/episode, AniDB episode ID and TVDB episode ID prevent
+competing placement/ownership from silently creating a second slot. No row is
+external content ownership or proof of staging. There is no automatic TTL or
+release operation. See ../jobs/RESERVE_EPISODE.md. Historical 001–011 is immutable.

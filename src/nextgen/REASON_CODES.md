@@ -217,3 +217,9 @@ TRIAL_COUNTS_INVALID rejects two zero episode-selection counts during settings
 conversion/validation. Its public message asks for at least one positive count
 without requiring users to understand the internal word trial. TRIAL_DISABLED
 is retained for historical records only; new policy evaluations do not emit it.
+
+EPISODE_RESERVATION_GRANTED explains a durable exact-episode reservation;
+EPISODE_RESERVED holds competing work; EPISODE_RESERVATION_CONFLICT requires
+identity/selection review. All have static readable messages/actions and
+translation keys. EPISODE_RESERVATION_CREATED and EPISODE_RESERVATION_SKIPPED
+are durable job markers; a skipped gate carries TRIAL_OUTSIDE_WINDOW.

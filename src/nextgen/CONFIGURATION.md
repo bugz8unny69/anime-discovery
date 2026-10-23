@@ -67,7 +67,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v11 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v12 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -239,3 +239,6 @@ v4→v5 explicitly adds these fields and advances revision. Published older step
 keep their historical outputs. Fields use next_operation metadata: each new
 plan uses fresh settings, while an established plan retains its original anchor,
 counts and revision. See TRIAL_POLICY.md for examples and immutable-plan behavior.
+
+The exact-episode reservation foundation uses SQLite v12; these settings remain
+configuration v5. No new setting or secret is needed for the local episode gate.

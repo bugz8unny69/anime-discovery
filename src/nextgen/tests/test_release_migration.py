@@ -32,11 +32,12 @@ class ReleaseMigrationTests(unittest.TestCase):
         fresh=sqlite3.connect(':memory:')
         try:
             self.db.executescript((SQL_DIR/'011_trial_windows.sql').read_text())
+            self.db.executescript((SQL_DIR/'012_episode_reservations.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(self.db),_structure(fresh))
         finally:fresh.close()
         for table,rows in before.items():self.assertEqual(self.db.execute('SELECT * FROM '+table).fetchall(),rows)
-        self.assertEqual(self.db.execute('PRAGMA user_version').fetchone()[0],11)
+        self.assertEqual(self.db.execute('PRAGMA user_version').fetchone()[0],12)
         self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(),[])
 
     def insert(self,scope='DECLARED_SINGLE_EPISODE',eid=987):

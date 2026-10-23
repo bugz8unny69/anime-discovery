@@ -55,7 +55,8 @@ AniDB/TVDB episode IDs are manufactured from these ranges.
 
 ## Worker and durable decisions
 
-The composed worker now runs IDENTIFY_ANIME → VERIFY_RELEASE → EVALUATE_TRIAL.
+The composed worker now runs IDENTIFY_ANIME → VERIFY_RELEASE → EVALUATE_TRIAL →
+RESERVE_EPISODE.
 The release handler supplies an explicit verification-job reference; the new
 handler loads its committed declared-episode evidence for the same incoming
 event and checks source/canonical identity. created_by_job_id remains provenance,
@@ -71,7 +72,8 @@ static readable messages/actions and translation keys. The history marker is dur
 receipt is emitted only after commit and respects the configured logging level.
 
 A DONE evaluation means the policy decision is recorded. It does not mean the
-episode was acquired or staged. There is no acquisition successor. Selected
+episode was acquired or staged. The next job reserves only a selected verified episode; no external acquisition
+successor is installed. Selected
 backfill/following positions remain intents for later exact-resource/inventory,
 provider search, ownership and trial publishing work. The future dashboard can
 expose the settings through existing field metadata; no dashboard or management
@@ -83,7 +85,7 @@ Configuration v4→v5 explicitly adds the two defaults and advances revision onc
 Historical v0→v4 converter outputs keep their original shapes. SQLite v10→v11
 adds trial_plans and trial_evaluations with matching fresh schema, helpers,
 version guards and offline cases; numbered migrations 001–010 stay unchanged.
-AnimeSeries stays v2. This draft depends on unmerged PRs #110/#111.
+AnimeSeries stays v2. The prerequisite provider, release and selection PRs #110–#112 are merged.
 
 Offline tests cover corrected counting, zero/overlap/bounds, frozen plans,
 configuration changes, concurrency, source/lease safety, rollback and migration
@@ -91,3 +93,12 @@ preservation/fresh equivalence. Tests remain **unexecuted** under project policy
 Only source review, syntax-only AST and diff/DDL source checks were performed.
 No tests/CI, application imports/execution, SQL, live providers, download/media
 operations, permanent Keep, production changes or deployment occurred.
+
+## Episode reservation handoff
+
+The composed worker now queues RESERVE_EPISODE after each committed evaluation.
+The gate reads the durable decision: outside-window work records a readable
+skip without reserving; selected verified received episodes can obtain an exact
+slot. Backfill/future positions still need provider-backed release evidence.
+See jobs/RESERVE_EPISODE.md. This refines the earlier no-successor description;
+there is still no external acquisition route. SQLite is now v12.

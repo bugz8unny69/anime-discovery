@@ -204,7 +204,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.client_version for item in constructed],[1,2])
 
 
-    async def test_default_composition_advances_identity_to_release_only(self):
+    async def test_default_composition_advances_to_reserved_episode_without_external_acquisition(self):
         from src.nextgen.release_contracts import VerifiedRelease
         self.secrets.initialize("private-key")
         def identity_factory(*args,**kwargs):
@@ -226,4 +226,12 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
                              [('IDENTIFY_ANIME','DONE',self.event,None),('VERIFY_RELEASE','DONE',self.event,self.job),('EVALUATE_TRIAL','PENDING',self.event,self.job+1)])
             self.assertEqual(db.execute('SELECT verification_scope FROM release_verifications').fetchall(),[('DECLARED_SINGLE_EPISODE',)])
             self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0],3)
+        finally:db.close()
+        await worker.attempt()
+        await worker.attempt()
+        db=connect(self.database)
+        try:
+            self.assertEqual(db.execute('SELECT kind,state FROM jobs ORDER BY job_id').fetchall(),
+                             [('IDENTIFY_ANIME','DONE'),('VERIFY_RELEASE','DONE'),('EVALUATE_TRIAL','DONE'),('RESERVE_EPISODE','DONE')])
+            self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
         finally:db.close()
