@@ -1,0 +1,41 @@
+"""Inspect hash-bound source files and persist an intent; no torrent submission."""
+import inspect
+
+from src.nextgen.acquisition.contracts import AcquisitionProposal
+from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing, parse_metainfo
+from src.nextgen.handlers import HandlerDefinition
+from src.nextgen.history import integer
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.providers.errors import ProviderDeferred, ProviderUnavailable
+from src.nextgen.storage.acquisition import load_acquisition_input, persist_acquisition, validate_declaration
+from src.nextgen.worker import blocking
+
+KIND='PREPARE_ACQUISITION'
+DEFINITION=HandlerDefinition(KIND,'Inspect source files and prepare acquisition')
+
+
+def _persist(db,claim,value):
+    try:return (persist_acquisition(db,claim,value),)
+    except (AcquisitionConflict,MetadataInvalid,SourceMissing) as exc:
+        raise CompletionRejected(Outcome('review',exc.reason_code)) from None
+
+
+def registration(read_metainfo):
+    # Trusted service callback, never selected by a webhook/job payload.
+    if not inspect.iscoroutinefunction(read_metainfo):raise ValueError('async metadata reader required')
+    async def execute(context):
+        payload=context.data()
+        try:
+            if set(payload)!={'evaluation_job_id'} or context.claim.event_id is None:raise ValueError()
+            job=integer(payload['evaluation_job_id'],positive=True)
+        except (ValueError,TypeError):return Outcome('review','JOB_PAYLOAD_INVALID')
+        try:
+            source=await blocking(load_acquisition_input,context.configuration.value('storage.database_path'),job,context.claim.event_id)
+            raw=await read_metainfo(source,context.configuration,context.cancelled)
+            manifest=await blocking(parse_metainfo,raw,source.info_hash)
+            validate_declaration(source,manifest)
+        except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
+        except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
+        except (AcquisitionConflict,MetadataInvalid,SourceMissing) as exc:return Outcome('review',exc.reason_code)
+        return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision))
+    return Registration(KIND,DEFINITION,execute,persist=_persist)

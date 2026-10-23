@@ -16,10 +16,11 @@ class TrialMigrationTests(unittest.TestCase):
             before=db.execute('SELECT * FROM incoming_events').fetchall()
             db.executescript((SQL_DIR/'011_trial_windows.sql').read_text())
             db.executescript((SQL_DIR/'012_episode_reservations.sql').read_text())
+            db.executescript((SQL_DIR/'013_acquisition_plans.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],12)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],13)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:
             db.close()

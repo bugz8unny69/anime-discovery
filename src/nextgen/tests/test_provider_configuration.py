@@ -235,3 +235,14 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
                              [('IDENTIFY_ANIME','DONE'),('VERIFY_RELEASE','DONE'),('EVALUATE_TRIAL','DONE'),('RESERVE_EPISODE','DONE')])
             self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
         finally:db.close()
+
+    async def test_metadata_preparation_is_installed_only_with_trusted_reader(self):
+        self.secrets.initialize('private-key')
+        worker=await build_identity_worker(self.root)
+        self.addAsyncCleanup(worker.close)
+        self.assertNotIn('PREPARE_ACQUISITION',worker.registry.entries)
+        async def reader(*args):raise AssertionError('startup must not read metadata')
+        composed=await build_identity_worker(self.root,read_metainfo=reader)
+        self.addAsyncCleanup(composed.close)
+        self.assertIn('PREPARE_ACQUISITION',composed.registry.entries)
+        self.assertEqual(composed.registry.entries['RESERVE_EPISODE'].successor_kinds,('PREPARE_ACQUISITION',))

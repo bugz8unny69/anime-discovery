@@ -223,3 +223,10 @@ EPISODE_RESERVED holds competing work; EPISODE_RESERVATION_CONFLICT requires
 identity/selection review. All have static readable messages/actions and
 translation keys. EPISODE_RESERVATION_CREATED and EPISODE_RESERVATION_SKIPPED
 are durable job markers; a skipped gate carries TRIAL_OUTSIDE_WINDOW.
+
+ACQUISITION_SOURCE_MISSING requires a normalized supported source identity;
+ACQUISITION_METADATA_INVALID requires file-list/declaration review;
+ACQUISITION_PLAN_CONFLICT protects immutable reservation/source/plan facts;
+ACQUISITION_PLAN_READY describes preparation only. Each has a readable message,
+action and translation key. ACQUISITION_PREPARED is a durable after-commit
+logged job marker; neither file names nor tracker data are diagnostic details.

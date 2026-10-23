@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v12**, adding durable exact-episode reservations.
+Latest schema: **v13**, adding hash-bound acquisition preparation plans.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -179,7 +179,12 @@ It adds trial_plans/trial_evaluations with constrained counts/decisions and a pl
 history index. Fresh schema, runtime guards and v1–v11 sequential cases accompany
 the migration. Earlier scripts 001–010 remain unchanged. No SQL was executed.
 
-Latest SQLite version: **12**. 012_episode_reservations.sql upgrades v11→v12
+SQLite v12 follow-up. 012_episode_reservations.sql upgrades v11→v12
 with exact-episode gates. Use the existing explicit maintenance migration path;
 no runtime helper creates the table. Fresh DDL and versioned SQL are updated
 together. Published migrations 001–011 remain unchanged.
+
+013_acquisition_plans.sql upgrades v12→v13 under explicit maintenance, binding
+one preparation job/reservation/content hash to inventory and a unique marker.
+Only PREPARED state is supported. Fresh schema and sequential upgrade coverage
+extend through v13. Historical scripts 001–012 remain unchanged.

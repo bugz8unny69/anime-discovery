@@ -15,10 +15,11 @@ class EpisodeReservationMigrationTests(unittest.TestCase):
             db.commit()
             before=db.execute('SELECT * FROM incoming_events').fetchall()
             db.executescript((SQL_DIR/'012_episode_reservations.sql').read_text())
+            db.executescript((SQL_DIR/'013_acquisition_plans.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],12)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],13)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
             indexes=db.execute("PRAGMA index_list('episode_reservations')").fetchall()
             unique=[tuple(r[2] for r in db.execute('PRAGMA index_info('+row[1]+')')) for row in indexes if row[2]]

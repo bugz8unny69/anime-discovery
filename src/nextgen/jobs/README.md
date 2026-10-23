@@ -98,3 +98,10 @@ resource/provider inventory and publishing prerequisites are implemented.
 The default composition now follows selection with RESERVE_EPISODE /
 reserve_episode_job.py. See RESERVE_EPISODE.md for scope, hold/review behavior and
 the durable reservation lifetime. No external acquisition successor is installed.
+
+## Source inventory preparation
+
+PREPARE_ACQUISITION / prepare_acquisition_job.py records hash-bound single-video
+metadata and a stable submission marker after a reservation. It is composed only
+when the application supplies a trusted async metadata reader. No reader/client
+transport or external submission is installed by default. See PREPARE_ACQUISITION.md.

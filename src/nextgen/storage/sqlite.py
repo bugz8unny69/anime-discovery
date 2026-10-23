@@ -209,6 +209,19 @@ CREATE TABLE IF NOT EXISTS episode_reservations (
  UNIQUE(tvdb_series_id,tvdb_season,tvdb_episode,tvdb_order)
 );
 
+CREATE TABLE IF NOT EXISTS acquisition_plans (
+ plan_id INTEGER PRIMARY KEY,
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ reservation_id INTEGER NOT NULL UNIQUE REFERENCES episode_reservations(reservation_id),
+ info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 1048576),
+ submission_marker TEXT NOT NULL UNIQUE CHECK(length(submission_marker)=32 AND submission_marker NOT GLOB '*[^a-f0-9]*'),
+ state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state='PREPARED'),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0)
+);
+
 """
 
 def connect(path):
@@ -248,13 +261,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v12; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v13; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11 databases require explicit versioned SQL migrations
-    before accessing v12 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12 databases require explicit versioned SQL migrations
+    before accessing v13 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 12:
+    if version == 13:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -264,7 +277,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=12;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=13;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

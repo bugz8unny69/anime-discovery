@@ -266,3 +266,13 @@ episodes remain independent. Existing reservations do not expire with worker
 leases or imply a downloaded/staged artifact. Source/file inventory, external
 operation intent, torrent ownership/reconciliation, backfill discovery and
 staging are the next separate work. See ../jobs/RESERVE_EPISODE.md.
+
+## Source inventory preparation refinement
+
+An explicitly supplied trusted metadata reader can extend reservation with
+PREPARE_ACQUISITION. SQLite v13 records an exact-hash single-video inventory and
+a stable submission marker in PREPARED state. The default composition ends at
+reservation until that library is supplied. Inventory is metadata, not verified
+media or external ownership. Download-size policy, client settings/secrets,
+durable submission/uncertainty states and authoritative reconciliation remain
+prerequisites for a torrent submission route. See ../jobs/PREPARE_ACQUISITION.md.

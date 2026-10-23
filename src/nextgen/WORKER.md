@@ -183,3 +183,9 @@ Its feature adapter reserves one exact verified episode inside the ordinary
 fenced completion transaction. Busy slots become held jobs; inconsistent
 evidence becomes review. It adds no whole-anime scheduling lock, external
 client call or acquisition successor. See jobs/RESERVE_EPISODE.md.
+
+Optional trusted read_metainfo composition installs PREPARE_ACQUISITION after
+selected reservations. It performs metadata reads outside write transactions
+and publishes an immutable PREPARED inventory/marker through the worker's
+ordinary fenced completion adapter. No dynamic hooks or external torrent
+submission/reconciliation transport are added. See jobs/PREPARE_ACQUISITION.md.

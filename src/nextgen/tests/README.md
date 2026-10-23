@@ -169,3 +169,11 @@ Migration cases extend fresh equivalence through SQLite v12 and check slot
 uniqueness metadata, preservation and failed/wrong-version rollback. Existing
 sequential migration-runner coverage includes all v1–v12 starting points.
 Tests remain intentionally unexecuted under project policy.
+
+Acquisition preparation cases cover exact encoded info hashes, canonical
+bencoding, path/bounds/pieces/pack/alias rejection, declaration alignment,
+missing source before reads, durable markers, racing preparation, changed
+evidence, expired leases, rollback and optional trusted composition. SQLite
+v13 cases cover preservation/fresh equivalence/unique markers/rollback; the
+existing sequential runner covers every supported starting version.
+All tests remain intentionally unexecuted under project policy.

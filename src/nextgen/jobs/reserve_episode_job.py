@@ -2,7 +2,7 @@
 from src.nextgen.episode_reservations import ReservationConflict, EpisodeReserved
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.episode_reservations import load_reservation_input, persist_reservation
 from src.nextgen.worker import blocking
 
@@ -16,7 +16,10 @@ def _persist(db,claim,value):
     except ReservationConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration():
+def registration(*, preparation_kind=None):
+    if preparation_kind is not None and (type(preparation_kind) is not str or not preparation_kind.strip()
+                                        or len(preparation_kind)>64 or preparation_kind==KIND):
+        raise ValueError('invalid acquisition preparation successor')
     async def execute(context):
         payload=context.data()
         try:
@@ -27,4 +30,8 @@ def registration():
             value=await blocking(load_reservation_input,context.configuration.value('storage.database_path'),job,context.claim.event_id)
         except ReservationConflict:return Outcome('review','EPISODE_RESERVATION_CONFLICT')
         return Outcome(value=value)
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if preparation_kind is None or not value.selected else (
+            Successor.create(preparation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if preparation_kind is None else (preparation_kind,))

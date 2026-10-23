@@ -75,3 +75,10 @@ Offline cases include competing releases, independent episodes, season zero in
 default composition, outside-window decisions, identity conflicts, wrong-event
 payloads, source changes, stale leases, completion rollback and migration
 preservation/constraints/fresh equivalence/rollback. Tests remain unexecuted.
+
+## Preparation follow-up
+
+When a trusted metadata-reading library is supplied at composition, selected
+reservations now enqueue PREPARE_ACQUISITION atomically. Outside-window skips do
+not. Without that dependency, reservation still ends the installed pipeline.
+See PREPARE_ACQUISITION.md for the PREPARED-only durable inventory boundary.
