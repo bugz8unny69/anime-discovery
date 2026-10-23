@@ -31,6 +31,7 @@ _EVENTS = (
     EventDefinition("DEFERRED", "job", "Work is waiting for a later check.", True),
     EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
     EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
+    EventDefinition("TRIAL_EVALUATED", "job", "Trial episode selection evaluated.", True),
     EventDefinition("DONE", "job", "Job completed."),
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),

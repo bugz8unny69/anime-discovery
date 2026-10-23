@@ -50,13 +50,14 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=4, a positive revision, and a settings object
+Canonical JSON has schema_version=5, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 4,
+      "schema_version": 5,
       "revision": 1,
       "settings": {
+        "trial": {"backfill_count": 6, "following_count": 1},
         "anidb": {"client_name": "", "client_version": 1},
         "providers": {"timeout_seconds": 30},
         "logging": {"level": "INFO", "components": {}},
@@ -66,7 +67,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v10 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v11 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -224,3 +225,17 @@ startup and before claims. Each attempt captures fresh settings/credentials;
 existing work retains its snapshot. API host/port, worker concurrency and database
 location remain restart-required. Startup validation makes no provider requests.
 See SECRETS.md for private credential publication, status and service entry points.
+
+
+## Trial windows (configuration v5)
+
+trial.backfill_count defaults to 6; trial.following_count defaults to 1 and
+includes the triggering episode. Both accept 0–1000, with zero disabling that
+window provided the other count is positive. Both zero raises
+TRIAL_COUNTS_INVALID during validation/conversion and is never saved. Their union is deduplicated; there is no combined maximum. Labels/help
+make the inclusive following count explicit for the future dashboard.
+
+v4→v5 explicitly adds these fields and advances revision. Published older steps
+keep their historical outputs. Fields use next_operation metadata: each new
+plan uses fresh settings, while an established plan retains its original anchor,
+counts and revision. See TRIAL_POLICY.md for examples and immutable-plan behavior.

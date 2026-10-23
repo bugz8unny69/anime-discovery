@@ -170,3 +170,10 @@ or credential-storage errors discovered later in a handler remain infrastructure
 errors; the worker stops/drains and preserves the lease for recovery instead of
 inventing a provider retry. The generic Worker remains usable for other trusted
 job registries; no HTTP management transport or supervisor is added here.
+
+
+The concrete composition also registers EVALUATE_TRIAL after VERIFY_RELEASE.
+Feature-owned completion adapters atomically freeze trial windows and decisions;
+the generic worker remains concerned only with execution, fencing and auditing.
+TRIAL_EVALUATED receipts are logged only after commit. No acquisition handler or
+resource lease is supplied by numeric selection policy. See TRIAL_POLICY.md.

@@ -85,3 +85,10 @@ receipts, unsafe payloads, invalid results, provider wait/retry, existing/confli
 identities, episode ownership, lease fencing, incoming leases and caller rollback.
 All tests are authored but **unexecuted** under project policy. No CI, application
 imports/execution, SQL execution, live provider calls, deployment or media changes.
+
+
+Trial evaluation now follows release verification in the composed worker.
+EVALUATE_TRIAL records immutable plan/evaluation facts and readable decisions;
+see ../TRIAL_POLICY.md. It never schedules acquisition. Configuration is v5,
+SQLite v11 and AnimeSeries v2. Trial targets remain intents until later exact
+resource/provider inventory and publishing prerequisites are implemented.

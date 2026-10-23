@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **10**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **11**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -31,8 +31,9 @@ Latest fresh SQLite version: **10**. The version stored in `PRAGMA user_version`
 | 8 | `008_handler_history.sql` | Record individual handler invocations within existing jobs |
 | 9 | `009_provider_cache.sql` | Shared provider pacing and bounded public AniDB/mapping cache |
 | 10 | `010_release_verification.sql` | Bound declared single-episode verification to its job and identity snapshot |
+| 11 | `011_trial_windows.sql` | Immutable season-scoped trial windows and per-job selection decisions |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -46,7 +47,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v10 or accepts an existing v10 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v11 or accepts an existing v11 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -254,3 +255,20 @@ tvdb_order defaults to and is constrained to official. verification_scope is
 constrained to DECLARED_SINGLE_EPISODE. This is declared-release identity evidence,
 not a verified file manifest, trial eligibility or acquisition permission.
 The existing AnimeSeries snapshot is preserved and no job/state redesign occurs.
+
+
+## Trial selection intents (v11)
+
+trial_plans has one immutable plan per AniDB anime, TVDB series, verified official
+season/order. Required fields bind its anchor verification/episode, bounded
+backfill/following counts (0–1000 with at least one nonzero), configuration revision
+and creation time. Anchors/count arithmetic is checked against signed-integer
+bounds. Helpers cross-check the anchor and current verification source identities.
+The unique scope makes first committed plan creation safe under concurrency.
+
+trial_evaluations records one decision per job, with source verification, selected
+boolean, readable allowlisted reason and timestamp. plan_id is nullable only for
+TRIAL_DISABLED with selected=0; other decisions reference a plan and have matching
+selected/reason semantics. idx_trial_evaluations_plan supports plan history.
+Neither table grants an acquisition lease or proves file/provider availability.
+Backfill/following numbers are requested season positions, not invented episode IDs.
