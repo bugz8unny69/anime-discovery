@@ -78,7 +78,7 @@ class IdentityProviderTests(unittest.TestCase):
         self.assertEqual(len(self.calls),2)
 
     def test_tvdb_login_defers_get_then_reuses_token_and_series_cache(self):
-        secret = Credentials("private-api-key","private-pin")
+        secret = Credentials("private-api-key")
         self.responses.append(Response(b'{"data":{"token":"private-bearer"}}'))
         with self.assertRaises(ProviderDeferred): self.client.series(456,secret)
         self.now += 1000
@@ -88,6 +88,7 @@ class IdentityProviderTests(unittest.TestCase):
         self.assertEqual(self.client.series(456,secret),value)
         self.assertEqual(len(self.calls),2)
         self.assertEqual(self.calls[1].get_header("Authorization"),"Bearer private-bearer")
+        self.assertEqual(json.loads(self.calls[0].data),{"apikey":"private-api-key"})
         self.assertNotIn("private",repr(secret))
         db = sqlite3.connect(self.path)
         try:

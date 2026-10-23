@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 3
+CONFIGURATION_VERSION = 4
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -62,6 +62,12 @@ class FieldDefinition:
 # Register new fields with their actual component; do not expose speculative
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
+    "anidb.client_name": FieldDefinition("", "client_name", "next_operation",
+        label="AniDB client name", help_text="Registered AniDB HTTP client name. Required before identity work can start."),
+    "anidb.client_version": FieldDefinition(1, "integer", "next_operation", minimum=1, maximum=999999,
+        label="AniDB client version", help_text="Version registered for the AniDB HTTP client."),
+    "providers.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
+        label="Provider request timeout", help_text="Maximum time in seconds for one provider request."),
     "logging.level": FieldDefinition("INFO", "level", "next_operation"),
     "logging.components": FieldDefinition(MappingProxyType({}), "levels", "next_operation"),
     "api.host": FieldDefinition("127.0.0.1", "host", "restart", ("api",)),
@@ -136,6 +142,9 @@ def validate_values(value):
             spec = FIELDS[section + "." + key]
             if spec.kind == "integer":
                 if type(item) is not int or not spec.minimum <= item <= spec.maximum:
+                    raise ConfigurationError()
+            elif spec.kind == "client_name":
+                if type(item) is not str or (item and not re.fullmatch(r"[A-Za-z0-9_-]{3,32}",item)):
                     raise ConfigurationError()
             elif spec.kind == "host":
                 if not _host(item):
@@ -303,7 +312,7 @@ def _v2_values(values):
     storage = values.get("storage", {})
     if type(storage) is not dict or set(storage) & {"trial_root", "keep_root"}:
         raise ConfigurationError()
-    historical = validate_values(values)
+    historical = _v3_values(values)
     del historical["storage"]["trial_root"]
     del historical["storage"]["keep_root"]
     return historical
@@ -318,12 +327,31 @@ def _v2_to_v3(document):
     if current_revision == MAX_REVISION:
         raise ConfigurationError()
     return {"schema_version": 3, "revision": current_revision + 1,
-            "settings": validate_values(_v2_values(document["settings"]))}
+            "settings": _v3_values(_v2_values(document["settings"]))}
+
+
+def _v3_values(values):
+    """Validate published v3 without adding or accepting v4 provider sections."""
+    if type(values) is not dict or set(values) & {"anidb", "providers"}:
+        raise ConfigurationError()
+    historical = validate_values(values)
+    del historical["anidb"]
+    del historical["providers"]
+    return historical
+
+
+def _v3_to_v4(document):
+    if (type(document) is not dict or set(document)!={"schema_version","revision","settings"}
+            or document["schema_version"]!=3):
+        raise ConfigurationError()
+    current = revision(document["revision"])
+    if current == MAX_REVISION: raise ConfigurationError()
+    return {"schema_version":4,"revision":current+1,"settings":validate_values(_v3_values(document["settings"]))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4})
 
 
 def convert_document(document):

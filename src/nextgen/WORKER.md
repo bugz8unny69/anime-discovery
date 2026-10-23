@@ -157,3 +157,16 @@ handler ending and successors. The worker then rechecks the same lease and recor
 that outcome in a new transaction without invoking persistence/routing again.
 It never converts storage or unexpected adapter exceptions into successful
 completion. See jobs/README.md for the first feature adapter and its limitations.
+
+
+## Identity-provider readiness composition
+
+providers.configuration.build_identity_worker/run_identity_worker compose the
+required AniDB-first resolver and protected SecretStore. They validate startup
+configuration locally, and install a synchronous readiness callback run in the
+control executor after each fresh operation snapshot but before claiming work.
+Readiness failure releases admission without changing queued jobs. Configuration
+or credential-storage errors discovered later in a handler remain infrastructure
+errors; the worker stops/drains and preserves the lease for recovery instead of
+inventing a provider retry. The generic Worker remains usable for other trusted
+job registries; no HTTP management transport or supervisor is added here.

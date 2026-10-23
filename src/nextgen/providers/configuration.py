@@ -1,0 +1,51 @@
+"""Required provider configuration and worker composition; no HTTP at startup."""
+from functools import partial
+
+from src.nextgen.configuration import ConfigurationStore
+from src.nextgen.configuration_schema import ConfigurationError
+from src.nextgen.job_contracts import Policy, Registry
+from src.nextgen.jobs.identify_anime_job import registration
+from src.nextgen.providers.errors import ProviderConfigurationError
+from src.nextgen.providers.http import Options
+from src.nextgen.providers.identity import make_resolver
+from src.nextgen.secrets import SecretStore
+from src.nextgen.worker import Worker, blocking, serve_worker
+
+
+def options_from_configuration(configuration):
+    try:
+        return Options(configuration.value("anidb.client_name"),
+                       configuration.value("anidb.client_version"),
+                       configuration.value("providers.timeout_seconds"))
+    except ConfigurationError:
+        raise ProviderConfigurationError() from None
+
+
+def validate_provider_configuration(configuration, *, secrets):
+    options_from_configuration(configuration)
+    secrets.tvdb_credentials()
+
+
+async def build_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
+                                policy=Policy(), logger=None):
+    """Validate required local settings, then return an unstarted worker.
+
+    Call close() if not serving it. Both providers are mandatory for this
+    composition. Generic Worker still supports unrelated explicitly installed
+    jobs without requiring identity-provider credentials.
+    """
+    store = ConfigurationStore(config_directory)
+    secrets = SecretStore(config_directory)
+    startup = await blocking(store.read)
+    prepare = partial(validate_provider_configuration,secrets=secrets)
+    await blocking(prepare,startup)  # Missing configuration fails before claims.
+    resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials)
+    registry = Registry((registration(resolve,release_kind=release_kind),*additional_registrations))
+    return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
+
+
+async def run_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
+                              policy=Policy()):
+    worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
+                                         release_kind=release_kind,policy=policy)
+    await serve_worker(worker)
