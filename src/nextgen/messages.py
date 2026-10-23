@@ -22,6 +22,7 @@ class EventDefinition:
 
 
 _EVENTS = (
+    EventDefinition("MANAGEMENT_ACTION_RESUMED", "job", "Cleanup was submitted again after review."),
     EventDefinition("API_SESSION_CREATED", "runtime", "A management browser session was created."),
     EventDefinition("API_SESSION_CLOSED", "runtime", "A management browser session was closed."),
     EventDefinition("API_CREDENTIALS_UPDATED", "runtime", "Private service credentials were updated."),

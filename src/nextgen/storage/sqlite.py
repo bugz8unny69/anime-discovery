@@ -316,6 +316,16 @@ CREATE TABLE IF NOT EXISTS staging_cleanup_artifacts (
  phase TEXT NOT NULL CHECK(phase IN ('TEMP','PUBLISH_UNCERTAIN','PUBLISHED','REMOVE_UNCERTAIN','REMOVED')),
  UNIQUE(root_path,relative_path)
 );
+CREATE TABLE IF NOT EXISTS management_actions (
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ action TEXT NOT NULL CHECK(action IN ('KEEP','CLEANUP')),
+ target_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ PRIMARY KEY(operation_id,action),
+ CHECK(target_job_id<>job_id)
+);
+
 """
 
 def connect(path):
@@ -355,13 +365,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v17; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v18; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16 databases require explicit versioned SQL migrations
-    before accessing v17 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17 databases require explicit versioned SQL migrations
+    before accessing v18 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 17:
+    if version == 18:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -371,7 +381,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=17;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=18;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

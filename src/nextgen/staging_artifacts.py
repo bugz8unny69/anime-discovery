@@ -48,9 +48,10 @@ def publication(db,claim,artifact_id,*,confirmed=False):
     if changed!=1:raise CancellationError()
 
 
-def clean_temporaries(queue,operation_id):
+def clean_temporaries(queue,operation_id,*,guard=None):
     """Caller holds exclusive OperationGate. Preserve published/uncertain media."""
     with queue.connection() as db,transaction(db):
+        if guard is not None:guard(db)
         rows=db.execute('SELECT artifact_id,root_path,relative_path,root_device,root_inode,file_device,file_inode,phase '
                         'FROM staging_cleanup_artifacts WHERE operation_id=? ORDER BY artifact_id',(operation_id,)).fetchall()
     for aid,root,name,rdev,rino,fdev,fino,phase in rows:
@@ -66,9 +67,12 @@ def clean_temporaries(queue,operation_id):
                 fingerprint(info)
                 if (info.st_dev,info.st_ino)!=(fdev,fino):raise CancellationError()
                 with queue.connection() as db,transaction(db):
+                    if guard is not None:guard(db)
                     db.execute("UPDATE staging_cleanup_artifacts SET phase='REMOVE_UNCERTAIN' WHERE artifact_id=?",(aid,))
                 fresh=os.stat(name,dir_fd=fd,follow_symlinks=False)
                 if fingerprint(fresh)!=fingerprint(info):raise CancellationError()
+                if guard is not None:guard()
                 os.unlink(name,dir_fd=fd);os.fsync(fd)
         with queue.connection() as db,transaction(db):
+            if guard is not None:guard(db)
             db.execute("UPDATE staging_cleanup_artifacts SET phase='REMOVED' WHERE artifact_id=?",(aid,))

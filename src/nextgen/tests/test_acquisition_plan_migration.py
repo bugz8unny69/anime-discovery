@@ -19,10 +19,11 @@ class AcquisitionPlanMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'015_torrent_submissions.sql').read_text())
             db.executescript((SQL_DIR/'016_torrent_transfers.sql').read_text())
             db.executescript((SQL_DIR/'017_cancellation.sql').read_text())
+            db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],17)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],18)
             indexes=db.execute("PRAGMA index_list('acquisition_plans')").fetchall()
             unique=[tuple(r[2] for r in db.execute('PRAGMA index_info('+row[1]+')')) for row in indexes if row[2]]
             for columns in (('job_id',),('reservation_id',),('info_hash',),('submission_marker',)):self.assertIn(columns,unique)

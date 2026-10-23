@@ -295,3 +295,16 @@ API_CSRF_REQUIRED, API_ORIGIN_INVALID, API_REQUEST_INVALID, API_WEBHOOK_INVALID,
 API_BODY_TOO_LARGE, API_MEDIA_TYPE_INVALID, API_ROUTE_NOT_FOUND, API_METHOD_INVALID,
 API_RATE_LIMITED and API_UNAVAILABLE. See api/README.md for HTTP mappings and
 credential separation. These reasons do not dictate Worker retry policy.
+
+### Durable management actions
+
+| Code | Human-readable message | Meaning |
+| --- | --- | --- |
+| MANAGEMENT_ACTION_UNAVAILABLE | This action is not available for this work. | Current target cannot accept the action |
+| MANAGEMENT_JOB_SUBMITTED | Job submitted. | Durable acknowledgement, not execution success |
+| MANAGEMENT_JOB_EXISTS | This action already has a job. | Follow the existing action receipt |
+| KEEP_NOT_READY | Keeping videos is not available yet. | Intent recorded; verified media promotion remains unimplemented |
+
+All include static suggested actions and translation keys through MessageCatalog.
+`MANAGEMENT_ACTION_RESUMED` is a registered readable job event for explicit
+cleanup resubmission after review. No arbitrary exception text is presented.

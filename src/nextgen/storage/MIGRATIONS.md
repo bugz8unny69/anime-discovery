@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v17**, adding cancellation scopes and recoverable cleanup.
+Latest schema: **v18**, adding durable management action submissions.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -213,3 +213,14 @@ backfilling each historical job as an independent cancellation scope. Trusted
 future successor handoffs share explicit scope membership. Fresh schema, runner
 and offline equivalence/preservation cases extend through v17; published SQL
 001–016 remains unchanged. See ../CANCELLATION.md. Tests remain unexecuted.
+
+
+## v18 durable management actions
+
+018_management_actions.sql upgrades v17→v18 with the management_actions table,
+foreign keys, action allowlist and unique target-operation/action and control-job
+constraints. Existing jobs, histories, cancellation scopes and journals are
+unchanged; no historical action associations are guessed. Fresh SCHEMA and the
+runner manifest match v18. Scripts 001–017 remain immutable. Offline preservation,
+fresh equivalence, guard, uniqueness and rollback cases are written but unrun.
+See [MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md).

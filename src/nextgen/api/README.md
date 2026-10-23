@@ -3,7 +3,8 @@
 The API is a separate ASGI process. Every application endpoint lives beneath
 `/api/v1/`; it never runs the jobs worker, provider lookup or acquisition pipeline
 inside an HTTP handler. Dashboard and ADM clients use the same management routes
-and authorization. No dashboard HTML, Keep action or supervisor is implemented.
+and authorization. No dashboard HTML or supervisor is implemented. Keep requests can be recorded,
+but actual media promotion remains blocked until its library is implemented.
 
 ## Routes
 
@@ -31,10 +32,12 @@ never returned by management reads.
 | PATCH /api/v1/credentials/qbittorrent | Management | Replace/clear username/password pair with expected_revision |
 | PATCH /api/v1/credentials/access | Management | Replace/clear distinct webhook_token/management_token with expected_revision |
 | GET /api/v1/jobs | Management | Bounded job list with readable status/reason and cancellation capabilities |
+| GET /api/v1/jobs/{id} | Management | Individual readable status and action availability |
 | GET /api/v1/jobs/{id}/history | Management | Bounded readable event/handler history and allowlisted details |
 | GET /api/v1/jobs/{id}/cancellation | Management | Cancellation and cleanup state/capabilities |
-| POST /api/v1/jobs/{id}/cancel | Management | Request cancellation and one bounded owned-cleanup pass |
-| POST /api/v1/jobs/{id}/cleanup | Management | Resume/reconcile the existing canceled operation's cleanup |
+| POST /api/v1/jobs/{id}/cancel | Management | Cancel idle work immediately, or atomically request cancellation and enqueue cleanup |
+| POST /api/v1/jobs/{id}/cleanup | Management | Submit/reuse cleanup control job; explicitly resume that job after review |
+| POST /api/v1/jobs/{id}/keep | Management | Record one Keep control job for a staged operation; media execution is not available yet |
 
 Job/history reads accept after_id (default 0) and limit (1–100, default 50), and
 return next_after_id. The list is ordered by increasing durable IDs. A callback
@@ -50,11 +53,22 @@ saved and durability_confirmed, never the supplied values. A saved-but-unconfirm
 publication is reported accurately, rather than as a misleading unsaved error.
 Clearing the management key closes management access until local bootstrap.
 
-Cancel and cleanup accept `{}`. They return 200 when recorded cleanup is complete,
-otherwise 202 with pending/review state. Cancellation is durable even if external
-cleanup needs attention; a timeout must not prompt a blind destructive replay.
-GET never runs cleanup. See [CANCELLATION.md](../CANCELLATION.md) for drain, sharing,
-file safety, historical scopes and retained episode-reservation evidence.
+Keep, cancel and cleanup accept only `{}`. No caller-supplied job kind, module,
+path or arbitrary payload is accepted. Bearer authorization and browser
+Origin/CSRF checks apply to all three. See
+[MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md) for the durable action contract,
+HTTP 202 receipt, polling, duplicate-click handling and explicit Keep limitation.
+HTTP handlers never call torrent/file cleanup. GET never starts work.
+
+A local cancellation with no running handlers and no recorded resources returns
+200 with completed=true and a readable notification. All queued action receipts
+return 202 only after commit, with job_id, status_url, history_url, current
+state/status, translation-ready notification and disable_action=true. Location
+contains status_url. The response acknowledges submission, not completion.
+A repeat returns the existing job, even if it has finished or needs attention;
+POST cleanup after review explicitly resumes that same cleanup job. Journal
+uncertainty never rearms a destructive command. See
+[CANCELLATION.md](../CANCELLATION.md) for file/drain protections.
 
 Configuration/credential revision conflicts return 409. Authentication failure
 returns 401; browser Origin/CSRF failures return 403; malformed/oversized input

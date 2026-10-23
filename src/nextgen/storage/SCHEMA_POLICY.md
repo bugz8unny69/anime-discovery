@@ -330,3 +330,13 @@ stop/remove and exact file fingerprints; staging receipts protect publication.
 Migration 017 preserves existing jobs/history and gives old jobs separate scopes,
 without guessing dependencies. Historical SQL 001–016 is unchanged.
 See [CANCELLATION.md](../CANCELLATION.md) for capabilities and recovery limits.
+
+## SQLite v18: durable management actions
+
+018 adds management_actions with a unique control job and a composite
+(operation_id, action) key for KEEP/CLEANUP. Foreign keys retain the target
+scope/job and control job; a self-target check rejects the identical job ID.
+Runtime helpers enforce distinct control/target scopes, matching kind and current
+eligibility. Cancellation plus conditional cleanup enqueue is atomic. No prior
+rows are rewritten; fresh schema and explicit runner use v18. Published SQL
+001–017 remains unchanged. See [MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md).

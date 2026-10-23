@@ -14,11 +14,12 @@ class CancellationMigrationTests(unittest.TestCase):
             db.execute("INSERT INTO jobs(job_id,created_by_job_id,kind,payload_json,available_at_ms,created_at_ms,updated_at_ms) VALUES(2,1,'TASK','{}',0,1,1)")
             db.commit();before=db.execute('SELECT * FROM jobs ORDER BY job_id').fetchall()
             db.executescript((SQL_DIR/'017_cancellation.sql').read_text())
+            db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM jobs ORDER BY job_id').fetchall(),before)
             self.assertEqual(db.execute('SELECT * FROM job_operation_members ORDER BY job_id').fetchall(),[(1,1),(2,2)])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],17)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],18)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 

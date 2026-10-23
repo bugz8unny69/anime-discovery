@@ -57,28 +57,33 @@ class CancellationStore:
             op=operation(db,job_id)
             members=db.execute('SELECT j.state FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=?',(op[0],)).fetchall()
             return {'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
-                    'can_cancel':op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0])),
+                    'can_cancel':not db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(job_id,)).fetchone() and op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0])),
                     'can_cleanup':op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE'}
     def request(self,job_id):
         integer(job_id,positive=True)
         with self.queue.connection() as db,transaction(db):
-            op=operation(db,job_id)
-            if op[1] in ('CANCEL_REQUESTED','CANCELED'):return op[0],()
-            members=db.execute('SELECT j.job_id,j.state,j.attempt_count FROM jobs j JOIN job_operation_members m USING(job_id) '
-                               'WHERE m.operation_id=?',(op[0],)).fetchall()
-            if op[1]!='ACTIVE' or not (any(r[1] in CANCELABLE for r in members) or unfinished_resources(db,op[0])):raise CancellationError()
-            now=self.queue.now();receipts=[]
-            db.execute("UPDATE job_operations SET state='CANCEL_REQUESTED',cleanup_state='PENDING',reason_code='CANCELLATION_DRAINING',"
-                       'updated_at_ms=? WHERE operation_id=?',(now,op[0]))
-            for job,state,attempt in members:
-                if state not in CANCELABLE:continue
-                receipts.append(append_job_history(db,job_id=job,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
-                    component='api',occurred_at_ms=now,details={'attempt':attempt}))
-                if state!='RUNNING':receipts.extend(cancel_job(db,job,now,'api'))
-            if not receipts:
-                receipts.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
-                    component='api',occurred_at_ms=now))
-            return op[0],tuple(receipts)
+            return self.request_in_transaction(db,job_id)
+    def request_in_transaction(self,db,job_id):
+        """Caller transaction allows cancellation + cleanup enqueue to be atomic."""
+        if not db.in_transaction:raise CancellationError()
+        if db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(job_id,)).fetchone():raise CancellationError()
+        op=operation(db,job_id)
+        if op[1] in ('CANCEL_REQUESTED','CANCELED'):return op[0],()
+        members=db.execute('SELECT j.job_id,j.state,j.attempt_count FROM jobs j JOIN job_operation_members m USING(job_id) '
+                           'WHERE m.operation_id=?',(op[0],)).fetchall()
+        if op[1]!='ACTIVE' or not (any(r[1] in CANCELABLE for r in members) or unfinished_resources(db,op[0])):raise CancellationError()
+        now=self.queue.now();receipts=[]
+        db.execute("UPDATE job_operations SET state='CANCEL_REQUESTED',cleanup_state='PENDING',reason_code='CANCELLATION_DRAINING',"
+                   'updated_at_ms=? WHERE operation_id=?',(now,op[0]))
+        for job,state,attempt in members:
+            if state not in CANCELABLE:continue
+            receipts.append(append_job_history(db,job_id=job,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
+                component='api',occurred_at_ms=now,details={'attempt':attempt}))
+            if state!='RUNNING':receipts.extend(cancel_job(db,job,now,'api'))
+        if not receipts:
+            receipts.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
+                component='api',occurred_at_ms=now))
+        return op[0],tuple(receipts)
     def acknowledge(self,claim):
         with self.queue.connection() as db,transaction(db):
             op=operation(db,claim.job_id)

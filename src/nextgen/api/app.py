@@ -13,14 +13,13 @@ from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, p
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
 from src.nextgen.cancellation import CancellationError
-from src.nextgen.cancellation_service import CancellationService
-from src.nextgen.diagnostics import configure_logging, event
+from src.nextgen.diagnostics import configure_logging, event, log_history
 from src.nextgen.history import encode_details
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceError, MaintenancePending, MaintenanceBusy
 from src.nextgen.messages import MessageCatalog
 from src.nextgen.secrets import SecretStore
-from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
+from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable, ActionNotFound
 from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import accept_event_and_job
 
@@ -88,14 +87,14 @@ def normalize_webhook(body):
 
 
 class Application:
-    def __init__(self,directory,*,origin=None,secrets=None,sessions=None,cancellation_factory=CancellationService):
+    def __init__(self,directory,*,origin=None,secrets=None,sessions=None):
         self.store=ConfigurationStore(directory);self.startup=self.store.read()
         self.secrets=SecretStore(directory) if secrets is None else secrets
         host=self.startup.value('api.host');port=self.startup.value('api.port')
         authority=('['+host+']' if ':' in host else host)+':'+str(port)
         self.origin=public_origin(origin or 'http://'+authority)
         self.authorities={urlsplit(self.origin).netloc,authority.lower()}
-        self.sessions=sessions or Sessions();self.cancellation_factory=cancellation_factory
+        self.sessions=sessions or Sessions()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
         self.logger=configure_logging(self.startup.logging_settings(),'api',logger=logging.Logger('nextgen.api.requests'))
@@ -183,6 +182,8 @@ class Application:
     def _dispatch(self,method,path,headers,query,body,peer):
         try:return self._route(method,path,headers,query,body,peer)
         except ApiError:raise
+        except ActionNotFound as exc:raise ApiError(404,exc.reason_code) from None
+        except ActionUnavailable as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationConflict as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationError as exc:raise ApiError(503,exc.reason_code) from None
         except (MaintenancePending,MaintenanceBusy,MaintenanceError) as exc:raise ApiError(503,exc.reason_code) from None
@@ -233,20 +234,40 @@ class Application:
         if 'token' in query:raise ApiError(400,'API_REQUEST_INVALID')
         desired=self.store.read();configuration=for_operation(desired,self.startup,component='api')
         configure_logging(configuration.logging_settings(),'api',logger=self.logger)
-        match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(cancel|cleanup|cancellation)',path)
-        if match:
-            if query:raise ApiError(400,'API_REQUEST_INVALID')
-            job=int(match[1]);action=match[2]
-            if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
-            service=self.cancellation_factory(configuration,self.secrets,logger=self.logger)
-            if action=='cancellation' and method=='GET':return 200,service.status(job),[]
-            if action in ('cancel','cleanup') and method=='POST':
-                exact(body,())
-                data=service.cancel(job) if action=='cancel' else service.cleanup(job)
-                return (200 if data['cleanup_state']=='COMPLETE' else 202),data,[]
-            raise ApiError(405,'API_METHOD_INVALID')
-        # CancellationService takes its own admission; never nest that gate.
+        # Authentication and CSRF above apply equally to all explicit actions.
+        # HTTP performs local admission only; network/filesystem cleanup is queued.
         with MaintenanceGate(configuration.value('storage.database_path')).operation():
+            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|cancel|cleanup|cancellation)',path)
+            if match:
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                job=int(match[1]);action=match[2]
+                if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                actions=ManagementActions(configuration.value('storage.database_path'))
+                if action=='cancellation' and method=='GET':
+                    with actions.queue.connection() as db:
+                        db.execute('BEGIN')
+                        row=db.execute('SELECT job_id,event_id,created_by_job_id,kind,state,activity_code,attempt_count,last_reason_code FROM jobs WHERE job_id=?',(job,)).fetchone()
+                        if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                        data=self._job(actions.queue,db,row)
+                        return 200,{**data['cancellation'],'actions':data['actions']},[]
+                if action in ('keep','cancel','cleanup') and method=='POST':
+                    exact(body,())
+                    status,data,records=actions.submit(job,action)
+                    for record in records:log_history(self.logger,record)
+                    return status,data,([] if 'status_url' not in data else [(b'location',data['status_url'].encode())])
+                raise ApiError(405,'API_METHOD_INVALID')
+            single=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})',path)
+            if single:
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                job=int(single[1])
+                if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                queue=JobQueue(configuration.value('storage.database_path'))
+                with queue.connection() as db:
+                    db.execute('BEGIN')
+                    row=db.execute('SELECT job_id,event_id,created_by_job_id,kind,state,activity_code,attempt_count,last_reason_code FROM jobs WHERE job_id=?',(job,)).fetchone()
+                    if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 return 200,{'version':'v1','resources':['health','settings','credentials','jobs','auth/session','webhook']},[]
@@ -297,6 +318,7 @@ class Application:
         queue=JobQueue(configuration.value('storage.database_path'))
         history=path.endswith('/history')
         with queue.connection() as db:
+            db.execute('BEGIN')
             if history:
                 job=int(path.split('/')[-2])
                 if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
@@ -313,7 +335,14 @@ class Application:
             else:
                 rows=db.execute('SELECT job_id,event_id,created_by_job_id,kind,state,activity_code,attempt_count,last_reason_code '
                                 'FROM jobs WHERE job_id>? ORDER BY job_id LIMIT ?',(after,limit+1)).fetchall()
-                items=[{'job_id':r[0],'event_id':r[1],'created_by_job_id':r[2],'kind':r[3],'state':r[4],
-                    'status':CATALOG.job_status(r[4],r[5]),'attempt_count':r[6],'reason':None if r[7] is None else CATALOG.reason(r[7]),
-                    'cancellation':CancellationStore(queue.database).status(r[0])} for r in rows[:limit]]
+                items=[self._job(queue,db,r) for r in rows[:limit]]
         return {'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
+
+    def _job(self,queue,db,row):
+        op=db.execute('SELECT o.operation_id,o.state,o.cleanup_state,o.reason_code FROM job_operations o JOIN job_operation_members m USING(operation_id) WHERE m.job_id=?',(row[0],)).fetchone()
+        actions=ManagementActions(queue.database).capabilities(db,row[0])
+        return {'job_id':row[0],'event_id':row[1],'created_by_job_id':row[2],'kind':row[3],'state':row[4],
+                'status':CATALOG.job_status(row[4],row[5]),'attempt_count':row[6],
+                'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
+                'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
+                                'can_cancel':actions['cancel']['enabled'],'can_cleanup':actions['cleanup']['enabled']}}

@@ -17,13 +17,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         await fixture.AcquisitionPreparationTests.asyncSetUp(self)
         self.secrets=SecretStore(self.root)
         self.secrets.initialize(webhook_token=WEB,management_token=ADMIN)
-        self.calls=[];test=self
-        class FakeCancellation:
-            def __init__(self,*args,**kwargs):pass
-            def status(self,job):return {'can_cancel':True,'cleanup_state':'NONE'}
-            def cancel(self,job):test.calls.append(('cancel',job));return {'cleanup_state':'COMPLETE'}
-            def cleanup(self,job):test.calls.append(('cleanup',job));return {'cleanup_state':'PENDING'}
-        self.app=Application(self.root,origin=ORIGIN,cancellation_factory=FakeCancellation)
+        self.calls=[]
+        self.app=Application(self.root,origin=ORIGIN)
         self.addCleanup(self.app.close)
 
     async def request(self,method,path,body=None,*,token=None,headers=None,raw=None,scope_changes=None):
@@ -74,6 +69,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls,[])
 
     async def test_cookie_mutations_require_origin_and_session_csrf_and_logout_revokes(self):
+        await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
         status,result,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'origin':ORIGIN})
         self.assertEqual(status,201)
         cookie=headers[b'set-cookie'].decode().split(';')[0]
@@ -84,7 +80,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
             status,_,_=await self.request('POST','/api/v1/jobs/1/cancel',{},headers=extra)
             self.assertEqual(status,403)
         status,_,_=await self.request('POST','/api/v1/jobs/1/cancel',{},headers={'cookie':cookie,'origin':ORIGIN,'x-csrf-token':csrf})
-        self.assertEqual(status,200);self.assertEqual(self.calls,[('cancel',1)])
+        self.assertEqual(status,200);self.assertEqual(self.calls,[])
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=1'),[('CANCELED',)])
         status,_,_=await self.request('DELETE','/api/v1/auth/session',{},headers={'cookie':cookie,'origin':ORIGIN,'x-csrf-token':csrf})
         self.assertEqual(status,200)
         status,_,_=await self.request('GET','/api/v1/jobs',headers={'cookie':cookie})

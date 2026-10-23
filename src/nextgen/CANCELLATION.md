@@ -178,3 +178,14 @@ session plus Origin/CSRF is required; webhook credentials cannot reach cleanup.
 No GET performs cleanup, and a canceled command may return 202 for pending/review
 cleanup. Blocking service work is drained on the API executor. Dashboard HTML and
 automatic episode-slot release remain separate. See [API v1](api/README.md).
+
+## Durable HTTP action submission (v18)
+
+The versioned API now calls ManagementActions instead of performing cleanup in
+its request handler. Idle cancellation with no recorded resources returns 200;
+otherwise cancellation and a distinct cleanup control job commit atomically
+before 202. The Worker executes bounded passes under the existing exclusive
+target drain gate. Read [MANAGEMENT_ACTIONS.md](MANAGEMENT_ACTIONS.md) for status
+receipts, duplicate clicks, explicit review resume and lease fencing. Earlier
+examples of direct CancellationService calls remain trusted library usage, not
+the current HTTP execution model.

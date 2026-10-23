@@ -1,10 +1,11 @@
 """API-ready cancellation library; invoke only after management authorization.
 
-No HTTP server or dashboard is installed here. The API process may call cancel()
-and resume cleanup() from durable pending status. Never call cleanup inside a
-Worker handler: it must acquire exclusive drain protection for that operation.
+HTTP callers submit control jobs. Only a job in a distinct control operation
+may invoke cleanup under existing maintenance admission, with a lease guard.
+Cleanup always requires exclusive drain protection for the target operation.
 """
 import json
+from contextlib import nullcontext
 from src.nextgen.acquisition.cleanup import CleanupPermit, FileCleanup, owned
 from src.nextgen.acquisition.qbittorrent import Client
 from src.nextgen.acquisition.submission import ClientUnavailable, ClientInvalid, ClientAuthenticationFailed, ClientUnsupported
@@ -19,19 +20,27 @@ from src.nextgen.storage.submissions import _plan, _intent
 
 
 class CancellationService:
-    def __init__(self,configuration,secrets,*,client_factory=Client,files_factory=FileCleanup,logger=None):
+    def __init__(self,configuration,secrets,*,client_factory=Client,files_factory=FileCleanup,logger=None,admitted=False,guard=None,component="api"):
+        if type(admitted) is not bool or admitted and not callable(guard):raise CancellationError()
+        from src.nextgen.history import component_name
+        self.component=component_name(component)
         self.configuration,self.secrets=configuration,secrets
         self.database=configuration.value('storage.database_path')
         self.store=CancellationStore(self.database)
         self.client_factory,self.files_factory,self.logger=client_factory,files_factory,logger
         self.gate=MaintenanceGate(self.database)
+        self.admitted,self.guard=admitted,guard
+    def _admission(self):
+        return nullcontext() if self.admitted else self.gate.operation()
+    def _fence(self,db=None):
+        if self.guard is not None:self.guard(db)
     def _log(self,records):
         if self.logger is not None:
             for record in records:log_history(self.logger,record)
     def status(self,job_id):
-        with self.gate.operation():return self.store.status(job_id)
+        with self._admission():return self.store.status(job_id)
     def request(self,job_id):
-        with self.gate.operation():
+        with self._admission():
             op,receipts=self.store.request(job_id)
             self._log(receipts)
             return op
@@ -40,23 +49,25 @@ class CancellationService:
         return self.cleanup(job_id)
     def _state(self,job_id,state,reason,*,cause=None):
         with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
             op=operation(db,job_id)
             if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise CancellationError()
             now=self.store.queue.now()
             db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state=?,reason_code=?,updated_at_ms=? WHERE operation_id=?",
                        (state,reason,now,op[0]))
             records=() if (op[2],op[3])==(state,reason) else (append_job_history(db,job_id=job_id,
-                event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component='api',occurred_at_ms=now,
+                event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component=self.component,occurred_at_ms=now,
                 details={} if cause is None else {'cause_reason_code':cause}),)
         self._log(records)
     def _targets(self,job_id):
         with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
             op=operation(db,job_id)
             if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise CancellationError()
             receipts=[];now=self.store.queue.now()
             # Exclusive OperationGate proves participating handlers have drained.
             for (member,) in db.execute('SELECT job_id FROM job_operation_members WHERE operation_id=?',(op[0],)).fetchall():
-                receipts.extend(cancel_job(db,member,now,'api'))
+                receipts.extend(cancel_job(db,member,now,self.component))
             rows=db.execute('SELECT p.job_id,j.event_id FROM acquisition_plans p JOIN jobs j ON j.job_id=p.job_id '
                 'JOIN job_operation_members m ON m.job_id=p.job_id WHERE m.operation_id=? ORDER BY p.plan_id',(op[0],)).fetchall()
             if len(rows)>1000:raise CancellationError()
@@ -80,6 +91,7 @@ class CancellationService:
         return result
     def _journal(self,op,intent):
         with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
             row=db.execute('SELECT operation_id,fingerprint,files_json,phase FROM cancellation_cleanup WHERE plan_id=?',
                            (intent.plan.plan_id,)).fetchone()
             if row is not None:
@@ -91,6 +103,7 @@ class CancellationService:
             return {},'PREPARED'
     def _advance(self,intent,prior,phase,files=None):
         with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
             now=self.store.queue.now()
             if files is None:
                 changed=db.execute('UPDATE cancellation_cleanup SET phase=?,updated_at_ms=? WHERE plan_id=? AND phase=?',
@@ -103,7 +116,7 @@ class CancellationService:
             if changed!=1:raise CancellationError()
             receipt=append_job_history(db,job_id=intent.plan.preparation_job_id,event_code='CANCELLATION_CONTROL_RECORDED',
                 reason_code='CANCELLATION_COMPLETE' if phase=='COMPLETE' else 'CANCELLATION_PENDING',
-                component='api',occurred_at_ms=now)
+                component=self.component,occurred_at_ms=now)
         self._log((receipt,))
     def _clean_target(self,op,intent):
         files,phase=self._journal(op,intent)
@@ -119,12 +132,14 @@ class CancellationService:
                 if phase=='STOP_UNCERTAIN':return False
                 self._advance(intent,phase,'STOP_UNCERTAIN');phase='STOP_UNCERTAIN'
                 # At most one stop request; a lost/uncertain permit is not rearmed.
+                self._fence()
                 client.cleanup_control(intent,intent.fingerprint,CleanupPermit(intent.fingerprint,'stop'),'stop')
                 found=client.inspect(intent.plan.manifest.info_hash)
                 current=owned(intent,found)
                 if current.state not in STOPPED:return False
             files=cleaner.capture()
             self._advance(intent,phase,'REMOVE_UNCERTAIN',files);phase='REMOVE_UNCERTAIN'
+            self._fence()
             client.cleanup_control(intent,intent.fingerprint,CleanupPermit(intent.fingerprint,'remove'),'remove')
             found=client.inspect(intent.plan.manifest.info_hash)
         if phase=='REMOVE_UNCERTAIN':
@@ -136,12 +151,14 @@ class CancellationService:
         if phase=='FILES':
             # Reappearance prevents file deletion, even after an earlier absence.
             if found is not None:raise CancellationError()
-            cleaner.remove(files)
+            self._fence()
+            if self.guard is None:cleaner.remove(files)
+            else:cleaner.remove(files,guard=self._fence)
             self._advance(intent,phase,'COMPLETE')
         return True
     def cleanup(self,job_id,*,max_targets=1):
         if type(max_targets) is not int or not 1<=max_targets<=32:raise CancellationError()
-        with self.gate.operation():
+        with self._admission():
             status=self.store.status(job_id)
             if not status['can_cleanup']:return status
             try:
@@ -158,7 +175,8 @@ class CancellationService:
                         complete=self._clean_target(op,target) and complete
                     if complete:
                         from src.nextgen.staging_artifacts import clean_temporaries
-                        clean_temporaries(self.store.queue,op)
+                        self._fence()
+                        clean_temporaries(self.store.queue,op,guard=self._fence)
                     self._state(job_id,'COMPLETE' if complete else 'PENDING',
                                 'CANCELLATION_COMPLETE' if complete else 'CANCELLATION_PENDING')
             except CleanupBusy:

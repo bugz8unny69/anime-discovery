@@ -109,7 +109,7 @@ class FileCleanup:
             # removal. A remote client's path is not proof of local file absence.
             raise CancellationError() from None
 
-    def remove(self,plan):
+    def remove(self,plan,*,guard=None):
         if type(plan) is not dict or set(plan)!={'root','files'} or type(plan['files']) is not dict:raise CancellationError()
         try:
             with directory(self.root) as fd:
@@ -123,6 +123,7 @@ class FileCleanup:
                 for path in sorted(present):
                     with parent(fd,path) as (directory_fd,name):
                         if fingerprint(os.stat(name,dir_fd=directory_fd,follow_symlinks=False))!=plan['files'][path]:raise CancellationError()
+                        if guard is not None:guard()
                         os.unlink(name,dir_fd=directory_fd)
                         os.fsync(directory_fd)
                 # Retain directories: no recursive removal and no broad root deletion.
