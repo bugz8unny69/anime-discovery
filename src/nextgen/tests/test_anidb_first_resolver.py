@@ -1,6 +1,8 @@
 """Offline resolver ordering/evidence/cancellation tests; intentionally unrun."""
 from dataclasses import replace
 import threading
+import tempfile
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 
@@ -14,7 +16,14 @@ from src.nextgen.storage.sqlite import IdentityConflict, IdentityNotReady
 
 class AniDBFirstResolverTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        startup = ConfigurationSnapshot(1,{})
+        temporary=tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        database=Path(temporary.name)/'identity.sqlite'
+        from src.nextgen.storage.sqlite import connect, initialize
+        db=connect(database)
+        initialize(db)
+        db.close()
+        startup = ConfigurationSnapshot(1,{'storage':{'database_path':str(database)}})
         self.configuration = for_operation(startup,startup,component="worker")
         self.cancelled = threading.Event()
         self.request = IdentityRequest(1,"normalized-test",b'{"release_name":"[Group] Test Anime - 01 [1080p]"}')

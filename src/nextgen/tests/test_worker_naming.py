@@ -111,6 +111,8 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.db.executescript((SQL_DIR / "021_reject_decisions.sql").read_text())
         self.db.executescript((SQL_DIR / "022_keep_imports.sql").read_text())
         self.db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
+        from src.nextgen.storage.migrations import SCRIPTS as current_scripts
+        for name in current_scripts[23:]:self.db.executescript((SQL_DIR/name).read_text())
         initialize(self.db)  # Latest version accepted without implicit upgrade.
 
     def test_failure_before_version_bump_rolls_back_rows_and_vocabulary(self):

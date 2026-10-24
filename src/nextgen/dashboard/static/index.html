@@ -11,16 +11,16 @@
   <header><span class="brand">◈ Anime Discovery</span><button id="sign-out" class="secondary" hidden>Sign out</button></header>
   <p id="notice" class="notice" role="status" aria-live="polite"></p>
   <section id="login-panel" class="panel" hidden>
-    <h1>Sign in</h1><p class="muted">Use your management access key to open the dashboard.</p>
+    <h1>Sign in</h1><p class="muted">Enter your administrator password to open the dashboard.</p>
     <form id="login-form" class="integration">
-      <label for="access-key">Management access key</label>
+      <label for="access-key">Administrator password</label>
       <input id="access-key" type="password" autocomplete="current-password" required maxlength="256" spellcheck="false">
       <button type="submit">Sign in</button>
     </form>
   </section>
   <div id="workspace" hidden>
     <nav aria-label="Main navigation">
-      <a class="tab" href="/">Intake</a><a class="tab" href="/jobs">Jobs</a><a class="tab" href="/settings">Settings</a>
+      <a class="tab" href="/">Intake</a><a class="tab" href="/jobs">Jobs</a><a class="tab" href="/recognized">Recognized Names</a><a class="tab" href="/settings">Settings</a>
     </nav>
     <section id="activity-panel" hidden>
       <h1 id="page-title">Intake</h1><p id="page-description" class="muted"></p>
@@ -40,11 +40,27 @@
         <div class="page-controls"><button id="previous-page" class="secondary">Previous</button><button id="next-page" class="secondary">Next</button></div>
       </section>
     </section>
+    <section id="recognized-panel" hidden>
+      <h1>Recognized Names</h1>
+      <p class="muted">Automatically remembered verified AniDB identities, grouped by TVDB series and season. Each new episode still requires independent verification.</p>
+      <button id="refresh-recognized" class="secondary">Refresh recognized names</button>
+      <section class="panel">
+        <table class="jobs-table"><thead><tr><th>Series</th><th>Season</th><th>AniDB ID</th><th>TVDB ID</th><th>Aliases</th><th>Verified episodes</th><th>Details</th></tr></thead>
+        <tbody id="recognized-rows"></tbody></table>
+        <p id="recognized-note" role="status"></p>
+      </section>
+    </section>
     <section id="settings-panel" hidden>
       <h1>Settings</h1><p class="muted">Changes apply to new operations. Some infrastructure settings require a restart.</p>
       <button id="reload-settings" class="secondary">Refresh settings</button>
       <p id="restart-notice" role="status"></p>
       <div id="settings-fields"></div>
+      <section class="panel"><h2>Security</h2><form id="password-form" class="integration">
+        <label>Current password <input name="current_password" type="password" autocomplete="current-password" required></label>
+        <label>New password <input name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+        <label>Confirm new password <input name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+        <button type="submit">Change password</button><p id="password-result" role="status"></p>
+      </form></section>
       <section class="panel"><h2>Private credentials</h2><div id="credential-forms"></div></section>
     </section>
   </div>

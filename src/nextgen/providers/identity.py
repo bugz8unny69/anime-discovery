@@ -2,6 +2,9 @@
 from collections import OrderedDict
 import re
 import threading
+from contextlib import closing
+from src.nextgen.storage.recognition import recognized_for_release
+from src.nextgen.storage.migrations import _open, LATEST_VERSION
 
 from src.nextgen.providers.http import Clients, Credentials, Options, json_object
 from src.nextgen.providers.errors import ProviderInvalidResponse
@@ -65,10 +68,22 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             raise ProviderAuthenticationFailed()
         title = title_extractor(request)
         if type(title) is not str or len(title)>2048: raise IdentityNotReady()
-        # The legacy parser removes season labels for candidate discovery.
-        # Until release-to-part evidence is implemented, do not silently turn
-        # an explicit S02/Season 2 label into an approval for the first entry.
+        # Reuse only an exact season-scoped mapping backed by earlier verified
+        # AniDB and TVDB episode evidence. This skips series-level HTTP work,
+        # but never authorizes the new release or its episode.
         seasons = re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])",title)
+        if len({int(value) for value in seasons}) > 1: raise IdentityNotReady()
+        database = configuration.value("storage.database_path")
+        if seasons:
+            with closing(_open(database,readonly=True,timeout_ms=5000)) as known_db:
+                if known_db.execute("PRAGMA user_version").fetchone()[0] == LATEST_VERSION:
+                    known = recognized_for_release(known_db,title,season=int(seasons[0]))
+                    if known is not None:
+                        return {"schema_version":2,"anime":{
+                            "anidb_id":known["anidb_id"],
+                            "tvdb_series_id":known["tvdb_series_id"],
+                            "title":known["title"]},"episodes":[],"attributes":{}}
+        # An unfamiliar sequel is not silently mapped to the first AniDB work.
         if any(int(value)>1 for value in seasons): raise IdentityNotReady()
         aliases,_ = release_title(title)
         if not aliases: raise IdentityNotReady()

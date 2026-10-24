@@ -35,7 +35,7 @@ const node = (tag, text, cls) => {
 };
 const state = {
   csrf: null, generation: 0, requests: new Set(), jobs: [], pending: new Set(),
-  page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : 'intake',
+  page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : location.pathname === '/recognized' ? 'recognized' : 'intake',
   cursor: MAX_CURSOR, previous: [], next: null, loading: null, timer: null,
   settings: null, credentials: null, dirty: false,
   historyJob: null, historyCursor: 0, historyNext: null, historyVersion: 0,
@@ -55,6 +55,7 @@ function clearPrivate(message = '') {
   state.historyJob = null; state.historyVersion += 1;
   $('job-rows').replaceChildren(); $('settings-fields').replaceChildren();
   $('credential-forms').replaceChildren(); $('history-rows').replaceChildren();
+  $('recognized-rows').replaceChildren(); $('recognized-note').textContent = '';
   $('access-key').value = '';
   if ($('history-dialog').open) $('history-dialog').close();
   $('workspace').hidden = true; $('sign-out').hidden = true; $('login-panel').hidden = false;
@@ -315,6 +316,7 @@ function renderCredentials() {
     ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
+    ['access', 'Autobrr webhook', 'webhook_configured', [['webhook_token', 'Webhook token']]],
   ];
   for (const [service, title, presence, fields] of specs) {
     const form = node('form', null, 'integration'); form.autocomplete = 'off';
@@ -347,14 +349,72 @@ function renderCredentials() {
     });
     container.appendChild(form);
   }
-  container.appendChild(node('p', 'Saved credentials are never revealed. Webhook and management access use separate keys.', 'muted'));
-  container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'} · Management access: ${state.credentials.management_configured ? 'configured' : 'not configured'}`, 'muted'));
+  container.appendChild(node('p', 'Saved credentials are never revealed. The webhook token cannot administer the dashboard.', 'muted'));
+  container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'}`, 'muted'));
+}
+async function loadRecognized() {
+  const generation = state.generation;
+  const table = $('recognized-rows');
+  try {
+    const result = await request(`${API}/recognized`);
+    if (generation !== state.generation || !state.csrf) return;
+    table.replaceChildren();
+    for (const item of result.items) {
+      const tr = node('tr');
+      for (const value of [item.title, item.season, item.anidb_id, item.tvdb_series_id,
+        item.alias_count, item.verified_episode_count]) {
+        tr.appendChild(node('td', value));
+      }
+      const action = node('td');
+      const button = node('button', 'Episodes', 'secondary');
+      button.type = 'button';
+      let detail = null;
+      button.addEventListener('click', async () => {
+        if (detail) { detail.remove(); detail = null; button.textContent = 'Episodes'; return; }
+        button.disabled = true;
+        detail = node('tr');
+        const cell = node('td');
+        cell.colSpan = 7;
+        cell.textContent = 'Loading verified episode placements…';
+        detail.appendChild(cell);
+        tr.after(detail);
+        try {
+          const data = await request(`${API}/recognized/${item.tvdb_series_id}/${item.season}/${item.anidb_id}/episodes`);
+          if (generation !== state.generation || !state.csrf) return;
+          cell.replaceChildren();
+          const summary = node('p', `${data.items.length} verified episode placements`);
+          cell.appendChild(summary);
+          for (const episode of data.items) {
+            cell.appendChild(node('p',
+              `AniDB #${episode.anidb_episode_id} (episode ${episode.anidb_episode_number}) → TVDB S${String(item.season).padStart(2,'0')}E${String(episode.tvdb_episode).padStart(2,'0')} (#${episode.tvdb_episode_id})`));
+          }
+          button.textContent = 'Hide episodes';
+          button.disabled = false;
+        } catch (error) {
+          cell.textContent = error.message;
+          button.textContent = 'Hide episodes';
+          button.disabled = false;
+        }
+      });
+      action.appendChild(button);
+      tr.appendChild(action);
+      table.appendChild(tr);
+    }
+    $('recognized-note').textContent = result.items.length
+      ? `${result.items.length} verified series/season identities`
+      : 'No verified series/season identities yet.';
+  } catch (error) {
+    $('recognized-note').textContent = error.message;
+  }
 }
 async function showWorkspace() {
   $('login-panel').hidden = true; $('workspace').hidden = false; $('sign-out').hidden = false;
-  $('activity-panel').hidden = state.page === 'settings'; $('settings-panel').hidden = state.page !== 'settings';
+  $('activity-panel').hidden = state.page === 'settings' || state.page === 'recognized';
+  $('settings-panel').hidden = state.page !== 'settings';
+  $('recognized-panel').hidden = state.page !== 'recognized';
   for (const link of document.querySelectorAll('nav a')) link.classList.toggle('selected', new URL(link.href).pathname === location.pathname);
   if (state.page === 'settings') { await loadSettings(); return; }
+  if (state.page === 'recognized') { await loadRecognized(); return; }
   $('page-title').textContent = state.page === 'intake' ? 'Intake' : 'Jobs';
   $('activity-title').textContent = state.page === 'intake' ? 'Incoming anime' : 'Job activity';
   $('page-description').textContent = state.page === 'intake' ? 'Follow incoming anime through processing and staging.' : 'Track jobs and their recorded history. Status updates every five seconds.';
@@ -364,9 +424,27 @@ async function showWorkspace() {
 $('login-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true;
   try {
-    const result = await request(`${API}/auth/session`, {method: 'POST', body: {token: $('access-key').value}});
+    const result = await request(`${API}/auth/session`, {method: 'POST', body: {password: $('access-key').value}});
     $('access-key').value = ''; state.csrf = result.csrf_token; notice(); await showWorkspace();
   } catch (error) { $('access-key').value = ''; displayError(error); }
+  finally { button.disabled = false; }
+});
+$('password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button');
+  button.disabled = true;
+  try {
+    if (form.elements.namedItem('new_password').value !== form.elements.namedItem('confirm_password').value) {
+      throw new Error('New passwords do not match.');
+    }
+    await request(`${API}/auth/password`, {method: 'POST', body: {
+      current_password: form.elements.namedItem('current_password').value,
+      new_password: form.elements.namedItem('new_password').value
+    }});
+    form.reset();
+    clearPrivate('Password changed. Sign in again.');
+  } catch (error) { form.reset(); displayError(error); }
   finally { button.disabled = false; }
 });
 $('sign-out').addEventListener('click', async () => {
@@ -374,6 +452,7 @@ $('sign-out').addEventListener('click', async () => {
   catch (error) { displayError(error); }
 });
 $('refresh').addEventListener('click', () => loadActivity());
+$('refresh-recognized').addEventListener('click', () => loadRecognized());
 $('reload-settings').addEventListener('click', async () => {
   if (state.dirty && !confirm(COPY['dashboard.discard'])) return;
   await loadSettings();

@@ -109,3 +109,7 @@ class Sessions:
         return digest,session
     def remove(self,digest):
         with self.lock:self.items.pop(digest,None)
+
+    def clear(self):
+        with self.lock:
+            self.items.clear()

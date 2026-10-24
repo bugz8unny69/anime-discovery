@@ -162,6 +162,45 @@ CREATE TABLE IF NOT EXISTS release_verifications (
 );
 CREATE INDEX IF NOT EXISTS idx_release_identity ON release_verifications(identity_result_id);
 
+CREATE TABLE IF NOT EXISTS recognized_seasons (
+ tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>=0),
+ anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
+ display_title TEXT NOT NULL CHECK(length(trim(display_title)) BETWEEN 1 AND 512),
+ evidence_verification_id INTEGER NOT NULL REFERENCES release_verifications(verification_id),
+ recognized_at_ms INTEGER NOT NULL CHECK(recognized_at_ms>=0),
+ PRIMARY KEY(tvdb_series_id,tvdb_season,anidb_id)
+);
+CREATE TABLE IF NOT EXISTS recognized_aliases (
+ alias_key TEXT NOT NULL CHECK(length(alias_key) BETWEEN 3 AND 256),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>=0),
+ tvdb_series_id INTEGER NOT NULL,
+ anidb_id INTEGER NOT NULL,
+ PRIMARY KEY(alias_key,tvdb_season,tvdb_series_id,anidb_id),
+ FOREIGN KEY(tvdb_series_id,tvdb_season,anidb_id)
+  REFERENCES recognized_seasons(tvdb_series_id,tvdb_season,anidb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_recognized_alias_series ON recognized_aliases(tvdb_series_id,tvdb_season);
+
+CREATE TABLE IF NOT EXISTS recognized_episodes (
+ tvdb_series_id INTEGER NOT NULL,
+ tvdb_season INTEGER NOT NULL,
+ anidb_id INTEGER NOT NULL,
+ anidb_episode_number INTEGER NOT NULL CHECK(anidb_episode_number>0),
+ anidb_episode_id INTEGER NOT NULL CHECK(anidb_episode_id>0),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ tvdb_episode_id INTEGER NOT NULL CHECK(tvdb_episode_id>0),
+ evidence_verification_id INTEGER NOT NULL REFERENCES release_verifications(verification_id),
+ recognized_at_ms INTEGER NOT NULL CHECK(recognized_at_ms>=0),
+ PRIMARY KEY(anidb_id,anidb_episode_number),
+ UNIQUE(anidb_episode_id),
+ UNIQUE(tvdb_series_id,tvdb_season,tvdb_episode),
+ UNIQUE(tvdb_episode_id),
+ FOREIGN KEY(tvdb_series_id,tvdb_season,anidb_id)
+  REFERENCES recognized_seasons(tvdb_series_id,tvdb_season,anidb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_recognized_episodes_season ON recognized_episodes(tvdb_series_id,tvdb_season);
+
 CREATE TABLE IF NOT EXISTS trial_plans (
  plan_id INTEGER PRIMARY KEY,
  anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
@@ -413,13 +452,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v23; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v26; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v23 storage.
+    before accessing v26 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 23:
+    if version == 26:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -429,7 +468,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=23;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=26;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

@@ -24,6 +24,29 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
         await self.app(scope,receive,send)
         return output[0]['status'],output[1]['body'],dict(output[0]['headers'])
 
+    async def test_recognized_episodes_are_scoped_to_each_verified_work(self):
+        from src.nextgen.tests.test_recognized_seasons import RecognitionTests
+        fixture=RecognitionTests()
+        fixture.setUp()
+        try:
+            fixture.remember(11,1)
+            fixture.second_work()
+            with connect(self.database) as target:
+                fixture.db.backup(target)
+        finally:
+            fixture.doCleanups()
+        status,result,_=await self.request('GET','/api/v1/recognized',token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertEqual(len(result['data']['items']),2)
+        self.assertEqual([item['verified_episode_count'] for item in result['data']['items']],[1,1])
+        for aid,eid in ((1001,10011),(1002,10013)):
+            status,result,_=await self.request('GET',f'/api/v1/recognized/2001/1/{aid}/episodes',token=ADMIN)
+            self.assertEqual(status,200)
+            self.assertEqual(result['data']['anidb_id'],aid)
+            self.assertEqual([row['anidb_episode_id'] for row in result['data']['items']],[eid])
+        status,_,_=await self.request('GET','/api/v1/recognized/2001/1/episodes',token=ADMIN)
+        self.assertEqual(status,404)
+
     async def test_public_shell_and_assets_contain_no_private_data_and_have_strict_csp(self):
         await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
         for route,mime in [('/','text/html'),('/jobs','text/html'),('/settings','text/html'),
@@ -52,7 +75,7 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
         for credential in (None,WEB):
             status,_,_=await self.request('GET','/api/v1/intake',token=credential)
             self.assertEqual(status,401)
-        status,session,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'Origin':ORIGIN})
+        status,session,headers=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},headers={'Origin':ORIGIN})
         self.assertEqual(status,201)
         cookie=headers[b'set-cookie'].decode().split(';',1)[0]
         self.assertTrue(cookie.startswith(COOKIE+'='))

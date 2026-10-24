@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Install/upgrade NextGen. Interactive by default; --yes uses explicit flags/defaults.
+
+This standalone launcher needs only Python's standard library. It provisions a
+versioned release, uses native setup commands as the service user, and preserves
+existing settings/credentials. It never imports the legacy operational database.
+"""
+import argparse
+import fcntl
+import grp
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import tempfile
+import uuid
+from urllib.parse import urlsplit
+
+DEFAULTS={'root':'/opt/anime-discovery','state_dir':'/var/lib/anime-discovery',
+    'config_dir':'/var/lib/anime-discovery/config','user':'anime-discovery',
+    'source':'git@github.com:bugz8unny69/anime-discovery.git','ref':'NextGen',
+    'destination':'/usr/local/bin/anime-discovery-install','unit_dir':'/etc/systemd/system','python':'python3'}
+SERVICES=('anime-discovery-api.service','anime-discovery-worker.service')
+
+
+def run(args,*,cwd=None,input=None,check=True):
+    result=subprocess.run([str(x) for x in args],cwd=cwd,input=input,text=True,capture_output=True)
+    if check and result.returncode:raise RuntimeError('Command failed: '+Path(str(args[0])).name+'. Output withheld to protect credentials.')
+    return result
+
+
+def private_json(path):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(fd,'r') as stream:
+        info=os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):raise ValueError('Expected a regular JSON file.')
+        data=json.loads(stream.read(65537))
+    if type(data) is not dict:raise ValueError('Expected a JSON object.')
+    return data
+
+
+def atomic_file(path,content,mode):
+    path=Path(path);fd,name=tempfile.mkstemp(prefix='.'+path.name+'-',dir=path.parent)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            os.fchmod(stream.fileno(),mode);stream.write(content);stream.flush();os.fsync(stream.fileno())
+        os.replace(name,path)
+        directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
+
+def saved_defaults():
+    path=Path(str(Path(__file__).resolve())+'.json')
+    if not path.exists():return {}
+    info=path.lstat();parent=path.parent.stat()
+    if path.is_symlink() or info.st_uid!=0 or info.st_mode&0o022 or parent.st_uid!=0 or parent.st_mode&0o022:raise ValueError('Installer defaults must be root-owned and protected.')
+    return {k:v for k,v in private_json(path).items() if k in (*DEFAULTS,'origin')}
+
+
+def parser():
+    p=argparse.ArgumentParser(description=__doc__)
+    modes=p.add_mutually_exclusive_group();modes.add_argument('--install',action='store_true');modes.add_argument('--upgrade',action='store_true')
+    for name in DEFAULTS:p.add_argument('--'+name.replace('_','-'))
+    p.add_argument('--public-origin',dest='origin',help='Exact HTTPS dashboard origin, or loopback HTTP. Existing installed origin is retained.')
+    p.add_argument('--source-dir',type=Path,help='Use tracked files from an existing local Git checkout instead of fetching.')
+    p.add_argument('--revision',help='Exact Git commit to install; defaults to the selected branch head.')
+    p.add_argument('--database',type=Path,help='New NextGen database path; existing configuration always wins.')
+    p.add_argument('--settings-file',type=Path,help='Initial native settings object.')
+    p.add_argument('--webhook-key-file',type=Path)
+    p.add_argument('--admin-password-file',type=Path,help='Provision a fresh administrator through ADM after API startup. Existing passwords are preserved.')
+    p.add_argument('--install-system-deps',action='store_true',help='Install git, Python venv/pip and ffmpeg using apt-get (Debian/Ubuntu).')
+    p.add_argument('--start',choices=('preserve','api','all','none'),default='preserve')
+    p.add_argument('--enable',action='store_true',help='Enable the selected API/worker services at boot.')
+    p.add_argument('--yes',action='store_true',help='Do not ask questions. Never enables optional OS package installation implicitly.')
+    p.add_argument('--plan',action='store_true',help='Print the action plan without fetching, creating files or changing services.')
+    return p
+
+
+def resolve(args):
+    options={**DEFAULTS,**saved_defaults()}
+    for k in (*DEFAULTS,'origin'):
+        if getattr(args,k,None) is not None:options[k]=getattr(args,k)
+    interactive=not(args.yes or args.plan)
+    if interactive:
+        for name,label in [('root','Application folder'),('config_dir','NextGen config folder'),('user','Service account')]:
+            if getattr(args,name) is None:options[name]=input(label+' ['+options[name]+']: ').strip() or options[name]
+    for name in ('root','state_dir','config_dir','destination','unit_dir'):
+        value=options[name]
+        if not re.fullmatch(r'/[A-Za-z0-9_./-]+',value) or '..' in Path(value).parts or str(Path(value))=='/':raise ValueError('Use absolute infrastructure paths with letters, numbers, dots, dashes and underscores.')
+        options[name]=str(Path(value))
+    source=urlsplit(options['source'])
+    if any(ord(c)<32 for c in options['source']) or source.scheme in ('http','https') and source.username is not None:raise ValueError('Use SSH or a Git credential helper instead of credentials in the source URL.')
+    if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',options['user']):raise ValueError('Invalid service user.')
+    if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_./-]*',options['ref']):raise ValueError('Invalid Git ref.')
+    if args.revision and not re.fullmatch('[a-f0-9]{40,64}',args.revision):raise ValueError('Use an exact Git revision.')
+    if options.get('origin') is None:
+        unit=Path(options['unit_dir'])/SERVICES[0]
+        if unit.is_file():
+            for line in unit.read_text().splitlines():
+                if line.startswith('ExecStart='):
+                    words=shlex.split(line.partition('=')[2])
+                    if '--public-origin' in words:options['origin']=words[words.index('--public-origin')+1]
+    if interactive and args.origin is None:
+        options['origin']=input('Public dashboard origin ['+(options.get('origin') or 'loopback HTTP')+']: ').strip() or options.get('origin')
+    options.setdefault('origin',None)
+    options['database']=str(args.database or Path(options['state_dir'])/'nextgen.sqlite')
+    existing=Path(options['config_dir'])/'settings.json'
+    if existing.exists():
+        doc=private_json(existing)
+        if 'schema_version' not in doc:raise ValueError('Choose a separate fresh NextGen configuration directory; legacy conversion is unsupported.')
+        options['database']=doc.get('settings',{}).get('storage',{}).get('database_path',options['database'])
+    if args.upgrade and not existing.exists():raise ValueError('Upgrade needs an existing native NextGen configuration.')
+    return options
+
+
+def extract_checkout(source,release,revision,execute=run):
+    sha=execute(['git','-c','safe.directory='+str(source),'-C',str(source),'rev-parse',revision or 'HEAD']).stdout.strip()
+    archive=release/'source.tar'
+    execute(['git','-c','safe.directory='+str(source),'-C',str(source),'archive','--format=tar','--output='+str(archive),sha])
+    with tarfile.open(archive) as stream:
+        for item in stream.getmembers():
+            path=Path(item.name)
+            if path.is_absolute() or '..' in path.parts or not(item.isfile() or item.isdir()):raise ValueError('Source archive contains unsupported paths or links.')
+        stream.extractall(release)
+    archive.unlink();return sha
+
+
+def service_call(release,options,command,payload,execute=run):
+    result=execute(['runuser','-u',options['user'],'--',release/'.venv/bin/python','-m','src.nextgen.install_support',command,
+        '--config-dir',options['config_dir']],cwd=release,input=json.dumps(payload))
+    return json.loads(result.stdout)
+
+
+def apply(options,args,execute=run):
+    if os.geteuid()!=0:raise PermissionError('Run the installer with sudo; --plan does not require root.')
+    if args.install_system_deps:
+        if not shutil.which('apt-get'):raise RuntimeError('Automatic OS dependencies support apt-get. Install Python 3.11+, venv, pip, git and ffprobe manually on other systems.')
+        execute(['apt-get','update']);execute(['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','git','python3','python3-venv','python3-pip','ffmpeg'])
+    execute([options['python'],'-c','import sys; assert sys.version_info >= (3,11)'])
+    for cmd in ('git','runuser','systemctl'):
+        if not shutil.which(cmd):raise RuntimeError('Missing required tool: '+cmd)
+    root=Path(options['root']);state=Path(options['state_dir']);config=Path(options['config_dir'])
+    if root.is_symlink() or (root/'releases').is_symlink():raise ValueError('Install folders must not be symlinks.')
+    root.mkdir(parents=True,exist_ok=True);(root/'releases').mkdir(exist_ok=True)
+    for path in (root,root/'releases'):
+        os.chown(path,0,0);os.chmod(path,0o755)
+    if (root/'current').exists() and not(root/'current').is_symlink():raise ValueError('The release pointer is occupied by an existing file/folder.')
+    lock=os.open(root/'.installer.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    setup_started=False
+    previous_umask=os.umask(0o022)  # Source/venv readable by the non-root service account.
+    try:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try:account=pwd.getpwnam(options['user'])
+        except KeyError:
+            execute(['useradd','--system','--user-group','--home-dir',str(state),'--shell','/usr/sbin/nologin',options['user']])
+            account=pwd.getpwnam(options['user'])
+        if account.pw_uid==0 or grp.getgrnam(options['user']).gr_gid!=account.pw_gid:raise ValueError('Use a dedicated non-root account with a matching primary group.')
+        for path,mode in [(state,0o750),(config.parent,0o750)]:
+            if not path.exists():path.mkdir(parents=True,mode=mode);os.chown(path,account.pw_uid,account.pw_gid)
+        release=root/'releases'/uuid.uuid4().hex;release.mkdir(mode=0o755)
+        print('Preparing candidate source and Python environment...',flush=True)
+        if args.source_dir:revision=extract_checkout(args.source_dir,release,args.revision,execute)
+        else:
+            # Clone into the final release path; virtualenv paths stay stable.
+            release.rmdir();execute(['git','clone','--no-checkout','--',options['source'],str(release)])
+            execute(['git','-C',str(release),'fetch','--depth=1','--no-tags','origin',args.revision or options['ref']])
+            revision=execute(['git','-C',str(release),'rev-parse','FETCH_HEAD']).stdout.strip()
+            execute(['git','-C',str(release),'checkout','--detach',revision])
+        if not re.fullmatch('[a-f0-9]{40,64}',revision):raise ValueError('Source did not resolve to an exact revision.')
+        for required in ('src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install'):
+            if not (release/required).is_file():raise ValueError('Selected source does not contain the NextGen installer.')
+        execute([options['python'],'-m','venv',str(release/'.venv')])
+        execute([str(release/'.venv/bin/python'),'-m','pip','install','--disable-pip-version-check','-r',str(release/'requirements-nextgen-api.txt')])
+        # Build first; stop only once the candidate is ready for local setup.
+        active=[name for name in SERVICES if execute(['systemctl','is-active','--quiet',name],check=False).returncode==0]
+        previous=os.readlink(root/'current') if (root/'current').is_symlink() else None
+        had_config=(config/'settings.json').exists()
+        atomic_file(root/'installation.pending.json',(json.dumps({'candidate':str(release),'previous_release':previous,'revision':revision},sort_keys=True)+'\n').encode(),0o600)
+        print('Stopping NextGen services for local setup...',flush=True)
+        installed=[name for name in ('anime-discovery.target',*SERVICES)
+            if execute(['systemctl','show','--property=LoadState','--value',name],check=False).stdout.strip() not in ('','not-found')]
+        setup_started=True
+        if installed:execute(['systemctl','stop',*installed])
+        if not config.exists():config.mkdir(mode=0o700);os.chown(config,account.pw_uid,account.pw_gid)
+        settings={} if args.settings_file is None else private_json(args.settings_file)
+        access={}
+        for key,path in [('webhook_token',args.webhook_key_file)]:
+            if path:
+                fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                with os.fdopen(fd,'r') as stream:
+                    if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):raise ValueError('Expected a private key file.')
+                    access[key]=stream.read(4097).strip()
+        if not args.yes and not(config/'secrets.json').exists():
+            import getpass
+            for key,label in [('webhook_token','Webhook key')]:
+                if key not in access:access[key]=getpass.getpass(label+' (blank generates a new key): ')
+        payload={**options,'settings':settings,'access':access}
+        service_call(release,options,'prepare',payload,execute)
+        units=service_call(release,options,'render',options,execute)
+        selected=(list(SERVICES) if args.start=='all' else [SERVICES[0]] if args.start=='api' else [] if args.start=='none' else active if previous or had_config or active else [SERVICES[0]])
+        if SERVICES[1] in selected:service_call(release,options,'check-worker',{},execute)
+        unit_dir=Path(options['unit_dir']);unit_dir.mkdir(parents=True,exist_ok=True)
+        backup=root/'unit-backups'/release.name;backup.mkdir(parents=True,mode=0o700)
+        for name,body in units.items():
+            old=unit_dir/name
+            if old.exists():shutil.copyfile(old,backup/name)
+            atomic_file(old,body.encode(),0o644)
+        pointer=root/('.current-'+release.name);pointer.symlink_to(release)
+        os.replace(pointer,root/'current')
+        execute(['systemctl','daemon-reload'])
+        if args.enable and selected:execute(['systemctl','enable',*selected])
+        if selected:
+            execute(['systemctl','start',*selected])
+            for name in selected:execute(['systemctl','is-active','--quiet',name])
+        if args.admin_password_file:
+            if SERVICES[0] not in selected:raise ValueError('Password provisioning requires --start api or all.')
+            # ADM is the sole password bootstrap path; never write the password store directly.
+            fd=os.open(args.admin_password_file,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            with os.fdopen(fd,'r') as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):raise ValueError('Expected a password file.')
+                password=stream.read(1026)
+            execute(['runuser','-u',options['user'],'--',release/'.venv/bin/python','-m',
+                'src.nextgen.api.adm','set-password','--if-unset','--password-stdin'],cwd=release,input=password)
+        destination=Path(options['destination']);destination.parent.mkdir(parents=True,exist_ok=True)
+        atomic_file(destination,(release/'bin/anime-discovery-install').read_bytes(),0o755)
+        saved={k:options[k] for k in (*DEFAULTS,'origin')}
+        atomic_file(Path(str(destination)+'.json'),(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
+        result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
+            'configuration_preserved':True,'started_services':selected,
+            'credentials_file':str(config/'secrets.json'),'command':str(destination)}
+        atomic_file(root/'installation.json',(json.dumps(result,sort_keys=True)+'\n').encode(),0o600)
+        (root/'installation.pending.json').unlink()
+        return result
+    except BaseException:
+        if setup_started:
+            # Schema may have advanced: never restart older source or restore a
+            # database automatically. Retain pending metadata for the next run.
+            execute(['systemctl','stop','anime-discovery.target',*SERVICES],check=False)
+        raise
+    finally:
+        os.umask(previous_umask)
+        os.close(lock)
+
+
+def main(argv=None):
+    args=parser().parse_args(argv)
+    try:
+        options=resolve(args)
+        if args.plan:
+            print(json.dumps({'mode':'upgrade' if args.upgrade else 'install-or-upgrade','root':options['root'],
+                'config_dir':options['config_dir'],'database':options['database'],'start':args.start,'existing_settings_preserved':True,'changes_made':False},sort_keys=True));return 0
+        if not args.yes and input('Install/upgrade NextGen with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
+        print(json.dumps(apply(options,args),sort_keys=True));return 0
+    except (OSError,ValueError,RuntimeError,KeyError):
+        print('INSTALL_FAILED: Review prerequisites, settings and service state. Existing NextGen configuration values are preserved. A failed candidate is retained; setup failures leave NextGen services stopped.',file=sys.stderr);return 1
+
+
+if __name__=='__main__':raise SystemExit(main())

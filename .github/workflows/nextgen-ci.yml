@@ -29,6 +29,8 @@ jobs:
       - name: Check source syntax
         run: |
           python -m compileall -q src/nextgen
+          python -m py_compile bin/anime-discovery-install
+          node --test src/nextgen/tests/dashboard_browser.test.cjs
           node --check src/nextgen/dashboard/static/dashboard.js
       - name: Run the complete NextGen offline stack
         shell: bash

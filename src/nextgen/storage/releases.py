@@ -3,6 +3,7 @@ import time
 import sqlite3
 
 from src.nextgen.history import integer
+from src.nextgen.storage.recognition import remember_verified_release, remember_verified_episode, RecognitionConflict
 from src.nextgen.job_contracts import parse_payload
 from src.nextgen.release_contracts import ReleaseInput, VerifiedRelease, ReleaseConflict, ReleaseNotReady
 from src.nextgen.schema.anime_series import AnimeSeries
@@ -53,9 +54,16 @@ def persist_release(db, claim, value):
     if owner is not None and owner[0]!=source.anidb_id: raise ReleaseConflict()
     # No mutation of the original, possibly series-only AnimeSeries snapshot.
     db.execute("INSERT OR IGNORE INTO identified_episodes VALUES(?,?)",(value.anidb_episode_id,source.anidb_id))
-    db.execute("INSERT INTO release_verifications(job_id,identity_result_id,anidb_id,release_sha256,verification_scope,"
+    cursor=db.execute("INSERT INTO release_verifications(job_id,identity_result_id,anidb_id,release_sha256,verification_scope,"
                "anidb_episode_number,anidb_episode_id,tvdb_series_id,tvdb_season,tvdb_episode,tvdb_episode_id,verified_at_ms) "
                "VALUES(?,?,?,?,'DECLARED_SINGLE_EPISODE',?,?,?,?,?,?,?)",
                (claim.job_id,source.identity_result_id,source.anidb_id,source.release_sha256,
                 value.anidb_episode_number,value.anidb_episode_id,source.tvdb_series_id,value.tvdb_season,
                 value.tvdb_episode,value.tvdb_episode_id,integer(time.time_ns()//1000000)))
+
+    try:
+        remember_verified_release(db,verification_id=cursor.lastrowid,source=source,season=value.tvdb_season)
+        remember_verified_episode(db,verification_id=cursor.lastrowid)
+    except RecognitionConflict:
+        # Contradictory season identity is not silently reclassified.
+        raise ReleaseConflict() from None

@@ -5,6 +5,9 @@ from src.nextgen.providers.identity import ClientPool, delivery_title
 from src.nextgen.providers.release_mapping import declared_episode, forward_mappings
 from src.nextgen.release_contracts import VerifiedRelease, ReleaseNotReady, ReleaseConflict
 from src.nextgen.worker import blocking
+from contextlib import closing
+from src.nextgen.storage.recognition import recognized_episode
+from src.nextgen.storage.migrations import _open, LATEST_VERSION
 
 
 def make_verifier(options, credentials, *, client_pool=None, client_factory=Clients):
@@ -14,12 +17,25 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
 
     def verify(source,configuration,cancelled):
         if cancelled.is_set(): raise ReleaseNotReady()
-        actual=options(configuration) if callable(options) else options
-        secret=credentials()
-        if type(secret) is not Credentials: raise ProviderAuthenticationFailed()
         try: title=delivery_title(source)
         except ValueError: raise ReleaseNotReady() from None
         origin,season,number=declared_episode(title)
+        # Exact previously verified episode placement is reusable. There is no
+        # release approval here: the normal trial, reservation, and acquisition
+        # gates run unchanged, and an unknown mapping still needs providers.
+        with closing(_open(configuration.value("storage.database_path"),
+                           readonly=True,timeout_ms=5000)) as known_db:
+            if known_db.execute("PRAGMA user_version").fetchone()[0]==LATEST_VERSION:
+                hit=recognized_episode(known_db,aid=source.anidb_id,
+                    tid=source.tvdb_series_id,origin=origin,season=season,number=number)
+                if hit is not None:
+                    if cancelled.is_set():raise ReleaseNotReady()
+                    return VerifiedRelease(source,hit["anidb_episode_number"],
+                        hit["anidb_episode_id"],hit["tvdb_season"],
+                        hit["tvdb_episode"],hit["tvdb_episode_id"])
+        actual=options(configuration) if callable(options) else options
+        secret=credentials()
+        if type(secret) is not Credentials: raise ProviderAuthenticationFailed()
         client=pool.get(configuration.value("storage.database_path"),actual)
         catalog=client.episodes(source.anidb_id)
         mappings=forward_mappings(client.mapping_xml(),source.anidb_id,source.tvdb_series_id,catalog)

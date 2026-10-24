@@ -4,11 +4,16 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 import json
 import logging
+import os
 import re
 import uuid
 from urllib.parse import parse_qs, urlsplit
 
 from src.nextgen.async_io import blocking
+from src.nextgen.systemd_notify import notify, watchdog_interval
+from src.nextgen.api.password_store import PasswordStore, PasswordConflict, PasswordStorageError
+from src.nextgen.api.passwords import verify_password
+from src.nextgen.api.admin_socket import start_admin
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
@@ -62,7 +67,7 @@ def validate_secret_fields(kind,body,fields):
     try:
         if kind=='access':
             from src.nextgen.secrets import _access_values
-            _access_values(body['webhook_token'],body['management_token'])
+            _access_values(body['webhook_token'],'')
         elif kind=='qbittorrent':
             from src.nextgen.acquisition.settings import DownloadCredentials
             if body['username'] or body['password']:DownloadCredentials(body['username'],body['password'])
@@ -97,6 +102,9 @@ class Application:
         self.origin=public_origin(origin or 'http://'+authority)
         self.authorities={urlsplit(self.origin).netloc,authority.lower()}
         self.sessions=sessions or Sessions()
+        self.passwords=PasswordStore(directory)
+        self.admin_server=None
+        self.admin_path=os.environ.get('ANIME_DISCOVERY_ADMIN_SOCKET')
         self.assets=load_assets()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
@@ -106,6 +114,13 @@ class Application:
     def close(self):
         self.closed=True
         self.pool.shutdown(wait=True,cancel_futures=False)
+
+    async def _watchdog(self, interval):
+        """Heartbeat from the serving event loop, not a background OS thread."""
+        while True:
+            await asyncio.sleep(interval)
+            if not self.closed:
+                notify('WATCHDOG=1')
 
     async def _body(self,receive):
         chunks=[];size=0
@@ -122,10 +137,30 @@ class Application:
 
     async def __call__(self,scope,receive,send):
         if scope['type']=='lifespan':
+            watchdog_task = None
             while True:
                 message=await receive()
-                if message['type']=='lifespan.startup':await send({'type':'lifespan.startup.complete'})
+                if message['type']=='lifespan.startup':
+                    try:
+                        if self.admin_path:
+                            self.admin_server=await start_admin(self.admin_path,self.passwords)
+                    except Exception:
+                        await send({'type':'lifespan.startup.failed','message':'Admin socket could not be started'})
+                        return
+                    await send({'type':'lifespan.startup.complete'})
+                    interval = watchdog_interval()
+                    if interval is not None:
+                        watchdog_task = asyncio.create_task(self._watchdog(interval))
                 elif message['type']=='lifespan.shutdown':
+                    notify('STOPPING=1')
+                    if self.admin_server is not None:
+                        self.admin_server.close()
+                        await self.admin_server.wait_closed()
+                        try:os.unlink(self.admin_path)
+                        except FileNotFoundError:pass  # Python 3.13 asyncio owns socket cleanup.
+                    if watchdog_task is not None:
+                        watchdog_task.cancel()
+                        await asyncio.gather(watchdog_task, return_exceptions=True)
                     await blocking(self.close)
                     await send({'type':'lifespan.shutdown.complete'});return
             return
@@ -188,7 +223,6 @@ class Application:
             (b'x-content-type-options',b'nosniff'),(b'referrer-policy',b'no-referrer'),
             (b'content-security-policy',b"default-src 'none'; frame-ancestors 'none'"),
             (b'x-request-id',request_id.encode()),(b'content-length',str(len(encoded)).encode()),*extra]
-        if status==401:response_headers.append((b'www-authenticate',b'Bearer realm="anime-discovery"'))
         if status in (429,503):response_headers.append((b'retry-after',b'60'))
         await send({'type':'http.response.start','status':status,'headers':response_headers})
         await send({'type':'http.response.body','body':encoded})
@@ -211,7 +245,7 @@ class Application:
             if set(query)-{'token'}:raise ApiError(400,'API_REQUEST_INVALID')
             webhook_key(headers,query,body,access.webhook_token)
             normalized=normalize_webhook(body)
-            if any(key and key.encode() in normalized for key in (access.webhook_token,access.management_token)):raise ApiError(400,'API_WEBHOOK_INVALID')
+            if any(key and key.encode() in normalized for key in (access.webhook_token,)):raise ApiError(400,'API_WEBHOOK_INVALID')
             desired=self.store.read();configuration=for_operation(desired,self.startup,component='api')
             configure_logging(configuration.logging_settings(),'api',logger=self.logger)
             with MaintenanceGate(configuration.value('storage.database_path')).operation():
@@ -219,32 +253,46 @@ class Application:
                     event_id,job_id=accept_event_and_job(db,'autobrr',normalized,kind='IDENTIFY_ANIME',payload={},component='api',logger=self.logger)
             return 202,{'event_id':event_id,'job_id':job_id},[]
         check_origin(headers,self.origin)
-        if not access.management_token:raise ApiError(503,'API_AUTH_UNCONFIGURED')
+        try:
+            password_revision, password_digest = self.passwords.read()
+        except PasswordStorageError:
+            raise ApiError(503,'API_AUTH_UNCONFIGURED') from None
+        if password_digest is None:
+            raise ApiError(503,'API_AUTH_UNCONFIGURED')
         if path==PREFIX+'/auth/session' and method=='POST':
             if query:raise ApiError(400,'API_REQUEST_INVALID')
             check_origin(headers,self.origin,required=True)
-            self.sessions.attempt(peer);exact(body,('token',))
-            if not matches(body['token'],access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-            if 'authorization' in headers and not matches(bearer(headers),access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-            token,csrf=self.sessions.create(access.management_token)
+            self.sessions.attempt(peer);exact(body,('password',))
+            if not verify_password(body['password'],password_digest):raise ApiError(401,'API_AUTH_REQUIRED')
+            token,csrf=self.sessions.create(password_digest)
             event(self.logger,logging.INFO,'API_SESSION_CREATED',component='api')
             return 201,{'csrf_token':csrf,'expires_in':self.sessions.ttl},[(b'set-cookie',self._cookie(token).encode())]
-        supplied=bearer(headers)
-        digest=session=None
-        if supplied is not None:
-            if not matches(supplied,access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-        else:
-            check_origin(headers,self.origin,required=method!='GET')
-            digest,session=self.sessions.require(headers,access.management_token,mutation=method!='GET')
+        if 'authorization' in headers:
+            raise ApiError(401,'API_AUTH_REQUIRED')
+        check_origin(headers,self.origin,required=method!='GET')
+        digest,session=self.sessions.require(headers,password_digest,mutation=method!='GET')
         if path==PREFIX+'/auth/session':
             if query:raise ApiError(400,'API_REQUEST_INVALID')
-            if method=='GET':return 200,{'authenticated':True,'csrf_token':None if session is None else session.csrf},[]
+            if method=='GET':return 200,{'authenticated':True,'csrf_token':session.csrf},[]
             if method=='DELETE':
                 exact(body,())
-                if digest is not None:self.sessions.remove(digest)
+                self.sessions.remove(digest)
                 event(self.logger,logging.INFO,'API_SESSION_CLOSED',component='api')
                 return 200,{'signed_out':True},[(b'set-cookie',self._cookie('',clear=True).encode())]
             raise ApiError(405,'API_METHOD_INVALID')
+        if path==PREFIX+'/auth/password':
+            if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
+            if query:raise ApiError(400,'API_REQUEST_INVALID')
+            exact(body,('current_password','new_password'))
+            if not verify_password(body['current_password'],password_digest):raise ApiError(401,'API_AUTH_REQUIRED')
+            try:
+                new_revision=self.passwords.replace(body['new_password'],expected_revision=password_revision)
+            except PasswordConflict:
+                raise ApiError(409,'API_AUTH_REQUIRED') from None
+            except ValueError:
+                raise ApiError(400,'API_REQUEST_INVALID') from None
+            self.sessions.clear()
+            return 200,{'password_changed':True,'revision':new_revision},[(b'set-cookie',self._cookie('',clear=True).encode())]
         if 'token' in query:raise ApiError(400,'API_REQUEST_INVALID')
         desired=self.store.read();configuration=for_operation(desired,self.startup,component='api')
         configure_logging(configuration.logging_settings(),'api',logger=self.logger)
@@ -284,7 +332,51 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','recognized','webhook']},[]
+            season_match=re.fullmatch(PREFIX+r'/recognized/([1-9][0-9]{0,17})/([0-9]{1,3})(?:/([1-9][0-9]{0,17}))?/episodes',path)
+            if season_match:
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                tid,season=map(int,season_match.groups()[:2])
+                aid=int(season_match.group(3)) if season_match.group(3) else None
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    parents=db.execute(
+                        "SELECT anidb_id,display_title FROM recognized_seasons "
+                        "WHERE tvdb_series_id=? AND tvdb_season=?" +
+                        (" AND anidb_id=?" if aid is not None else ""),
+                        (tid,season,aid) if aid is not None else (tid,season)).fetchall()
+                    if len(parents)!=1:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    parent=parents[0]
+                    records=db.execute(
+                        "SELECT anidb_episode_number,anidb_episode_id,tvdb_episode,tvdb_episode_id "
+                        "FROM recognized_episodes WHERE tvdb_series_id=? AND tvdb_season=? "
+                        "AND anidb_id=? ORDER BY tvdb_episode LIMIT 501",(tid,season,parent[0])).fetchall()
+                if len(records)>500:raise ApiError(503,'API_UNAVAILABLE')
+                return 200,{'tvdb_series_id':tid,'season':season,'anidb_id':parent[0],
+                    'title':parent[1],'items':[{'anidb_episode_number':an,
+                    'anidb_episode_id':ae,'tvdb_episode':te,'tvdb_episode_id':tid_episode}
+                    for an,ae,te,tid_episode in records]},[]
+            if path==PREFIX+'/recognized':
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    rows=db.execute(
+                        "SELECT s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title,"
+                        "count(DISTINCT a.alias_key),count(DISTINCT v.anidb_episode_id) "
+                        "FROM recognized_seasons s "
+                        "LEFT JOIN recognized_aliases a "
+                        "ON a.tvdb_series_id=s.tvdb_series_id AND a.tvdb_season=s.tvdb_season AND a.anidb_id=s.anidb_id "
+                        "LEFT JOIN recognized_episodes v "
+                        "ON v.tvdb_series_id=s.tvdb_series_id AND v.tvdb_season=s.tvdb_season "
+                        "AND v.anidb_id=s.anidb_id "
+                        "GROUP BY s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title "
+                        "ORDER BY s.display_title,s.tvdb_season LIMIT 501").fetchall()
+                if len(rows)>500:raise ApiError(503,'API_UNAVAILABLE')
+                return 200,{'items':[{'tvdb_series_id':tid,'season':season,
+                    'anidb_id':aid,'title':title,'alias_count':alias_count,
+                    'verified_episode_count':ep_count} for tid,season,aid,title,alias_count,ep_count in rows]},[]
             if path==PREFIX+'/intake':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 return 200,self._intake(configuration,query),[]
@@ -315,10 +407,10 @@ class Application:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 if method!='PATCH':raise ApiError(405,'API_METHOD_INVALID')
                 kind=secret_match[1]
-                fields={'shoko':('api_key',),'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token')}[kind]
+                fields={'shoko':('api_key',),'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token',)}[kind]
                 exact(body,('expected_revision',*fields))
                 validate_secret_fields(kind,body,fields)
-                callback={'shoko':self.secrets.update_shoko_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens}[kind]
+                callback={'shoko':self.secrets.update_shoko_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_webhook_token}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
                 return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
