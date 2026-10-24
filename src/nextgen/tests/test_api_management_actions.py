@@ -93,7 +93,7 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,200);self.assertTrue(result['data']['completed'])
         self.assertEqual(self.rows('SELECT count(*) FROM jobs'),[(1,)])
 
-    async def test_staged_keep_is_a_single_durable_request_not_a_claim_of_completion(self):
+    async def test_synthetic_staged_marker_does_not_fake_keep_publication(self):
         _,result,_=await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
         target=result['data']['job_id'];db=connect(self.database)
         try:
@@ -101,14 +101,13 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
                 db.execute("UPDATE jobs SET state='DONE' WHERE job_id=?",(target,))
                 db.execute("UPDATE job_operations SET state='STAGED' WHERE operation_id=(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(target,))
         finally:db.close()
-        status,result,_=await self.request('POST',f'/api/v1/jobs/{target}/keep',{},token=ADMIN)
-        self.assertEqual(status,202);control=result['data']['job_id']
-        _,again,_=await self.request('POST',f'/api/v1/jobs/{target}/keep',{},token=ADMIN)
-        self.assertEqual(again['data']['job_id'],control)
-        self.assertEqual(self.rows('SELECT kind,state FROM jobs WHERE job_id=?',(control,)),[('KEEP_MEDIA','PENDING')])
+        status,_,_=await self.request('POST',f'/api/v1/jobs/{target}/keep',{},token=ADMIN)
+        self.assertEqual(status,409)
+        self.assertEqual(self.rows('SELECT count(*) FROM keep_imports'),[(0,)])
+        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(0,)])
         _,original,_=await self.request('GET',f'/api/v1/jobs/{target}',token=ADMIN)
-        self.assertFalse(original['data']['actions']['keep']['enabled'])
         self.assertFalse(original['data']['actions']['cancel']['enabled'])
+
 
 
 class ActionMessageTests(unittest.TestCase):
