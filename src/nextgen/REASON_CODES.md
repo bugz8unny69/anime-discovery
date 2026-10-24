@@ -205,18 +205,17 @@ translation keys through the shared catalog. Neither a provider title nor raw
 release name/payload is placed in diagnostic history.
 
 
-Trial policy records TRIAL_SELECTED ("This episode is selected for the trial."),
-TRIAL_OUTSIDE_WINDOW ("This episode is outside the trial selection.") and
-TRIAL_DISABLED ("Trial episode selection is disabled."). Each has a static action
-and translation-ready catalog key. TRIAL_PLAN_CONFLICT requests plan/evidence
-review. TRIAL_EVALUATED is a readable job marker requiring a registered reason;
-its durable audit and selection facts commit together and log only after commit.
-Selection success never means download, staging or permanent Keep completed.
+Episode selection retains stable historical identifiers `TRIAL_SELECTED`,
+`TRIAL_OUTSIDE_WINDOW`, `TRIAL_DISABLED` and `TRIAL_PLAN_CONFLICT`. Their
+English messages use "Intake selection" or "episode selection", not the old
+product name. `TRIAL_EVALUATED` remains the durable job event with a registered
+reason; its audit and selection facts commit together and log only after commit.
+A selected episode does not mean download, staging or Keep completed.
 
-TRIAL_COUNTS_INVALID rejects two zero episode-selection counts during settings
-conversion/validation. Its public message asks for at least one positive count
-without requiring users to understand the internal word trial. TRIAL_DISABLED
-is retained for historical records only; new policy evaluations do not emit it.
+`TRIAL_COUNTS_INVALID` rejects two zero episode-selection counts during
+configuration validation. `TRIAL_DISABLED` is retained for historical
+compatibility only; current evaluations do not emit it. Do not rename any of
+these stored codes without a separate compatibility migration.
 
 EPISODE_RESERVATION_GRANTED explains a durable exact-episode reservation;
 EPISODE_RESERVED holds competing work; EPISODE_RESERVATION_CONFLICT requires

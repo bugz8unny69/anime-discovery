@@ -137,6 +137,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         job=result['data']['items'][0]
         self.assertNotIn('payload_json',job);self.assertNotIn('lease_token',job)
         self.assertTrue(job['cancellation']['can_cancel'])
+        self.assertIn('reason',job['cancellation'])
+        self.assertIsNone(job['cancellation']['reason'])
         status,result,_=await self.request('GET',f"/api/v1/jobs/{job['job_id']}/history",token=ADMIN)
         self.assertEqual(status,200)
         self.assertEqual(result['data']['items'][0]['event']['message'],'Job created.')

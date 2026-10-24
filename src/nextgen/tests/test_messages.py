@@ -59,6 +59,14 @@ class MessageTests(unittest.TestCase):
                              REGISTRY["IDENTITY_INVALID"].message)
         self.assertEqual(catalog.event("CREATED")["message"], "Job created.")
 
+    def test_historical_episode_selection_codes_use_current_plain_language(self):
+        for code in ("TRIAL_SELECTED", "TRIAL_OUTSIDE_WINDOW", "TRIAL_DISABLED", "TRIAL_PLAN_CONFLICT"):
+            rendered = DEFAULT_CATALOG.reason(code)
+            self.assertTrue(rendered["message"])
+            self.assertTrue(rendered["action"])
+            self.assertNotIn("trial", rendered["message"].lower())
+            self.assertNotIn("trial", rendered["action"].lower())
+
     def test_unknown_history_is_readable_without_untrusted_prose(self):
         for code in ("FUTURE_CODE", None, "PASSWORD=secret", "<script>", "A" * 65, []):
             self.assertIn("recorded", DEFAULT_CATALOG.event(code)["message"])

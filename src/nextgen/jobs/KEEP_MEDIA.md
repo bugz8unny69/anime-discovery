@@ -36,7 +36,7 @@ Shoko is optional and not involved in the Sonarr import.
    staged evidence and must not be the same inode. Only then may the lease-fenced
    worker commit `VERIFIED` and the Keep job's `DONE` outcome atomically.
 
-## Setup for an isolated lab trial (do not deploy until validated)
+## Setup for an isolated lab validation (do not deploy until validated)
 
 - Upgrade NextGen configuration explicitly from v7 to v8; configure
   `sonarr.base_url`, `sonarr.root_folder`,

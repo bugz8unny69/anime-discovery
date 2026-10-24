@@ -396,4 +396,5 @@ class Application:
                 'status':CATALOG.job_status(row[4],row[5]),'attempt_count':row[6],
                 'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
+                                 'reason':None if op[3] is None else CATALOG.reason(op[3]),
                                 'can_cancel':actions['cancel']['enabled'],'can_cleanup':actions['cleanup']['enabled']}}
