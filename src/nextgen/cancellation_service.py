@@ -11,7 +11,7 @@ from src.nextgen.acquisition.qbittorrent import Client
 from src.nextgen.acquisition.submission import ClientUnavailable, ClientInvalid, ClientAuthenticationFailed, ClientUnsupported
 from src.nextgen.cancellation import CancellationError, CleanupBusy, OperationGate
 from src.nextgen.diagnostics import log_history
-from src.nextgen.history import append_job_history
+from src.nextgen.history import job_attempt, append_job_history
 from src.nextgen.maintenance import MaintenanceGate
 from src.nextgen.storage.cancellation import CancellationStore, operation, cancel_job
 from src.nextgen.storage.sqlite import transaction
@@ -57,7 +57,7 @@ class CancellationService(OwnedCleanup):
                        (state,reason,now,op[0]))
             records=() if (op[2],op[3])==(state,reason) else (append_job_history(db,job_id=job_id,
                 event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component=self.component,occurred_at_ms=now,
-                details={} if cause is None else {'cause_reason_code':cause}),)
+                details={**({} if cause is None else {'cause_reason_code':cause}),'attempt':job_attempt(db,job_id)}),)
             if state=='COMPLETE':
                 from src.nextgen.storage.reservation_release import release_cancelled
                 records+=release_cancelled(db,op[0],job_id,now,component=self.component)

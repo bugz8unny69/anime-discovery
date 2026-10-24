@@ -86,8 +86,11 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             initialize(self.db)  # Current storage requires explicit upgrade from v7.
         self.db.executescript((SQL_DIR / "008_handler_history.sql").read_text())
+        # The current enqueue adapter also writes operation scopes (v17+).
+        # At v8, exercise only the historical worker-attributed audit shape.
         with transaction(self.db):
-            enqueue_job(self.db, component="worker", kind="new-work", payload={})
+            self.db.execute("INSERT INTO jobs(job_id,kind,payload_json,available_at_ms,created_at_ms,updated_at_ms) VALUES(11,'new-work','{}',1,1,1)")
+            self.db.execute("INSERT INTO job_history(job_id,occurred_at_ms,event_code,details_json,component) VALUES(11,1,'CREATED','{}','worker')")
         self.assertEqual(self.db.execute("SELECT component FROM job_history ORDER BY history_id").fetchall(),
                          [("coordinator",), ("worker",)])
         self.assertEqual(self.db.execute("PRAGMA foreign_key_check").fetchall(), [])

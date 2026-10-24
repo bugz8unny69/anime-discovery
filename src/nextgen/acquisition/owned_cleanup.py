@@ -3,7 +3,7 @@ import json
 from src.nextgen.acquisition.cleanup import CleanupPermit, owned
 from src.nextgen.acquisition.transfers import STOPPED, CHECKING
 from src.nextgen.cancellation import CancellationError
-from src.nextgen.history import append_job_history
+from src.nextgen.history import job_attempt, append_job_history
 from src.nextgen.storage.sqlite import transaction
 
 
@@ -41,7 +41,7 @@ class OwnedCleanup:
             if changed!=1:raise CancellationError()
             receipt=append_job_history(db,job_id=intent.plan.preparation_job_id,event_code=self.cleanup_event,
                 reason_code=self.complete_reason if phase=='COMPLETE' else self.pending_reason,
-                component=self.component,occurred_at_ms=now)
+                component=self.component,occurred_at_ms=now,details={'attempt':job_attempt(db,intent.plan.preparation_job_id)})
         self._log((receipt,))
     def _clean_target(self,op,intent):
         files,phase=self._journal(op,intent)

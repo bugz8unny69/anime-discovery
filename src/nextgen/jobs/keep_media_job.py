@@ -9,7 +9,7 @@ from src.nextgen.keep_selection import KeepSelectionInvalid
 from src.nextgen.sonarr import KeepReview, KeepUnavailable
 from src.nextgen.staging import StagingReview, StagingBusy
 from src.nextgen.acquisition.media import MediaInvalid
-from src.nextgen.history import append_job_history
+from src.nextgen.history import job_attempt, append_job_history
 
 KIND='KEEP_MEDIA'
 DEFINITION=HandlerDefinition(KIND,'Keep staged video in the permanent library')
@@ -27,7 +27,7 @@ def _persist(db,claim,value):
         from src.nextgen.jobs.enrich_shoko_job import enqueue as enqueue_shoko
         enqueue_shoko(db,claim)
     return (append_job_history(db,job_id=claim.job_id,event_code='KEEP_COMPLETED',reason_code='KEEP_COMPLETE',
-        component='worker',occurred_at_ms=time.time_ns()//1000000),)
+        component='worker',occurred_at_ms=time.time_ns()//1000000,details={'attempt':job_attempt(db,claim.job_id)}),)
 
 
 def registration(secrets=None,*,service_factory=Service):

@@ -1,6 +1,6 @@
 """Retire canceled acquisition slots only after proven drained cleanup."""
 from src.nextgen.cancellation import CancellationError
-from src.nextgen.history import append_job_history
+from src.nextgen.history import job_attempt, append_job_history
 
 
 def active(db,operation_id):
@@ -35,4 +35,4 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
         db.execute("UPDATE episode_reservations SET state='RELEASED',ended_at_ms=?,ended_by_job_id=? WHERE reservation_id=? AND state='ACTIVE'",(now,job_id,reservation))
     if not rows:return ()
     return (append_job_history(db,job_id=job_id,event_code='EPISODE_RESERVATIONS_RELEASED',
-        reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,occurred_at_ms=now),)
+        reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}),)

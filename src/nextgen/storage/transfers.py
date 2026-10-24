@@ -126,11 +126,14 @@ class TransferJournal:
             self.queue._owns(db,claim,self.queue.now())
             return _record(db,current),permit,(receipt,)
 
-    def observe(self,claim,intent,snapshot):
+    def observe(self,claim,intent,snapshot,*,expected_record=None):
         with self.queue.connection() as db,transaction(db):
             current,record=self._fence(db,claim,intent)
             if record is None:raise TransferConflict()
             if record.phase=='REVIEW':return record,()
+            # Another job may have advanced the journal after this observation
+            # began. Retain its newer result instead of writing a stale snapshot.
+            if expected_record is not None and record!=expected_record:return record,()
             if snapshot is None:
                 if record.phase=='COMPLETE':raise TransferConflict()
                 return record,()

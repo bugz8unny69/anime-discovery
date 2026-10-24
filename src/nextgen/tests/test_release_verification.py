@@ -138,12 +138,13 @@ class ReleaseJobTests(unittest.IsolatedAsyncioTestCase):
     async def test_stale_lease_cannot_commit_release_facts(self):
         async def verify(source,*args): return VerifiedRelease(source,1,987,2,13,100)
         worker=self.worker(verify)
-        worker.queue.clock=lambda:1000
+        now=worker.queue.now()
+        worker.queue.clock=lambda:now
         claim,_=worker.queue.claim()
         spec=worker.registry.entries['VERIFY_RELEASE']
         worker.queue.start(claim,spec,'a'*32,worker.registry)
         source=load_release(self.database,self.event,123)
-        worker.queue.clock=lambda:31000
+        worker.queue.clock=lambda:now+worker.policy.lease_ms
         with self.assertRaises(LeaseLost):
             worker.queue.finish(claim,Outcome(value=VerifiedRelease(source,1,987,2,13,100)),
                                 spec=spec,invocation='a'*32,registry=worker.registry)

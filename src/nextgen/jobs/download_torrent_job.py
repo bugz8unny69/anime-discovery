@@ -83,8 +83,10 @@ def registration(secrets,*,client_factory=Client,journal_factory=TransferJournal
                     await blocking(journal.guard,context.claim,intent,record,'start')
                     try:await blocking(client.start_selected,intent,record.fingerprint,permit)
                     except (ClientUnavailable,ClientAuthenticationFailed,ClientInvalid):return wait('TORRENT_START_UNCERTAIN')
-                    snapshot=await blocking(client.inspect_transfer,intent.plan.manifest.info_hash)
-            record,receipts=await blocking(journal.observe,context.claim,intent,snapshot)
+            # start() can return another job's newer record without a permit.
+            # Read again before reconciling that record, even when we did not send.
+            snapshot=await blocking(client.inspect_transfer,intent.plan.manifest.info_hash)
+            record,receipts=await blocking(journal.observe,context.claim,intent,snapshot,expected_record=record)
             log(receipts)
             if record.phase=='COMPLETE':return Outcome(value={'preparation_job_id':preparation,'download_job_id':context.claim.job_id})
             if record.phase=='REVIEW':return Outcome('review',record.reason_code)

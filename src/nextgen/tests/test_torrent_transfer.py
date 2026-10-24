@@ -170,6 +170,17 @@ class TorrentTransferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.adds,self.starts),(1,1))
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='SUBMIT_TORRENT'"),[('DONE',),('DONE',)])
 
+    async def test_stale_stopped_snapshot_cannot_replace_a_newer_active_record(self):
+        worker=self.worker();_,prep=await self.queued(worker);await worker.attempt()
+        self.due();claim,_=worker.queue.claim();journal=TransferJournal(self.database)
+        intent,current=journal.load(claim,prep)
+        self.assertEqual(current.phase,'ACTIVE')
+        stale=replace(current,phase='START_UNCERTAIN',reason_code='TORRENT_START_UNCERTAIN')
+        old_snapshot=replace(self.snapshot,observation=replace(self.snapshot.observation,state='stoppedDL'))
+        result,receipts=journal.observe(claim,intent,old_snapshot,expected_record=stale)
+        self.assertEqual(result,current);self.assertEqual(receipts,())
+        self.assertEqual(self.rows('SELECT phase FROM torrent_transfers'),[('ACTIVE',)])
+
     async def test_changed_priorities_stop_monitoring_for_review_without_restarting(self):
         worker=self.worker();await self.queued(worker);await worker.attempt()
         self.snapshot=replace(self.snapshot,priorities=(0,))

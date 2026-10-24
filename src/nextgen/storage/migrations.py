@@ -134,15 +134,15 @@ def _plan(db, scripts):
     return MigrationPlan(version, LATEST_VERSION, fingerprint, steps)
 
 
-def _open(database, *, readonly):
+def _open(database, *, readonly, timeout_ms=0):
     path = Path(database).absolute()
     if not stat.S_ISREG(path.lstat().st_mode):
         raise MigrationSchemaInvalid()
     db = sqlite3.connect(path.as_uri() + ("?mode=ro" if readonly else "?mode=rw"),
-                         uri=True, timeout=0)
+                         uri=True, timeout=timeout_ms/1000)
     try:
         db.execute("PRAGMA foreign_keys=ON")
-        db.execute("PRAGMA busy_timeout=0")
+        db.execute(f"PRAGMA busy_timeout={timeout_ms}")
         if not readonly:
             db.execute("PRAGMA synchronous=FULL")
         return db

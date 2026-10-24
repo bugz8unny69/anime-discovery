@@ -24,7 +24,9 @@ class DiagnosticLoggingTests(unittest.TestCase):
         logger, stream = self.make_logger()
         for name, definition in EVENTS.items():
             reason = definition.exact_reason or ("JOB_HANDLER_FAILED" if definition.reason_required else None)
-            event(logger, logging.INFO, name, reason_code=reason)
+            fields=({'handler_code':'TEST_HANDLER','handler_label':'Test handler','invocation_id':'a'*32}
+                    if name in ('HANDLER_STARTED','HANDLER_COMPLETED','HANDLER_FAILED') else {})
+            event(logger, logging.INFO, name, reason_code=reason,**fields)
             self.assertIn("event_code=" + name, stream.getvalue())
             self.assertIn(DEFAULT_CATALOG.event(name)["message"], stream.getvalue())
             if reason:

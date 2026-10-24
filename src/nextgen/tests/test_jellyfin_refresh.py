@@ -90,7 +90,12 @@ class RefreshJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM job_operations WHERE state='STAGED'"),[(1,)])
         await worker.attempt()
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[('RETRY_WAIT',)])
-        self.due();await worker.attempt()
+        from src.nextgen.storage.sqlite import connect,transaction
+        db=connect(self.database)
+        try:
+            with transaction(db):db.execute("UPDATE jobs SET available_at_ms=0 WHERE kind='REFRESH_JELLYFIN'")
+        finally:db.close()
+        await worker.attempt()
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[('DONE',)])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(1,)])
 
