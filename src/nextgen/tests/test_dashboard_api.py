@@ -52,7 +52,7 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
         for credential in (None,WEB):
             status,_,_=await self.request('GET','/api/v1/intake',token=credential)
             self.assertEqual(status,401)
-        status,session,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'Origin':ORIGIN})
+        status,session,headers=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},headers={'Origin':ORIGIN})
         self.assertEqual(status,201)
         cookie=headers[b'set-cookie'].decode().split(';',1)[0]
         self.assertTrue(cookie.startswith(COOKIE+'='))
