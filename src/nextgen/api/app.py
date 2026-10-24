@@ -331,7 +331,27 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','recognized','webhook']},[]
+            if path==PREFIX+'/recognized':
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    rows=db.execute(
+                        "SELECT s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title,"
+                        "count(DISTINCT a.alias_key),count(DISTINCT v.anidb_episode_id) "
+                        "FROM recognized_seasons s "
+                        "LEFT JOIN recognized_aliases a "
+                        "ON a.tvdb_series_id=s.tvdb_series_id AND a.tvdb_season=s.tvdb_season "
+                        "LEFT JOIN release_verifications v "
+                        "ON v.tvdb_series_id=s.tvdb_series_id AND v.tvdb_season=s.tvdb_season "
+                        "AND v.anidb_id=s.anidb_id "
+                        "GROUP BY s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title "
+                        "ORDER BY s.display_title,s.tvdb_season LIMIT 501").fetchall()
+                if len(rows)>500:raise ApiError(503,'API_UNAVAILABLE')
+                return 200,{'items':[{'tvdb_series_id':tid,'season':season,
+                    'anidb_id':aid,'title':title,'alias_count':alias_count,
+                    'verified_episode_count':ep_count} for tid,season,aid,title,alias_count,ep_count in rows]},[]
             if path==PREFIX+'/intake':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 return 200,self._intake(configuration,query),[]
