@@ -99,3 +99,11 @@ Keep/Reject. Automatic scan behavior and media-server naming recognition require
 later integration validation. All authored offline filesystem/worker/migration
 cases and CI remain unrun. No live source files, clients, viewers, migrations or
 services were contacted during implementation.
+
+
+## Follow-up refresh handoff (draft)
+
+After this job completes successfully, a separately owned `REFRESH_JELLYFIN`
+job is atomically enqueued if `jellyfin.base_url` was configured at completion.
+It requests a library scan only; media success and cleanup never depend on
+Jellyfin availability. See [REFRESH_JELLYFIN](REFRESH_JELLYFIN.md).
