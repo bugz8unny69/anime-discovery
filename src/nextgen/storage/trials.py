@@ -24,7 +24,8 @@ def load_trial_source(database,verification_job_id,event_id):
     integer(event_id,positive=True)
     db=None
     try:
-        db=_open(database,readonly=True)
+        db=_open(database,readonly=True,timeout_ms=5000)
+        db.execute("BEGIN")
         if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:raise QueueUnavailable()
         return _source(db,verification_job_id,event_id)
     except (OSError,sqlite3.Error,MigrationError):raise QueueUnavailable() from None

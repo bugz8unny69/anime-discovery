@@ -29,7 +29,8 @@ def load_release(database, event_id, aid):
     integer(aid,positive=True)
     db=None
     try:
-        db=_open(database,readonly=True)
+        db=_open(database,readonly=True,timeout_ms=5000)
+        db.execute("BEGIN")
         if db.execute("PRAGMA user_version").fetchone()[0]!=LATEST_VERSION: raise QueueUnavailable()
         return _source(db,event_id,aid)
     except (OSError,sqlite3.Error,MigrationError):

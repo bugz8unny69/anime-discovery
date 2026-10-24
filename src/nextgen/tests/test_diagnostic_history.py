@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from src.nextgen.diagnostics import configure_logging, log_history
-from src.nextgen.history import append_event_history, append_job_history, encode_details, trace_id
+from src.nextgen.history import append_event_history, append_job_history, job_attempt, encode_details, trace_id
 from src.nextgen.settings import parse_settings
 from src.nextgen.storage.sqlite import (
     initialize, accept_event, accept_event_and_job, enqueue_job, save_identity, transaction,
@@ -33,6 +33,18 @@ class DiagnosticHistoryTests(unittest.TestCase):
                 "SELECT event_code,component,details_json FROM job_history WHERE job_id=?", (job,)
             ).fetchall(), [("CREATED", "intake", '{"attempt":0}')])
         self.assertEqual(self.db.execute("SELECT count(*) FROM jobs").fetchone()[0], 2)
+
+    def test_control_audit_observes_target_attempt_and_keeps_explicit_validation(self):
+        _,target=accept_event_and_job(self.db,'test',b'private',kind='identity',payload={})
+        with transaction(self.db):
+            self.db.execute('UPDATE jobs SET attempt_count=3 WHERE job_id=?',(target,))
+            record=append_job_history(self.db,job_id=target,event_code='MANAGEMENT_ACTION_RESUMED',
+                component='api',occurred_at_ms=2,details={'attempt':job_attempt(self.db,target)})
+            self.assertEqual(record.details_json,'{"attempt":3}')
+            with self.assertRaises(ValueError):
+                append_job_history(self.db,job_id=target,event_code='MANAGEMENT_ACTION_RESUMED',
+                    component='api',occurred_at_ms=2,details={'attempt':1})
+        with self.assertRaises(ValueError):job_attempt(self.db,target)
 
     def test_writer_refuses_missing_transaction_and_leaves_no_partial_job(self):
         with self.assertRaises(ValueError):

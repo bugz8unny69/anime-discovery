@@ -206,7 +206,7 @@ class AsyncWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.enqueue()
             worker = self.worker(async_handler if mode == "async" else thread_handler,mode)
             self.assertTrue(await asyncio.wait_for(worker.attempt(),2))
-        self.assertEqual([row[2] for row in self.rows()],["JOB_HANDLER_FAILED"]*2)
+        self.assertEqual([row[2] for row in self.rows()],["JOB_RETRY_EXHAUSTED"]*2)
 
     async def test_embedded_attempts_share_limit_and_close_drains_them(self):
         entered, release = asyncio.Event(),asyncio.Event()

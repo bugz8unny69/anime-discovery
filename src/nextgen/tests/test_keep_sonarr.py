@@ -31,7 +31,7 @@ class Response(io.BytesIO):
 
 
 class FakeSonarr:
-    def __init__(self):self.selection=None;self.root=None;self.present=True;self.imported=False;self.posts=[];self.payload=None;self.lose_import=False;self.lose_add=False;self.failed=False;self.wrong_destination=False
+    def __init__(self):self.selection=None;self.root=None;self.present=True;self.imported=False;self.posts=[];self.payload=None;self.lose_import=False;self.lose_add=False;self.failed=False;self.wrong_destination=False;self.imported_size=None
     def __call__(self,request,timeout):
         assert request.get_header('X-api-key')=='sonarr-private-key'
         path=urlsplit(request.full_url).path.removeprefix('/api/v3/')
@@ -64,12 +64,12 @@ class FakeSonarr:
             self.payload=body
             if not self.failed:
                 destination=self.root/'Series'/'episode.mkv';destination.parent.mkdir(exist_ok=True)
-                shutil.copyfile(self.selection.media_path,destination);self.imported=True
+                shutil.copyfile(self.selection.media_path,destination);self.imported_size=destination.stat().st_size;self.imported=True
             if self.lose_import:self.lose_import=False;raise urllib.error.URLError('lost reply')
             return Response({'id':61})
         if path=='command':return Response([{'id':61,'body':self.payload}] if self.payload else [])
         if path=='command/61':return Response({'id':61,'status':'failed' if self.failed else 'completed'})
-        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':(self.root/'Series'/'episode.mkv').stat().st_size,
+        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':self.imported_size,
             'path':'/elsewhere/episode.mkv' if self.wrong_destination else str(self.root/'Series'/'episode.mkv')})
         raise AssertionError(path)
 
@@ -190,7 +190,7 @@ class SonarrSettingsTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
         self.assertEqual(upgraded.schema_version,10)
-        self.assertEqual(upgraded.revision,doc['revision']+2)
+        self.assertEqual(upgraded.revision,doc['revision']+3)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
         for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
 

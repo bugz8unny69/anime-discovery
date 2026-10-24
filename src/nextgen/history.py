@@ -102,6 +102,14 @@ def append_event_history(db, *, event_id, event_code, component, occurred_at_ms,
                          component, occurred_at_ms, event_id, None, None, encoded)
 
 
+def job_attempt(db,job_id):
+    """Observe the target job's attempt for a cross-operation control audit."""
+    if not db.in_transaction:raise ValueError("history requires an active transaction")
+    row=db.execute('SELECT attempt_count FROM jobs WHERE job_id=?',(integer(job_id,positive=True),)).fetchone()
+    if row is None:raise ValueError("unknown job")
+    return row[0]
+
+
 def append_job_history(db, *, job_id, event_code, component, occurred_at_ms,
                        reason_code=None, details=None, handler_code=None,
                        invocation_id=None, handlers=EMPTY_HANDLERS):

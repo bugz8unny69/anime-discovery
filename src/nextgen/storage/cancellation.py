@@ -1,6 +1,6 @@
 """Trusted management-service cancellation library. Caller holds maintenance admission."""
 from src.nextgen.cancellation import CancellationError
-from src.nextgen.history import append_job_history, integer
+from src.nextgen.history import job_attempt, append_job_history, integer
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction
 
@@ -100,7 +100,7 @@ class CancellationStore:
             if state!='RUNNING':receipts.extend(cancel_job(db,job,now,'api'))
         if not receipts:
             receipts.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_REQUESTED',reason_code='JOB_CANCELED',
-                component='api',occurred_at_ms=now))
+                component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}))
         return op[0],tuple(receipts)
     def acknowledge(self,claim):
         with self.queue.connection() as db,transaction(db):

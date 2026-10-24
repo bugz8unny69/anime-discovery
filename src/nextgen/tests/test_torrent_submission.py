@@ -170,6 +170,18 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM torrent_submissions'),[('OWNED_STOPPED',)])
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='SUBMIT_TORRENT'"),[('DONE',),('DONE',)])
 
+    async def test_stale_absence_cannot_replace_another_jobs_confirmed_ownership(self):
+        worker=self.worker();_,prep=await self.queued(worker)
+        claim,_=worker.queue.claim();journal=SubmissionJournal(self.database)
+        plan,_=journal.load(claim,prep)
+        options=target_options(download_options(self.store.read()),plan)
+        original,_,_=journal.authorize(claim,plan,options,5,False,2)
+        found=Observation(plan.manifest.info_hash,'stoppedDL',options.download_root,
+            options.category,('ad-'+plan.marker,),False,plan.manifest.files)
+        self.assertEqual(journal.observe(claim,original,found)[0],'OWNED_STOPPED')
+        self.assertEqual(journal.observe(claim,original,None)[0],'OWNED_STOPPED')
+        self.assertEqual(self.rows('SELECT state FROM torrent_submissions'),[('OWNED_STOPPED',)])
+
     async def test_changed_evidence_before_authorization_cannot_create_an_intent(self):
         from src.nextgen.acquisition.metadata import AcquisitionConflict
         worker=self.worker()

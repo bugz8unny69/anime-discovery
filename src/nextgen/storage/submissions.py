@@ -123,6 +123,10 @@ class SubmissionJournal:
             if current.state=='OWNED_STOPPED' and db.execute(
                     'SELECT 1 FROM torrent_transfers WHERE plan_id=?',(plan.plan_id,)).fetchone() is not None:
                 return 'OWNED_STOPPED','TORRENT_STOPPED_CONFIRMED',()
+            # A concurrent reconciler may already have confirmed this intent
+            # after our client read. Do not overwrite its newer state.
+            if current.state!=intent.state:
+                return current.state,('TORRENT_STOPPED_CONFIRMED' if current.state=='OWNED_STOPPED' else 'TORRENT_SUBMISSION_UNCERTAIN'),()
             state,reason=classify(current,observation)
             records=()
             if state!=current.state:

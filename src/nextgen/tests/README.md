@@ -2,10 +2,11 @@
 
 NextGen is a clean-slate application. Its tests live in `src/nextgen/tests/` and test only new `src/nextgen/` code. The old tests under `src/legacy/` remain intact as historical regression/reference material; they do **not** run as part of NextGen batches.
 
-## Commands for the later authorized testing phase
+## Running the complete offline stack
 
-**Current policy: author and commit tests, but do not execute offline tests or
-CI.** The commands below are reference instructions for later authorization.
+**Authorized 2026-10-24:** run offline tests and GitHub CI across the complete
+NextGen stack and fix failures. Earlier unrun notes below describe historical
+implementation milestones. Live services, real media and deployment are separate.
 
 Run from the **repository root** with Python 3.12+ (standard library only):
 
@@ -32,9 +33,9 @@ Test JSON samples are in `fixtures/`. **Fixtures are sample data used by the tes
 
 ## Testing policy
 
-- **No GitHub Actions test checks** on pushes or pull requests. The old automatic test workflow is removed in this draft branch. Tests are kept and run locally/on demand in batches, not discarded.
+- `.github/workflows/nextgen-ci.yml` runs the complete NextGen batch suite on Python 3.11, 3.12 and 3.13 for NextGen pushes/PRs. It performs syntax checks and preserves test logs without publishing releases or deploying.
 - Create new offline NextGen tests alongside each NextGen component. They MUST NOT depend on old runtime modules, old databases, or live services. Use temporary SQLite databases, mock providers, and sample inputs as appropriate.
-- Under the current policy, record **not run** in review/PR descriptions. When execution is explicitly authorized later, run focused and complete batches and record actual outcomes.
+- Run focused checks while fixing failures, then complete batches and report actual outcomes.
 - Do not rewrite legacy tests to suit NextGen. Existing legacy code remains untouched. If a historical regression matters, express it as a new NextGen test of the **expected behavior**, not an imported legacy test.
 - No production deploy, live acquisition, or destructive integration is part of this test runner.
 

@@ -2,7 +2,20 @@
 
 > **Authoritative architecture decision: 2026-10-22.** NextGen is built fresh in `src/nextgen/`. There is **no migration**, compatibility bridge, legacy SQLite reader or transitional data assembler. Legacy `src/legacy/` is reference material for domain lessons and regression tests only.
 >
-> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
+> **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current authorization (2026-10-24): merge the completed NextGen stack, run offline tests and CI across it, and fix failures. Keep deployment and live media operations separate.
+
+## Merged stack and CI repair — 2026-10-24
+
+User authorized merging the completed stack and running full offline CI/tests.
+PR #138 merged #135–#138 into NextGen; all four closed. Add dedicated NextGen CI
+on Python 3.11/3.12/3.13, without archive publishing/deployment. Initial execution
+exposed missing target-attempt audit details, zero-timeout connection startup
+races, stale concurrent submission/transfer observations and older test fixtures.
+The repaired local complete run passed 15/15 batches (827 test executions); three
+new deterministic regression cases passed separately. The final CI matrix and
+complete run include those regression additions. Preserve explicit attempt validation, lease checks,
+no duplicate external mutation and immutable published SQL. Later results and CI
+runs supersede earlier unrun notes below. No production or live-media operations.
 
 ## Optional Shoko metadata and service setup — 2026-10-24
 

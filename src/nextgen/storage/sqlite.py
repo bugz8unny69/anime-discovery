@@ -396,7 +396,7 @@ def admitted_connection(gate):
     with gate.operation():
         from src.nextgen.storage.migrations import _open, LATEST_VERSION, MigrationError, MigrationUnsupported
         try:
-            db = _open(gate.database, readonly=False)
+            db = _open(gate.database, readonly=False,timeout_ms=5000)
         except (OSError, sqlite3.Error):
             raise MigrationError() from None
         try:

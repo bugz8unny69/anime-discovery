@@ -53,7 +53,8 @@ def _request(database, event_id):
     integer(event_id,positive=True)
     db = None
     try:
-        db = _open(database,readonly=True)
+        db = _open(database,readonly=True,timeout_ms=5000)
+        db.execute("BEGIN")
         if db.execute("PRAGMA user_version").fetchone()[0] != LATEST_VERSION:
             raise QueueUnavailable()
         row = db.execute("SELECT source,CASE WHEN length(raw_body)<=65536 THEN raw_body ELSE NULL END,"

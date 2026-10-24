@@ -132,7 +132,11 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         prep,event=self.rows("SELECT job_id,event_id FROM jobs WHERE kind='PREPARE_ACQUISITION'")[0]
         db=connect(self.database)
         try:
-            with transaction(db):enqueue_job(db,kind='DOWNLOAD_TORRENT',payload={'preparation_job_id':prep},component='api',event_id=event,available_at_ms=9999999999999)
+            with transaction(db):
+                # Simulate a separately scoped historical consumer. New references
+                # to STAGED work are correctly rejected by normal admission.
+                historical=enqueue_job(db,kind='DOWNLOAD_TORRENT',payload={},component='api',event_id=event,available_at_ms=9999999999999)
+                db.execute('UPDATE jobs SET payload_json=? WHERE job_id=?',('{"preparation_job_id":'+str(prep)+'}',historical))
         finally:db.close()
         await worker.attempt()
         self.assertEqual(self.controls,[]);self.assertTrue(self.remainder.exists())

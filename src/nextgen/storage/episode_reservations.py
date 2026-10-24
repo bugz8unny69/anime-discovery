@@ -47,7 +47,8 @@ def load_reservation_input(database,evaluation_job_id,event_id):
     integer(event_id,positive=True)
     db=None
     try:
-        db=_open(database,readonly=True)
+        db=_open(database,readonly=True,timeout_ms=5000)
+        db.execute("BEGIN")
         if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:raise QueueUnavailable()
         return _facts(db,evaluation_job_id,event_id)
     except (OSError,sqlite3.Error,MigrationError):raise QueueUnavailable() from None

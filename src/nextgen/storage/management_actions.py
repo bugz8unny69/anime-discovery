@@ -5,7 +5,7 @@ its target scope may be canceled/staged without canceling the control job.
 """
 from contextlib import ExitStack
 from src.nextgen.cancellation import CleanupBusy, OperationGate, CancellationError
-from src.nextgen.history import append_job_history, integer
+from src.nextgen.history import job_attempt, append_job_history, integer
 from src.nextgen.messages import MessageCatalog
 from src.nextgen.storage.cancellation import CancellationStore, operation, unfinished_resources, can_cancel_operation
 from src.nextgen.storage.job_queue import JobQueue
@@ -84,7 +84,7 @@ class ManagementActions:
                     if active(db,op[0]):
                         now=self.queue.now()
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
-                        records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,prior[0])}))
                         data=receipt(db,prior[0]);data['resumed']=True
                         return 202,data,tuple(records)
                 if action in ('keep','reject') and state=='DONE':
@@ -93,7 +93,7 @@ class ManagementActions:
                     if download and download['state'] in STOPPED_JOBS:
                         now=self.queue.now()
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,download['job_id']))
-                        records.append(append_job_history(db,job_id=download['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        records.append(append_job_history(db,job_id=download['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,download['job_id'])}))
                         data=receipt(db,prior[0],reused=True);data['download_cleanup_resumed']=True
                         return 202,data,tuple(records)
                 if action=='keep' and state=='DONE':
@@ -102,7 +102,7 @@ class ManagementActions:
                     if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
                         now=self.queue.now()
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,cleanup['job_id']))
-                        records.append(append_job_history(db,job_id=cleanup['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        records.append(append_job_history(db,job_id=cleanup['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,cleanup['job_id'])}))
                         data=receipt(db,prior[0],reused=True);data['cleanup_resumed']=True
                         return 202,data,tuple(records)
                 if action=='keep' and state=='DONE':
@@ -111,13 +111,13 @@ class ManagementActions:
                     if shoko and shoko['state'] in ('NEEDS_REVIEW','BLOCKED'):
                         now=self.queue.now()
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,shoko['job_id']))
-                        records.append(append_job_history(db,job_id=shoko['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        records.append(append_job_history(db,job_id=shoko['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,shoko['job_id'])}))
                         data=receipt(db,prior[0],reused=True);data['shoko_resumed']=True
                         return 202,data,tuple(records)
                 if action in ('cleanup','reject','keep') and state in ('NEEDS_REVIEW','BLOCKED'):
                     now=self.queue.now()
                     db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
-                    records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                    records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,prior[0])}))
                     data=receipt(db,prior[0]);data['resumed']=True
                     return 202,data,tuple(records)
                 return 202,receipt(db,prior[0],reused=True),()
@@ -135,7 +135,8 @@ class ManagementActions:
                     if db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
             else:
                 if action=='cancel':
-                    _,audits=self.cancellations.request_in_transaction(db,job_id)
+                    try:_,audits=self.cancellations.request_in_transaction(db,job_id)
+                    except CancellationError:raise ActionUnavailable() from None
                     records.extend(audits)
                     op=operation(db,job_id)
                     now=self.queue.now()
@@ -159,7 +160,7 @@ class ManagementActions:
                     db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
                                "reason_code='CANCELLATION_COMPLETE',updated_at_ms=? WHERE operation_id=?",(now,op[0]))
                     records.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_CLEANUP_CHANGED',
-                        reason_code='CANCELLATION_COMPLETE',component='api',occurred_at_ms=now))
+                        reason_code='CANCELLATION_COMPLETE',component='api',occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}))
                     from src.nextgen.storage.reservation_release import release_cancelled
                     records.extend(release_cancelled(db,op[0],job_id,now,component='api'))
                     return 200,{'completed':True,'disable_action':True,
