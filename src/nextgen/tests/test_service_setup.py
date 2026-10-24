@@ -24,7 +24,7 @@ class ServiceSetupTests(unittest.TestCase):
         return initialize_local(self.root,self.database,{'anidb':{'client_name':'registeredclient'}})
 
     def access(self):
-        SecretStore(self.root).update_access_tokens('w'*43,'m'*43,expected_revision=1)
+        SecretStore(self.root).update_webhook_token('w'*43,expected_revision=1)
 
     def test_explicit_init_creates_current_local_files_without_external_work(self):
         result=self.initialize();self.assertTrue(result['initialized']);self.assertEqual(result['configuration_version'],10)
@@ -33,7 +33,8 @@ class ServiceSetupTests(unittest.TestCase):
         db=connect(self.database)
         try:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
         finally:db.close()
-        with self.assertRaises(ValueError):check_local(self.root)
+        # API readiness must not require either a webhook token or a password.
+        self.assertFalse(check_local(self.root)['external_services_checked'])
         self.access();self.assertFalse(check_local(self.root)['external_services_checked'])
 
     def test_existing_database_or_config_is_not_overwritten(self):
