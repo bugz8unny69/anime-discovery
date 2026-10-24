@@ -218,10 +218,11 @@ class KeepMigrationTests(unittest.TestCase):
         try:
             for script in SCRIPTS[:21]:db.executescript((SQL_DIR/script).read_text())
             before=db.execute('SELECT * FROM management_actions').fetchall()
-            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text());initialize(fresh)
+            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text())
+            db.executescript((SQL_DIR / "023_reservation_release.sql").read_text());initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],22)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
         finally:db.close();fresh.close()
 
     def test_wrong_version_and_partial_failure_roll_back(self):

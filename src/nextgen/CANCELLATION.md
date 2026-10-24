@@ -198,3 +198,15 @@ target drain gate. Read [MANAGEMENT_ACTIONS.md](MANAGEMENT_ACTIONS.md) for statu
 receipts, duplicate clicks, explicit review resume and lease fencing. Earlier
 examples of direct CancellationService calls remain trusted library usage, not
 the current HTTP execution model.
+
+
+## Canceled reservation release — v23
+
+After drained cancellation cleanup completes, reservations and associated
+acquisition plans are marked RELEASED in the same completion transaction.
+Their history remains; active partial unique indexes and budgets let a later
+verified delivery acquire the episode/hash again. Kept/staged duplicate
+protection remains ACTIVE. Older completed cancellations need an explicit
+Cleanup action to retire retained slots; migration does not release them.
+This supersedes earlier paragraphs describing slot release as future work.
+See [Reservation release](RESERVATION_RELEASE.md). Migration/tests remain unrun.

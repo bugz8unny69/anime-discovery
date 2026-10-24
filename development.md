@@ -4,6 +4,24 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Canceled-work reservation release — 2026-10-24
+
+Completed drained cancellation cleanup now retires its exact reservation and
+prepared acquisition claims without deleting history. Later verified deliveries
+can reserve the episode and same torrent hash with fresh identities/markers;
+released plans no longer consume active size budget. Shared consumers, uncertain
+cleanup and staged/kept work retain protection. Existing completed cancellations
+can explicitly resume Cleanup to retire retained slots.
+
+SQLite v23 adds state/provenance and active-only uniqueness via an explicit
+table rebuild. Historical SQL 001–022 stays unchanged. Config v9/secrets v5 stay.
+Source syntax and matching fresh/migration table definitions checked; offline
+migration/lifecycle cases authored but unrun. No SQL, tests/CI, live cleanup,
+merge or deployment performed. See [Reservation release](src/nextgen/RESERVATION_RELEASE.md).
+
+PR #135 provides staged-source cleanup after Keep. Download/torrent cleanup
+after Keep/Reject, optional Shoko, service setup and lab validation remain.
+
 ## Post-Keep selected staging cleanup — 2026-10-24
 
 Successful Keep completion now creates one independent CLEANUP_KEPT_MEDIA job

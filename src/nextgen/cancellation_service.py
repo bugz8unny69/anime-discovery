@@ -58,6 +58,9 @@ class CancellationService:
             records=() if (op[2],op[3])==(state,reason) else (append_job_history(db,job_id=job_id,
                 event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component=self.component,occurred_at_ms=now,
                 details={} if cause is None else {'cause_reason_code':cause}),)
+            if state=='COMPLETE':
+                from src.nextgen.storage.reservation_release import release_cancelled
+                records+=release_cancelled(db,op[0],job_id,now,component=self.component)
         self._log(records)
     def _targets(self,job_id):
         with self.store.queue.connection() as db,transaction(db):

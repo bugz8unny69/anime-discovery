@@ -199,29 +199,37 @@ CREATE TABLE IF NOT EXISTS episode_reservations (
  verification_id INTEGER NOT NULL REFERENCES release_verifications(verification_id),
  plan_id INTEGER NOT NULL REFERENCES trial_plans(plan_id),
  anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
- anidb_episode_id INTEGER NOT NULL UNIQUE REFERENCES identified_episodes(anidb_episode_id),
+ anidb_episode_id INTEGER NOT NULL REFERENCES identified_episodes(anidb_episode_id),
  tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
  tvdb_season INTEGER NOT NULL CHECK(tvdb_season>=0),
  tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
- tvdb_episode_id INTEGER NOT NULL UNIQUE CHECK(tvdb_episode_id>0),
+ tvdb_episode_id INTEGER NOT NULL CHECK(tvdb_episode_id>0),
  tvdb_order TEXT NOT NULL DEFAULT 'official' CHECK(tvdb_order='official'),
  reserved_at_ms INTEGER NOT NULL CHECK(reserved_at_ms>=0),
- UNIQUE(tvdb_series_id,tvdb_season,tvdb_episode,tvdb_order)
+ state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','RELEASED')),
+ ended_at_ms INTEGER CHECK(ended_at_ms IS NULL OR ended_at_ms>=0),
+ ended_by_job_id INTEGER REFERENCES jobs(job_id),
+ CHECK((state='ACTIVE' AND ended_at_ms IS NULL AND ended_by_job_id IS NULL) OR
+       (state='RELEASED' AND ended_at_ms IS NOT NULL AND ended_by_job_id IS NOT NULL))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_active_anidb ON episode_reservations(anidb_episode_id) WHERE state='ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_active_tvdb ON episode_reservations(tvdb_episode_id) WHERE state='ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_episode_active_placement ON episode_reservations(tvdb_series_id,tvdb_season,tvdb_episode,tvdb_order) WHERE state='ACTIVE';
 
 CREATE TABLE IF NOT EXISTS acquisition_plans (
  plan_id INTEGER PRIMARY KEY,
  job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
  reservation_id INTEGER NOT NULL UNIQUE REFERENCES episode_reservations(reservation_id),
- info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
  info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
  manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 1048576),
  submission_marker TEXT NOT NULL UNIQUE CHECK(length(submission_marker)=32 AND submission_marker NOT GLOB '*[^a-f0-9]*'),
- state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state='PREPARED'),
+ state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state IN ('PREPARED','RELEASED')),
  configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
  prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0),
  selected_size_bytes INTEGER CHECK(selected_size_bytes IS NULL OR selected_size_bytes>0)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acquisition_active_hash ON acquisition_plans(info_hash) WHERE state='PREPARED';
 
 CREATE TABLE IF NOT EXISTS acquisition_budgets (
  trial_plan_id INTEGER PRIMARY KEY REFERENCES trial_plans(plan_id),
@@ -405,13 +413,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v22; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v23; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21 databases require explicit versioned SQL migrations
-    before accessing v22 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
+    before accessing v23 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 22:
+    if version == 23:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -421,7 +429,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=22;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=23;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

@@ -25,7 +25,7 @@ def _source(db,evaluation_job_id,event_id):
         "FROM episode_reservations s JOIN jobs j ON j.job_id=s.owner_job_id "
         "JOIN release_verifications r ON r.verification_id=s.verification_id "
         "JOIN identified_anime a ON a.anidb_id=s.anidb_id JOIN incoming_events e ON e.event_id=j.event_id "
-        "WHERE s.evaluation_job_id=? AND j.event_id=? AND j.kind='RESERVE_EPISODE' AND j.state='DONE'",
+        "WHERE s.evaluation_job_id=? AND j.event_id=? AND j.kind='RESERVE_EPISODE' AND j.state='DONE' AND s.state='ACTIVE'",
         (evaluation_job_id,event_id)).fetchone()
     if row is None:raise AcquisitionConflict()
     from src.nextgen.storage.review_decisions import require_allowed
@@ -73,7 +73,7 @@ def _admit_size(db,value,job_id,now):
     row=db.execute('SELECT max_episode_bytes,max_plan_bytes FROM acquisition_budgets WHERE trial_plan_id=?',(plan,)).fetchone()
     limits=value.limits if row is None else SizeLimits(row[0]//1000000,row[1]//1000000)
     prior=db.execute('SELECT p.job_id,p.selected_size_bytes FROM acquisition_plans p JOIN episode_reservations r '
-                     'ON r.reservation_id=p.reservation_id WHERE r.plan_id=?',(plan,)).fetchall()
+                     "ON r.reservation_id=p.reservation_id WHERE r.plan_id=? AND r.state='ACTIVE' AND p.state='PREPARED'",(plan,)).fetchall()
     size=value.manifest.files[value.manifest.selected_index].size
     if any(n is None or (old_job==job_id and n!=size) for old_job,n in prior):raise SizeEvidenceMissing()
     limits.admit(size,sum(n for old_job,n in prior if old_job!=job_id))
@@ -92,7 +92,7 @@ def persist_acquisition(db,claim,value):
     validate_declaration(source,manifest)
     encoded=manifest.json()
     rows=db.execute("SELECT job_id,reservation_id,info_hash,info_sha256,manifest_json,configuration_revision "
-                    "FROM acquisition_plans WHERE reservation_id=? OR info_hash=?",
+                    "FROM acquisition_plans WHERE reservation_id=? OR (info_hash=? AND state='PREPARED')",
                     (source.reservation_id,source.info_hash)).fetchall()
     expected=(claim.job_id,source.reservation_id,manifest.info_hash,manifest.info_sha256,encoded,value.configuration_revision)
     now=integer(time.time_ns()//1000000)

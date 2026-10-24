@@ -17,6 +17,7 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('CANCELED_RESERVATIONS_RELEASED','Cancellation cleanup completed and its acquisition slots were retired without deleting history.','Canceled episode slots are available for a later intake.','A later verified release may reserve the episode again. Kept episodes remain protected.','INFO',False),
     Reason('POST_KEEP_CLEANUP_COMPLETE','Selected staged artifacts were removed after confirming the permanent result.','Selected staging files removed.','The episode remains in the permanent library.','INFO',False),
     Reason('POST_KEEP_CLEANUP_WAITING','Another attempt is still cleaning this kept episode.','Waiting to finish staged-file cleanup.','The worker will check again. The episode remains kept.','INFO',None),
     Reason('POST_KEEP_CLEANUP_UNAVAILABLE','Sonarr or the staging/permanent filesystem is temporarily unavailable.','The episode is kept, but staged-file cleanup will retry.','Check service and mount availability.','WARNING',True),

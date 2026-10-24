@@ -4,7 +4,7 @@ Caller holds maintenance admission. Each action has a separate control scope;
 its target scope may be canceled/staged without canceling the control job.
 """
 from contextlib import ExitStack
-from src.nextgen.cancellation import CleanupBusy, OperationGate
+from src.nextgen.cancellation import CleanupBusy, OperationGate, CancellationError
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.messages import MessageCatalog
 from src.nextgen.storage.cancellation import CancellationStore, operation, unfinished_resources, can_cancel_operation
@@ -75,6 +75,14 @@ class ManagementActions:
                              (op[0],selected)).fetchone()
             if prior:
                 state=db.execute('SELECT state FROM jobs WHERE job_id=?',(prior[0],)).fetchone()[0]
+                if action=='cleanup' and state=='DONE' and op[1:3]==('CANCELED','COMPLETE'):
+                    from src.nextgen.storage.reservation_release import active
+                    if active(db,op[0]):
+                        now=self.queue.now()
+                        db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
+                        records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        data=receipt(db,prior[0]);data['resumed']=True
+                        return 202,data,tuple(records)
                 if action=='keep' and state=='DONE':
                     from src.nextgen.post_keep_cleanup import status as cleanup_status
                     cleanup=cleanup_status(db,prior[0])
@@ -110,7 +118,8 @@ class ManagementActions:
                     op=operation(db,job_id)
                     now=self.queue.now()
                 if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise ActionUnavailable()
-                if op[2]=='COMPLETE':return 200,{'completed':True,'disable_action':True,
+                from src.nextgen.storage.reservation_release import active,validate_releasable
+                if op[2]=='COMPLETE' and not active(db,op[0]):return 200,{'completed':True,'disable_action':True,
                                                  'notification':CATALOG.reason('CANCELLATION_COMPLETE')},tuple(records)
                 running=db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) "
                                    "WHERE m.operation_id=? AND j.state='RUNNING' LIMIT 1",(op[0],)).fetchone()
@@ -122,10 +131,15 @@ class ManagementActions:
                     except CleanupBusy:pass
                     else:drained=True
                 if drained:
+                    try:validate_releasable(db,op[0])
+                    except CancellationError:drained=False
+                if drained:
                     db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
                                "reason_code='CANCELLATION_COMPLETE',updated_at_ms=? WHERE operation_id=?",(now,op[0]))
                     records.append(append_job_history(db,job_id=job_id,event_code='CANCELLATION_CLEANUP_CHANGED',
                         reason_code='CANCELLATION_COMPLETE',component='api',occurred_at_ms=now))
+                    from src.nextgen.storage.reservation_release import release_cancelled
+                    records.extend(release_cancelled(db,op[0],job_id,now,component='api'))
                     return 200,{'completed':True,'disable_action':True,
                                 'notification':CATALOG.reason('CANCELLATION_COMPLETE')},tuple(records)
             event=db.execute('SELECT event_id FROM jobs WHERE job_id=?',(job_id,)).fetchone()[0]
@@ -155,11 +169,15 @@ class ManagementActions:
         result={}
         rejected=db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None
         keep_exists=db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone() is not None
+        from src.nextgen.storage.reservation_release import active
+        release_pending=op[1]=='CANCELED' and op[2]=='COMPLETE' and active(db,op[0])
         for name,enabled in (('keep',op[1]=='STAGED' and not rejected),('reject',op[1]=='STAGED' and not rejected and not keep_exists),('cancel',cancelable),
-                             ('cleanup',op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE')):
+                             ('cleanup',op[1] in ('CANCEL_REQUESTED','CANCELED') and (op[2]!='COMPLETE' or release_pending))):
             code={'keep':'KEEP','reject':'REJECT'}.get(name,'CLEANUP')
             row=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',(op[0],code)).fetchone()
             resumable=name in ('cleanup','reject','keep') and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
+            if name=='cleanup' and release_pending and row is not None:
+                resumable=db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0]=='DONE' or resumable
             if name=='keep' and row is not None:
                 from src.nextgen.post_keep_cleanup import status as cleanup_status
                 cleanup=cleanup_status(db,row[0])
