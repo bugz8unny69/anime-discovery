@@ -82,6 +82,23 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertIn('RuntimeDirectoryMode=0700',rendered['anime-discovery-api.service'])
         self.assertIn('ANIME_DISCOVERY_ADMIN_SOCKET=',rendered['anime-discovery-api.service'])
 
+    def test_rendered_units_pass_systemd_parser(self):
+        import shutil
+        import sys
+        from src.nextgen.configuration_schema import ConfigurationSnapshot
+        if shutil.which('systemd-analyze') is None:self.skipTest('systemd-analyze unavailable')
+        executable=self.root/'current/.venv/bin/python'
+        executable.parent.mkdir(parents=True)
+        executable.symlink_to(sys.executable)
+        rendered=units(ConfigurationSnapshot(1,{}),self.root,self.config,self.root,'anime-discovery',None)
+        paths=[]
+        for name,body in rendered.items():
+            path=self.root/name
+            path.write_text(body)
+            paths.append(str(path))
+        result=subprocess.run(['systemd-analyze','verify',*paths],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
     def test_plan_is_read_only_noninteractive_and_honors_existing_database(self):
         ConfigurationStore(self.config).initialize({'storage':{'database_path':str(self.database)}})
         output=io.StringIO()
