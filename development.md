@@ -12,6 +12,27 @@ for finishing missing functionality. Preserve the agreed staging move with no
 byte-for-byte destination comparison. Tests/CI remain unrun until authorized;
 no merge, deployment or live media operations are implied.
 
+## Keep through Sonarr — 2026-10-24 (draft; not yet validated)
+
+Implement the primary selected-episode Keep path without importing any legacy
+runtime. Configuration v8 registers Sonarr endpoint, root folder, quality profile
+and timeout; secrets v4 stores the Sonarr API key with presence-only metadata
+and authenticated dashboard replacement. Explicit SQLite v22 provides an
+immutable approved staging/TVDB snapshot and fenced Sonarr series/import/receipt/
+verification phases. The Keep worker reconciles a TVDB-matched Sonarr series,
+previews the exact staged file, submits a copy-only ManualImport once, checks
+the recorded command and hashes the registered permanent file before committing
+VERIFIED and jobs.DONE together. No staging source deletion or torrent cleanup
+occurs during Keep. An uncertain submission remains IMPORT_INTENT and cannot
+be automatically replayed. See [KEEP_MEDIA](src/nextgen/jobs/KEEP_MEDIA.md).
+
+The code is **unmerged and untested**; no CLI tests, CI, browser validation,
+actual Sonarr calls, migration, media I/O or lab deployment have been performed
+in this development session. Later functional steps: Jellyfin staging/library
+refresh, missing-episode window acquisition, optional nonblocking Shoko,
+cancel/cleanup reservation policy and deployment/supervision. The historical
+dated sections below describe earlier draft milestones, not current code.
+
 ## Reject decision and selected staging cleanup — 2026-10-23
 
 Reject is now wired through the dashboard, versioned management API and worker.
