@@ -109,6 +109,8 @@ def _persist(db,claim,value):
     if not row or row[0]!='COMPLETE':raise KeepReview()
     record=json.loads(row[1]).get('post_cleanup')
     if record!={'job_id':claim.job_id,'state':'COMPLETE'}:raise KeepReview()
+    from src.nextgen.decision_download_cleanup import enqueue as enqueue_download_cleanup
+    enqueue_download_cleanup(db,claim,value['keep_job_id'])
     if value['refresh']:
         from src.nextgen.jobs.refresh_jellyfin_job import enqueue as enqueue_refresh
         enqueue_refresh(db,claim)

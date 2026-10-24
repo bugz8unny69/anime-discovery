@@ -166,6 +166,11 @@ function renderJobs() {
         details.appendChild(node('small', cleanup.completed ? cleanup.completion.message : `Staging cleanup: ${cleanup.status.message}`, 'muted'));
         if (cleanup.reason) details.appendChild(node('small', cleanup.reason.message, 'muted'));
       }
+      if (activeAction.download_cleanup) {
+        const cleanup = activeAction.download_cleanup;
+        details.appendChild(node('small', cleanup.completed ? cleanup.completion.message : `Download cleanup: ${cleanup.status.message}`, 'muted'));
+        if (cleanup.reason) details.appendChild(node('small', cleanup.reason.message, 'muted'));
+      }
       const controlHistory = node('button', 'Action job history', 'secondary');
       controlHistory.addEventListener('click', () => openHistory(activeAction.job_id)); details.appendChild(controlHistory);
     }
@@ -173,8 +178,9 @@ function renderJobs() {
     if (job.actions?.keep && 'execution_available' in job.actions.keep) {
       const cleanup = job.actions?.keep?.job?.post_keep_cleanup;
       const retryCleanup = cleanup && ['NEEDS_REVIEW', 'BLOCKED'].includes(cleanup.state);
-      actions.appendChild(actionButton(job, 'keep', retryCleanup ? 'Retry staging cleanup' : 'Keep'));
-      if (job.actions?.reject) actions.appendChild(actionButton(job, 'reject', 'Reject'));
+      const retryDownload = name => ['NEEDS_REVIEW', 'BLOCKED'].includes(job.actions?.[name]?.job?.download_cleanup?.state);
+      actions.appendChild(actionButton(job, 'keep', retryDownload('keep') ? 'Retry download cleanup' : retryCleanup ? 'Retry staging cleanup' : 'Keep'));
+      if (job.actions?.reject) actions.appendChild(actionButton(job, 'reject', retryDownload('reject') ? 'Retry download cleanup' : 'Reject'));
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
     }

@@ -38,3 +38,11 @@ Offline cases for selected-only deletion, missing permanent output, changed
 staging files, interrupted deletion, retry without reimport and unavailable
 Sonarr are authored but unrun. Source checks do not establish runtime or lab
 correctness. No live calls, deletion, tests, CI, migration or deployment occurred.
+
+## Decision download cleanup follow-up
+
+New completed Reject decisions and post-Keep staging cleanups enqueue a separate
+owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
+can resume through Keep/Reject with the dashboard label Retry download cleanup.
+Decision/import completion and episode protection remain intact. Current contract:
+[Download cleanup](DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.

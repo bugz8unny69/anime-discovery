@@ -91,3 +91,11 @@ It uses API-provided capabilities, receipts and job status. See
 [REJECT_MEDIA.md](../jobs/REJECT_MEDIA.md). Earlier lists marking Reject entirely
 unimplemented describe the previous implementation stage. Keep execution remains
 unavailable until Sonarr import is implemented.
+
+## Decision download cleanup follow-up
+
+New completed Reject decisions and post-Keep staging cleanups enqueue a separate
+owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
+can resume through Keep/Reject with the dashboard label Retry download cleanup.
+Decision/import completion and episode protection remain intact. Current contract:
+[Download cleanup](../DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.

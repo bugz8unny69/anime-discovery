@@ -17,4 +17,6 @@ from src.nextgen.jobs.refresh_jellyfin_job import DEFINITION as refresh
 
 from src.nextgen.post_keep_cleanup import DEFINITION as cleanup_kept
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept))
+from src.nextgen.decision_download_cleanup import DEFINITION as cleanup_download
+
+HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download))

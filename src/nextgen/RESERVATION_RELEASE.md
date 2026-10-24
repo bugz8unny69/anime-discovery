@@ -43,3 +43,11 @@ No SQL, tests, CI, live services, media deletion or deployment was run.
 Remaining work includes download/torrent cleanup after Keep/Reject, optional
 Shoko integration, service lifecycle/setup and end-to-end lab validation. Existing
 cancellation download cleanup is reused, rather than being reimplemented here.
+
+## Decision download cleanup follow-up
+
+New completed Reject decisions and post-Keep staging cleanups enqueue a separate
+owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
+can resume through Keep/Reject with the dashboard label Retry download cleanup.
+Decision/import completion and episode protection remain intact. Current contract:
+[Download cleanup](DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.

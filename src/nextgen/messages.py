@@ -51,6 +51,7 @@ _EVENTS = (
     EventDefinition("DONE", "job", "Job completed."),
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),
+    EventDefinition("DECISION_DOWNLOAD_CONTROL_RECORDED", "job", "Keep/Reject download cleanup step recorded.", True),
     EventDefinition("CANCELLATION_CONTROL_RECORDED", "job", "Cancellation cleanup step recorded.", True),
     EventDefinition("CANCELLATION_REQUESTED", "job", "Cancellation requested for unfinished work.", True),
     EventDefinition("CANCELLATION_CLEANUP_CHANGED", "job", "Cancellation cleanup status updated.", True),

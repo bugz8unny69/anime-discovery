@@ -1,0 +1,156 @@
+"""Offline decision/download handoffs and one-shot recovery; deliberately unrun."""
+from dataclasses import replace
+from functools import partial
+from pathlib import Path
+import unittest
+
+from src.nextgen.acquisition.submission import ClientUnavailable
+from src.nextgen.decision_download_cleanup import KIND, Service, registration
+from src.nextgen.job_contracts import Registry
+from src.nextgen.storage.management_actions import ManagementActions
+from src.nextgen.storage.sqlite import connect, enqueue_job, transaction
+from src.nextgen.tests.test_acquisition_preparation import AcquisitionPreparationTests
+from src.nextgen.tests.test_keep_sonarr import KeepSonarrTests
+from src.nextgen.tests.test_post_keep_cleanup import PostKeepCleanupTests
+from src.nextgen.tests.test_reject_media import RejectMediaTests
+from src.nextgen.tests.test_stage_media_job import StageMediaJobTests
+from src.nextgen.tests.test_torrent_submission import Secrets
+from src.nextgen.tests.test_torrent_transfer import TorrentTransferTests
+from src.nextgen.tests.test_verify_media_job import VerifyMediaJobTests
+
+
+class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp=AcquisitionPreparationTests.asyncSetUp
+    rows=AcquisitionPreparationTests.rows
+    source=AcquisitionPreparationTests.source
+    queued=TorrentTransferTests.queued
+    due=TorrentTransferTests.due
+    ready=VerifyMediaJobTests.ready
+    staged_ready=StageMediaJobTests.staged_ready
+    prepared=KeepSonarrTests.prepared
+    make_due=KeepSonarrTests.make_due
+    cleanup_ready=PostKeepCleanupTests.cleanup_ready
+    staged=RejectMediaTests.staged
+
+    def attach(self,worker,mode='normal'):
+        test=self;self.controls=[]
+        class Client:
+            def __init__(self,*args):pass
+            def login(self):pass
+            def inspect(self,expected):return None if test.snapshot is None else test.snapshot.observation
+            def cleanup_control(self,intent,fingerprint,permit,action):
+                permit.take(fingerprint,action);test.controls.append(action)
+                if action=='stop':
+                    if mode!='stop_present':test.snapshot=replace(test.snapshot,observation=replace(test.snapshot.observation,state='stoppedDL'))
+                    if mode in ('stop_lost','stop_present'):raise ClientUnavailable()
+                else:
+                    if mode!='remove_present':test.snapshot=None
+                    if mode in ('remove_lost','remove_present','changed_after_remove'):
+                        if mode=='changed_after_remove':test.remainder.write_bytes(b'changed')
+                        raise ClientUnavailable()
+        factory=partial(Service,client_factory=Client)
+        worker.registry=Registry((*worker.registry.entries.values(),registration(Secrets(),service_factory=factory)))
+
+    async def download_ready(self,action='keep',mode='normal'):
+        if action=='keep':
+            worker,fake,actions,target,decision,staging_cleanup=await self.cleanup_ready()
+            self.assertEqual(self.rows('SELECT count(*) FROM jobs WHERE kind=?',(KIND,)),[(0,)])
+            await worker.attempt()
+        else:
+            worker,_,target=await self.staged();fake=None
+            actions=ManagementActions(self.database);_,receipt,_=actions.submit(target,'reject')
+            decision=receipt['job_id'];await worker.attempt()
+        job=self.rows('SELECT job_id FROM jobs WHERE kind=?',(KIND,))[0][0]
+        self.payload_root=Path(self.snapshot.observation.save_path)
+        self.remainder=self.payload_root/self.snapshot.observation.files[0].path
+        self.remainder.parent.mkdir(parents=True,exist_ok=True)
+        # A remaining declared partial payload (selected video was moved out).
+        self.remainder.write_bytes(b'partial')
+        self.attach(worker,mode)
+        return worker,fake,actions,target,decision,job
+
+    async def test_keep_cleans_download_once_without_reimport_or_releasing_kept_slot(self):
+        worker,fake,actions,target,decision,job=await self.download_ready()
+        permanent=fake.root/'Series'/'episode.mkv';before=permanent.read_bytes()
+        await worker.attempt()
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertFalse(self.remainder.exists());self.assertTrue(self.payload_root.is_dir())
+        self.assertEqual(permanent.read_bytes(),before);self.assertEqual(fake.posts.count('command'),1)
+        self.assertEqual(self.rows('SELECT state FROM episode_reservations'),[('ACTIVE',)])
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        _,receipt,_=actions.submit(target,'keep')
+        self.assertTrue(receipt['download_cleanup']['completed'])
+        self.assertEqual(self.rows('SELECT count(*) FROM jobs WHERE kind=?',(KIND,)),[(1,)])
+
+    async def test_reject_retains_rejection_and_shared_series_metadata(self):
+        worker,_,actions,target,decision,job=await self.download_ready('reject')
+        await worker.attempt()
+        self.assertFalse(self.remainder.exists())
+        self.assertEqual(self.rows('SELECT decision,cleanup_state FROM anime_review_decisions'),[('REJECT','COMPLETE')])
+        self.assertEqual(len(list((self.root/'staging').rglob('tvshow.nfo'))),1)
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        _,receipt,_=actions.submit(target,'reject');self.assertTrue(receipt['download_cleanup']['completed'])
+
+    async def test_lost_remove_response_reconciles_without_another_delete(self):
+        worker,_,_,_,_,job=await self.download_ready(mode='remove_lost')
+        await worker.attempt();self.assertTrue(self.remainder.exists())
+        await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.controls,['stop','remove']);self.assertFalse(self.remainder.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+
+    async def test_lost_stop_response_does_not_repeat_stop(self):
+        worker,_,_,_,_,job=await self.download_ready(mode='stop_lost')
+        await worker.attempt();await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+
+    async def test_uncertain_remove_still_present_never_gets_another_permit(self):
+        worker,_,_,_,_,job=await self.download_ready(mode='remove_present')
+        for _ in range(3):await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.controls,['stop','remove']);self.assertTrue(self.remainder.exists())
+        self.assertEqual(self.rows('SELECT phase FROM cancellation_cleanup'),[('REMOVE_UNCERTAIN',)])
+
+    async def test_changed_captured_file_survives_after_lost_remove(self):
+        worker,_,_,_,_,job=await self.download_ready(mode='changed_after_remove')
+        await worker.attempt();await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.remainder.read_bytes(),b'changed')
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+
+    async def test_unknown_file_preserved_and_explicit_retry_resumes_cleanup_only(self):
+        worker,fake,actions,target,decision,job=await self.download_ready()
+        unknown=self.payload_root/'unowned.txt';unknown.write_text('preserve')
+        await worker.attempt()
+        self.assertEqual(self.controls,['stop']);self.assertTrue(unknown.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(decision,)),[('DONE',)])
+        unknown.unlink();_,receipt,_=actions.submit(target,'keep')
+        self.assertTrue(receipt['download_cleanup_resumed'])
+        await worker.attempt()
+        self.assertEqual(self.controls,['stop','remove']);self.assertEqual(fake.posts.count('command'),1)
+
+    async def test_other_consumer_blocks_all_external_controls(self):
+        worker,_,_,_,_,job=await self.download_ready()
+        prep,event=self.rows("SELECT job_id,event_id FROM jobs WHERE kind='PREPARE_ACQUISITION'")[0]
+        db=connect(self.database)
+        try:
+            with transaction(db):enqueue_job(db,kind='DOWNLOAD_TORRENT',payload={'preparation_job_id':prep},component='api',event_id=event,available_at_ms=9999999999999)
+        finally:db.close()
+        await worker.attempt()
+        self.assertEqual(self.controls,[]);self.assertTrue(self.remainder.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+
+    async def test_changed_ownership_marker_preserves_download(self):
+        worker,_,_,_,_,job=await self.download_ready()
+        self.snapshot=replace(self.snapshot,observation=replace(self.snapshot.observation,tags=()))
+        await worker.attempt()
+        self.assertEqual(self.controls,[]);self.assertTrue(self.remainder.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+
+    async def test_replaced_download_root_is_preserved_for_review(self):
+        worker,_,_,_,_,job=await self.download_ready()
+        old=self.payload_root.with_name(self.payload_root.name+'-original')
+        self.payload_root.rename(old);self.payload_root.mkdir()
+        replacement=self.payload_root/self.remainder.relative_to(self.payload_root)
+        replacement.parent.mkdir(parents=True,exist_ok=True);replacement.write_bytes(b'new')
+        await worker.attempt()
+        self.assertNotIn('remove',self.controls);self.assertEqual(replacement.read_bytes(),b'new')
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])

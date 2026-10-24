@@ -258,3 +258,11 @@ Jellyfin uses PATCH /api/v1/credentials/jellyfin with api_key and
 expected_revision, with the same session/CSRF/revision contract as Sonarr.
 GET credentials adds jellyfin_configured, never the key. Settings expose
 jellyfin.base_url and jellyfin.timeout_seconds. See ../JELLYFIN_REFRESH.md.
+
+## Decision download cleanup follow-up
+
+New completed Reject decisions and post-Keep staging cleanups enqueue a separate
+owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
+can resume through Keep/Reject with the dashboard label Retry download cleanup.
+Decision/import completion and episode protection remain intact. Current contract:
+[Download cleanup](../DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.

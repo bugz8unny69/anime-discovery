@@ -4,6 +4,28 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Keep/Reject download cleanup — 2026-10-24
+
+New completed Reject decisions and completed post-Keep staging cleanups now
+queue independent CLEANUP_DECIDED_DOWNLOAD jobs. Reuse cancellation's owned
+stop/remove journal and manifest-only local cleanup. Keep/Reject completion
+remains valid while cleanup waits, retries or needs review. The dashboard exposes
+separate progress and Retry download cleanup; explicit retry never reimports or
+repeats an uncertain client mutation. Preserve kept reservations, rejected-anime
+protection, permanent media and shared series metadata.
+
+Historical source ownership is checked without bypassing acquisition's Reject
+fence. Require drained terminal acquisition work, no external consumer, original
+download root identity, exact client marker/path/inventory and captured remaining
+file identities. Reuse the existing cleanup table; v23/v9/v5 unchanged. No
+historical automatic backfill. See [Download cleanup](src/nextgen/DECISION_DOWNLOAD_CLEANUP.md).
+
+Source checks only; offline cases authored but tests/CI remain unrun. No live
+clients, SQL/migration execution, media operations or deployment. This draft
+builds on #136 and includes the unrun v23 migration from that stack. Optional
+Shoko, service lifecycle/setup and lab validation remain. Automatic missing-
+episode search is excluded by the consolidated architecture decision.
+
 ## Canceled-work reservation release — 2026-10-24
 
 Completed drained cancellation cleanup now retires its exact reservation and

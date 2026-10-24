@@ -5,7 +5,8 @@ from src.nextgen.jobs.refresh_jellyfin_job import registration as refresh
 from src.nextgen.post_keep_cleanup import registration as cleanup_kept
 
 
+from src.nextgen.decision_download_cleanup import registration as cleanup_download
 from src.nextgen.jobs.reject_media_job import registration as reject
 
 def registrations(secrets):
-    return (cleanup(secrets),keep(secrets),reject(),refresh(secrets),cleanup_kept(secrets))
+    return (cleanup(secrets),keep(secrets),reject(),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets))

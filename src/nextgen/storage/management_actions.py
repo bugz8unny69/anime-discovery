@@ -57,6 +57,8 @@ def receipt(db,job_id,*,reused=False):
         data['availability_reason']=None
         data['completion']=(CATALOG.reason('KEEP_COMPLETE') if db.execute(
             "SELECT 1 FROM keep_imports WHERE job_id=? AND phase='COMPLETE'",(job_id,)).fetchone() else None)
+    from src.nextgen.decision_download_cleanup import status as download_status
+    data['download_cleanup']=download_status(db,job_id)
     return data
 
 
@@ -82,6 +84,15 @@ class ManagementActions:
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
                         records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
                         data=receipt(db,prior[0]);data['resumed']=True
+                        return 202,data,tuple(records)
+                if action in ('keep','reject') and state=='DONE':
+                    from src.nextgen.decision_download_cleanup import status as download_status, STOPPED_JOBS
+                    download=download_status(db,prior[0])
+                    if download and download['state'] in STOPPED_JOBS:
+                        now=self.queue.now()
+                        db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,download['job_id']))
+                        records.append(append_job_history(db,job_id=download['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        data=receipt(db,prior[0],reused=True);data['download_cleanup_resumed']=True
                         return 202,data,tuple(records)
                 if action=='keep' and state=='DONE':
                     from src.nextgen.post_keep_cleanup import status as cleanup_status
@@ -182,6 +193,11 @@ class ManagementActions:
                 from src.nextgen.post_keep_cleanup import status as cleanup_status
                 cleanup=cleanup_status(db,row[0])
                 if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
+                    resumable=True;enabled=True
+            if name in ('keep','reject') and row is not None:
+                from src.nextgen.decision_download_cleanup import status as download_status, STOPPED_JOBS
+                download=download_status(db,row[0])
+                if download and download['state'] in STOPPED_JOBS:
                     resumable=True;enabled=True
             if name=='reject' and resumable:enabled=True
             allowed=bool(enabled and (row is None or resumable) and busy is None)
