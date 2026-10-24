@@ -135,7 +135,6 @@ class Application:
                 message=await receive()
                 if message['type']=='lifespan.startup':
                     await send({'type':'lifespan.startup.complete'})
-                    notify('READY=1')
                     interval = watchdog_interval()
                     if interval is not None:
                         watchdog_task = asyncio.create_task(self._watchdog(interval))
