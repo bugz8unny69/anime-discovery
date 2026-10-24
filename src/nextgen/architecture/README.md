@@ -4,6 +4,10 @@ User-facing terminology: [Anime Intake](ANIME_INTAKE.md) records the agreed
 **Intake → Staging → Keep or Reject** flow and each step's purpose. It supersedes trial/preview labels for
 that area without renaming internal code, configuration keys or these files.
 
+Start with [Intake → Staging → Keep or Reject](INTAKE_STAGING_KEEP.md), the current
+end-to-end planning overview. It separates agreed product responsibilities,
+existing draft libraries, unfinished work and open policies.
+
 These are reviewable design documents, **not implemented pipelines**. They
 supersede informal routing assumptions when discussing the planned worker;
 open decisions in each file must be resolved before implementing that behavior.

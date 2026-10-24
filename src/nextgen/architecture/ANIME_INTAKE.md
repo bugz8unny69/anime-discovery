@@ -4,6 +4,9 @@ Status: planning only. Naming decision recorded 2026-10-23.
 This document records the agreed user-facing vocabulary. It does not implement
 the dashboard, change acquisition behavior or rename the application.
 
+See [the end-to-end system design](INTAKE_STAGING_KEEP.md) for process ownership,
+phase transitions, recovery, action behavior and the implementation map.
+
 ## Agreed name and purpose
 
 Use **Intake** as the dashboard section name. Use **Anime Intake** when a

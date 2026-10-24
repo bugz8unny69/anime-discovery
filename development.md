@@ -14,7 +14,10 @@ only after the explicit Keep operation succeeds and its copies are verified.
 This replaces trial/preview as the user-facing area name. Internal trial names,
 configuration keys and stored paths can stay unchanged. Application branding
 is not settled. See [Anime Intake planning](src/nextgen/architecture/ANIME_INTAKE.md).
-This is a documentation-only decision; dashboard implementation remains future work.
+The [end-to-end design](src/nextgen/architecture/INTAKE_STAGING_KEEP.md) covers
+arrival, selection, acquisition, verification, staging, decisions, permanent
+import and recovery, with an implementation map. This is documentation-only
+planning; dashboard implementation remains future work.
 
 ## Initial async worker core — 2026-10-22
 
