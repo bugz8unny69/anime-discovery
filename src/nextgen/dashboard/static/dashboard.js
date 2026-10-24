@@ -368,9 +368,11 @@ async function loadRecognized() {
       const action = node('td');
       const button = node('button', 'Episodes', 'secondary');
       button.type = 'button';
+      let detail = null;
       button.addEventListener('click', async () => {
+        if (detail) { detail.remove(); detail = null; button.textContent = 'Episodes'; return; }
         button.disabled = true;
-        const detail = node('tr');
+        detail = node('tr');
         const cell = node('td');
         cell.colSpan = 7;
         cell.textContent = 'Loading verified episode placements…';
@@ -387,13 +389,10 @@ async function loadRecognized() {
               `AniDB #${episode.anidb_episode_id} (episode ${episode.anidb_episode_number}) → TVDB S${String(item.season).padStart(2,'0')}E${String(episode.tvdb_episode).padStart(2,'0')} (#${episode.tvdb_episode_id})`));
           }
           button.textContent = 'Hide episodes';
-          button.addEventListener('click', () => {
-            detail.remove();
-            button.textContent = 'Episodes';
-            button.disabled = false;
-          }, {once: true});
+          button.disabled = false;
         } catch (error) {
           cell.textContent = error.message;
+          button.textContent = 'Hide episodes';
           button.disabled = false;
         }
       });
