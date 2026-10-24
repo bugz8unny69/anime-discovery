@@ -441,13 +441,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v21; never implicitly upgrade.
+    """Initialize a *new* NextGen database at v23; never upgrade existing data.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21 databases require explicit versioned SQL migrations
-    before accessing v21 storage.
+    All existing nonzero historical schema versions must pass through explicit
+    numbered SQL migrations under maintenance; initialization is not migration.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 21:
+    if version == 23:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -457,7 +457,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=22;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=23;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
