@@ -113,7 +113,8 @@ class JobsStorageTests(unittest.TestCase):
                 db.executescript((sql_dir / "016_torrent_transfers.sql").read_text())
                 db.executescript((sql_dir / "017_cancellation.sql").read_text())
                 db.executescript((sql_dir / "018_management_actions.sql").read_text())
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 18)
+                db.executescript((sql_dir / "019_media_verifications.sql").read_text())
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 19)
                 initialize(db)
             finally:
                 db.close()

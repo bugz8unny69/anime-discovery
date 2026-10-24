@@ -121,3 +121,11 @@ The v17 cancellation service now owns separately authorized stop/removal and
 manifest-only file cleanup. It drains the explicit operation, preserves uncertain
 external ownership and exposes readable cleanup progress. Even if this download
 job is DONE, an unstaged acquisition remains cancelable. See ../CANCELLATION.md.
+
+## Verification handoff
+
+The default composition supplies VERIFY_MEDIA as the optional completion
+successor. The worker commits download completion and this successor together;
+the payload carries preparation_job_id and download_job_id. See
+[VERIFY_MEDIA.md](VERIFY_MEDIA.md). Custom registrations can omit the successor.
+No successful client progress report alone marks media verified or staged.

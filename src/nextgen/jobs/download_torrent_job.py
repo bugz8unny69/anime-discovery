@@ -8,7 +8,7 @@ from src.nextgen.acquisition.transfers import (TransferConflict, PieceOverlap, S
 from src.nextgen.diagnostics import log_history
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.transfers import TransferJournal, _current, _record
 from src.nextgen.worker import blocking
 
@@ -18,7 +18,8 @@ DEFINITION=HandlerDefinition(KIND,'Select video, start torrent and monitor downl
 
 def _persist(db,claim,value):
     try:
-        preparation=integer(value,positive=True)
+        if type(value) is not dict or set(value)!={'preparation_job_id','download_job_id'} or value['download_job_id']!=claim.job_id:raise ValueError()
+        preparation=integer(value['preparation_job_id'],positive=True)
         current=_current(db,claim,preparation)
         record=_record(db,current)
         if record is None or record.phase!='COMPLETE':raise TransferConflict()
@@ -27,7 +28,9 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome('review',reason)) from None
 
 
-def registration(secrets,*,client_factory=Client,journal_factory=TransferJournal):
+def registration(secrets,*,client_factory=Client,journal_factory=TransferJournal,verification_kind=None):
+    if verification_kind is not None and (type(verification_kind) is not str or not verification_kind.strip()
+            or len(verification_kind)>64 or verification_kind==KIND):raise ValueError("invalid verification successor")
     async def execute(context):
         payload=context.data()
         try:
@@ -83,7 +86,7 @@ def registration(secrets,*,client_factory=Client,journal_factory=TransferJournal
                     snapshot=await blocking(client.inspect_transfer,intent.plan.manifest.info_hash)
             record,receipts=await blocking(journal.observe,context.claim,intent,snapshot)
             log(receipts)
-            if record.phase=='COMPLETE':return Outcome(value=preparation)
+            if record.phase=='COMPLETE':return Outcome(value={'preparation_job_id':preparation,'download_job_id':context.claim.job_id})
             if record.phase=='REVIEW':return Outcome('review',record.reason_code)
             return wait('TORRENT_DOWNLOAD_IN_PROGRESS' if record.phase=='ACTIVE' else 'TORRENT_START_UNCERTAIN',record.phase=='ACTIVE')
         except (TransferConflict,PieceOverlap) as exc:
@@ -93,4 +96,7 @@ def registration(secrets,*,client_factory=Client,journal_factory=TransferJournal
         except ClientUnavailable:return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
         except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeEvidenceMissing,DownloadConfigurationError,
                 ClientInvalid,ClientAuthenticationFailed,ClientUnsupported) as exc:return Outcome('review',exc.reason_code)
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if verification_kind is None else (Successor.create(verification_kind,value),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+        successor_kinds=() if verification_kind is None else (verification_kind,))

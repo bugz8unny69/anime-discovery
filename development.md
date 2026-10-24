@@ -4,6 +4,21 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Downloaded-media verification — 2026-10-23
+
+Completed downloads now hand off atomically to VERIFY_MEDIA in the default
+worker. Read the exact pinned selected file without symlinks, require stable
+size/inode/timestamps, record SHA-256, and use bounded local ffprobe metadata for
+one video plus Japanese/English audio. Evidence and job completion commit under
+existing lease/cancellation fencing. SQLite v19 adds media_verifications with an
+explicit maintenance upgrade; configuration remains v7. See
+[the verification contract](src/nextgen/jobs/VERIFY_MEDIA.md) for exact guarantees,
+shared-path/executable requirements and limitations. No full decode or semantic
+episode proof is claimed. Verification does not mark STAGED or authorize Keep.
+
+Staging/publication recovery remains next. Tests and CI are authored/unrun; source
+checks only. No live client/media operations, migrations or deployment.
+
 ## Hash-addressed metadata retrieval — 2026-10-23
 
 The identity worker now supplies an HTTP(S) metainfo reader and installs

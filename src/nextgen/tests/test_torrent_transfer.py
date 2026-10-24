@@ -25,7 +25,7 @@ class TorrentTransferTests(unittest.IsolatedAsyncioTestCase):
     rows=fixture.AcquisitionPreparationTests.rows
     source=fixture.AcquisitionPreparationTests.source
 
-    def worker(self,*,mode='normal',journal_factory=TransferJournal):
+    def worker(self,*,mode='normal',journal_factory=TransferJournal,verification=None):
         test=self
         self.adds=self.starts=0
         self.selection_calls=[];self.targets=[];self.snapshot=None
@@ -63,7 +63,9 @@ class TorrentTransferTests(unittest.IsolatedAsyncioTestCase):
         worker=Worker(self.store,self.startup,Registry((evaluate(reservation_kind='RESERVE_EPISODE'),
             reserve(preparation_kind='PREPARE_ACQUISITION'),prepare(read,submission_kind='SUBMIT_TORRENT'),
             submit(read,Secrets(),client_factory=FakeClient,transfer_kind='DOWNLOAD_TORRENT'),
-            download(Secrets(),client_factory=FakeClient,journal_factory=journal_factory))),policy=Policy(lease_ms=30000))
+            download(Secrets(),client_factory=FakeClient,journal_factory=journal_factory,
+                verification_kind=None if verification is None else verification.kind),
+            *((verification,) if verification is not None else ()))),policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
         self.store.update({'qbittorrent':{'base_url':'https://qb.example'},'storage':{'download_root':'/srv/downloads'}},expected_revision=1)
         return worker

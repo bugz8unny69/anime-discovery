@@ -327,3 +327,12 @@ serves dashboard-ready settings, job/history/cancellation data through separate
 management authentication with cookie CSRF protection. A dedicated intake process,
 dashboard HTML and later publication/Keep routes are not claimed here. See
 ../api/README.md for authentication, process and logging boundaries.
+
+## Implementation refinement: downloaded-media verification
+
+The default worker now routes completed download jobs into VERIFY_MEDIA.
+SQLite v19 stores its immutable selected-file/stream evidence. See
+[the verification contract](../jobs/VERIFY_MEDIA.md) for the implemented narrow
+container, audio-tag and stable-file gate and its semantic/playback limitations.
+The earlier future-work notes above describe their implementation stage at the
+time; verification now exists, while staging and Keep remain unfinished.

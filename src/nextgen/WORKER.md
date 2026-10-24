@@ -209,3 +209,11 @@ admission and current queue lease; no HTTP spans a write transaction. Durable
 external progress can precede final queue completion and survives crashes.
 No replacement send right is granted after expiration/absence. See
 jobs/SUBMIT_TORRENT.md for the external-fencing limitation and next transfer stage.
+
+## Downloaded-media verification
+
+The default identity-worker composition routes completed DOWNLOAD_TORRENT into
+VERIFY_MEDIA and installs its handler. Generic/custom registries stay explicit.
+See [the verification contract](jobs/VERIFY_MEDIA.md). The worker requires local
+shared download paths and `/usr/bin/ffprobe`. SQLite v19 requires explicit upgrade.
+No staging successor is installed yet; verification success does not mean staged.

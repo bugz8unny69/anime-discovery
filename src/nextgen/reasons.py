@@ -17,6 +17,10 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('MEDIA_VERIFICATION_INVALID', 'The selected file, container or pinned content changed or failed validation.', 'The downloaded video needs verification review.', 'Review the selected file and its recorded acquisition evidence.', 'WARNING', False),
+    Reason('MEDIA_VERIFICATION_UNAVAILABLE', 'Local selected-file reads or the bounded probe timed out.', 'The downloaded video could not be checked yet.', 'Check the shared download mount and file readability.', 'ERROR', None),
+    Reason('MEDIA_PROBE_UNAVAILABLE', 'The fixed local ffprobe executable could not be started.', 'The local media probe is unavailable.', 'Install ffprobe at /usr/bin/ffprobe and check worker permissions.', 'WARNING', False),
+    Reason('MEDIA_AUDIO_REQUIRED', 'Distinct non-commentary Japanese and English audio language tags were not established.', 'Japanese and English audio tracks are required.', 'Review the audio streams; filenames and subtitles do not satisfy this requirement.', 'WARNING', False),
     Reason('TORRENT_METADATA_CONFIGURATION_INVALID', 'The trusted hash-addressed metainfo source is missing or invalid.',
            'Configure the torrent metadata source before downloading.', 'Set the metadata source address in Settings, then review this job.', 'WARNING', False),
     Reason('TORRENT_METADATA_UNAVAILABLE', 'The metadata source request failed or timed out before usable bytes were received.',

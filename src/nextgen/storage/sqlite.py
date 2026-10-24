@@ -326,6 +326,16 @@ CREATE TABLE IF NOT EXISTS management_actions (
  CHECK(target_job_id<>job_id)
 );
 
+CREATE TABLE IF NOT EXISTS media_verifications (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ download_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ submission_fingerprint TEXT NOT NULL CHECK(length(submission_fingerprint)=64 AND submission_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ transfer_fingerprint TEXT NOT NULL CHECK(length(transfer_fingerprint)=64 AND transfer_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND length(CAST(evidence_json AS BLOB)) BETWEEN 1 AND 16384),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
+ CHECK(job_id<>download_job_id)
+);
 """
 
 def connect(path):
@@ -365,13 +375,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v18; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v19; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17 databases require explicit versioned SQL migrations
-    before accessing v18 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18 databases require explicit versioned SQL migrations
+    before accessing v19 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 18:
+    if version == 19:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -381,7 +391,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=18;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=19;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
