@@ -16,18 +16,18 @@ async def serve_admin(reader, writer, password_store):
     try:
         sock = writer.get_extra_info("socket")
         if not hasattr(socket, "SO_PEERCRED") or sock is None:
-            return
+            raise ValueError("Unauthorized peer")
         pid, uid, gid = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
         # File mode and directory ACLs gate connections; peer identity adds a
         # fail-closed second layer. Group membership is checked by the kernel.
         if uid not in (0, os.geteuid()):
-            return
+            raise ValueError("Unauthorized peer")
         line = await asyncio.wait_for(reader.readline(), timeout=10)
         if len(line) > MAX_LINE or not line.endswith(bytes([10])):
-            return
+            raise ValueError("Invalid request")
         request = json.loads(line)
         if type(request) is not dict or set(request) != {"command", "password"} or request["command"] != "set-password":
-            return
+            raise ValueError("Invalid request")
         revision, _ = password_store.read()
         next_revision = await asyncio.to_thread(password_store.replace, request["password"], expected_revision=revision)
         response = {"ok": True, "revision": next_revision}
