@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 import json
 import logging
+import os
 import re
 import uuid
 from urllib.parse import parse_qs, urlsplit
@@ -11,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from src.nextgen.async_io import blocking
 from src.nextgen.systemd_notify import notify, watchdog_interval
 from src.nextgen.api.password_store import PasswordStore, PasswordConflict, PasswordStorageError
+from src.nextgen.api.admin_socket import start_admin
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
@@ -100,6 +102,8 @@ class Application:
         self.authorities={urlsplit(self.origin).netloc,authority.lower()}
         self.sessions=sessions or Sessions()
         self.passwords=PasswordStore(directory)
+        self.admin_server=None
+        self.admin_path=os.environ.get('ANIME_DISCOVERY_ADMIN_SOCKET')
         self.assets=load_assets()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
@@ -136,12 +140,22 @@ class Application:
             while True:
                 message=await receive()
                 if message['type']=='lifespan.startup':
+                    try:
+                        if self.admin_path:
+                            self.admin_server=await start_admin(self.admin_path,self.passwords)
+                    except Exception:
+                        await send({'type':'lifespan.startup.failed','message':'Admin socket could not be started'})
+                        return
                     await send({'type':'lifespan.startup.complete'})
                     interval = watchdog_interval()
                     if interval is not None:
                         watchdog_task = asyncio.create_task(self._watchdog(interval))
                 elif message['type']=='lifespan.shutdown':
                     notify('STOPPING=1')
+                    if self.admin_server is not None:
+                        self.admin_server.close()
+                        await self.admin_server.wait_closed()
+                        os.unlink(self.admin_path)
                     if watchdog_task is not None:
                         watchdog_task.cancel()
                         await asyncio.gather(watchdog_task, return_exceptions=True)
