@@ -4,6 +4,88 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Optional Shoko metadata and service setup — 2026-10-24
+
+Finish the planned source implementation with independent AniDB-ID metadata
+lookups after Keep and explicit local setup/maintenance/worker entry points.
+Shoko titles are display-only; no file registration, scanning, hashing, renaming
+or Sonarr mapping changes. The dashboard exposes optional status/private keys
+and retry without reimport. Config v10 converts explicitly from v9; secrets v6
+remains backward-readable. SQLite remains v23 with earlier SQL untouched.
+
+`python -m src.nextgen` now provides fresh init, local check, worker run and
+explicit config/database preview/apply commands. Fresh init never replaces old
+files. Failed database apply retains maintenance; plan tokens pin schema/scripts.
+API startup also checks local readiness. Add dedicated non-root systemd unit
+examples, mount/path controls and a fresh-install/upgrade/lab-validation guide.
+See [Shoko metadata](src/nextgen/SHOKO_METADATA.md) and
+[Service setup](src/nextgen/SERVICE_SETUP.md).
+
+The source work is ready for review, not runtime-proven completion. Tests/CI,
+service installation, SQLite upgrades, client calls and media operations remain
+unrun. Lab validation, including the v23 migration, is the next required milestone.
+This draft is stacked on #137 and includes the earlier unmerged cleanup drafts.
+No new merge or deployment is authorized or performed by this implementation.
+
+## Keep/Reject download cleanup — 2026-10-24
+
+New completed Reject decisions and completed post-Keep staging cleanups now
+queue independent CLEANUP_DECIDED_DOWNLOAD jobs. Reuse cancellation's owned
+stop/remove journal and manifest-only local cleanup. Keep/Reject completion
+remains valid while cleanup waits, retries or needs review. The dashboard exposes
+separate progress and Retry download cleanup; explicit retry never reimports or
+repeats an uncertain client mutation. Preserve kept reservations, rejected-anime
+protection, permanent media and shared series metadata.
+
+Historical source ownership is checked without bypassing acquisition's Reject
+fence. Require drained terminal acquisition work, no external consumer, original
+download root identity, exact client marker/path/inventory and captured remaining
+file identities. Reuse the existing cleanup table; v23/v9/v5 unchanged. No
+historical automatic backfill. See [Download cleanup](src/nextgen/DECISION_DOWNLOAD_CLEANUP.md).
+
+Source checks only; offline cases authored but tests/CI remain unrun. No live
+clients, SQL/migration execution, media operations or deployment. This draft
+builds on #136 and includes the unrun v23 migration from that stack. Optional
+Shoko, service lifecycle/setup and lab validation remain. Automatic missing-
+episode search is excluded by the consolidated architecture decision.
+
+## Canceled-work reservation release — 2026-10-24
+
+Completed drained cancellation cleanup now retires its exact reservation and
+prepared acquisition claims without deleting history. Later verified deliveries
+can reserve the episode and same torrent hash with fresh identities/markers;
+released plans no longer consume active size budget. Shared consumers, uncertain
+cleanup and staged/kept work retain protection. Existing completed cancellations
+can explicitly resume Cleanup to retire retained slots.
+
+SQLite v23 adds state/provenance and active-only uniqueness via an explicit
+table rebuild. Historical SQL 001–022 stays unchanged. Config v9/secrets v5 stay.
+Source syntax and matching fresh/migration table definitions checked; offline
+migration/lifecycle cases authored but unrun. No SQL, tests/CI, live cleanup,
+merge or deployment performed. See [Reservation release](src/nextgen/RESERVATION_RELEASE.md).
+
+PR #135 provides staged-source cleanup after Keep. Download/torrent cleanup
+after Keep/Reject, optional Shoko, service setup and lab validation remain.
+
+## Post-Keep selected staging cleanup — 2026-10-24
+
+Successful Keep completion now creates one independent CLEANUP_KEPT_MEDIA job
+and saves its ID/state in the existing keep_imports JSON journal in the same
+transaction. It rechecks Sonarr's episode binding and the readable permanent file
+at the expected size, then reuses selected staging cleanup for the video and
+episode NFO only. No destination video hashing; shared series NFOs stay.
+
+The API exposes cleanup progress on the Keep receipt. A stopped cleanup can be
+explicitly resumed by the Keep action; the dashboard labels this Retry staging
+cleanup and never resubmits the completed Sonarr import. Successful cleanup can
+queue an independent Jellyfin refresh. Existing completed Keeps are not backfilled.
+No SQL/configuration/secrets upgrade is needed (v22/v9/v5 unchanged).
+
+Kept episode reservations remain durable duplicate protection. Canceled-work
+reservation release, torrent/download cleanup, optional Shoko and service setup
+remain unfinished. Tests/CI and live media operations remain unrun; source checks
+only. This work is published as a draft for review.
+
 ## Consolidation of completed drafts — 2026-10-24
 
 User authorized reconciling completed NextGen work and merging it into NextGen.

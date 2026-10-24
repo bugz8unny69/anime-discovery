@@ -73,9 +73,10 @@ class CancellationStore:
         integer(job_id,positive=True)
         with self.queue.connection() as db,transaction(db):
             op=operation(db,job_id)
+            from src.nextgen.storage.reservation_release import active
             return {'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
                     'can_cancel':not db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(job_id,)).fetchone() and can_cancel_operation(db,op),
-                    'can_cleanup':op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE'}
+                    'can_cleanup':op[1] in ('CANCEL_REQUESTED','CANCELED') and (op[2]!='COMPLETE' or active(db,op[0]))}
     def request(self,job_id):
         integer(job_id,positive=True)
         with self.queue.connection() as db,transaction(db):

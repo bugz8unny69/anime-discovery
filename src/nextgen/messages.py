@@ -22,6 +22,7 @@ class EventDefinition:
 
 
 _EVENTS = (
+    EventDefinition('EPISODE_RESERVATIONS_RELEASED','job','Canceled episode reservations released after cleanup.',True,'CANCELED_RESERVATIONS_RELEASED'),
     EventDefinition('KEEP_COMPLETED','job','Episode kept in the permanent library.',True),
     EventDefinition("MANAGEMENT_ACTION_RESUMED", "job", "The action was submitted again after review."),
     EventDefinition("API_SESSION_CREATED", "runtime", "A management browser session was created."),
@@ -50,6 +51,7 @@ _EVENTS = (
     EventDefinition("DONE", "job", "Job completed."),
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),
+    EventDefinition("DECISION_DOWNLOAD_CONTROL_RECORDED", "job", "Keep/Reject download cleanup step recorded.", True),
     EventDefinition("CANCELLATION_CONTROL_RECORDED", "job", "Cancellation cleanup step recorded.", True),
     EventDefinition("CANCELLATION_REQUESTED", "job", "Cancellation requested for unfinished work.", True),
     EventDefinition("CANCELLATION_CLEANUP_CHANGED", "job", "Cancellation cleanup status updated.", True),

@@ -45,6 +45,11 @@ class RejectMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_episode_for_rejected_anime_stops_before_reservation(self):
         worker,target,job=await self.staged()
         ManagementActions(self.database).submit(job,'reject');await worker.attempt()
+        # Isolate this acquisition assertion from the independent follow-up job.
+        db=connect(self.database)
+        try:
+            with transaction(db):db.execute("UPDATE jobs SET available_at_ms=9999999999999 WHERE kind='CLEANUP_DECIDED_DOWNLOAD'")
+        finally:db.close()
         before=self.rows('SELECT count(*) FROM episode_reservations')
         self.source(episode=11);await worker.attempt()
         self.assertEqual(self.rows('SELECT count(*) FROM episode_reservations'),before)

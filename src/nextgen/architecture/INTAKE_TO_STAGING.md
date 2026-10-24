@@ -48,6 +48,6 @@ Jellyfin refresh may be queued independently after stage or after verified Keep.
 
 ## Existing implementations versus unfinished work
 
-The current draft stack has source for the stages above, including a staging manifest, Reject action, Keep journal and Jellyfin refresh jobs. It does **not** establish that those pieces function together in the lab. Additional work remains for cancellation reservation release, post-Keep cleanup and uncertain-command operator reconciliation, optional Shoko, deployment/service lifecycle, and permitted end-to-end verification.
+The current draft stack has source for the stages above, including a staging manifest, Reject action, Keep journal and Jellyfin refresh jobs. It does **not** establish that those pieces function together in the lab. Additional work remains for cancellation reservation release, torrent/download cleanup and uncertain-command operator reconciliation, optional Shoko, deployment/service lifecycle, and permitted end-to-end verification.
 
 Earlier exploratory design and proposed job names remain in Git history. **Do not restore outdated search assumptions or unimplemented job-kind proposals as though they were installed handlers.**

@@ -228,3 +228,14 @@ Current Keep addition: schema v22 adds 022_keep_imports.sql, the durable Sonarr
 series/import intent and permanent-file result. Published 001–021 remain unchanged.
 Use the existing maintenance preview/backup/apply contract; startup never upgrades
 an existing v21 database implicitly. Configuration v8 and secrets v4 are independent.
+
+
+## v22 → v23: canceled reservation release
+
+023_reservation_release.sql rebuilds episode_reservations and acquisition_plans
+without changing existing IDs or child foreign-key references. New state/time/job
+fields retain lifecycle history; partial unique indexes retain only active
+identity/hash claims. All old rows remain ACTIVE/PREPARED after migration.
+Explicit cleanup retires only fully cleaned canceled work. No automatic media
+operation or source-history deletion occurs. Configuration v9 and secrets v5
+are unchanged. Authored migration preservation/rollback cases remain unrun.

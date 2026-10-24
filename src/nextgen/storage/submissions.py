@@ -21,7 +21,7 @@ def _plan(db,preparation_job_id,event_id):
     row=db.execute("SELECT p.plan_id,p.reservation_id,p.info_hash,p.info_sha256,p.manifest_json,p.submission_marker,"
         "p.selected_size_bytes,r.evaluation_job_id,r.plan_id FROM acquisition_plans p "
         "JOIN jobs j ON j.job_id=p.job_id JOIN episode_reservations r ON r.reservation_id=p.reservation_id "
-        "WHERE p.job_id=? AND j.event_id=? AND j.kind='PREPARE_ACQUISITION' AND j.state='DONE'",
+        "WHERE p.job_id=? AND j.event_id=? AND j.kind='PREPARE_ACQUISITION' AND j.state='DONE' AND p.state='PREPARED' AND r.state='ACTIVE'",
         (preparation_job_id,event_id)).fetchone()
     if row is None:raise AcquisitionConflict()
     source=_source(db,row[7],event_id)
@@ -30,7 +30,7 @@ def _plan(db,preparation_job_id,event_id):
     if source.reservation_id!=row[1] or source.info_hash!=manifest.info_hash or not re.fullmatch('[a-f0-9]{32}',row[5]):raise AcquisitionConflict()
     budget=db.execute('SELECT max_episode_bytes,max_plan_bytes FROM acquisition_budgets WHERE trial_plan_id=?',(row[8],)).fetchone()
     sizes=db.execute('SELECT p.selected_size_bytes FROM acquisition_plans p JOIN episode_reservations r '
-                     'ON r.reservation_id=p.reservation_id WHERE r.plan_id=?',(row[8],)).fetchall()
+                     "ON r.reservation_id=p.reservation_id WHERE r.plan_id=? AND r.state='ACTIVE' AND p.state='PREPARED'",(row[8],)).fetchall()
     if (row[6]!=manifest.files[manifest.selected_index].size or budget is None or any(n[0] is None for n in sizes)):
         raise SizeEvidenceMissing()
     if row[6]>budget[0] or sum(n[0] for n in sizes)>budget[1]:raise AcquisitionConflict()

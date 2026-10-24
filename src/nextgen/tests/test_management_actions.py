@@ -61,7 +61,8 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,200);self.assertTrue(data['completed'])
         self.assertEqual(self.actions().submit(target,'cancel')[0],200)
         self.assertFalse(CancellationStore(self.database).status(target)['can_cancel'])
-        self.assertEqual(self.rows('SELECT * FROM episode_reservations'),reservations)
+        self.assertEqual([row[:13] for row in self.rows('SELECT * FROM episode_reservations')],[row[:13] for row in reservations])
+        self.assertEqual(self.rows('SELECT state FROM episode_reservations'),[('RELEASED',)])
         self.assertEqual(self.rows('SELECT * FROM management_actions'),[])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE state<>'DONE'"),[(0,)])
         with self.assertRaises(ValueError):

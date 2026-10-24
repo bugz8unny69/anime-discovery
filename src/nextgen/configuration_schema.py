@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 9
+CONFIGURATION_VERSION = 10
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -69,6 +69,8 @@ class FieldDefinition:
 # Register new fields with their actual component; do not expose speculative
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
+    "shoko.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Shoko address", help_text="Optional Shoko v5 API v3 metadata lookup after Keep. Blank disables it. Does not move, rename, hash or register files."),
+    "shoko.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Shoko timeout"),
     "jellyfin.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Jellyfin address", help_text="HTTP(S) address without a subpath. Blank disables automatic library refresh. Configure both staging and permanent folders in Jellyfin first."),
     "jellyfin.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Jellyfin timeout"),
     "sonarr.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Sonarr address", help_text="HTTP(S) server address for Sonarr v4."),
@@ -467,7 +469,7 @@ def _v7_to_v8(document):
 
 def _v8_values(values):
     if type(values) is not dict or 'jellyfin' in values:raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v9_values(values)
     del historical['jellyfin']
     return historical
 
@@ -476,12 +478,26 @@ def _v8_to_v9(document):
     if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=8):raise ConfigurationError()
     current=revision(document['revision'])
     if current==MAX_REVISION:raise ConfigurationError()
-    return {'schema_version':9,'revision':current+1,'settings':validate_values(_v8_values(document['settings']))}
+    return {'schema_version':9,'revision':current+1,'settings':_v9_values(_v8_values(document['settings']))}
+
+
+def _v9_values(values):
+    if type(values) is not dict or 'shoko' in values:raise ConfigurationError()
+    historical=validate_values(values)
+    del historical['shoko']
+    return historical
+
+
+def _v9_to_v10(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=9):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':10,'revision':current+1,'settings':validate_values(_v9_values(document['settings']))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10})
 
 
 def convert_document(document):

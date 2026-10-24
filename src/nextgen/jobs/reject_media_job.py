@@ -16,6 +16,8 @@ DEFINITION=HandlerDefinition(KIND,'Reject anime and remove selected staged video
 def _persist(db,claim,value):
     row=db.execute("SELECT cleanup_state FROM anime_review_decisions WHERE job_id=? AND decision='REJECT'",(claim.job_id,)).fetchone()
     if row!=('COMPLETE',):raise CompletionRejected(Outcome('review','REJECT_CLEANUP_REVIEW'))
+    from src.nextgen.decision_download_cleanup import enqueue
+    enqueue(db,claim,claim.job_id)
 
 
 def registration():

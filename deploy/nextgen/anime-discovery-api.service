@@ -1,0 +1,26 @@
+[Unit]
+Description=Anime Discovery NextGen management API
+PartOf=anime-discovery.target
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=anime-discovery
+Group=anime-discovery
+WorkingDirectory=/opt/anime-discovery
+Environment=PYTHONUNBUFFERED=1
+# Replace the origin with the exact HTTPS dashboard origin before installing.
+ExecStart=/opt/anime-discovery/.venv/bin/python -m src.nextgen.api serve --config-dir /var/lib/anime-discovery/config --public-origin https://anime.example.invalid
+Restart=on-failure
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=infinity
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/anime-discovery
+StandardOutput=journal
+StandardError=journal

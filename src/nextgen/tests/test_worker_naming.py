@@ -25,7 +25,7 @@ class WorkerConfigurationTests(unittest.TestCase):
         original = copy.deepcopy(source)
         result = convert_document(source)
         self.assertEqual(source, original)
-        self.assertEqual((result.schema_version, result.revision), (9, 20))
+        self.assertEqual((result.schema_version, result.revision), (10, 21))
         self.assertEqual(result.value("worker.concurrency"), 9)
         self.assertEqual(result.value("logging.components"), {"worker": "TRACE", "api": "WARNING"})
         self.assertEqual(result.value("api.port"), 9000)
@@ -107,6 +107,7 @@ class WorkerSqlMigrationTests(unittest.TestCase):
         self.db.executescript((SQL_DIR / "020_staging_publications.sql").read_text())
         self.db.executescript((SQL_DIR / "021_reject_decisions.sql").read_text())
         self.db.executescript((SQL_DIR / "022_keep_imports.sql").read_text())
+        self.db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
         initialize(self.db)  # Latest version accepted without implicit upgrade.
 
     def test_failure_before_version_bump_rolls_back_rows_and_vocabulary(self):

@@ -69,7 +69,7 @@ class FakeSonarr:
             return Response({'id':61})
         if path=='command':return Response([{'id':61,'body':self.payload}] if self.payload else [])
         if path=='command/61':return Response({'id':61,'status':'failed' if self.failed else 'completed'})
-        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':Path(self.selection.media_path).stat().st_size,
+        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':(self.root/'Series'/'episode.mkv').stat().st_size,
             'path':'/elsewhere/episode.mkv' if self.wrong_destination else str(self.root/'Series'/'episode.mkv')})
         raise AssertionError(path)
 
@@ -189,7 +189,7 @@ class SonarrSettingsTests(unittest.TestCase):
             self.assertNotIn('sonarr',doc['settings'])
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
-        self.assertEqual(upgraded.schema_version,9)
+        self.assertEqual(upgraded.schema_version,10)
         self.assertEqual(upgraded.revision,doc['revision']+2)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
         for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
@@ -218,10 +218,11 @@ class KeepMigrationTests(unittest.TestCase):
         try:
             for script in SCRIPTS[:21]:db.executescript((SQL_DIR/script).read_text())
             before=db.execute('SELECT * FROM management_actions').fetchall()
-            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text());initialize(fresh)
+            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text())
+            db.executescript((SQL_DIR / "023_reservation_release.sql").read_text());initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],22)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
         finally:db.close();fresh.close()
 
     def test_wrong_version_and_partial_failure_roll_back(self):

@@ -32,6 +32,8 @@ def main():
         result=store.initialize(management_token=management,webhook_token=webhook) if status.revision==0 else store.update_access_tokens(webhook,management,expected_revision=status.revision)
         print('Access keys saved.' if result.durability_confirmed else 'Access keys saved; storage durability needs review.')
         return
+    from src.nextgen.__main__ import check_local
+    check_local(args.config_dir)
     app=Application(args.config_dir,origin=args.public_origin)
     host=app.startup.value('api.host')
     try:

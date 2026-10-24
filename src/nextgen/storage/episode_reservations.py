@@ -68,9 +68,11 @@ def persist_reservation(db,claim,value):
     key=(value.tvdb_series_id,value.tvdb_season,value.tvdb_episode)
     rows=db.execute("SELECT owner_job_id,evaluation_job_id,anidb_id,anidb_episode_id,"
                     "tvdb_series_id,tvdb_season,tvdb_episode,tvdb_episode_id FROM episode_reservations "
-                    "WHERE (tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=? AND tvdb_order='official') "
-                    "OR anidb_episode_id=? OR tvdb_episode_id=?",(*key,value.anidb_episode_id,value.tvdb_episode_id)).fetchall()
+                    "WHERE state='ACTIVE' AND ((tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=? AND tvdb_order='official') "
+                    "OR anidb_episode_id=? OR tvdb_episode_id=?)",(*key,value.anidb_episode_id,value.tvdb_episode_id)).fetchall()
     expected=(value.anidb_id,value.anidb_episode_id,*key,value.tvdb_episode_id)
+    prior=db.execute('SELECT state FROM episode_reservations WHERE owner_job_id=?',(claim.job_id,)).fetchone()
+    if prior==('RELEASED',):raise ReservationConflict()
     if rows:
         if len(rows)!=1 or rows[0][2:]!=expected:raise ReservationConflict()
         if rows[0][0]!=claim.job_id:raise EpisodeReserved()

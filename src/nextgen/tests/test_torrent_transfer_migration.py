@@ -20,10 +20,11 @@ class TorrentTransferMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'020_staging_publications.sql').read_text())
             db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
             db.executescript((SQL_DIR / "022_keep_imports.sql").read_text())
+            db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],22)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 
