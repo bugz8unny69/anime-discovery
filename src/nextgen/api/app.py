@@ -284,7 +284,34 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','webhook','missing-episodes']},[]
+
+            if path==PREFIX+'/missing-episodes':
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if set(query)!={'plan_id'}:raise ApiError(400,'API_REQUEST_INVALID')
+                plan_id=page_number(query,'plan_id',None,1,(1<<63)-1)
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    plan=db.execute('SELECT anidb_id,tvdb_series_id,tvdb_season,anchor_episode,backfill_count,following_count '
+                                    'FROM trial_plans WHERE plan_id=?',(plan_id,)).fetchone()
+                    if plan is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    from src.nextgen.trial_policy import Window
+                    positions=Window(plan[4],plan[5]).episodes(plan[3])
+                    reserved={x[0] for x in db.execute('SELECT tvdb_episode FROM episode_reservations WHERE '
+                                "tvdb_series_id=? AND tvdb_season=? AND tvdb_order='official'",(plan[1],plan[2]))}
+                    recorded={x[0]:(x[1],x[2],x[3]) for x in db.execute(
+                        'SELECT tvdb_episode,status,candidate_count,searched_at_ms FROM missing_episode_searches '
+                        'WHERE plan_id=?',(plan_id,))}
+                    rows=[{'tvdb_episode':n,'status':'RESERVED' if n in reserved else
+                           recorded[n][0] if n in recorded else 'NOT_SEARCHED',
+                           'candidate_count':recorded[n][1] if n in recorded else 0}
+                          for n in positions]
+                    candidates=[{'tvdb_episode':e,'info_hash':h,'release_name':title} for e,h,title in db.execute(
+                        'SELECT tvdb_episode,info_hash,release_name FROM missing_episode_candidates '
+                        'WHERE plan_id=? ORDER BY tvdb_episode,info_hash LIMIT 100',(plan_id,))]
+                    return 200,{'plan_id':plan_id,'anidb_id':plan[0],'tvdb_series_id':plan[1],
+                        'tvdb_season':plan[2],'positions':rows,'candidates':candidates,
+                        'candidate_limit':100,'candidate_note':'Unverified search hints; no automatic download'},[]
             if path==PREFIX+'/intake':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 return 200,self._intake(configuration,query),[]
@@ -309,21 +336,21 @@ class Application:
             if path==PREFIX+'/credentials' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 return 200,asdict(self.secrets.status()),[]
-            secret_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|qbittorrent|access|sonarr|jellyfin)',path)
+            secret_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|qbittorrent|access|sonarr|jellyfin|prowlarr)',path)
             if secret_match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 if method!='PATCH':raise ApiError(405,'API_METHOD_INVALID')
                 kind=secret_match[1]
-                fields={'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token'),'sonarr':('api_key',),'jellyfin':('api_key',)}[kind]
+                fields={'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token'),'sonarr':('api_key',),'jellyfin':('api_key',),'prowlarr':('api_key',)}[kind]
                 exact(body,('expected_revision',*fields))
                 validate_secret_fields(kind,body,fields)
-                callback={'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens,'sonarr':self.secrets.update_sonarr_api_key,'jellyfin':self.secrets.update_jellyfin_api_key}[kind]
+                callback={'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens,'sonarr':self.secrets.update_sonarr_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'prowlarr':self.secrets.update_prowlarr_api_key}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
                 return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code},[]
             if method=='GET' and (path==PREFIX+'/jobs' or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path)):
                 return 200,self._jobs(configuration,path,query),[]
-        if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
+        if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs',PREFIX+'/missing-episodes') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
         raise ApiError(404,'API_ROUTE_NOT_FOUND')
 
     def _cookie(self,token,*,clear=False):
