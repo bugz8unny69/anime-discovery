@@ -70,7 +70,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         migrated = convert_document(old)
         self.assertEqual(old, original)
         self.assertEqual(source_version(old), 0)
-        self.assertEqual(migrated.revision, 8)
+        self.assertEqual(migrated.revision, 9)
         self.assertEqual(migrated.value("logging.level"), "DEBUG")
         self.assertEqual(migrated.value("logging.components")["worker"], "TRACE")
         self.assertEqual(convert_document(migrated.to_document()), migrated)
@@ -83,11 +83,12 @@ class ConfigurationSchemaTests(unittest.TestCase):
         current=ConfigurationSnapshot(10, {"storage":{"keep_root":"/mnt/media/Anime"}})
         v7=current.to_document();v7["schema_version"]=7
         del v7["settings"]["sonarr"]
+        del v7["settings"]["jellyfin"]
         with self.assertRaises(ConfigurationMigrationRequired):
             load_current(json.dumps(v7).encode())
         converted=convert_document(v7)
-        self.assertEqual(converted.schema_version,8)
-        self.assertEqual(converted.revision,11)
+        self.assertEqual(converted.schema_version,9)
+        self.assertEqual(converted.revision,12)
         self.assertEqual(converted.value("sonarr.quality_profile_name"),"Anime")
         with self.assertRaises(ConfigurationError):
             ConfigurationSnapshot(1,{"storage":{"keep_root":"/mnt/media/Anime"},
@@ -97,6 +98,22 @@ class ConfigurationSchemaTests(unittest.TestCase):
             "sonarr":{"base_url":"https://sonarr.arr.internal",
                       "root_folder":"/mnt/media/Anime","quality_profile_name":"Anime"}})
         self.assertEqual(validated.value("sonarr.timeout_seconds"),15)
+
+    def test_v8_to_v9_adds_optional_jellyfin_without_changing_sonarr(self):
+        current=ConfigurationSnapshot(10,{"sonarr":{"base_url":"https://sonarr.internal",
+            "root_folder":"/mnt/anime"},"storage":{"keep_root":"/mnt/anime"}})
+        v8=current.to_document();v8["schema_version"]=8
+        del v8["settings"]["jellyfin"]
+        upgraded=convert_document(v8)
+        self.assertEqual(upgraded.schema_version,9)
+        self.assertEqual(upgraded.revision,11)
+        self.assertEqual(upgraded.value("sonarr.root_folder"),"/mnt/anime")
+        self.assertEqual(upgraded.value("jellyfin.base_url"),"")
+        self.assertEqual(upgraded.value("jellyfin.timeout_seconds"),15)
+        enabled,_=patch_snapshot(upgraded,{"jellyfin":{"base_url":"https://jellyfin.internal"}})
+        self.assertEqual(enabled.value("jellyfin.base_url"),"https://jellyfin.internal")
+        with self.assertRaises(ConfigurationError):
+            ConfigurationSnapshot(1,{"jellyfin":{"base_url":"https://jellyfin.internal/emby"}})
 
     def test_strict_decode_rejects_duplicate_nonfinite_oversized_or_invalid_input(self):
         for raw in (b'{"logging":{},"logging":{}}', b'{"x":NaN}', b'{"x":Infinity}',
@@ -127,7 +144,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         candidate, changed = patch_snapshot(initial, {"logging": {"level": "INFO"}})
         self.assertIs(candidate, initial)
         self.assertEqual(changed, ())
-        for version in (True, 0, 1, 2, 3, 4, 5, 6, 7, 9, "1"):
+        for version in (True, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, "1"):
             with self.subTest(version=version), self.assertRaises(ConfigurationError):
                 document_snapshot({"schema_version": version, "revision": 1, "settings": {}})
         for revision in (True, 0, -1, "1", MAX_REVISION + 1):
