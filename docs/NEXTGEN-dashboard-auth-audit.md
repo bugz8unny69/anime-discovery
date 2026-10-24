@@ -41,3 +41,25 @@ Do not deploy the scrypt foundation as a completed authentication migration. It 
 ## Confirmed scope decision
 
 No migration from the older application is requested or authorized. Treat the legacy source solely as a reference for feature parity. A new NextGen installation starts with fresh configuration, using the existing configuration library and management API for configuration. `adm set-password` bootstraps the administrator password; it does not import legacy secrets. Do not implement migration scripts or automatic legacy-data conversion.
+
+## Feature parity review against the retired dashboard (reference only)
+
+The older source is **not imported, executed, or migrated**. Its browser routes and page functions are used only to identify product capabilities still needed:
+
+| Retired dashboard capability | NextGen status at source review |
+| --- | --- |
+| Jobs list, status, history, keep/reject/cancel/cleanup | Present under Intake/Jobs, needs browser/API test |
+| Configuration forms and provider credentials | Present under Settings, needs full schema validation |
+| Password sign-in and security page | Implemented on new API, needs proxy/browser validation |
+| Series overview and per-series detail | Not yet implemented in NextGen dashboard |
+| Recognized names and alias maintenance | Not yet implemented in NextGen dashboard |
+| Manual one-time anime trial request | Not yet implemented in NextGen dashboard |
+| Sonarr cleanup review/preview | Not yet implemented in NextGen dashboard |
+| Identity trace and diagnostic views | Not yet implemented in NextGen dashboard |
+| Provider connection checks in settings | Not yet implemented in NextGen dashboard |
+
+The last six capabilities require native NextGen application/service operations and management endpoints. Do not point the NextGen UI at the retired Python HTTP handlers. Parity is **not complete**, and source review is not a browser validation.
+
+### Fresh-install invariant
+
+There is no conversion or migration step. Use the NextGen configuration library and management API. A fresh API can start before the administrator password or webhook key exists, `adm set-password` bootstraps authentication via the same-process local socket, and the dashboard configures the separate webhook key.
