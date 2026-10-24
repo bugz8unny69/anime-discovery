@@ -1,6 +1,6 @@
 # NextGen dashboard and management authentication audit
 
-Status: source inspection, not deployment verification (2026-10-24).
+Status: incremental implementation and source inspection, not deployment verification (2026-10-24).
 
 ## Existing NextGen dashboard
 - `src/nextgen/dashboard/assets.py` allowlists `/`, `/jobs`, `/settings`, and static CSS/JS assets.
@@ -32,8 +32,8 @@ Do not deploy the scrypt foundation as a completed authentication migration. It 
 - [x] Implement same-process Unix socket (0600, root/service UID), peer identity checks, and `adm set-password` (host validation pending).
 - [x] Wire dashboard login and Settings > Security forms to the new API (browser testing pending).
 - [x] Remove management-token bootstrap dependency; initialize fresh NextGen secrets v7, provision password via `adm set-password`, and retain independent Autobrr webhook credentials.
-- [ ] Verify full legacy dashboard feature parity and worker-unavailable UX.
-- [ ] Add authorization, CSRF, socket, rotation, lifecycle, and browser/API integration tests.
+- [ ] Implement native NextGen Series, recognized aliases, manual trial requests, cleanup review, identity diagnostics and connection checks; verify worker-unavailable UX. Source comparison documented below.
+- [ ] Complete authorization, CSRF, socket, rotation, lifecycle, and browser/API integration tests (new fixtures and regression cases committed; full suite unexecuted).
 - [ ] Review complete diff, then ask for approval to run CI; fix failures after approval.
 
 **Gate:** No CI trigger, merge, or deployment until the user approves CI after checklist completion.
