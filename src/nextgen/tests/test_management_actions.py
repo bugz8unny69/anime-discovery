@@ -150,23 +150,26 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT * FROM job_history'),before)
         self.assertEqual(self.rows('SELECT * FROM management_actions'),[])
 
-    async def test_concurrent_keep_requests_share_one_receipt(self):
+    async def test_synthetic_staged_marker_cannot_authorize_keep_without_manifest(self):
+        # A forged STAGED state is not proof of a verified staged episode.
         first=self.staged()
         with ThreadPoolExecutor(max_workers=2) as pool:
-            results=list(pool.map(lambda _:self.actions().submit(first,'keep'),range(2)))
-        self.assertEqual(results[0][1]['job_id'],results[1][1]['job_id'])
-        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(1,)])
+            def try_keep(_):
+                try:self.actions().submit(first,'keep')
+                except ActionUnavailable:return 'rejected'
+                return 'unexpected'
+            self.assertEqual(list(pool.map(try_keep,range(2))),['rejected','rejected'])
+        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(0,)])
+        self.assertEqual(self.rows('SELECT count(*) FROM keep_imports'),[(0,)])
 
-    async def test_keep_requires_staged_and_stays_explicitly_blocked_without_media_library(self):
+    async def test_keep_requires_published_staging_not_only_a_staged_state(self):
         pending=self.add()
         with self.assertRaises(ActionUnavailable):self.actions().submit(pending,'keep')
         self.actions().submit(pending,'cancel')
-        target=self.staged();_,data,_=self.actions().submit(target,'keep')
-        worker=Worker(self.store,self.startup,Registry((keep(),)))
-        self.addAsyncCleanup(worker.close)
-        await worker.attempt()
-        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(data['job_id'],)),[('BLOCKED','KEEP_NOT_READY')])
-        self.assertEqual(self.actions().submit(target,'keep')[1]['job_id'],data['job_id'])
+        target=self.staged()
+        with self.assertRaises(ActionUnavailable):self.actions().submit(target,'keep')
+        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(0,)])
+        self.assertEqual(self.rows('SELECT count(*) FROM keep_imports'),[(0,)])
         self.assertEqual(self.rows('SELECT state FROM job_operations WHERE operation_id=(SELECT operation_id FROM job_operation_members WHERE job_id=?)',(target,)),[('STAGED',)])
 
     async def test_cleanup_waits_for_target_lock_then_completes_after_drain(self):
