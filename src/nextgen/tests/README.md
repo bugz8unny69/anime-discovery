@@ -161,3 +161,31 @@ CI, application imports, SQL, live providers, acquisition/media or deployment ra
 Episode-selection regression cases reject 0/0 during conversion, snapshot
 construction and settings updates, preserve saved settings on failure, and allow
 6/0 and 0/1. Tests remain unexecuted under project policy.
+
+Episode reservation offline cases cover atomic handoff, selected and skipped
+gates, same-episode competition, independent episodes, identity conflict,
+wrong-event references, changed source, stale lease and post-insert rollback.
+Migration cases extend fresh equivalence through SQLite v12 and check slot
+uniqueness metadata, preservation and failed/wrong-version rollback. Existing
+sequential migration-runner coverage includes all v1–v12 starting points.
+Tests remain intentionally unexecuted under project policy.
+
+Acquisition preparation cases cover exact encoded info hashes, canonical
+bencoding, path/bounds/pieces/pack/alias rejection, declaration alignment,
+missing source before reads, durable markers, racing preparation, changed
+evidence, expired leases, rollback and optional trusted composition. SQLite
+v13 cases cover preservation/fresh equivalence/unique markers/rollback; the
+existing sequential runner covers every supported starting version.
+All tests remain intentionally unexecuted under project policy.
+
+Download foundation cases cover v6 settings conversions, URL/path/budget bounds,
+private pair updates/v1 compatibility/public redaction/revision and publication
+failures, point-of-use captured contexts, concurrent size admission, frozen
+limits, old unknown-size review, rollback and v13→v14 preservation/equivalence.
+Sequential runner coverage now includes v14. Tests remain unexecuted.
+
+Stopped submission offline cases cover version-specific forms, auth/redirect/
+response bounds, exact inventory/provenance, one-use permits, timeout/crash/absence
+without replay, pinned options, external torrents, changed state and expired
+authorization/confirmation. Migration preservation/fresh equivalence/rollback
+and existing sequential coverage extend through SQLite v15. No tests or CI run.

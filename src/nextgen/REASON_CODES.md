@@ -205,15 +205,105 @@ translation keys through the shared catalog. Neither a provider title nor raw
 release name/payload is placed in diagnostic history.
 
 
-Trial policy records TRIAL_SELECTED ("This episode is selected for the trial."),
-TRIAL_OUTSIDE_WINDOW ("This episode is outside the trial selection.") and
-TRIAL_DISABLED ("Trial episode selection is disabled."). Each has a static action
-and translation-ready catalog key. TRIAL_PLAN_CONFLICT requests plan/evidence
-review. TRIAL_EVALUATED is a readable job marker requiring a registered reason;
-its durable audit and selection facts commit together and log only after commit.
-Selection success never means download, staging or permanent Keep completed.
+Episode selection retains stable historical identifiers `TRIAL_SELECTED`,
+`TRIAL_OUTSIDE_WINDOW`, `TRIAL_DISABLED` and `TRIAL_PLAN_CONFLICT`. Their
+English messages use "Intake selection" or "episode selection", not the old
+product name. `TRIAL_EVALUATED` remains the durable job event with a registered
+reason; its audit and selection facts commit together and log only after commit.
+A selected episode does not mean download, staging or Keep completed.
 
-TRIAL_COUNTS_INVALID rejects two zero episode-selection counts during settings
-conversion/validation. Its public message asks for at least one positive count
-without requiring users to understand the internal word trial. TRIAL_DISABLED
-is retained for historical records only; new policy evaluations do not emit it.
+`TRIAL_COUNTS_INVALID` rejects two zero episode-selection counts during
+configuration validation. `TRIAL_DISABLED` is retained for historical
+compatibility only; current evaluations do not emit it. Do not rename any of
+these stored codes without a separate compatibility migration.
+
+EPISODE_RESERVATION_GRANTED explains a durable exact-episode reservation;
+EPISODE_RESERVED holds competing work; EPISODE_RESERVATION_CONFLICT requires
+identity/selection review. All have static readable messages/actions and
+translation keys. EPISODE_RESERVATION_CREATED and EPISODE_RESERVATION_SKIPPED
+are durable job markers; a skipped gate carries TRIAL_OUTSIDE_WINDOW.
+
+ACQUISITION_SOURCE_MISSING requires a normalized supported source identity;
+ACQUISITION_METADATA_INVALID requires file-list/declaration review;
+ACQUISITION_PLAN_CONFLICT protects immutable reservation/source/plan facts;
+ACQUISITION_PLAN_READY describes preparation only. Each has a readable message,
+action and translation key. ACQUISITION_PREPARED is a durable after-commit
+logged job marker; neither file names nor tracker data are diagnostic details.
+
+DOWNLOAD_CONFIGURATION_INVALID requires local download settings/credentials
+before client work. ACQUISITION_SIZE_LIMIT reviews an oversized selected video
+or aggregate plan; ACQUISITION_SIZE_EVIDENCE_MISSING reviews unknown historical
+selected-byte evidence. All have bounded static readable messages/actions and
+translation keys, without values or paths in exceptions/history.
+
+DOWNLOAD_CLIENT_UNAVAILABLE/AUTH_FAILED/RESPONSE_INVALID/UNSUPPORTED describe
+bounded transport failures without response bodies or credential values.
+TORRENT_SUBMISSION_UNCERTAIN defers read-only reconciliation; TORRENT_ALREADY_PRESENT
+protects externally present torrents; TORRENT_PROVENANCE_CONFLICT reviews changed
+provenance/state/files; TORRENT_STOPPED_CONFIRMED describes a stopped snapshot
+only. TORRENT_INTENT_RECORDED and TORRENT_RECONCILED are durable job markers with
+readable messages/actions/translation keys and after-commit logging.
+
+## Selected-video transfers
+
+Every new transfer event and reason has a static English message in the shared
+catalog; translations use stable codes, never exception text. Retry classification
+is descriptive: worker policy and the durable journal decide behavior.
+
+| Reason | Message |
+| --- | --- |
+| TORRENT_SELECTION_UNCERTAIN | Video file selection is waiting for confirmation. |
+| TORRENT_SELECTION_CONFIRMED | The video file is selected and ready to download. |
+| TORRENT_START_UNCERTAIN | Download startup is waiting for confirmation. |
+| TORRENT_DOWNLOAD_IN_PROGRESS | The selected video is downloading. |
+| TORRENT_DOWNLOAD_COMPLETE | The download client reports that the selected video is complete. |
+| TORRENT_DOWNLOAD_WAITING | Waiting for the existing download to appear. |
+| TORRENT_TRANSFER_CONFLICT | Download details changed and need review. |
+| TORRENT_PIECE_OVERLAP | This video shares download pieces with files that are not selected. |
+| TORRENT_SNAPSHOT_CHANGED | The download is changing or being checked. |
+
+Selection/start uncertainty never authorizes replay. Client completion is not
+local media verification or permission to stage a video.
+
+## Cancellation
+
+All new cancellation events/reasons have static readable English catalog entries,
+with stable translation keys. Cancellation is an explicit operator decision, not
+a reason-code retry flag.
+
+| Code | Message |
+| --- | --- |
+| JOB_CANCELED | This work was canceled. |
+| CANCELLATION_DRAINING | Waiting for active work to stop before cleanup. |
+| CANCELLATION_PENDING | Cancellation cleanup is waiting for confirmation. |
+| CANCELLATION_REVIEW | Cancellation cleanup needs attention. |
+| CANCELLATION_COMPLETE | Cancellation cleanup is complete. |
+
+CANCELLATION_REQUESTED, CANCELLATION_CONTROL_RECORDED and
+CANCELLATION_CLEANUP_CHANGED identify events; reasons explain their outcomes.
+Details never include arbitrary client response bodies or exception strings.
+
+## Versioned HTTP API
+
+API v1 responses carry registered reason codes, readable messages/actions and
+translation keys. API_REQUEST_REJECTED and API_TRANSPORT_NOTICE are runtime events;
+API_SESSION_CREATED, API_SESSION_CLOSED and API_CREDENTIALS_UPDATED are readable
+operational notices. No request URL, query, header, cookie, body or raw exception
+is used as a message. The catalog includes API_AUTH_REQUIRED, API_AUTH_UNCONFIGURED,
+API_CSRF_REQUIRED, API_ORIGIN_INVALID, API_REQUEST_INVALID, API_WEBHOOK_INVALID,
+API_BODY_TOO_LARGE, API_MEDIA_TYPE_INVALID, API_ROUTE_NOT_FOUND, API_METHOD_INVALID,
+API_RATE_LIMITED and API_UNAVAILABLE. See api/README.md for HTTP mappings and
+credential separation. These reasons do not dictate Worker retry policy.
+
+### Durable management actions
+
+| Code | Human-readable message | Meaning |
+| --- | --- | --- |
+| MANAGEMENT_ACTION_UNAVAILABLE | This action is not available for this work. | Current target cannot accept the action |
+| MANAGEMENT_JOB_SUBMITTED | Job submitted. | Durable acknowledgement, not execution success |
+| MANAGEMENT_JOB_EXISTS | This action already has a job. | Follow the existing action receipt |
+| KEEP_NOT_READY | Keeping videos is not available yet. | Intent recorded; verified media promotion remains unimplemented |
+
+All include static suggested actions and translation keys through MessageCatalog.
+`MANAGEMENT_ACTION_RESUMED` is a registered readable job event for explicit
+cleanup resubmission after review. No arbitrary exception text is presented.

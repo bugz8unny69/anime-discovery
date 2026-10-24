@@ -1,0 +1,191 @@
+"""API-ready cancellation library; invoke only after management authorization.
+
+HTTP callers submit control jobs. Only a job in a distinct control operation
+may invoke cleanup under existing maintenance admission, with a lease guard.
+Cleanup always requires exclusive drain protection for the target operation.
+"""
+import json
+from contextlib import nullcontext
+from src.nextgen.acquisition.cleanup import CleanupPermit, FileCleanup, owned
+from src.nextgen.acquisition.qbittorrent import Client
+from src.nextgen.acquisition.submission import ClientUnavailable, ClientInvalid, ClientAuthenticationFailed, ClientUnsupported
+from src.nextgen.acquisition.transfers import STOPPED, CHECKING
+from src.nextgen.cancellation import CancellationError, CleanupBusy, OperationGate
+from src.nextgen.diagnostics import log_history
+from src.nextgen.history import append_job_history
+from src.nextgen.maintenance import MaintenanceGate
+from src.nextgen.storage.cancellation import CancellationStore, operation, cancel_job
+from src.nextgen.storage.sqlite import transaction
+from src.nextgen.storage.submissions import _plan, _intent
+
+
+class CancellationService:
+    def __init__(self,configuration,secrets,*,client_factory=Client,files_factory=FileCleanup,logger=None,admitted=False,guard=None,component="api"):
+        if type(admitted) is not bool or admitted and not callable(guard):raise CancellationError()
+        from src.nextgen.history import component_name
+        self.component=component_name(component)
+        self.configuration,self.secrets=configuration,secrets
+        self.database=configuration.value('storage.database_path')
+        self.store=CancellationStore(self.database)
+        self.client_factory,self.files_factory,self.logger=client_factory,files_factory,logger
+        self.gate=MaintenanceGate(self.database)
+        self.admitted,self.guard=admitted,guard
+    def _admission(self):
+        return nullcontext() if self.admitted else self.gate.operation()
+    def _fence(self,db=None):
+        if self.guard is not None:self.guard(db)
+    def _log(self,records):
+        if self.logger is not None:
+            for record in records:log_history(self.logger,record)
+    def status(self,job_id):
+        with self._admission():return self.store.status(job_id)
+    def request(self,job_id):
+        with self._admission():
+            op,receipts=self.store.request(job_id)
+            self._log(receipts)
+            return op
+    def cancel(self,job_id):
+        self.request(job_id)
+        return self.cleanup(job_id)
+    def _state(self,job_id,state,reason,*,cause=None):
+        with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
+            op=operation(db,job_id)
+            if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise CancellationError()
+            now=self.store.queue.now()
+            db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state=?,reason_code=?,updated_at_ms=? WHERE operation_id=?",
+                       (state,reason,now,op[0]))
+            records=() if (op[2],op[3])==(state,reason) else (append_job_history(db,job_id=job_id,
+                event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component=self.component,occurred_at_ms=now,
+                details={} if cause is None else {'cause_reason_code':cause}),)
+        self._log(records)
+    def _targets(self,job_id):
+        with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
+            op=operation(db,job_id)
+            if op[1] not in ('CANCEL_REQUESTED','CANCELED'):raise CancellationError()
+            receipts=[];now=self.store.queue.now()
+            # Exclusive OperationGate proves participating handlers have drained.
+            for (member,) in db.execute('SELECT job_id FROM job_operation_members WHERE operation_id=?',(op[0],)).fetchall():
+                receipts.extend(cancel_job(db,member,now,self.component))
+            rows=db.execute('SELECT p.job_id,j.event_id FROM acquisition_plans p JOIN jobs j ON j.job_id=p.job_id '
+                'JOIN job_operation_members m ON m.job_id=p.job_id WHERE m.operation_id=? ORDER BY p.plan_id',(op[0],)).fetchall()
+            if len(rows)>1000:raise CancellationError()
+            targets=[]
+            for preparation,event in rows:
+                plan=_plan(db,preparation,event)
+                # Explicit other consumers, including older separately scoped jobs,
+                # preserve resources. Provenance IDs are never traversed as edges.
+                shared=db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) "
+                    "WHERE m.operation_id<>? AND "
+                    "((j.kind IN ('SUBMIT_TORRENT','DOWNLOAD_TORRENT') AND json_extract(j.payload_json,'$.preparation_job_id')=?) OR "
+                    "(j.kind IN ('RESERVE_EPISODE','PREPARE_ACQUISITION') AND json_extract(j.payload_json,'$.evaluation_job_id')=?)) LIMIT 1",
+                    (op[0],preparation,plan.evaluation_job_id)).fetchone()
+                if shared:raise CancellationError()
+                intent=_intent(db,plan)
+                if intent is not None:
+                    if intent.state!='OWNED_STOPPED':raise CancellationError()
+                    targets.append(intent)
+            result=(op[0],targets)
+        self._log(receipts)
+        return result
+    def _journal(self,op,intent):
+        with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
+            row=db.execute('SELECT operation_id,fingerprint,files_json,phase FROM cancellation_cleanup WHERE plan_id=?',
+                           (intent.plan.plan_id,)).fetchone()
+            if row is not None:
+                if row[:2]!=(op,intent.fingerprint):raise CancellationError()
+                return json.loads(row[2]),row[3]
+            now=self.store.queue.now()
+            db.execute("INSERT INTO cancellation_cleanup VALUES(?,?,?,?,'PREPARED',?,?)",
+                       (intent.plan.plan_id,op,intent.fingerprint,'{}',now,now))
+            return {},'PREPARED'
+    def _advance(self,intent,prior,phase,files=None):
+        with self.store.queue.connection() as db,transaction(db):
+            self._fence(db)
+            now=self.store.queue.now()
+            if files is None:
+                changed=db.execute('UPDATE cancellation_cleanup SET phase=?,updated_at_ms=? WHERE plan_id=? AND phase=?',
+                    (phase,now,intent.plan.plan_id,prior)).rowcount
+            else:
+                raw=json.dumps(files,sort_keys=True,separators=(',',':'),allow_nan=False)
+                if len(raw.encode())>1048576:raise CancellationError()
+                changed=db.execute('UPDATE cancellation_cleanup SET phase=?,files_json=?,updated_at_ms=? WHERE plan_id=? AND phase=?',
+                    (phase,raw,now,intent.plan.plan_id,prior)).rowcount
+            if changed!=1:raise CancellationError()
+            receipt=append_job_history(db,job_id=intent.plan.preparation_job_id,event_code='CANCELLATION_CONTROL_RECORDED',
+                reason_code='CANCELLATION_COMPLETE' if phase=='COMPLETE' else 'CANCELLATION_PENDING',
+                component=self.component,occurred_at_ms=now)
+        self._log((receipt,))
+    def _clean_target(self,op,intent):
+        files,phase=self._journal(op,intent)
+        if phase=='COMPLETE':return True
+        credentials=self.secrets.qbittorrent_credentials()
+        client=self.client_factory(intent.options,credentials);client.login()
+        found=client.inspect(intent.plan.manifest.info_hash)
+        cleaner=self.files_factory(intent,(self.configuration.value('storage.trial_root'),self.configuration.value('storage.keep_root')))
+        if phase in ('PREPARED','STOP_UNCERTAIN'):
+            current=owned(intent,found)
+            if current.state in CHECKING:return False
+            if current.state not in STOPPED:
+                if phase=='STOP_UNCERTAIN':return False
+                self._advance(intent,phase,'STOP_UNCERTAIN');phase='STOP_UNCERTAIN'
+                # At most one stop request; a lost/uncertain permit is not rearmed.
+                self._fence()
+                client.cleanup_control(intent,intent.fingerprint,CleanupPermit(intent.fingerprint,'stop'),'stop')
+                found=client.inspect(intent.plan.manifest.info_hash)
+                current=owned(intent,found)
+                if current.state not in STOPPED:return False
+            files=cleaner.capture()
+            self._advance(intent,phase,'REMOVE_UNCERTAIN',files);phase='REMOVE_UNCERTAIN'
+            self._fence()
+            client.cleanup_control(intent,intent.fingerprint,CleanupPermit(intent.fingerprint,'remove'),'remove')
+            found=client.inspect(intent.plan.manifest.info_hash)
+        if phase=='REMOVE_UNCERTAIN':
+            # Still present after uncertainty is never a second delete permit.
+            if found is not None:
+                owned(intent,found)
+                return False
+            self._advance(intent,phase,'FILES');phase='FILES'
+        if phase=='FILES':
+            # Reappearance prevents file deletion, even after an earlier absence.
+            if found is not None:raise CancellationError()
+            self._fence()
+            if self.guard is None:cleaner.remove(files)
+            else:cleaner.remove(files,guard=self._fence)
+            self._advance(intent,phase,'COMPLETE')
+        return True
+    def cleanup(self,job_id,*,max_targets=1):
+        if type(max_targets) is not int or not 1<=max_targets<=32:raise CancellationError()
+        with self._admission():
+            status=self.store.status(job_id)
+            if not status['can_cleanup']:return status
+            try:
+                with OperationGate(self.database).hold(status['operation_id'],cleanup=True):
+                    op,targets=self._targets(job_id)
+                    complete=True;processed=0
+                    for target in targets:
+                        with self.store.queue.connection() as db:
+                            prior=db.execute('SELECT phase FROM cancellation_cleanup WHERE plan_id=?',(target.plan.plan_id,)).fetchone()
+                        if prior==('COMPLETE',):continue
+                        if processed>=max_targets:
+                            complete=False;continue
+                        processed+=1
+                        complete=self._clean_target(op,target) and complete
+                    if complete:
+                        from src.nextgen.staging_artifacts import clean_temporaries
+                        self._fence()
+                        clean_temporaries(self.store.queue,op,guard=self._fence)
+                    self._state(job_id,'COMPLETE' if complete else 'PENDING',
+                                'CANCELLATION_COMPLETE' if complete else 'CANCELLATION_PENDING')
+            except CleanupBusy:
+                # Keep CANCEL_REQUESTED and leases intact until drain is proven.
+                return self.store.status(job_id)
+            except ClientUnavailable:
+                self._state(job_id,'PENDING','CANCELLATION_PENDING',cause='DOWNLOAD_CLIENT_UNAVAILABLE')
+            except (CancellationError,ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,OSError,ValueError) as exc:
+                from src.nextgen.reasons import get_reason
+                cause=getattr(exc,'reason_code','STORAGE_UNAVAILABLE' if isinstance(exc,OSError) else 'CANCELLATION_REVIEW')
+                self._state(job_id,'REVIEW','CANCELLATION_REVIEW',cause=cause if get_reason(cause) is not None else 'CANCELLATION_REVIEW')
+            return self.store.status(job_id)

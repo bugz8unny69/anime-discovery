@@ -17,7 +17,7 @@ This applies to **all** future components, including intake, worker, supervisor,
 
 ## Current NextGen SQLite state (latest foundation)
 
-Latest fresh SQLite version: **11**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
+Latest fresh SQLite version: **17**. The version stored in `PRAGMA user_version` is the **database schema version**, separate from the `AnimeSeries` Python domain `schema_version` (currently 2 in the checked-in SQLite identity-results constraint).
 
 | Version | SQL file | Purpose |
 | --- | --- | --- |
@@ -32,8 +32,14 @@ Latest fresh SQLite version: **11**. The version stored in `PRAGMA user_version`
 | 9 | `009_provider_cache.sql` | Shared provider pacing and bounded public AniDB/mapping cache |
 | 10 | `010_release_verification.sql` | Bound declared single-episode verification to its job and identity snapshot |
 | 11 | `011_trial_windows.sql` | Immutable season-scoped trial windows and per-job selection decisions |
+| 12 | `012_episode_reservations.sql` | Durable exact-episode reservations bound to selected verification evidence |
+| 13 | `013_acquisition_plans.sql` | Immutable hash-bound source inventory and submission marker |
+| 14 | `014_acquisition_budgets.sql` | Frozen per-video/plan budgets and selected-byte evidence |
+| 15 | `015_torrent_submissions.sql` | One-shot stopped-submission intent and reconciliation progress |
+| 16 | `016_torrent_transfers.sql` | Fixed file selection, one-shot start and selected-file progress |
+| 17 | `017_cancellation.sql` | Explicit cancellation scopes, cleanup intents and staging temporary receipts |
 
-**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`.
+**Current tables:** `incoming_events`, `event_history`, `identified_anime`, `identified_episodes`, `identity_results`, `result_episode_links`, `jobs`, `job_history`, `provider_limits`, `provider_public_cache`, `release_verifications`, `trial_plans`, `trial_evaluations`, `episode_reservations`, `acquisition_plans`, `acquisition_budgets`, `torrent_submissions`, `torrent_transfers`, `job_operations`, `job_operation_members`, `cancellation_cleanup`, `staging_cleanup_artifacts`.
 
 - `incoming_events`: durable inbound delivery record. An incoming event is not a notification and need not originate from a webhook. Do not deduplicate accepted deliveries by GUID, release title or payload.
 - `event_history`: event-specific timeline and reasons.
@@ -47,7 +53,7 @@ Current fresh schema definition: `src/nextgen/storage/sqlite.py` (`SCHEMA`), alo
 ## Migration and deployment boundaries
 
 - Never apply these SQL scripts against the legacy production database. NextGen uses separate database state.
-- `initialize(db)` currently atomically initializes an empty NextGen database to v11 or accepts an existing v11 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
+- `initialize(db)` currently atomically initializes an empty NextGen database to v17 or accepts an existing v17 database; it **does not implement a migration runner**. Versioned upgrades for existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16 files now use the explicit library described in [MIGRATIONS.md](MIGRATIONS.md); initialize() still never upgrades.
 - The runner must inspect `PRAGMA user_version`, apply exactly the missing migrations in order, reject unknown/downgrade paths, and back up or otherwise protect state before a live upgrade. It must validate foreign keys and schema state after upgrade.
 - A script's comment or `IF NOT EXISTS` is **not** a substitute for checking starting version. A migration must fail safely if applied to an unexpected version.
 - SQLite changes that rebuild tables must preserve validated data, indexes, foreign keys, and history; account for transaction safety and SQLite rename/alter semantics.
@@ -272,3 +278,65 @@ TRIAL_DISABLED with selected=0; other decisions reference a plan and have matchi
 selected/reason semantics. idx_trial_evaluations_plan supports plan history.
 Neither table grants an acquisition lease or proves file/provider availability.
 Backfill/following numbers are requested season positions, not invented episode IDs.
+
+## SQLite v12: exact episode reservation
+
+012_episode_reservations.sql adds episode_reservations. The table binds its
+unique owner job to evaluation, verification, plan and provider identities.
+Unique official TVDB season/episode, AniDB episode ID and TVDB episode ID prevent
+competing placement/ownership from silently creating a second slot. No row is
+external content ownership or proof of staging. There is no automatic TTL or
+release operation. See ../jobs/RESERVE_EPISODE.md. Historical 001–011 is immutable.
+
+## SQLite v13: acquisition preparation
+
+acquisition_plans stores bounded validated source-file inventory, exact info
+hashes, unique job/reservation/marker and configuration revision. PREPARED is
+the only supported state and confers no external ownership. Its state machine
+requires a future versioned migration before submission/reconciliation is added.
+See ../jobs/PREPARE_ACQUISITION.md. Historical SQL 001–012 remains immutable.
+
+## SQLite v14: prepared-byte budgets
+
+acquisition_budgets freezes per-video/plan byte caps and configuration revision.
+acquisition_plans.selected_size_bytes is positive for new admissions and nullable
+only for preserved historical rows; helpers block further admission when prior
+size is unknown. Budget creation, aggregate check and preparation commit are
+atomic. No automatic release or live disk accounting is implied. See
+../DOWNLOAD_CONFIGURATION.md. Historical 001–013 remains unchanged.
+
+## SQLite v15: stopped submission journal
+
+torrent_submissions binds one immutable pinned request to a prepared plan and
+first job/attempt, with constrained UNCERTAIN/EXTERNAL/REVIEW/OWNED_STOPPED
+reason pairs. Absence/retry/expired lease never deletes or rearms the row. Short
+fenced journal progress commits are distinct from final queue completion.
+See ../jobs/SUBMIT_TORRENT.md. Historical SQL 001–014 remains immutable.
+
+## SQLite v16: selected-video transfer journal
+
+`torrent_transfers` records one fixed selection and one possible start per
+submission plan, with creating job/attempt, immutable fingerprint, piece geometry,
+bounded progress and readable phase/reason. Historical stopped submission facts
+remain receipts after handoff. Migration 016 and the fresh schema agree; published
+SQL 001–015 is unchanged. See [DOWNLOAD_TORRENT.md](../jobs/DOWNLOAD_TORRENT.md).
+
+## SQLite v17: cancellation and cleanup
+
+Explicit scope membership follows trusted successor handoff; provenance stays
+historical. Requests fence claims/completion, while per-operation OS locks prove
+active work drained before destructive I/O. Cleanup journals retain uncertain
+stop/remove and exact file fingerprints; staging receipts protect publication.
+Migration 017 preserves existing jobs/history and gives old jobs separate scopes,
+without guessing dependencies. Historical SQL 001–016 is unchanged.
+See [CANCELLATION.md](../CANCELLATION.md) for capabilities and recovery limits.
+
+## SQLite v18: durable management actions
+
+018 adds management_actions with a unique control job and a composite
+(operation_id, action) key for KEEP/CLEANUP. Foreign keys retain the target
+scope/job and control job; a self-target check rejects the identical job ID.
+Runtime helpers enforce distinct control/target scopes, matching kind and current
+eligibility. Cancellation plus conditional cleanup enqueue is atomic. No prior
+rows are rewritten; fresh schema and explicit runner use v18. Published SQL
+001–017 remains unchanged. See [MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md).

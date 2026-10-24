@@ -192,6 +192,180 @@ CREATE TABLE IF NOT EXISTS trial_evaluations (
 );
 CREATE INDEX IF NOT EXISTS idx_trial_evaluations_plan ON trial_evaluations(plan_id);
 
+CREATE TABLE IF NOT EXISTS episode_reservations (
+ reservation_id INTEGER PRIMARY KEY,
+ owner_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ evaluation_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ verification_id INTEGER NOT NULL REFERENCES release_verifications(verification_id),
+ plan_id INTEGER NOT NULL REFERENCES trial_plans(plan_id),
+ anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
+ anidb_episode_id INTEGER NOT NULL UNIQUE REFERENCES identified_episodes(anidb_episode_id),
+ tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>=0),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ tvdb_episode_id INTEGER NOT NULL UNIQUE CHECK(tvdb_episode_id>0),
+ tvdb_order TEXT NOT NULL DEFAULT 'official' CHECK(tvdb_order='official'),
+ reserved_at_ms INTEGER NOT NULL CHECK(reserved_at_ms>=0),
+ UNIQUE(tvdb_series_id,tvdb_season,tvdb_episode,tvdb_order)
+);
+
+CREATE TABLE IF NOT EXISTS acquisition_plans (
+ plan_id INTEGER PRIMARY KEY,
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ reservation_id INTEGER NOT NULL UNIQUE REFERENCES episode_reservations(reservation_id),
+ info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 1048576),
+ submission_marker TEXT NOT NULL UNIQUE CHECK(length(submission_marker)=32 AND submission_marker NOT GLOB '*[^a-f0-9]*'),
+ state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state='PREPARED'),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0),
+ selected_size_bytes INTEGER CHECK(selected_size_bytes IS NULL OR selected_size_bytes>0)
+);
+
+CREATE TABLE IF NOT EXISTS acquisition_budgets (
+ trial_plan_id INTEGER PRIMARY KEY REFERENCES trial_plans(plan_id),
+ max_episode_bytes INTEGER NOT NULL CHECK(max_episode_bytes BETWEEN 1000000 AND 1000000000000 AND max_episode_bytes%1000000=0),
+ max_plan_bytes INTEGER NOT NULL CHECK(max_plan_bytes BETWEEN 1000000 AND 1000000000000 AND max_plan_bytes%1000000=0),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0)
+);
+
+CREATE TABLE IF NOT EXISTS torrent_submissions (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ first_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ first_attempt INTEGER NOT NULL CHECK(first_attempt>0),
+ base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
+ save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 1 AND 4096),
+ category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 64),
+ timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
+ api_major INTEGER NOT NULL CHECK(api_major IN (4,5)),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED')),
+ reason_code TEXT NOT NULL,
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((state='UNCERTAIN' AND reason_code='TORRENT_SUBMISSION_UNCERTAIN') OR
+       (state='EXTERNAL' AND reason_code='TORRENT_ALREADY_PRESENT') OR
+       (state='REVIEW' AND reason_code='TORRENT_PROVENANCE_CONFLICT') OR
+       (state='OWNED_STOPPED' AND reason_code='TORRENT_STOPPED_CONFIRMED'))
+);
+
+CREATE TABLE IF NOT EXISTS torrent_transfers (
+ plan_id INTEGER PRIMARY KEY REFERENCES torrent_submissions(plan_id),
+ selection_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ selection_attempt INTEGER NOT NULL CHECK(selection_attempt>0),
+ start_job_id INTEGER REFERENCES jobs(job_id),
+ start_attempt INTEGER CHECK(start_attempt IS NULL OR start_attempt>0),
+ selected_index INTEGER NOT NULL CHECK(selected_index>=0),
+ piece_size INTEGER NOT NULL CHECK(piece_size BETWEEN 1 AND 67108864),
+ overlap_bytes INTEGER NOT NULL DEFAULT 0 CHECK(overlap_bytes=0),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('SELECT_UNCERTAIN','SELECTED','START_UNCERTAIN','ACTIVE','COMPLETE','REVIEW')),
+ reason_code TEXT NOT NULL,
+ selected_progress REAL NOT NULL DEFAULT 0 CHECK(selected_progress BETWEEN 0 AND 1),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((start_job_id IS NULL AND start_attempt IS NULL) OR (start_job_id IS NOT NULL AND start_attempt IS NOT NULL)),
+ CHECK(phase NOT IN ('START_UNCERTAIN','ACTIVE') OR start_job_id IS NOT NULL),
+ CHECK((phase='SELECT_UNCERTAIN' AND reason_code='TORRENT_SELECTION_UNCERTAIN') OR
+       (phase='SELECTED' AND reason_code='TORRENT_SELECTION_CONFIRMED') OR
+       (phase='START_UNCERTAIN' AND reason_code='TORRENT_START_UNCERTAIN') OR
+       (phase='ACTIVE' AND reason_code='TORRENT_DOWNLOAD_IN_PROGRESS') OR
+       (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
+       (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
+);
+CREATE TABLE IF NOT EXISTS job_operations (
+ operation_id INTEGER PRIMARY KEY,
+ state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','CANCEL_REQUESTED','CANCELED','STAGED')),
+ cleanup_state TEXT NOT NULL DEFAULT 'NONE' CHECK(cleanup_state IN ('NONE','PENDING','REVIEW','COMPLETE')),
+ reason_code TEXT,
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((state IN ('ACTIVE','STAGED') AND cleanup_state='NONE' AND reason_code IS NULL) OR
+       (state IN ('CANCEL_REQUESTED','CANCELED') AND
+        ((cleanup_state='PENDING' AND reason_code IN ('CANCELLATION_DRAINING','CANCELLATION_PENDING')) OR
+         (cleanup_state='REVIEW' AND reason_code='CANCELLATION_REVIEW') OR
+         (cleanup_state='COMPLETE' AND reason_code='CANCELLATION_COMPLETE'))))
+);
+CREATE TABLE IF NOT EXISTS job_operation_members (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(job_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_operation_members ON job_operation_members(operation_id);
+CREATE TABLE IF NOT EXISTS cancellation_cleanup (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ files_json TEXT NOT NULL CHECK(length(CAST(files_json AS BLOB)) BETWEEN 2 AND 1048576),
+ phase TEXT NOT NULL CHECK(phase IN ('PREPARED','STOP_UNCERTAIN','REMOVE_UNCERTAIN','FILES','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE TABLE IF NOT EXISTS staging_cleanup_artifacts (
+ artifact_id INTEGER PRIMARY KEY,
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ root_path TEXT NOT NULL CHECK(length(root_path) BETWEEN 1 AND 4096),
+ relative_path TEXT NOT NULL CHECK(length(relative_path) BETWEEN 1 AND 128),
+ root_device INTEGER NOT NULL,
+ root_inode INTEGER NOT NULL,
+ file_device INTEGER NOT NULL,
+ file_inode INTEGER NOT NULL,
+ phase TEXT NOT NULL CHECK(phase IN ('TEMP','PUBLISH_UNCERTAIN','PUBLISHED','REMOVE_UNCERTAIN','REMOVED')),
+ UNIQUE(root_path,relative_path)
+);
+CREATE TABLE IF NOT EXISTS management_actions (
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ action TEXT NOT NULL CHECK(action IN ('KEEP','CLEANUP','REJECT')),
+ target_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ PRIMARY KEY(operation_id,action),
+ CHECK(target_job_id<>job_id)
+);
+
+CREATE TABLE IF NOT EXISTS media_verifications (
+ plan_id INTEGER PRIMARY KEY REFERENCES acquisition_plans(plan_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ download_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ submission_fingerprint TEXT NOT NULL CHECK(length(submission_fingerprint)=64 AND submission_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ transfer_fingerprint TEXT NOT NULL CHECK(length(transfer_fingerprint)=64 AND transfer_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND length(CAST(evidence_json AS BLOB)) BETWEEN 1 AND 16384),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
+ CHECK(job_id<>download_job_id)
+);
+CREATE TABLE IF NOT EXISTS staging_publications (
+ plan_id INTEGER PRIMARY KEY REFERENCES media_verifications(plan_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ manifest_json TEXT NOT NULL CHECK(json_valid(manifest_json) AND length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 65536),
+ state TEXT NOT NULL CHECK(state IN ('PLANNED','PUBLISHED')),
+ receipts_json TEXT CHECK(receipts_json IS NULL OR (json_valid(receipts_json) AND length(CAST(receipts_json AS BLOB))<=16384)),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ published_at_ms INTEGER CHECK(published_at_ms IS NULL OR published_at_ms>=created_at_ms),
+ CHECK(job_id<>verification_job_id),
+ CHECK((state='PLANNED' AND receipts_json IS NULL AND published_at_ms IS NULL) OR
+       (state='PUBLISHED' AND receipts_json IS NOT NULL AND published_at_ms IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS anime_review_decisions (
+ anidb_id INTEGER PRIMARY KEY REFERENCES identified_anime(anidb_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ decision TEXT NOT NULL CHECK(decision='REJECT'),
+ cleanup_state TEXT NOT NULL CHECK(cleanup_state IN ('PENDING','COMPLETE')),
+ decided_at_ms INTEGER NOT NULL CHECK(decided_at_ms>=0)
+);
+
+CREATE TABLE IF NOT EXISTS keep_imports (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(job_id),
+ phase TEXT NOT NULL CHECK(phase IN ('PLANNED','ADD_UNCERTAIN','SERIES_READY','IMPORT_UNCERTAIN','COMPLETE')),
+ data_json TEXT NOT NULL CHECK(json_valid(data_json) AND length(CAST(data_json AS BLOB))<=65536),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=0)
+);
+
 """
 
 def connect(path):
@@ -231,13 +405,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v11; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v22; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10 databases require explicit versioned SQL migrations
-    before accessing v11 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21 databases require explicit versioned SQL migrations
+    before accessing v22 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 11:
+    if version == 22:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -247,7 +421,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=11;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=22;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
@@ -373,7 +547,7 @@ def save_identity(db, event_id, candidate, validated_at_ms=None):
 
 
 def _enqueue_job(db, *, kind, payload, component, event_id=None,
-                 created_by_job_id=None, available_at_ms=None):
+                 created_by_job_id=None, available_at_ms=None, operation_id=None):
     if not db.in_transaction:
         raise ValueError("enqueue requires an active transaction")
     component_name(component)
@@ -387,6 +561,14 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
     for reference in (event_id, created_by_job_id):
         if reference is not None:
             integer(reference, positive=True)
+    # Source references cannot create another consumer after cancellation has
+    # fenced the referenced operation. These are explicit payload contracts.
+    for key in ('preparation_job_id','evaluation_job_id','verification_job_id'):
+        reference=payload.get(key)
+        if type(reference) is int and db.execute(
+                "SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) "
+                "WHERE m.job_id=? AND o.state<>'ACTIVE'",(reference,)).fetchone():
+            raise ValueError('Referenced work is no longer accepting jobs.')
     now = int(time.time() * 1000)
     available = integer(now if available_at_ms is None else available_at_ms)
     job_id = db.execute(
@@ -395,6 +577,13 @@ def _enqueue_job(db, *, kind, payload, component, event_id=None,
           VALUES(?,?,?,?,?,?,?)""",
         (event_id,created_by_job_id,kind,raw,available,now,now)
     ).lastrowid
+    if operation_id is None:
+        operation_id=db.execute('INSERT INTO job_operations(created_at_ms,updated_at_ms) VALUES(?,?)',(now,now)).lastrowid
+    else:
+        integer(operation_id,positive=True)
+        if db.execute("SELECT state FROM job_operations WHERE operation_id=?",(operation_id,)).fetchone() != ('ACTIVE',):
+            raise ValueError('Operation is no longer accepting work.')
+    db.execute('INSERT INTO job_operation_members VALUES(?,?)',(job_id,operation_id))
     audit = append_job_history(db, job_id=job_id, event_code="CREATED",
                                component=component, occurred_at_ms=now,
                                details={"attempt": 0})
@@ -407,7 +596,7 @@ def enqueue_job_with_receipt(db, **kwargs):
 
 
 def enqueue_job(db, *, kind, payload, component, event_id=None,
-                created_by_job_id=None, available_at_ms=None):
+                created_by_job_id=None, available_at_ms=None, operation_id=None):
     """Insert independent work and CREATED audit inside an active transaction.
 
     No commit or logging. Caller owns rollback and may emit CREATED with event()
@@ -416,10 +605,10 @@ def enqueue_job(db, *, kind, payload, component, event_id=None,
     """
     return _enqueue_job(db, kind=kind, payload=payload, component=component,
                         event_id=event_id, created_by_job_id=created_by_job_id,
-                        available_at_ms=available_at_ms)[0]
+                        available_at_ms=available_at_ms, operation_id=operation_id)[0]
 
 
-def accept_event_and_job(db, source, raw_body, *, kind, payload):
+def accept_event_and_job(db, source, raw_body, *, kind, payload, component="intake", logger=None):
     """Commit delivery, PENDING job and both audit rows before acknowledgment."""
     _delivery(source, raw_body)
     now = int(time.time()*1000)
@@ -428,9 +617,11 @@ def accept_event_and_job(db, source, raw_body, *, kind, payload):
             "INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
             (source,raw_body,now)).lastrowid
         event_audit = append_event_history(db, event_id=event_id, event_code="ACCEPTED",
-                                          component="intake", occurred_at_ms=now)
+                                          component=component, occurred_at_ms=now)
         job_id, job_audit = _enqueue_job(db, kind=kind, payload=payload,
-                                       component="intake", event_id=event_id)
-    _log(event_audit)
-    _log(job_audit)
+                                       component=component, event_id=event_id)
+    if logger is None:
+        _log(event_audit);_log(job_audit)
+    else:
+        log_history(logger,event_audit);log_history(logger,job_audit)
     return event_id, job_id

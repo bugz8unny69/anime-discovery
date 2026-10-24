@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 5
+CONFIGURATION_VERSION = 9
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -69,6 +69,29 @@ class FieldDefinition:
 # Register new fields with their actual component; do not expose speculative
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
+    "jellyfin.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Jellyfin address", help_text="HTTP(S) address without a subpath. Blank disables automatic library refresh. Configure both staging and permanent folders in Jellyfin first."),
+    "jellyfin.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Jellyfin timeout"),
+    "sonarr.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Sonarr address", help_text="HTTP(S) server address for Sonarr v4."),
+    "sonarr.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Sonarr timeout"),
+    "sonarr.quality_profile_id": FieldDefinition(0, "integer", "next_operation", minimum=0, maximum=2147483647, label="Sonarr quality profile ID", help_text="Required for new series. Zero means unconfigured."),
+    "sonarr.staging_root": FieldDefinition("", "directory", "next_operation", label="Staging folder as seen by Sonarr", help_text="Blank uses the recorded local staging root."),
+    "sonarr.library_root": FieldDefinition("", "directory", "next_operation", label="Permanent folder as seen by Sonarr", help_text="Blank uses the local Keep folder. Local and Sonarr folders must refer to the same storage."),
+    "torrent_metadata.base_url": FieldDefinition("", "metadata_source", "next_operation",
+        label="Torrent metadata source", help_text="Trusted HTTP(S) base folder serving lowercase-infohash.torrent files. No credentials, query, redirects or webhook URLs. Required before acquisition."),
+    "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
+        label="Torrent metadata timeout", help_text="Connect/read timeout and deadline checks between response chunks, in seconds."),
+    "qbittorrent.base_url": FieldDefinition("", "download_endpoint", "next_operation",
+        label="qBittorrent address", help_text="HTTP or HTTPS server address without credentials, query or subpath. Required before download work."),
+    "qbittorrent.category": FieldDefinition("anime-discovery", "download_category", "next_operation",
+        label="Download category", help_text="Category label for newly submitted torrents. A label is not proof of ownership."),
+    "qbittorrent.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
+        label="Download client timeout", help_text="Maximum seconds for a client request."),
+    "acquisition.max_episode_mb": FieldDefinition(600, "integer", "next_operation", minimum=1, maximum=1000000,
+        label="Maximum video size (MB)", help_text="Hard limit for each selected video. Decimal MB. New selection-plan budgets only."),
+    "acquisition.max_plan_mb": FieldDefinition(3000, "integer", "next_operation", minimum=1, maximum=1000000,
+        label="Maximum selection-plan size (MB)", help_text="Combined hard limit for prepared selected videos, counting each episode once. Decimal MB. New budgets only."),
+    "storage.download_root": FieldDefinition("", "directory", "next_operation",
+        label="Download working folder", help_text="Absolute client working folder, separate from published video folders. Required before submission."),
     "trial.backfill_count": FieldDefinition(6, "integer", "next_operation", minimum=0, maximum=1000,
         label="Backfill first episodes", help_text="First X episodes of the verified season. Zero disables backfill; the other count must then be at least 1. New selection plans only."),
     "trial.following_count": FieldDefinition(1, "integer", "next_operation", minimum=0, maximum=1000,
@@ -85,7 +108,7 @@ FIELDS = MappingProxyType({
     "api.port": FieldDefinition(8765, "integer", "restart", ("api",), 1, 65535),
     "worker.concurrency": FieldDefinition(4, "integer", "restart", ("worker",), 1, 32),
     "storage.trial_root": FieldDefinition("", "directory", "next_operation",
-        label="Trial video folder", help_text="Absolute destination for newly staged trial videos. Leave blank until configured. Existing files are not moved."),
+        label="Staging folder", help_text="Absolute destination for verified videos staged for viewing before Keep or Reject. Leave blank until configured. Existing files are not moved."),
     "storage.keep_root": FieldDefinition("", "directory", "next_operation",
         label="Keep video folder", help_text="Absolute permanent destination for approved Keep videos. Must agree with the library import target when Sonarr is used."),
     "storage.database_path": FieldDefinition(
@@ -154,6 +177,20 @@ def validate_values(value):
             if spec.kind == "integer":
                 if type(item) is not int or not spec.minimum <= item <= spec.maximum:
                     raise ConfigurationError()
+            elif spec.kind == "metadata_source":
+                if type(item) is not str:raise ConfigurationError()
+                if item:
+                    from src.nextgen.acquisition.metainfo_source import source_url
+                    try:source_url(item)
+                    except ValueError:raise ConfigurationError() from None
+            elif spec.kind == "download_endpoint":
+                if type(item) is not str:raise ConfigurationError()
+                if item:
+                    from src.nextgen.acquisition.settings import endpoint
+                    try:endpoint(item)
+                    except ValueError:raise ConfigurationError() from None
+            elif spec.kind == "download_category":
+                if type(item) is not str or not re.fullmatch('[A-Za-z0-9_-]{1,64}',item):raise ConfigurationError()
             elif spec.kind == "client_name":
                 if type(item) is not str or (item and not re.fullmatch(r"[A-Za-z0-9_-]{3,32}",item)):
                     raise ConfigurationError()
@@ -183,9 +220,9 @@ def validate_values(value):
         parse_settings({"logging": result["logging"]})
     except (ValueError, TypeError):
         raise ConfigurationError() from None
-    roots = [PurePosixPath(result["storage"][key]) for key in ("trial_root", "keep_root")
+    roots = [PurePosixPath(result["storage"][key]) for key in ("trial_root", "keep_root", "download_root")
              if result["storage"][key]]
-    if len(roots) == 2 and (roots[0].is_relative_to(roots[1]) or roots[1].is_relative_to(roots[0])):
+    if any(a.is_relative_to(b) or b.is_relative_to(a) for i,a in enumerate(roots) for b in roots[i+1:]):
         raise ConfigurationError()
     database = PurePosixPath(result["storage"]["database_path"])
     if any(database.is_relative_to(root) for root in roots):
@@ -365,7 +402,7 @@ def _v3_to_v4(document):
 def _v4_values(values):
     """Keep published v4 output free of new trial settings."""
     if type(values) is not dict or "trial" in values: raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v5_values(values)
     del historical["trial"]
     return historical
 
@@ -375,12 +412,76 @@ def _v4_to_v5(document):
             or document["schema_version"]!=4): raise ConfigurationError()
     current=revision(document["revision"])
     if current==MAX_REVISION: raise ConfigurationError()
-    return {"schema_version":5,"revision":current+1,"settings":validate_values(_v4_values(document["settings"]))}
+    return {"schema_version":5,"revision":current+1,"settings":_v5_values(_v4_values(document["settings"]))}
+
+
+def _v5_values(values):
+    """Published v5 has no client/size settings or download_root."""
+    if type(values) is not dict or set(values) & {'qbittorrent','acquisition'}:raise ConfigurationError()
+    storage=values.get('storage',{})
+    if type(storage) is not dict or 'download_root' in storage:raise ConfigurationError()
+    historical=_v6_values(values)
+    del historical['qbittorrent']
+    del historical['acquisition']
+    del historical['storage']['download_root']
+    return historical
+
+
+def _v5_to_v6(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=5):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':6,'revision':current+1,'settings':_v6_values(_v5_values(document['settings']))}
+
+
+def _v6_values(values):
+    """Keep published v6 shapes free of metadata-source fields."""
+    if type(values) is not dict or 'torrent_metadata' in values:raise ConfigurationError()
+    historical=_v7_values(values)
+    del historical['torrent_metadata']
+    return historical
+
+
+def _v6_to_v7(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=6):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':7,'revision':current+1,'settings':_v7_values(_v6_values(document['settings']))}
+
+
+def _v7_values(values):
+    if type(values) is not dict or 'sonarr' in values:raise ConfigurationError()
+    historical=_v8_values(values)
+    del historical['sonarr']
+    return historical
+
+
+def _v7_to_v8(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=7):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':8,'revision':current+1,'settings':_v8_values(_v7_values(document['settings']))}
+
+
+def _v8_values(values):
+    if type(values) is not dict or 'jellyfin' in values:raise ConfigurationError()
+    historical=validate_values(values)
+    del historical['jellyfin']
+    return historical
+
+
+def _v8_to_v9(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=8):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':9,'revision':current+1,'settings':validate_values(_v8_values(document['settings']))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9})
 
 
 def convert_document(document):

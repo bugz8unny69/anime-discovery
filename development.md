@@ -4,6 +4,162 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Consolidation of completed drafts — 2026-10-24
+
+User authorized reconciling completed NextGen work and merging it into NextGen.
+Bring the #132 readable diagnostic responses and canonical no-search architecture
+into the current #134 Sonarr/Jellyfin implementation. Preserve the #121 planning
+proposals with historical banners; current code and user decisions supersede
+older copy/hash/search proposals. #128–#130 are alternative implementations,
+not additive migrations: retain the current v9/v5/v22 contracts and no destination
+video hashing. No extra automatic search work is required.
+
+Source checks only; tests, CI, browser checks and live media operations remain
+unrun. Repository integration does not deploy the service or establish lab
+readiness. Post-Keep cleanup/reservation release, optional Shoko and service
+supervision remain unfinished.
+
+## Jellyfin scan follow-up — 2026-10-24
+
+Configured staging and Keep completions now enqueue independent Jellyfin scan
+jobs. A failed refresh does not undo completed media work. Settings and private
+API-key entry are exposed through the existing API/dashboard; blank address
+keeps automatic refresh disabled. A successful job means scan accepted, not
+confirmed episode visibility. Configuration v9, backward-readable secrets v5,
+SQLite unchanged at v22. See [Jellyfin refresh](src/nextgen/JELLYFIN_REFRESH.md).
+Offline cases authored/unrun; source checks only. No live requests or deployment.
+Cleanup, optional Shoko and missing-episode search remain separate work.
+
+## Keep through Sonarr — 2026-10-24
+
+Keep now uses the existing staged path and verified TVDB placement to find/add a
+Sonarr series and request one exact-file copy import. The worker records durable
+intent, reconciles lost replies and checks the episode-file result without
+hashing the permanent file. Shoko remains optional and separate. Source staging
+files stay available; post-Keep cleanup and Jellyfin refresh remain next work.
+
+Settings/API/dashboard now expose Sonarr address, profile, path mappings and
+private credential replacement. Keep is available on staged work; readable job
+receipts and a durable Kept result drive the dashboard. Configuration v8,
+secrets v4 and SQLite v22 are explicit upgrades. Older SQL migrations stay intact.
+See [Keep through Sonarr](src/nextgen/KEEP_SONARR.md). Tests/CI remain unrun;
+source checks only. No live imports, migrations, media changes or deployment.
+
+
+## Keep/Sonarr implementation in progress — 2026-10-23
+
+User clarification: Shoko is optional. Keep must use verified TVDB series and
+season/episode placement for Sonarr; Shoko results do not override or block it.
+Reuse the stored staged path and existing NFO output. KeepSelection now reads
+that existing manifest and carries both AniDB and TVDB identities, matching a
+Sonarr episode by TVDB-authoritative placement rather than title or AniDB ID.
+This is the first local implementation step, not completed Sonarr import.
+Sonarr settings/credentials, HTTP adapter and import execution remain unfinished.
+No duplicate staging/NFO pipeline or mandatory Shoko call is introduced.
+Offline mapping cases are authored/unrun; Python syntax checks only.
+
+## Finish the functional flow first — 2026-10-23
+
+User priority: finish the code so it can be exercised in the lab, then improve it
+from observed behavior. Do not expand optional safeguards/hardening as a substitute
+for finishing missing functionality. Preserve the agreed staging move with no
+byte-for-byte destination comparison. Tests/CI remain unrun until authorized;
+no merge, deployment or live media operations are implied.
+
+## Reject decision and selected staging cleanup — 2026-10-23
+
+Reject is now wired through the dashboard, versioned management API and worker.
+Admission records the AniDB-anime decision and queued control job together;
+duplicate clicks reuse it. Future Intake selection/reservation stops for that
+anime. Cleanup removes only the selected staged video and episode NFO, preserving
+other episodes, shared series metadata and permanent files. A cleanup problem
+does not undo the decision. See [the Reject contract](src/nextgen/jobs/REJECT_MEDIA.md).
+SQLite v21 explicitly upgrades action vocabulary and decision storage.
+
+Keep/Sonarr execution remains the next missing functional part. Reconsideration,
+viewer refresh and optional integrations remain follow-ups. Tests and CI are
+authored/unrun; source checks only. No live deletion, migration or deployment.
+
+## Verified-media staging — 2026-10-23
+
+The default worker now advances VERIFY_MEDIA into STAGE_TRIAL_MEDIA. Publish a
+selected video by move, plus episode/series NFOs, using a pinned destination
+and no-overwrite Linux rename. Same-filesystem moves rename the original inode;
+cross-filesystem moves stream once then remove the exact source. Per the user
+decision, staging performs no destination video hashing or byte-for-byte comparison. Durable publication intent
+and inode receipts reconcile interrupted copies/renames; uncertain files remain
+protected. All files must be revalidated before the same worker transaction
+records the manifest, STAGED milestone and DONE. Keep remains unavailable.
+
+SQLite v20 adds staging_publications through an explicit maintenance upgrade;
+configuration stays v7. See [the staging contract](src/nextgen/jobs/STAGE_TRIAL_MEDIA.md)
+for layout, fixed initial permission policy, non-root/shared-path requirements,
+recovery, cancellation and deferred viewer integration. No Jellyfin refresh or
+live media changes were performed. Offline tests and CI are authored/unrun.
+
+## Downloaded-media verification — 2026-10-23
+
+Completed downloads now hand off atomically to VERIFY_MEDIA in the default
+worker. Read the exact pinned selected file without symlinks, require stable
+size/inode/timestamps, record SHA-256, and use bounded local ffprobe metadata for
+one video plus Japanese/English audio. Evidence and job completion commit under
+existing lease/cancellation fencing. SQLite v19 adds media_verifications with an
+explicit maintenance upgrade; configuration remains v7. See
+[the verification contract](src/nextgen/jobs/VERIFY_MEDIA.md) for exact guarantees,
+shared-path/executable requirements and limitations. No full decode or semantic
+episode proof is claimed. Verification does not mark STAGED or authorize Keep.
+
+Staging/publication recovery remains next. Tests and CI are authored/unrun; source
+checks only. No live client/media operations, migrations or deployment.
+
+## Hash-addressed metadata retrieval — 2026-10-23
+
+The identity worker now supplies an HTTP(S) metainfo reader and installs
+preparation/submission/download by default. A trusted configured base folder
+serves lowercase-infohash.torrent files; no third-party default or webhook URL
+is selected. Missing configuration enters review; absent metadata waits; bad
+hash/inventory/access cannot authorize submission. Custom readers still work.
+
+Configuration v7 explicitly adds metadata source/timeout settings, rendered by
+the dashboard, while preserving historical converter shapes. SQLite stays v18;
+secrets stay v3. Retrieval is bounded, cancellation-drained and redirect/proxy-free.
+It persists no raw metainfo and creates no temporary client entries. See
+[the metadata source contract](src/nextgen/acquisition/METAINFO_SOURCE.md).
+Video verification and staging remain next. Offline tests and CI are unexecuted;
+no live services, migrations, media operations or deployment.
+
+## Reuse the dashboard through API v1 — 2026-10-23
+
+Adapt the legacy dark shell, jobs table, badges and schema-driven forms in an
+independent NextGen dashboard served by the API process. All private data and
+actions use `/api/v1/`, management browser sessions and CSRF; webhook authority
+remains separate. Intake lists explicit acquisition scopes; Jobs lists individual
+steps and their history. Keep/Cancel/Cleanup use API button availability and
+catalog explanations. Keep remains visibly unavailable for execution.
+
+Settings and credential replacements use revision-checked API updates. No legacy
+runtime/data bridge, old action endpoints, saved-credential reveal, extra server
+or frontend dependency is introduced. Read [the dashboard contract](src/nextgen/dashboard/README.md)
+for scope, source attribution and deployment paths. No media pipeline step is
+implemented by this UI. Offline Python/UI cases are authored but unexecuted;
+syntax/source checks only, with no CI, live listener or deployment.
+
+## Intake cancellation and presentation correction — 2026-10-23
+
+Follow-up to draft PR #120 and the Intake → Staging → Keep/Reject design in
+draft PR #121: a completed episode reservation keeps unfinished acquisition
+cancelable even when no metadata adapter is installed and all member jobs are
+DONE. Capability reads and admission use the same predicate. Reservation-only
+cancellation completes locally once drain is proven; active handlers still
+require the existing cleanup control job. Reservation history and exclusivity
+remain protected. STAGED continues to close Cancel.
+
+Dashboard-facing settings now label storage.trial_root as Staging folder, and
+episode-selection catalog/handler wording uses Intake. Internal trial names,
+configuration/schema versions, codes, translation keys and stored records are
+unchanged. No staging/Keep execution or dashboard HTML is introduced. Regression
+cases are authored but unexecuted; source checks only, no tests or CI.
+
 ## Initial async worker core — 2026-10-22
 
 The worker follow-up builds on draft destination-settings PR #106. It implements

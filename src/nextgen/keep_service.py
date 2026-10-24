@@ -1,0 +1,84 @@
+"""Reconcile Sonarr series/import intent and permanent episode-file result."""
+from pathlib import PurePosixPath
+import re
+
+from src.nextgen.keep_selection import KeepSelection
+from src.nextgen.acquisition.metadata import safe_path
+from src.nextgen.sonarr import Client, Options, KeepReview, KeepUnavailable, existing_file
+from src.nextgen.storage.keep_imports import Journal, check_source
+from src.nextgen.storage.staging import Journal as StageJournal
+
+
+class Service:
+    def __init__(self,configuration,secrets,*,client_factory=Client):
+        self.configuration,self.secrets,self.client_factory=configuration,secrets,client_factory
+        self.journal=Journal(configuration.value('storage.database_path'))
+
+    def run(self,claim,target,cancelled):
+        # A stale attempt must finish its I/O before a recovered attempt may send.
+        with StageJournal(self.journal.queue.database).lock(claim):
+            return self._run(claim,target,cancelled)
+
+    def _run(self,claim,target,cancelled):
+        journal=self.journal
+        def guard():
+            if cancelled.is_set():raise KeepReview()
+            journal.fence(claim)
+        phase,data=journal.load(claim,target,self.configuration)
+        if phase=='COMPLETE':return True
+        selection=KeepSelection(**data['selection']);options=Options(**data['options'])
+        client=self.client_factory(options,self.secrets.sonarr_api_key())
+        version=client.request('system/status')
+        if not re.match(r'^4\.',str(version.get('version',''))):raise KeepReview()
+        series=client.series(selection.tvdb_series_id)
+        if phase in ('PLANNED','ADD_UNCERTAIN'):
+            if series is None:
+                if phase=='ADD_UNCERTAIN':return False
+                check_source(data);payload=client.add_payload(selection)
+                guard();journal.change(claim,phase,'ADD_UNCERTAIN',data);phase='ADD_UNCERTAIN'
+                guard();client.request('series',body=payload)
+                series=client.series(selection.tvdb_series_id)
+                if series is None:return False
+            if type(series.get('id')) is not int or series['id']<=0:raise KeepReview()
+            path=PurePosixPath(series['path'])
+            if not path.is_relative_to(options.library_root) or path==PurePosixPath(options.library_root):raise KeepReview()
+            if str(path)!=series['path']:raise KeepReview()
+            safe_path(str(path.relative_to(options.library_root)))
+            data['series_id']=series['id'];data['series_path']=str(path)
+            journal.change(claim,phase,'SERIES_READY',data);phase='SERIES_READY'
+        if series is None or (series.get('id'),series.get('path'))!=(data['series_id'],data['series_path']):raise KeepReview()
+        episode=client.episode(selection,series)
+        if phase=='SERIES_READY':
+            if episode.get('episodeFileId',0):raise KeepReview()
+            check_source(data)
+            payload=client.import_payload(selection,series,episode)
+            data['payload']=payload;data['episode_id']=episode['id']
+            guard();journal.change(claim,phase,'IMPORT_UNCERTAIN',data);phase='IMPORT_UNCERTAIN'
+            guard();reply=client.request('command',body=payload)
+            if type(reply.get('id')) is not int or reply['id']<=0:raise KeepReview()
+            data['command_id']=reply['id'];journal.change(claim,phase,phase,data)
+        if phase!='IMPORT_UNCERTAIN' or episode['id']!=data['episode_id']:raise KeepReview()
+        if 'command_id' not in data:
+            commands=client.request('command')
+            matches=[]
+            for row in commands:
+                body=row.get('body',{})
+                if (str(body.get('name','')).lower()=='manualimport' and body.get('importMode')=='copy'
+                        and len(body.get('files',[]))==1):
+                    source=body['files'][0];wanted=data['payload']['files'][0]
+                    if all(source.get(k)==wanted[k] for k in ('path','seriesId','episodeIds')):matches.append(row)
+            if not matches:return False
+            if len(matches)!=1 or type(matches[0].get('id')) is not int:raise KeepReview()
+            data['command_id']=matches[0]['id'];journal.change(claim,phase,phase,data)
+        command=client.request('command/'+str(data['command_id']))
+        status=str(command.get('status','')).lower()
+        if status in ('failed','aborted','cancelled'):raise KeepReview()
+        if status!='completed':return False
+        episode=client.episode(selection,series)
+        if not episode.get('hasFile') or type(episode.get('episodeFileId')) is not int or episode['episodeFileId']<=0:return False
+        record=client.request('episodefile/'+str(episode['episodeFileId']))
+        try:proof=existing_file(options,series,episode,record,data['source_file'][2])
+        except FileNotFoundError:return False
+        data['result']=proof
+        guard();journal.change(claim,phase,'COMPLETE',data)
+        return True

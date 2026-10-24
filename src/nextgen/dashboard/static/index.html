@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Intake · Anime Discovery</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <script src="/assets/dashboard.js" defer></script>
+</head>
+<body><main class="container jobs-wide">
+  <header><span class="brand">◈ Anime Discovery</span><button id="sign-out" class="secondary" hidden>Sign out</button></header>
+  <p id="notice" class="notice" role="status" aria-live="polite"></p>
+  <section id="login-panel" class="panel" hidden>
+    <h1>Sign in</h1><p class="muted">Use your management access key to open the dashboard.</p>
+    <form id="login-form" class="integration">
+      <label for="access-key">Management access key</label>
+      <input id="access-key" type="password" autocomplete="current-password" required maxlength="256" spellcheck="false">
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+  <div id="workspace" hidden>
+    <nav aria-label="Main navigation">
+      <a class="tab" href="/">Intake</a><a class="tab" href="/jobs">Jobs</a><a class="tab" href="/settings">Settings</a>
+    </nav>
+    <section id="activity-panel" hidden>
+      <h1 id="page-title">Intake</h1><p id="page-description" class="muted"></p>
+      <section class="panel">
+        <div class="toolbar"><h2 id="activity-title">Incoming anime</h2><div class="inline">
+          <span class="status" id="live-indicator" role="status">Loading…</span>
+          <label>Status <select id="status-filter"><option value="">All statuses</option>
+            <option value="PENDING">Queued</option><option value="RUNNING">Running</option>
+            <option value="RETRY_WAIT">Waiting</option><option value="ON_HOLD">On hold</option>
+            <option value="NEEDS_REVIEW">Needs review</option><option value="BLOCKED">Blocked</option>
+            <option value="DONE">Completed jobs</option><option value="CANCELED">Canceled</option>
+          </select></label><button id="refresh" class="secondary">Refresh</button>
+        </div></div>
+        <p id="page-note" class="muted"></p>
+        <table class="jobs-table"><thead><tr><th>Received</th><th>Release / Anime</th><th>Job</th><th>Status</th><th>Activity details</th><th>Actions</th></tr></thead><tbody id="job-rows"></tbody></table>
+        <div id="no-jobs" class="empty" hidden>No items on this page.</div>
+        <div class="page-controls"><button id="previous-page" class="secondary">Previous</button><button id="next-page" class="secondary">Next</button></div>
+      </section>
+    </section>
+    <section id="settings-panel" hidden>
+      <h1>Settings</h1><p class="muted">Changes apply to new operations. Some infrastructure settings require a restart.</p>
+      <button id="reload-settings" class="secondary">Refresh settings</button>
+      <p id="restart-notice" role="status"></p>
+      <div id="settings-fields"></div>
+      <section class="panel"><h2>Private credentials</h2><div id="credential-forms"></div></section>
+    </section>
+  </div>
+  <dialog id="history-dialog" class="match-trace" aria-labelledby="history-title">
+    <div class="toolbar"><h2 id="history-title">Job history</h2><button id="history-close" class="secondary">Close</button></div>
+    <div id="history-rows"></div><button id="history-more" class="secondary" hidden>Load more</button>
+  </dialog>
+</main></body></html>

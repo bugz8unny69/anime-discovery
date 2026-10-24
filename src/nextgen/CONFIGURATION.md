@@ -34,6 +34,8 @@ separately. No config-revision field is added to SQLite history in this PR.
 | worker.concurrency | 4 | Restart | Worker |
 | storage.trial_root | Unconfigured | Next operation | None |
 | storage.keep_root | Unconfigured | Next operation | None |
+| torrent_metadata.base_url | Unconfigured | Next operation | None |
+| torrent_metadata.timeout_seconds | 30 | Next operation | None |
 | storage.database_path | /var/lib/anime-discovery/nextgen.sqlite | Restart | All current components |
 
 FIELDS defines defaults, type/range validation and apply metadata.
@@ -50,24 +52,27 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=5, a positive revision, and a settings object
+Canonical JSON has schema_version=8, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 5,
+      "schema_version": 8,
       "revision": 1,
       "settings": {
+        "torrent_metadata": {"base_url": "", "timeout_seconds": 30},
+        "qbittorrent": {"base_url": "", "category": "anime-discovery", "timeout_seconds": 30},
+        "acquisition": {"max_episode_mb": 600, "max_plan_mb": 3000},
         "trial": {"backfill_count": 6, "following_count": 1},
         "anidb": {"client_name": "", "client_version": 1},
         "providers": {"timeout_seconds": 30},
         "logging": {"level": "INFO", "components": {}},
         "api": {"host": "127.0.0.1", "port": 8765},
         "worker": {"concurrency": 4},
-        "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite"}
+        "storage": {"database_path": "/var/lib/anime-discovery/nextgen.sqlite", "download_root": "", "trial_root": "", "keep_root": ""}
       }
     }
 
-Configuration version, publication revision, SQLite v11 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v18 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -239,3 +244,52 @@ v4→v5 explicitly adds these fields and advances revision. Published older step
 keep their historical outputs. Fields use next_operation metadata: each new
 plan uses fresh settings, while an established plan retains its original anchor,
 counts and revision. See TRIAL_POLICY.md for examples and immutable-plan behavior.
+
+The exact-episode reservation foundation uses SQLite v12; these settings remain
+configuration v5. No new setting or secret is needed for the local episode gate.
+
+Source inventory preparation uses SQLite v13 and the existing configuration v5
+snapshot. It introduces no client endpoint, credential or download-size setting;
+those remain explicit prerequisites before external submission is implemented.
+
+## Download settings and budgets (v6)
+
+The current configuration version is 6. Explicit v5→v6 adds qbittorrent endpoint,
+category, timeout, storage.download_root and acquisition.max_episode_mb (600) /
+max_plan_mb (3000). They are next-operation fields; existing size budgets retain
+their captured limits. Download/trial/keep roots must be separate and exclude
+the database. See DOWNLOAD_CONFIGURATION.md. Current SQLite version is 15.
+
+Stopped torrent submission now uses SQLite v15 journal state. Configuration stays
+v6; persisted external requests pin their original target/options across live
+setting changes. See jobs/SUBMIT_TORRENT.md.
+
+## API v1 implementation
+
+A separate ASGI API now reads one operation snapshot for settings/management work
+and writes through ConfigurationStore with expected revisions. GET settings
+returns desired/effective values, restart fields and shared field metadata.
+Host/port/database path remain pinned until restart. Public browser origin is an
+explicit server startup option, not a live settings override. See
+[api/README.md](api/README.md). No implicit settings/SQL migration or service restart
+is exposed; those management routes remain future work.
+
+## Torrent metadata source — configuration v7
+
+Version 7 adds torrent_metadata.base_url (blank until configured) and
+torrent_metadata.timeout_seconds (30, bounded 1–60), both applied to new operation
+snapshots. The address is a trusted base folder serving lowercase-infohash.torrent
+files, not a delivery-supplied URL/template or secret-bearing query.
+The explicit v6→v7 conversion preserves existing settings and historical output
+shapes. Use the existing preview/backup/apply contract; no automatic startup
+conversion. The dashboard renders these new fields from metadata.
+See [the retrieval contract](acquisition/METAINFO_SOURCE.md).
+
+## Sonarr configuration v8
+
+sonarr.base_url, timeout_seconds, quality_profile_id, staging_root and library_root
+are applied to new operations. Defaults are unconfigured addresses/mappings,
+30-second timeout and profile 0 (unconfigured for adding a series). The existing
+storage.keep_root is the local permanent folder. Explicit v7→v8 conversion adds
+these defaults without changing earlier values or historical converter output.
+See [Keep through Sonarr](KEEP_SONARR.md) for mapping and saved-import behavior.

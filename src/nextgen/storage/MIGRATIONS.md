@@ -1,6 +1,6 @@
 # SQLite upgrades and maintenance library
 
-Latest schema: **v11**, adding immutable trial-window intents and evaluations.
+Latest schema: **v18**, adding durable management action submissions.
 
 Implemented library only: `storage/migrations.py`, `maintenance.py` and the
 `storage.sqlite.admitted_connection()` runtime helper. The public management
@@ -178,3 +178,53 @@ remain immutable. No migration, SQL or database upgrade was executed in developm
 It adds trial_plans/trial_evaluations with constrained counts/decisions and a plan
 history index. Fresh schema, runtime guards and v1–v11 sequential cases accompany
 the migration. Earlier scripts 001–010 remain unchanged. No SQL was executed.
+
+SQLite v12 follow-up. 012_episode_reservations.sql upgrades v11→v12
+with exact-episode gates. Use the existing explicit maintenance migration path;
+no runtime helper creates the table. Fresh DDL and versioned SQL are updated
+together. Published migrations 001–011 remain unchanged.
+
+013_acquisition_plans.sql upgrades v12→v13 under explicit maintenance, binding
+one preparation job/reservation/content hash to inventory and a unique marker.
+Only PREPARED state is supported. Fresh schema and sequential upgrade coverage
+extend through v13. Historical scripts 001–012 remain unchanged.
+
+014_acquisition_budgets.sql upgrades v13→v14 with a frozen per-selection-plan
+budget and nullable selected_size_bytes on prepared plans. Old rows remain NULL
+and require explicit size review before further admission. Fresh DDL and runner
+coverage extend through v14; historical scripts 001–013 remain immutable.
+
+015_torrent_submissions.sql upgrades v14→v15 with one-shot stopped-submission
+intent/progress and constrained reconciliation states. No automatic rearm or
+external client request occurs during migration. Fresh schema and sequential
+coverage extend through v15. Historical scripts 001–014 remain unchanged.
+
+## Selected-video transfer journal
+
+016_torrent_transfers.sql upgrades v15→v16. The new constrained transfer journal
+records separate selection/start authorization and bounded client progress without
+changing prior submission receipts. Fresh DDL and sequential runner coverage extend
+through v16; published SQL 001–015 stays unchanged. Tests remain unexecuted.
+
+## Cancellation scopes and cleanup
+
+017_cancellation.sql upgrades v16→v17, preserving job/history facts and
+backfilling each historical job as an independent cancellation scope. Trusted
+future successor handoffs share explicit scope membership. Fresh schema, runner
+and offline equivalence/preservation cases extend through v17; published SQL
+001–016 remains unchanged. See ../CANCELLATION.md. Tests remain unexecuted.
+
+
+## v18 durable management actions
+
+018_management_actions.sql upgrades v17→v18 with the management_actions table,
+foreign keys, action allowlist and unique target-operation/action and control-job
+constraints. Existing jobs, histories, cancellation scopes and journals are
+unchanged; no historical action associations are guessed. Fresh SCHEMA and the
+runner manifest match v18. Scripts 001–017 remain immutable. Offline preservation,
+fresh equivalence, guard, uniqueness and rollback cases are written but unrun.
+See [MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md).
+Current Keep addition: schema v22 adds 022_keep_imports.sql, the durable Sonarr
+series/import intent and permanent-file result. Published 001–021 remain unchanged.
+Use the existing maintenance preview/backup/apply contract; startup never upgrades
+an existing v21 database implicitly. Configuration v8 and secrets v4 are independent.

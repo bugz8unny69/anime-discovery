@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 
+from src.nextgen.cancellation import CancellationRequested
 from src.nextgen.history import HistoryRecord, append_job_history, integer
 from src.nextgen.job_contracts import Outcome, Policy, Successor, payload_json, parse_payload
 from src.nextgen.messages import validate_job_activity
@@ -72,6 +73,15 @@ class JobQueue:
         if row is None or row[0] != "RUNNING" or row[1] != claim.token or row[2] is None or row[2] <= now or row[3] != claim.attempt:
             raise LeaseLost()
 
+        row=db.execute('SELECT o.state FROM job_operations o JOIN job_operation_members m USING(operation_id) WHERE m.job_id=?',(claim.job_id,)).fetchone()
+        if row is not None and row[0] in ('CANCEL_REQUESTED','CANCELED'):raise CancellationRequested()
+
+    def operation_id(self,claim):
+        with self.connection() as db,transaction(db):
+            row=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',(claim.job_id,)).fetchone()
+            if row is None:raise QueueUnavailable()
+            return row[0]
+
     def claim(self, halted=None):
         with self.connection() as db, transaction(db):
             now = self.now()
@@ -79,10 +89,13 @@ class JobQueue:
                 return None, ()
             row = db.execute("SELECT job_id,event_id,kind,CASE WHEN length(CAST(payload_json AS BLOB))<=65536 "
                 "THEN payload_json ELSE '' END,attempt_count FROM jobs "
-                "WHERE state IN ('PENDING','RETRY_WAIT') AND available_at_ms<=? "
+                "WHERE state IN ('PENDING','RETRY_WAIT') AND available_at_ms<=? AND NOT EXISTS (SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) WHERE m.job_id=jobs.job_id AND o.state<>'ACTIVE') "
                 "ORDER BY available_at_ms,job_id LIMIT 1", (now,)).fetchone()
             if row is None:
                 return None, ()
+            if db.execute('SELECT 1 FROM job_operation_members WHERE job_id=?',(row[0],)).fetchone() is None:
+                op=db.execute('INSERT INTO job_operations(created_at_ms,updated_at_ms) VALUES(?,?)',(now,now)).lastrowid
+                db.execute('INSERT INTO job_operation_members VALUES(?,?)',(row[0],op))
             token = uuid.uuid4().hex
             claim = Claim(row[0], row[1], row[2], row[3], row[4]+1, token)
             db.execute("UPDATE jobs SET state='RUNNING',attempt_count=?,lease_token=?,lease_expires_at_ms=?,"
@@ -180,7 +193,8 @@ class JobQueue:
                     # enqueue_job owns no transaction/commit; all inserts roll back together.
                     _, created = enqueue_job_with_receipt(db,component="worker",kind=successor.kind,
                         payload=json.loads(successor.payload), event_id=claim.event_id,
-                        created_by_job_id=claim.job_id,available_at_ms=now)
+                        created_by_job_id=claim.job_id,available_at_ms=now,
+                        operation_id=db.execute("SELECT operation_id FROM job_operation_members WHERE job_id=?",(claim.job_id,)).fetchone()[0])
                     records.append(created)
             now = self.now()
             self._owns(db,claim,now)
@@ -198,6 +212,12 @@ class JobQueue:
             records = []
             for row in rows:
                 claim = Claim(row[0],row[1],row[2],row[3],row[4],row[5])
+                canceled=db.execute("SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) "
+                    "WHERE m.job_id=? AND o.state IN ('CANCEL_REQUESTED','CANCELED')",(claim.job_id,)).fetchone()
+                if canceled:
+                    from src.nextgen.storage.cancellation import cancel_job
+                    records.extend(cancel_job(db,claim.job_id,now))
+                    continue
                 if claim.attempt == 0:
                     # Older storage permitted RUNNING without a claim count.
                     # Quarantine without inventing processing history.

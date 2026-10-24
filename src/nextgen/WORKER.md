@@ -1,5 +1,12 @@
 # Async worker core
 
+Current metadata composition: the identity worker supplies the built-in
+hash-addressed HTTP(S) reader and installs acquisition through download by
+default. Source configuration is checked at use, not during unrelated identity
+startup. Missing source settings enter review. A trusted read_metainfo override
+remains supported. This supersedes older optional-reader/default-reservation-only
+notes below. See [metadata retrieval](acquisition/METAINFO_SOURCE.md).
+
 Implemented core only: worker.py, job_contracts.py and storage/job_queue.py.
 An opt-in identity handler/persistence adapter is now in jobs/identify_anime_job.py;
 its concrete verified-identity resolver is still required at composition time.
@@ -177,3 +184,44 @@ Feature-owned completion adapters atomically freeze trial windows and decisions;
 the generic worker remains concerned only with execution, fencing and auditing.
 TRIAL_EVALUATED receipts are logged only after commit. No acquisition handler or
 resource lease is supplied by numeric selection policy. See TRIAL_POLICY.md.
+
+The default provider composition now includes RESERVE_EPISODE after evaluation.
+Its feature adapter reserves one exact verified episode inside the ordinary
+fenced completion transaction. Busy slots become held jobs; inconsistent
+evidence becomes review. It adds no whole-anime scheduling lock, external
+client call or acquisition successor. See jobs/RESERVE_EPISODE.md.
+
+Optional trusted read_metainfo composition installs PREPARE_ACQUISITION after
+selected reservations. It performs metadata reads outside write transactions
+and publishes an immutable PREPARED inventory/marker through the worker's
+ordinary fenced completion adapter. No dynamic hooks or external torrent
+submission/reconciliation transport are added. See jobs/PREPARE_ACQUISITION.md.
+
+Download settings are validated at point of use, not imposed on unrelated
+identity work. Acquisition preparation now atomically admits the selected video
+against its selection plan's frozen per-video/total size caps. A rejected or
+unknown-size admission goes to readable review. No external client transport or
+submission state is introduced. See DOWNLOAD_CONFIGURATION.md.
+
+SUBMIT_TORRENT now journals a one-shot stopped add and read-only reconciliation.
+Its short journal transactions use the existing attempt-wide maintenance
+admission and current queue lease; no HTTP spans a write transaction. Durable
+external progress can precede final queue completion and survives crashes.
+No replacement send right is granted after expiration/absence. See
+jobs/SUBMIT_TORRENT.md for the external-fencing limitation and next transfer stage.
+
+## Downloaded-media verification
+
+The default identity-worker composition routes completed DOWNLOAD_TORRENT into
+VERIFY_MEDIA and installs its handler. Generic/custom registries stay explicit.
+See [the verification contract](jobs/VERIFY_MEDIA.md). The worker requires local
+shared download paths and `/usr/bin/ffprobe`. SQLite v19 requires explicit upgrade.
+No staging successor is installed yet; verification success does not mean staged.
+
+## Verified-video staging
+
+The default composition now also installs STAGE_TRIAL_MEDIA and routes successful
+VERIFY_MEDIA completion into it atomically. See
+[jobs/STAGE_TRIAL_MEDIA.md](jobs/STAGE_TRIAL_MEDIA.md). Use a non-root worker and an
+accessible existing staging folder. SQLite v20 upgrades explicitly; Keep and
+viewer refresh remain separate, unimplemented integrations.

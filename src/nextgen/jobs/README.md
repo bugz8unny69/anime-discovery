@@ -92,3 +92,32 @@ EVALUATE_TRIAL records immutable plan/evaluation facts and readable decisions;
 see ../TRIAL_POLICY.md. It never schedules acquisition. Configuration is v5,
 SQLite v11 and AnimeSeries v2. Trial targets remain intents until later exact
 resource/provider inventory and publishing prerequisites are implemented.
+
+## Exact episode gate
+
+The default composition now follows selection with RESERVE_EPISODE /
+reserve_episode_job.py. See RESERVE_EPISODE.md for scope, hold/review behavior and
+the durable reservation lifetime. No external acquisition successor is installed.
+
+## Source inventory preparation
+
+PREPARE_ACQUISITION / prepare_acquisition_job.py records hash-bound single-video
+metadata and a stable submission marker after a reservation. It is composed only
+when the application supplies a trusted async metadata reader. No reader/client
+transport or external submission is installed by default. See PREPARE_ACQUISITION.md.
+
+## Stopped submission and reconciliation
+
+SUBMIT_TORRENT / submit_torrent_job.py follows preparation in trusted metadata
+composition. It has one durable send authorization per plan, adds stopped, and
+reconciles pinned client provenance/inventory. It never starts or deletes data.
+See SUBMIT_TORRENT.md for supported versions, states and failure boundaries.
+
+## Selected-video download
+
+DOWNLOAD_TORRENT / download_torrent_job.py follows stopped submission in trusted
+metadata composition. It durably selects the video, starts once and defers between
+progress checks. Shared boundary pieces require review under the initial zero-overlap
+policy. Client completion ends this stage; media verification/staging remains next.
+See [DOWNLOAD_TORRENT.md](DOWNLOAD_TORRENT.md). Current SQLite is v16, configuration
+v6, secrets v2 and AnimeSeries v2. Earlier sections describe incremental milestones.
