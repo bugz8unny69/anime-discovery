@@ -26,12 +26,16 @@ def main():
     args=parser.parse_args()
     if args.command=='init-access':
         store=SecretStore(args.config_dir)
-        management=getpass.getpass('Management access key (32–256 URL-safe characters): ')
-        webhook=getpass.getpass('Separate webhook key (32–256 URL-safe characters): ')
-        if not management or not webhook:parser.error('Both distinct keys are required.')
+        webhook=getpass.getpass('Autobrr webhook key (32–256 URL-safe characters): ')
+        from src.nextgen.secrets import _access_value
+        try:
+            if not webhook or not _access_value(webhook):raise ValueError()
+        except (ValueError,TypeError):
+            parser.error('A webhook key is required.')
         status=store.status()
-        result=store.initialize(management_token=management,webhook_token=webhook) if status.revision==0 else store.update_access_tokens(webhook,management,expected_revision=status.revision)
-        print('Access keys saved.' if result.durability_confirmed else 'Access keys saved; storage durability needs review.')
+        result=(store.initialize(webhook_token=webhook) if status.revision==0
+                else store.update_webhook_token(webhook,expected_revision=status.revision))
+        print('Webhook key saved.' if result.durability_confirmed else 'Webhook key saved; storage durability needs review.')
         return
     from src.nextgen.__main__ import check_local
     check_local(args.config_dir)
