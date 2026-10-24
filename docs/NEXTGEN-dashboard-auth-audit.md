@@ -12,14 +12,14 @@ Status: source inspection, not deployment verification (2026-10-24).
 1. Replace management access-key login with password login, retaining cookie-session and CSRF boundaries.
 2. Add Settings > Security: change password, verify current password, clear old sessions.
 3. Add local `adm set-password` recovery using a permission-restricted Unix socket served by the existing API process (no extra systemd service). Verify Unix peer credentials and fail closed.
-4. Use fresh NextGen configuration and existing conversion library; no legacy secrets, settings, or management-token migration. Provision dashboard password through local `adm set-password` and use the management API for subsequent configuration.
+4. Use fresh NextGen configuration and existing configuration library; no legacy secrets, settings, or management-token migration. Provision dashboard password through local `adm set-password` and use the management API for subsequent configuration.
 5. Remove or restrict legacy HTTP management-token authentication and the access-token mutation endpoint once password flow is operational.
 6. Test unauthorized local/remote HTTP, CSRF, credential rotation, concurrent password changes, and socket permissions.
 7. Compare NextGen dashboard workflows against the legacy application's complete feature inventory; presence of three tabs does not prove parity.
 8. Verify real browser navigation, TLS proxy behavior, and API/worker outage presentation in an integration environment.
 
 ## Security constraint
-Do not deploy the scrypt foundation as a completed authentication migration. It is currently only a helper and tests; existing API authentication remains active.
+Do not deploy the scrypt foundation as a completed authentication migration. It is currently only a helper and tests; password-backed API authentication is implemented; integration and host validation remain outstanding.
 
 ## Delivery tracker (CI intentionally deferred until requested)
 
@@ -31,7 +31,7 @@ Do not deploy the scrypt foundation as a completed authentication migration. It 
 - [x] Remove management-token browser login and bearer-token bypass from administrative HTTP routes (legacy token storage cleanup pending).
 - [x] Implement same-process Unix socket (0600, root/service UID), peer identity checks, and `adm set-password` (host validation pending).
 - [x] Wire dashboard login and Settings > Security forms to the new API (browser testing pending).
-- [ ] Remove legacy management-token bootstrap dependency; initialize fresh NextGen state, provision password via `adm set-password`, and retain independent Autobrr webhook credentials.
+- [x] Remove management-token bootstrap dependency; initialize fresh NextGen secrets v7, provision password via `adm set-password`, and retain independent Autobrr webhook credentials.
 - [ ] Verify full legacy dashboard feature parity and worker-unavailable UX.
 - [ ] Add authorization, CSRF, socket, rotation, lifecycle, and browser/API integration tests.
 - [ ] Review complete diff, then ask for approval to run CI; fix failures after approval.
@@ -40,4 +40,4 @@ Do not deploy the scrypt foundation as a completed authentication migration. It 
 
 ## Confirmed scope decision
 
-No migration from the legacy application is requested or authorized. Treat the legacy source solely as a reference for feature parity. A new NextGen installation starts with fresh configuration, using the existing conversion library and management API for configuration. `adm set-password` bootstraps the administrator password; it does not import legacy secrets. Do not implement migration scripts or automatic legacy-data conversion.
+No migration from the older application is requested or authorized. Treat the legacy source solely as a reference for feature parity. A new NextGen installation starts with fresh configuration, using the existing configuration library and management API for configuration. `adm set-password` bootstraps the administrator password; it does not import legacy secrets. Do not implement migration scripts or automatic legacy-data conversion.
