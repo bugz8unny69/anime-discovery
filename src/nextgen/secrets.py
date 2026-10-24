@@ -83,7 +83,7 @@ def _read(fd):
     try:
         document = decode(raw)
         if (type(document) is not dict or set(document)!={"schema_version","revision","credentials"}
-                or type(document["schema_version"]) is not int or document["schema_version"] not in (1,2,3,4,5,6)
+                or type(document["schema_version"]) is not int or document["schema_version"] not in (1,2,3,4,5,6,7)
                 or type(document["credentials"]) is not dict):raise SecretStorageError()
         version=document['schema_version']
         expected={'tvdb_api_key'} if version==1 else {'tvdb_api_key','qbittorrent_username','qbittorrent_password'}

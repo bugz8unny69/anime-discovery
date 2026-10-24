@@ -379,7 +379,7 @@ async function loadRecognized() {
         detail.appendChild(cell);
         tr.after(detail);
         try {
-          const data = await request(`${API}/recognized/${item.tvdb_series_id}/${item.season}/episodes`);
+          const data = await request(`${API}/recognized/${item.tvdb_series_id}/${item.season}/${item.anidb_id}/episodes`);
           if (generation !== state.generation || !state.csrf) return;
           cell.replaceChildren();
           const summary = node('p', `${data.items.length} verified episode placements`);

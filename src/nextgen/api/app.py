@@ -332,21 +332,25 @@ class Application:
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','recognized','webhook']},[]
-            season_match=re.fullmatch(PREFIX+r'/recognized/([1-9][0-9]{0,17})/([0-9]{1,3})/episodes',path)
+            season_match=re.fullmatch(PREFIX+r'/recognized/([1-9][0-9]{0,17})/([0-9]{1,3})(?:/([1-9][0-9]{0,17}))?/episodes',path)
             if season_match:
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                tid,season=map(int,season_match.groups())
+                tid,season=map(int,season_match.groups()[:2])
+                aid=int(season_match.group(3)) if season_match.group(3) else None
                 with JobQueue(configuration.value('storage.database_path')).connection() as db:
                     db.execute('BEGIN')
-                    parent=db.execute(
+                    parents=db.execute(
                         "SELECT anidb_id,display_title FROM recognized_seasons "
-                        "WHERE tvdb_series_id=? AND tvdb_season=?",(tid,season)).fetchone()
-                    if parent is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                        "WHERE tvdb_series_id=? AND tvdb_season=?" +
+                        (" AND anidb_id=?" if aid is not None else ""),
+                        (tid,season,aid) if aid is not None else (tid,season)).fetchall()
+                    if len(parents)!=1:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    parent=parents[0]
                     records=db.execute(
                         "SELECT anidb_episode_number,anidb_episode_id,tvdb_episode,tvdb_episode_id "
                         "FROM recognized_episodes WHERE tvdb_series_id=? AND tvdb_season=? "
-                        "ORDER BY tvdb_episode LIMIT 501",(tid,season)).fetchall()
+                        "AND anidb_id=? ORDER BY tvdb_episode LIMIT 501",(tid,season,parent[0])).fetchall()
                 if len(records)>500:raise ApiError(503,'API_UNAVAILABLE')
                 return 200,{'tvdb_series_id':tid,'season':season,'anidb_id':parent[0],
                     'title':parent[1],'items':[{'anidb_episode_number':an,
@@ -362,7 +366,7 @@ class Application:
                         "count(DISTINCT a.alias_key),count(DISTINCT v.anidb_episode_id) "
                         "FROM recognized_seasons s "
                         "LEFT JOIN recognized_aliases a "
-                        "ON a.tvdb_series_id=s.tvdb_series_id AND a.tvdb_season=s.tvdb_season "
+                        "ON a.tvdb_series_id=s.tvdb_series_id AND a.tvdb_season=s.tvdb_season AND a.anidb_id=s.anidb_id "
                         "LEFT JOIN recognized_episodes v "
                         "ON v.tvdb_series_id=s.tvdb_series_id AND v.tvdb_season=s.tvdb_season "
                         "AND v.anidb_id=s.anidb_id "

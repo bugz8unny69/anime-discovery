@@ -25,9 +25,9 @@ class RecognitionTests(unittest.TestCase):
             self.db.execute("INSERT INTO jobs(job_id,event_id,kind,payload_json,available_at_ms,created_at_ms,updated_at_ms) VALUES(?,?,'VERIFY_RELEASE','{}',1,1,1)",(id_,event))
             self.db.execute("INSERT INTO identity_results VALUES(?,?,1001,2,'{}',1)",(id_,event))
             self.db.execute("INSERT INTO identified_episodes VALUES(?,1001)",(10000+id_,))
-            self.db.execute("INSERT INTO release_verifications VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            self.db.execute("INSERT INTO release_verifications VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (id_,id_,id_,1001,'a'*64,'DECLARED_SINGLE_EPISODE',episode,10000+id_,
-                 2001,season,episode,20000+id_,100000))
+                 2001,season,episode,20000+id_,'official',100000))
         self.db.commit()
 
     def remember(self,id_,season):
@@ -41,6 +41,58 @@ class RecognitionTests(unittest.TestCase):
         except BaseException:
             self.db.rollback()
             raise
+
+    def second_work(self, *, tid=2001, title='Second Cour', release='Second Cour S01E04'):
+        self.db.execute("INSERT INTO identified_anime VALUES(1002,?,?)", (tid,title))
+        self.db.execute("INSERT INTO incoming_events(event_id,source,raw_body,received_at_ms) VALUES(13,'autobrr',?,1)",
+                        (json.dumps({'release_name':release}).encode(),))
+        self.db.execute("INSERT INTO jobs(job_id,event_id,kind,payload_json,available_at_ms,created_at_ms,updated_at_ms) VALUES(13,13,'VERIFY_RELEASE','{}',1,1,1)")
+        self.db.execute("INSERT INTO identity_results VALUES(13,13,1002,2,'{}',1)")
+        self.db.execute("INSERT INTO identified_episodes VALUES(10013,1002)")
+        self.db.execute("INSERT INTO release_verifications VALUES(13,13,13,1002,?,'DECLARED_SINGLE_EPISODE',1,10013,?,1,4,20013,'official',100000)", ('b'*64,tid))
+        remember_verified_release(self.db, verification_id=13,
+            source=SimpleNamespace(anidb_id=1002,tvdb_series_id=tid,
+                raw_body=json.dumps({'release_name':release}).encode()), season=1)
+        remember_verified_episode(self.db, verification_id=13)
+        self.db.commit()
+
+    def test_two_verified_works_can_share_tvdb_season(self):
+        self.remember(11,1)
+        self.second_work()
+        self.assertEqual(self.db.execute("SELECT count(*) FROM recognized_seasons WHERE tvdb_season=1").fetchone()[0],2)
+        self.assertEqual(recognized_for_release(self.db,'Second Cour S01E04',season=1)['anidb_id'],1002)
+        self.assertEqual(recognized_for_release(self.db,'Example Anime S01E03',season=1)['anidb_id'],1001)
+        self.assertEqual(recognized_episode(self.db,aid=1002,tid=2001,origin='tvdb',season=1,number=4)['anidb_episode_id'],10013)
+        self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(),[])
+
+    def test_shared_alias_is_ambiguous_instead_of_first_owner_winning(self):
+        self.remember(11,1)
+        self.second_work(tid=2002,title='Example Anime')
+        self.assertIsNone(recognized_for_release(self.db,'Example Anime S01E09',season=1))
+        self.assertEqual(recognized_for_release(self.db,'Second Cour S01E04',season=1)['anidb_id'],1002)
+        self.assertEqual(self.db.execute('SELECT count(*) FROM recognized_episodes').fetchone()[0],2)
+
+    def test_v25_upgrade_preserves_evidence_and_matches_fresh_schema(self):
+        from src.nextgen.storage import migrations
+        old=sqlite3.connect(':memory:')
+        self.addCleanup(old.close)
+        old.execute('PRAGMA foreign_keys=ON')
+        for name in migrations.SCRIPTS[:25]:
+            old.executescript((migrations.SQL_DIR/name).read_text())
+        # Copy a complete verified graph into the historical schema.
+        self.remember(11,1)
+        for table in ('identified_anime','incoming_events','jobs','identity_results',
+                      'identified_episodes','release_verifications','recognized_seasons',
+                      'recognized_aliases','recognized_episodes'):
+            rows=self.db.execute('SELECT * FROM '+table).fetchall()
+            if rows:
+                old.executemany('INSERT INTO '+table+' VALUES('+','.join('?' for _ in rows[0])+')',rows)
+        old.commit()
+        old.executescript((migrations.SQL_DIR/migrations.SCRIPTS[25]).read_text())
+        self.assertEqual(migrations._structure(old),migrations._structure(self.db))
+        self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
+        self.assertEqual(recognized_for_release(old,'Example Anime S01E03',season=1)['anidb_id'],1001)
+        self.assertEqual(old.execute('SELECT count(*) FROM recognized_episodes').fetchone()[0],1)
 
     def test_automatic_series_season_recognition_is_not_per_episode(self):
         self.remember(11,1)

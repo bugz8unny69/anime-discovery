@@ -46,7 +46,13 @@ class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.source=ReleaseInput(1,1,123,456,b'{"release_name":"Test S02E13"}')
         self.cancelled=threading.Event()
-        self.configuration=ConfigurationSnapshot(1,{})
+        temporary=tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        database=Path(temporary.name)/'verification.sqlite'
+        db=connect(database)
+        initialize(db)
+        db.close()
+        self.configuration=ConfigurationSnapshot(1,{'storage':{'database_path':str(database)}})
         owner=self
         class Client:
             def episodes(self,aid): return {1:987,2:988}
@@ -121,6 +127,9 @@ class ReleaseJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT series_json FROM identity_results'),before)
         self.assertEqual(self.rows('SELECT kind,state FROM jobs'),[('VERIFY_RELEASE','DONE')])
         self.assertEqual(self.rows('SELECT * FROM identified_episodes'),[(987,123)])
+        self.assertEqual(self.rows('SELECT tvdb_series_id,tvdb_season,anidb_id FROM recognized_seasons'),[(456,2,123)])
+        self.assertEqual(self.rows('SELECT anidb_episode_id,tvdb_episode_id FROM recognized_episodes'),[(987,100)])
+        self.assertTrue(self.rows('SELECT alias_key FROM recognized_aliases'))
         self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
 
     async def test_source_change_during_provider_work_rolls_back_facts_and_reviews_job(self):

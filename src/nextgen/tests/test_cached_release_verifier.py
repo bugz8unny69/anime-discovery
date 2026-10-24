@@ -28,7 +28,7 @@ class CachedReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
         db.execute("INSERT INTO jobs(job_id,event_id,kind,payload_json,available_at_ms,created_at_ms,updated_at_ms) VALUES(1,1,'VERIFY_RELEASE','{}',1,1,1)")
         db.execute("INSERT INTO identity_results VALUES(1,1,1001,2,'{}',1)")
         db.execute("INSERT INTO identified_episodes VALUES(30013,1001)")
-        db.execute("INSERT INTO release_verifications VALUES(1,1,1,1001,?,'DECLARED_SINGLE_EPISODE',13,30013,2001,2,1,40001,1000)",('a'*64,))
+        db.execute("INSERT INTO release_verifications VALUES(1,1,1,1001,?,'DECLARED_SINGLE_EPISODE',13,30013,2001,2,1,40001,'official',1000)",('a'*64,))
         db.execute("INSERT INTO recognized_seasons VALUES(2001,2,1001,'Example Anime',1,1000)")
         db.execute("INSERT INTO recognized_episodes VALUES(2001,2,1001,13,30013,1,40001,1,1000)")
         db.commit()
@@ -57,7 +57,7 @@ class CachedReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"release_name":"Example Anime S02E02"}).encode())
         # Cache miss must fall through to provider resolver, rather than
         # return a fabricated mapping based on adjacent numbering.
-        with self.assertRaisesRegex(AssertionError,"Provider"):
+        with self.assertRaisesRegex(AssertionError,"providers"):
             await self.verify(source,self.configuration,threading.Event())
 
     async def test_cancelled_request_does_not_use_cached_placement(self):
