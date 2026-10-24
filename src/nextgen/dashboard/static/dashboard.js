@@ -365,6 +365,40 @@ async function loadRecognized() {
         item.alias_count, item.verified_episode_count]) {
         tr.appendChild(node('td', value));
       }
+      const action = node('td');
+      const button = node('button', 'Episodes', 'secondary');
+      button.type = 'button';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        const detail = node('tr');
+        const cell = node('td');
+        cell.colSpan = 7;
+        cell.textContent = 'Loading verified episode placements…';
+        detail.appendChild(cell);
+        tr.after(detail);
+        try {
+          const data = await request(`${API}/recognized/${item.tvdb_series_id}/${item.season}/episodes`);
+          if (generation !== state.generation || !state.csrf) return;
+          cell.replaceChildren();
+          const summary = node('p', `${data.items.length} verified episode placements`);
+          cell.appendChild(summary);
+          for (const episode of data.items) {
+            cell.appendChild(node('p',
+              `AniDB #${episode.anidb_episode_id} (episode ${episode.anidb_episode_number}) → TVDB S${String(item.season).padStart(2,'0')}E${String(episode.tvdb_episode).padStart(2,'0')} (#${episode.tvdb_episode_id})`));
+          }
+          button.textContent = 'Hide episodes';
+          button.addEventListener('click', () => {
+            detail.remove();
+            button.textContent = 'Episodes';
+            button.disabled = false;
+          }, {once: true});
+        } catch (error) {
+          cell.textContent = error.message;
+          button.disabled = false;
+        }
+      });
+      action.appendChild(button);
+      tr.appendChild(action);
       table.appendChild(tr);
     }
     $('recognized-note').textContent = result.items.length
