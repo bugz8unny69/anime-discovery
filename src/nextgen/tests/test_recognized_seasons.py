@@ -6,7 +6,8 @@ import unittest
 
 from src.nextgen.storage.sqlite import initialize
 from src.nextgen.storage.recognition import (
-    RecognitionConflict, recognized_for_release, remember_verified_release)
+    RecognitionConflict, recognized_for_release, remember_verified_release,
+    recognized_episode, remember_verified_episode)
 
 
 class RecognitionTests(unittest.TestCase):
@@ -35,6 +36,7 @@ class RecognitionTests(unittest.TestCase):
         self.db.execute("BEGIN")
         try:
             remember_verified_release(self.db,verification_id=id_,source=source,season=season)
+            remember_verified_episode(self.db,verification_id=id_)
             self.db.commit()
         except BaseException:
             self.db.rollback()
@@ -52,11 +54,16 @@ class RecognitionTests(unittest.TestCase):
         self.assertIsNone(recognized_for_release(self.db,"Example Anime - 01"))
         self.assertIsNone(recognized_for_release(self.db,"Unknown Anime S02E01",season=2))
         self.assertEqual(self.db.execute("SELECT count(*) FROM release_verifications").fetchone()[0],2)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM recognized_episodes").fetchone()[0],2)
+        self.assertEqual(recognized_episode(self.db,aid=1001,tid=2001,origin='tvdb',season=2,number=1)['anidb_episode_id'],10012)
+        self.assertEqual(recognized_episode(self.db,aid=1001,tid=2001,origin='anidb',season=None,number=3)['tvdb_season'],1)
+        self.assertIsNone(recognized_episode(self.db,aid=1001,tid=2001,origin='tvdb',season=2,number=5))
 
     def test_idempotence_and_verified_provenance_enforced(self):
         self.remember(11,1)
         self.remember(11,1)
         self.assertEqual(self.db.execute("SELECT count(*) FROM recognized_aliases").fetchone()[0],1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM recognized_episodes").fetchone()[0],1)
         source=SimpleNamespace(anidb_id=999,tvdb_series_id=2001,
             raw_body=b'{"release_name":"Untrusted S01E01"}')
         self.db.execute("BEGIN")
