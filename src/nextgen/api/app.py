@@ -304,6 +304,7 @@ class Application:
                     except ConfigurationError as exc:raise ApiError(400,exc.reason_code) from None
                     return 200,{'configuration':result.snapshot.to_document(),'saved':result.saved,
                         'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
+                        'reason':None if result.reason_code is None else CATALOG.reason(result.reason_code),
                         'restart_fields':result.restart_fields,'restart_components':result.restart_components},[]
                 raise ApiError(405,'API_METHOD_INVALID')
             if path==PREFIX+'/credentials' and method=='GET':
@@ -320,7 +321,8 @@ class Application:
                 callback={'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens,'sonarr':self.secrets.update_sonarr_api_key,'jellyfin':self.secrets.update_jellyfin_api_key}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
-                return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code},[]
+                return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
+                            'reason':None if result.reason_code is None else CATALOG.reason(result.reason_code)},[]
             if method=='GET' and (path==PREFIX+'/jobs' or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path)):
                 return 200,self._jobs(configuration,path,query),[]
         if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
