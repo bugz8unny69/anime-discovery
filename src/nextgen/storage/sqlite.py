@@ -383,25 +383,6 @@ CREATE TABLE IF NOT EXISTS keep_imports (
  CHECK(phase NOT IN ('COMMAND_ACCEPTED','VERIFIED') OR sonarr_command_id IS NOT NULL),
  CHECK(phase<>'VERIFIED' OR library_evidence_json IS NOT NULL)
 );
-CREATE TABLE IF NOT EXISTS missing_episode_searches (
- plan_id INTEGER NOT NULL REFERENCES trial_plans(plan_id),
- tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
- search_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
- status TEXT NOT NULL CHECK(status IN ('FOUND','NO_MATCH')),
- candidate_count INTEGER NOT NULL CHECK(candidate_count BETWEEN 0 AND 25),
- searched_at_ms INTEGER NOT NULL CHECK(searched_at_ms>=0),
- PRIMARY KEY(plan_id,tvdb_episode)
-);
-CREATE TABLE IF NOT EXISTS missing_episode_candidates (
- plan_id INTEGER NOT NULL,
- tvdb_episode INTEGER NOT NULL,
- info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
- release_name TEXT NOT NULL CHECK(length(release_name) BETWEEN 1 AND 1024),
- discovered_at_ms INTEGER NOT NULL CHECK(discovered_at_ms>=0),
- PRIMARY KEY(plan_id,tvdb_episode,info_hash),
- FOREIGN KEY(plan_id,tvdb_episode) REFERENCES missing_episode_searches(plan_id,tvdb_episode)
-);
-
 """
 
 def connect(path):
@@ -441,13 +422,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at v23; never upgrade existing data.
+    """Initialize a *new* NextGen database at schema v21; never implicitly upgrade.
 
-    All existing nonzero historical schema versions must pass through explicit
-    numbered SQL migrations under maintenance; initialization is not migration.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21 databases require explicit versioned SQL migrations
+    before accessing v21 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 23:
+    if version == 21:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -457,7 +438,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=23;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=22;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

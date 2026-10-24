@@ -58,22 +58,6 @@ class ApiAccessSecretsTests(unittest.TestCase):
         self.assertFalse(self.store.status().jellyfin_configured)
         with self.assertRaises(SecretStorageError):self.store.jellyfin_api_key()
 
-    def test_prowlarr_v6_keeps_existing_credentials_private(self):
-        self.store.initialize('tvdb-provider',sonarr_api_key='sonarr-token',
-                              jellyfin_api_key='jellyfin-key',
-                              webhook_token='w'*43,management_token='m'*43)
-        self.assertEqual(self.raw()['schema_version'],5)
-        result=self.store.update_prowlarr_api_key('prowlarr-private-key',expected_revision=1)
-        self.assertTrue(result.status.prowlarr_configured)
-        self.assertEqual(self.raw()['schema_version'],6)
-        self.assertEqual(self.store.prowlarr_api_key(),'prowlarr-private-key')
-        self.assertEqual(self.store.sonarr_api_key(),'sonarr-token')
-        self.assertEqual(self.store.jellyfin_api_key(),'jellyfin-key')
-        self.assertNotIn('prowlarr-private-key',repr(result.status))
-        self.store.update_prowlarr_api_key('',expected_revision=2)
-        self.assertFalse(self.store.status().prowlarr_configured)
-        with self.assertRaises(SecretStorageError):self.store.prowlarr_api_key()
-
     def test_missing_keys_are_blank_and_legacy_v1_reads_do_not_upgrade(self):
         self.assertEqual(self.store.access_credentials().webhook_token,'')
         path=self.root/'secrets.json'

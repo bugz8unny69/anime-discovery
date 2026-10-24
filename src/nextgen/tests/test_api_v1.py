@@ -130,25 +130,6 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,_,_=await self.request('PATCH',path,{'expected_revision':1,'api_key':'abcdef0123456789'},token=ADMIN)
         self.assertEqual(status,409)
 
-    async def test_prowlarr_credentials_and_missing_inventory_require_management(self):
-        path='/api/v1/credentials/prowlarr'
-        value={'expected_revision':1,'api_key':'private-prowlarr-token'}
-        status,_,_=await self.request('PATCH',path,value,token=WEB)
-        self.assertEqual(status,401)
-        status,result,_=await self.request('PATCH',path,value,token=ADMIN)
-        self.assertEqual(status,200)
-        self.assertTrue(result['data']['status']['prowlarr_configured'])
-        self.assertNotIn('private-prowlarr-token',json.dumps(result))
-        status,_,_=await self.request('GET','/api/v1/missing-episodes?plan_id=1',token=WEB)
-        self.assertEqual(status,401)
-        status,result,_=await self.request('GET','/api/v1/missing-episodes',token=ADMIN)
-        self.assertEqual(status,200)
-        self.assertEqual(result['data']['plans'],[])
-        status,_,_=await self.request('GET','/api/v1/missing-episodes?plan_id=1',token=ADMIN)
-        self.assertEqual(status,404)
-        status,_,_=await self.request('GET','/api/v1/missing-episodes?plan_id=-1',token=ADMIN)
-        self.assertEqual(status,400)
-
     async def test_jobs_history_are_readable_bounded_and_do_not_expose_payload_or_lease(self):
         await self.request('POST','/api/v1/webhook',self.release(token=WEB))
         status,result,_=await self.request('GET','/api/v1/jobs?limit=1',token=ADMIN)

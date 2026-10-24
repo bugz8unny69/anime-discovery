@@ -12,29 +12,6 @@ for finishing missing functionality. Preserve the agreed staging move with no
 byte-for-byte destination comparison. Tests/CI remain unrun until authorized;
 no merge, deployment or live media operations are implied.
 
-## Missing-episode Prowlarr candidate search — 2026-10-24 (draft)
-
-The immutable trial window now optionally hands off an independent
-`DISCOVER_MISSING_EPISODES` job at committed `EVALUATE_TRIAL`, preserving its
-regular reservation successor. A source-verified TVDB series/season and
-existing reservations/received releases determine missing numeric positions.
-Batches of eight query the configured internal Prowlarr torrent search endpoint
-for explicit SxxEyy matches; only bounded title/hash candidates are stored.
-Config v10, private secrets v6 and explicit SQLite v23 support optional
-Prowlarr, durable de-duplicated per-plan search tickets and candidate lists.
-Authenticated management can list plans or inspect
-`GET /api/v1/missing-episodes?plan_id=ID`.
-
-**Important incomplete functionality:** Discovery is not yet automatic
-acquisition. No indexer metadata or filename alone authorizes a new release,
-torrent submission, reservation, staging or Keep. The next task is
-trusted candidate metadata retrieval and re-verification through the existing
-Intake → VERIFY_RELEASE → reservation/acquisition pipeline, followed by
-ongoing re-search for future/unavailable episodes. See
-[the discovery contract](src/nextgen/jobs/DISCOVER_MISSING_EPISODES.md).
-Tests/CI, browser checks, migrations, live Prowlarr requests and media operations
-remain **unrun**; nothing merged or deployed.
-
 ## Jellyfin refresh — 2026-10-24 (draft; not yet validated)
 
 Staging and verified Sonarr Keep now optionally schedule independent

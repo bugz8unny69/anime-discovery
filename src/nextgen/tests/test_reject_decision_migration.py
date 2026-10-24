@@ -15,11 +15,10 @@ class RejectDecisionMigrationTests(unittest.TestCase):
             db.execute("INSERT INTO management_actions VALUES(1,'KEEP',1,2,0)");db.commit()
             before=db.execute('SELECT * FROM management_actions').fetchall()
             db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
-            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text())
-            db.executescript((SQL_DIR/'023_missing_episode_searches.sql').read_text());initialize(fresh)
+            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text());initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],22)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 

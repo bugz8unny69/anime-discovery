@@ -16,7 +16,6 @@ DEFINITION=HandlerDefinition(KIND,'Evaluate Intake episode selection')
 class EvaluationCompletion:
     proposal: TrialProposal
     evaluation_job_id: int
-    discover_enabled: bool = False
 
 
 def _persist(db,claim,value):
@@ -30,10 +29,7 @@ def _persist(db,claim,value):
     except TrialConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration(*, reservation_kind=None, discovery_kind=None):
-    if discovery_kind is not None and (type(discovery_kind) is not str or not discovery_kind.strip()
-            or len(discovery_kind)>64 or discovery_kind in (KIND,reservation_kind)):
-        raise ValueError('invalid discovery successor')
+def registration(*, reservation_kind=None):
     if reservation_kind is not None and (type(reservation_kind) is not str or not reservation_kind.strip()
                                          or len(reservation_kind)>64 or reservation_kind==KIND):
         raise ValueError('invalid episode reservation successor')
@@ -49,17 +45,11 @@ def registration(*, reservation_kind=None, discovery_kind=None):
                                              context.configuration.value('trial.following_count')),
                                 context.configuration.desired_revision)
         except TrialConflict:return Outcome('review','TRIAL_PLAN_CONFLICT')
-        return Outcome(value=EvaluationCompletion(value,context.claim.job_id,
-            bool(context.configuration.value('prowlarr.base_url'))))
+        return Outcome(value=EvaluationCompletion(value,context.claim.job_id))
 
     def route(value):
         if type(value) is not EvaluationCompletion:raise ValueError('typed episode selection completion required')
-        successors=[]
-        if reservation_kind is not None:
-            successors.append(Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}))
-        if discovery_kind is not None and value.discover_enabled:
-            successors.append(Successor.create(discovery_kind,{'evaluation_job_id':value.evaluation_job_id},independent=True))
-        return tuple(successors)
+        return () if reservation_kind is None else (Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
 
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
-                        successor_kinds=tuple(x for x in (reservation_kind,discovery_kind) if x is not None))
+                        successor_kinds=() if reservation_kind is None else (reservation_kind,))
