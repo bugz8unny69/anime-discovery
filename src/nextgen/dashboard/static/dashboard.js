@@ -291,6 +291,7 @@ function renderCredentials() {
   const specs = [
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
     ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
+    ['jellyfin', 'Jellyfin', 'jellyfin_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
   ];
   for (const [service, title, presence, fields] of specs) {
