@@ -336,6 +336,20 @@ CREATE TABLE IF NOT EXISTS media_verifications (
  verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
  CHECK(job_id<>download_job_id)
 );
+CREATE TABLE IF NOT EXISTS staging_publications (
+ plan_id INTEGER PRIMARY KEY REFERENCES media_verifications(plan_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ manifest_json TEXT NOT NULL CHECK(json_valid(manifest_json) AND length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 65536),
+ state TEXT NOT NULL CHECK(state IN ('PLANNED','PUBLISHED')),
+ receipts_json TEXT CHECK(receipts_json IS NULL OR (json_valid(receipts_json) AND length(CAST(receipts_json AS BLOB))<=16384)),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ published_at_ms INTEGER CHECK(published_at_ms IS NULL OR published_at_ms>=created_at_ms),
+ CHECK(job_id<>verification_job_id),
+ CHECK((state='PLANNED' AND receipts_json IS NULL AND published_at_ms IS NULL) OR
+       (state='PUBLISHED' AND receipts_json IS NOT NULL AND published_at_ms IS NOT NULL))
+);
+
 """
 
 def connect(path):
@@ -375,13 +389,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v19; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v20; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18 databases require explicit versioned SQL migrations
-    before accessing v19 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19 databases require explicit versioned SQL migrations
+    before accessing v20 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 19:
+    if version == 20:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -391,7 +405,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=19;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=20;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

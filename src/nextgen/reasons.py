@@ -17,6 +17,10 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('STAGING_REVIEW', 'Destination, copy identity, source digest or publication evidence could not be reconciled.', 'Staging needs review; existing files have been preserved.', 'Review the recorded files and publication intent before retrying.', 'WARNING', False),
+    Reason('STAGING_UNAVAILABLE', 'A staging filesystem operation failed transiently.', 'The staging filesystem is temporarily unavailable.', 'Check mounts, free space and worker permissions.', 'ERROR', True),
+    Reason('STAGING_CONFIGURATION_INVALID', 'An accessible disjoint staging root, non-root worker or Linux no-replace publication is unavailable.', 'Configure an accessible separate staging folder and a non-root worker.', 'Configure the staging folder and worker service permissions.', 'WARNING', False),
+    Reason('STAGING_BUSY', 'An exact publication attempt or shared series-metadata operation is still active.', 'Waiting for another staging operation to finish.', 'The worker will check again shortly.', 'INFO', None),
     Reason('MEDIA_VERIFICATION_INVALID', 'The selected file, container or pinned content changed or failed validation.', 'The downloaded video needs verification review.', 'Review the selected file and its recorded acquisition evidence.', 'WARNING', False),
     Reason('MEDIA_VERIFICATION_UNAVAILABLE', 'Local selected-file reads or the bounded probe timed out.', 'The downloaded video could not be checked yet.', 'Check the shared download mount and file readability.', 'ERROR', None),
     Reason('MEDIA_PROBE_UNAVAILABLE', 'The fixed local ffprobe executable could not be started.', 'The local media probe is unavailable.', 'Install ffprobe at /usr/bin/ffprobe and check worker permissions.', 'WARNING', False),

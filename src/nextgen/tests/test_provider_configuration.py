@@ -244,6 +244,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('SUBMIT_TORRENT',worker.registry.entries)
         self.assertIn('DOWNLOAD_TORRENT',worker.registry.entries)
         self.assertIn('VERIFY_MEDIA',worker.registry.entries)
+        self.assertIn('STAGE_TRIAL_MEDIA',worker.registry.entries)
         self.assertIn('CLEANUP_CANCELED_OPERATION',worker.registry.entries)
         self.assertIn('KEEP_MEDIA',worker.registry.entries)
         async def reader(*args):raise AssertionError('startup must not read metadata')
@@ -253,4 +254,5 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('DOWNLOAD_TORRENT',composed.registry.entries)
         self.assertEqual(composed.registry.entries['SUBMIT_TORRENT'].successor_kinds,('DOWNLOAD_TORRENT',))
         self.assertEqual(composed.registry.entries['DOWNLOAD_TORRENT'].successor_kinds,('VERIFY_MEDIA',))
+        self.assertEqual(composed.registry.entries['VERIFY_MEDIA'].successor_kinds,('STAGE_TRIAL_MEDIA',))
         self.assertEqual(composed.registry.entries['RESERVE_EPISODE'].successor_kinds,('PREPARE_ACQUISITION',))

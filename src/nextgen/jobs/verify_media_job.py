@@ -7,7 +7,7 @@ from src.nextgen.acquisition.submission import ClientInvalid
 from src.nextgen.acquisition.transfers import TransferConflict
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.media_verification import load, persist
 from src.nextgen.worker import blocking
 
@@ -18,11 +18,15 @@ REVIEW=(MediaInvalid,AcquisitionConflict,MetadataInvalid,SourceMissing,SizeEvide
 
 
 def _persist(db,claim,value):
-    try:persist(db,claim,value)
+    try:
+        if type(value) is not dict or set(value)!={'media','verification_job_id'} or value['verification_job_id']!=claim.job_id:raise MediaInvalid()
+        persist(db,claim,value['media'])
     except REVIEW as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration(*,verify=verify_file,load_input=load):
+def registration(*,verify=verify_file,load_input=load,staging_kind=None):
+    if staging_kind is not None and (type(staging_kind) is not str or not staging_kind.strip()
+            or len(staging_kind)>64 or staging_kind==KIND):raise ValueError('invalid staging successor')
     async def execute(context):
         payload=context.data()
         try:
@@ -36,8 +40,11 @@ def registration(*,verify=verify_file,load_input=load):
             work=partial(verify,intent,record,download,context.cancelled,protected_roots=(
                 context.configuration.value('storage.trial_root'),context.configuration.value('storage.keep_root')))
             value=await blocking(work)
-            return Outcome(value=value)
+            return Outcome(value={'media':value,'verification_job_id':context.claim.job_id})
         except MediaUnavailable as exc:return Outcome('retry',exc.reason_code)
         except ProbeUnavailable as exc:return Outcome('review',exc.reason_code)
         except REVIEW as exc:return Outcome('review',exc.reason_code)
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if staging_kind is None else (Successor.create(staging_kind,{'verification_job_id':value['verification_job_id']}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+        successor_kinds=() if staging_kind is None else (staging_kind,))

@@ -217,3 +217,11 @@ VERIFY_MEDIA and installs its handler. Generic/custom registries stay explicit.
 See [the verification contract](jobs/VERIFY_MEDIA.md). The worker requires local
 shared download paths and `/usr/bin/ffprobe`. SQLite v19 requires explicit upgrade.
 No staging successor is installed yet; verification success does not mean staged.
+
+## Verified-video staging
+
+The default composition now also installs STAGE_TRIAL_MEDIA and routes successful
+VERIFY_MEDIA completion into it atomically. See
+[jobs/STAGE_TRIAL_MEDIA.md](jobs/STAGE_TRIAL_MEDIA.md). Use a non-root worker and an
+accessible existing staging folder. SQLite v20 upgrades explicitly; Keep and
+viewer refresh remain separate, unimplemented integrations.

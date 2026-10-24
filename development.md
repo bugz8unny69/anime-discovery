@@ -4,6 +4,23 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Verified-media staging — 2026-10-23
+
+The default worker now advances VERIFY_MEDIA into STAGE_TRIAL_MEDIA. Publish a
+selected video by move, plus episode/series NFOs, using a pinned destination
+and no-overwrite Linux rename. Same-filesystem moves rename the original inode;
+cross-filesystem moves stream once then remove the exact source. Per the user
+decision, staging performs no destination video hashing or byte-for-byte comparison. Durable publication intent
+and inode receipts reconcile interrupted copies/renames; uncertain files remain
+protected. All files must be revalidated before the same worker transaction
+records the manifest, STAGED milestone and DONE. Keep remains unavailable.
+
+SQLite v20 adds staging_publications through an explicit maintenance upgrade;
+configuration stays v7. See [the staging contract](src/nextgen/jobs/STAGE_TRIAL_MEDIA.md)
+for layout, fixed initial permission policy, non-root/shared-path requirements,
+recovery, cancellation and deferred viewer integration. No Jellyfin refresh or
+live media changes were performed. Offline tests and CI are authored/unrun.
+
 ## Downloaded-media verification — 2026-10-23
 
 Completed downloads now hand off atomically to VERIFY_MEDIA in the default

@@ -336,3 +336,24 @@ SQLite v19 stores its immutable selected-file/stream evidence. See
 container, audio-tag and stable-file gate and its semantic/playback limitations.
 The earlier future-work notes above describe their implementation stage at the
 time; verification now exists, while staging and Keep remain unfinished.
+
+## Implementation refinement: verified-copy staging
+
+The default worker now includes the verified-media → STAGE_TRIAL_MEDIA handoff.
+SQLite v20 stores pinned publication intents and final file receipts. The staging
+library publishes a copied video and series/episode NFOs without overwrite and
+reconciles interrupted attempts. All outputs must be proven before STAGED. See
+[the implemented staging contract](../jobs/STAGE_TRIAL_MEDIA.md) for exact layout,
+initial fixed modes/inherited groups, no-replace rename requirements and limits.
+Configurable permissions, viewer recognition/refresh, Keep and Reject remain
+follow-ups. Earlier future-work notes above describe historical implementation
+stages and are superseded by this narrower explicit completion boundary.
+
+## User refinement: move into staging, no copy comparison
+
+On 2026-10-23 the user explicitly chose a move into staging and rejected extra
+byte-for-byte copy verification. This supersedes the earlier copying/checksum
+proposal. Keep the media/audio checks before staging. Rename on one filesystem;
+across filesystems, complete the necessary streamed write, publish without
+overwrite and remove the exact original. Staging uses journaled inode/size facts
+for recovery and does not hash/read back the destination video.

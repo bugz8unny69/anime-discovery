@@ -20,11 +20,12 @@ class ManagementActionMigrationTests(unittest.TestCase):
             db.execute('INSERT INTO job_operation_members VALUES(1,1)');db.commit()
             before={table:db.execute('SELECT * FROM '+table).fetchall() for table in ('jobs','job_history','job_operations','job_operation_members')}
             db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
-            db.executescript((SQL_DIR/'019_media_verifications.sql').read_text());initialize(fresh)
+            db.executescript((SQL_DIR/'019_media_verifications.sql').read_text())
+            db.executescript((SQL_DIR/'020_staging_publications.sql').read_text());initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             for table,rows in before.items():self.assertEqual(db.execute('SELECT * FROM '+table).fetchall(),rows)
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),[])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],19)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],20)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 
