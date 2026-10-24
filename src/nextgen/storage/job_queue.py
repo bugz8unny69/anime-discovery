@@ -194,7 +194,9 @@ class JobQueue:
                     _, created = enqueue_job_with_receipt(db,component="worker",kind=successor.kind,
                         payload=json.loads(successor.payload), event_id=claim.event_id,
                         created_by_job_id=claim.job_id,available_at_ms=now,
-                        operation_id=db.execute("SELECT operation_id FROM job_operation_members WHERE job_id=?",(claim.job_id,)).fetchone()[0])
+                        operation_id=(None if successor.independent else db.execute(
+                            "SELECT operation_id FROM job_operation_members WHERE job_id=?",
+                            (claim.job_id,)).fetchone()[0]))
                     records.append(created)
             now = self.now()
             self._owns(db,claim,now)
