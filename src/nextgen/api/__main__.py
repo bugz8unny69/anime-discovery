@@ -7,6 +7,7 @@ import logging
 from src.nextgen.api.app import Application
 from src.nextgen.api.auth import ApiError
 from src.nextgen.secrets import SecretStore
+from src.nextgen.systemd_notify import notify
 
 
 class TransportFilter(logging.Filter):
@@ -21,7 +22,6 @@ def main():
     parser=argparse.ArgumentParser(description='Anime Discovery NextGen API')
     parser.add_argument('command',choices=('serve','init-access'))
     parser.add_argument('--config-dir',required=True)
-    parser.add_argument('--socket-activated',action='store_true',help='Serve the management API on the systemd-provided Unix socket (fd 3).')
     parser.add_argument('--public-origin',help='Exact browser origin; HTTPS behind a trusted proxy, or local loopback HTTP.')
     args=parser.parse_args()
     if args.command=='init-access':
@@ -45,15 +45,22 @@ def main():
         import uvicorn
     except ImportError:
         app.close();parser.error('Install requirements-nextgen-api.txt before serving the API.')
-    if args.socket_activated and args.command!='serve':
-        parser.error('Socket activation is available only for serve.')
     transport=logging.getLogger('uvicorn.error')
     transport.addFilter(TransportFilter())
     try:
-        uvicorn.run(app,**({'fd':3} if args.socket_activated else {'host':host,'port':app.startup.value('api.port')}),workers=1,interface='asgi3',
-            http='h11',ws='none',lifespan='on',proxy_headers=False,forwarded_allow_ips='',
-            access_log=False,log_level='warning',log_config=None,limit_concurrency=32,
-            timeout_keep_alive=5,h11_max_incomplete_event_size=16384,server_header=False)
+        class NotifyingServer(uvicorn.Server):
+            async def startup(self, sockets=None):
+                await super().startup(sockets=sockets)
+                if self.started and not self.should_exit:
+                    notify('READY=1')
+
+        config = uvicorn.Config(app, host=host, port=app.startup.value('api.port'),
+            workers=1, interface='asgi3', http='h11', ws='none', lifespan='on',
+            proxy_headers=False, forwarded_allow_ips='', access_log=False,
+            log_level='warning', log_config=None, limit_concurrency=32,
+            timeout_keep_alive=5, h11_max_incomplete_event_size=16384,
+            server_header=False)
+        NotifyingServer(config).run()
     finally:app.close()
 
 
