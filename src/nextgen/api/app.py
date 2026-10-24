@@ -67,7 +67,7 @@ def validate_secret_fields(kind,body,fields):
     try:
         if kind=='access':
             from src.nextgen.secrets import _access_values
-            _access_values(body['webhook_token'],body['management_token'])
+            _access_values(body['webhook_token'],'')
         elif kind=='qbittorrent':
             from src.nextgen.acquisition.settings import DownloadCredentials
             if body['username'] or body['password']:DownloadCredentials(body['username'],body['password'])
@@ -245,7 +245,7 @@ class Application:
             if set(query)-{'token'}:raise ApiError(400,'API_REQUEST_INVALID')
             webhook_key(headers,query,body,access.webhook_token)
             normalized=normalize_webhook(body)
-            if any(key and key.encode() in normalized for key in (access.webhook_token,access.management_token)):raise ApiError(400,'API_WEBHOOK_INVALID')
+            if any(key and key.encode() in normalized for key in (access.webhook_token,)):raise ApiError(400,'API_WEBHOOK_INVALID')
             desired=self.store.read();configuration=for_operation(desired,self.startup,component='api')
             configure_logging(configuration.logging_settings(),'api',logger=self.logger)
             with MaintenanceGate(configuration.value('storage.database_path')).operation():
@@ -332,7 +332,7 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','webhook']},[]
             if path==PREFIX+'/intake':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 return 200,self._intake(configuration,query),[]
@@ -363,10 +363,10 @@ class Application:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 if method!='PATCH':raise ApiError(405,'API_METHOD_INVALID')
                 kind=secret_match[1]
-                fields={'shoko':('api_key',),'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token')}[kind]
+                fields={'shoko':('api_key',),'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token',)}[kind]
                 exact(body,('expected_revision',*fields))
                 validate_secret_fields(kind,body,fields)
-                callback={'shoko':self.secrets.update_shoko_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens}[kind]
+                callback={'shoko':self.secrets.update_shoko_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_webhook_token}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
                 return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
