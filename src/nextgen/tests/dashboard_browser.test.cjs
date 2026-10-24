@@ -110,3 +110,22 @@ test('session expiry clears private rows and in-memory session state', async () 
   assert.equal(h.elements.get('workspace').hidden, true);
   assert.equal(h.elements.get('login-panel').hidden, false);
 });
+
+test('dashboard login sends password, never the webhook or old management token field', async () => {
+  const h = await harness();
+  const requests = [];
+  h.ctx.fetch = async (url, options) => {
+    requests.push({url, options});
+    if (url === '/api/v1/auth/session') return response({csrf_token: 'new-session-csrf', expires_in: 43200}, 201);
+    return response({items: [], next_before_id: null});
+  };
+  h.elements.get('access-key').value = 'correct horse battery staple';
+  const form = h.elements.get('login-form');
+  await form.listeners.submit({preventDefault() {}, currentTarget: form});
+  const login = requests.find(item => item.url === '/api/v1/auth/session');
+  assert.ok(login);
+  assert.deepEqual(JSON.parse(login.options.body), {password: 'correct horse battery staple'});
+  assert.equal(login.options.credentials, 'same-origin');
+  assert.equal(h.elements.get('access-key').value, '');
+  assert.equal(h.run('state.csrf'), 'new-session-csrf');
+});
