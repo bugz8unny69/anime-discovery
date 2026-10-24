@@ -1,7 +1,7 @@
 # NextGen pipeline architecture drafts
 
 User-facing terminology: [Anime Intake](ANIME_INTAKE.md) records the agreed
-**Intake** section name and its purpose. It supersedes trial/preview labels for
+**Intake → Staging → Keep or Reject** flow and each step's purpose. It supersedes trial/preview labels for
 that area without renaming internal code, configuration keys or these files.
 
 These are reviewable design documents, **not implemented pipelines**. They

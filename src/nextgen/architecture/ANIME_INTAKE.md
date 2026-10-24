@@ -1,4 +1,4 @@
-# Anime Intake: purpose and terminology
+# Anime Intake, Staging and Keep: purpose and terminology
 
 Status: planning only. Naming decision recorded 2026-10-23.
 This document records the agreed user-facing vocabulary. It does not implement
@@ -9,16 +9,28 @@ the dashboard, change acquisition behavior or rename the application.
 Use **Intake** as the dashboard section name. Use **Anime Intake** when a
 standalone heading needs to explain what is being collected.
 
-Intake is the collection of incoming anime being processed or held for the
-user's consideration before a Keep or Reject decision. An item in Intake does
-not mean the user has committed to watching it or adding it to the permanent
-library. Intake can include work still downloading or needing attention, as
-well as episodes available to watch.
+The agreed product flow is **Intake → Staging → Keep or Reject**.
 
-Use Intake for the user-facing area previously discussed as trial or preview.
-The section is not restricted to raw webhook notifications. A webhook delivery,
-a processing job and an identified anime remain different records; choosing a
-section name does not merge their identities or lifecycles.
+- **Intake** receives incoming release information from sources such as Autobrr
+  and begins identification and processing. It does not imply a commitment to
+  watch or retain the anime.
+- **Staging** prepares verified episodes for viewing and consideration. **Staged**
+  means those episodes are available for the user's decision, with no automatic
+  permanent import.
+- **Keep** is the explicit decision to put approved content into the permanent
+  library. Content is permanent only after that operation succeeds and the
+  permanent copies are verified.
+- **Reject** is the decision not to keep/follow the anime. Its exact cleanup and
+  future-arrival blocking policy must be designed explicitly.
+
+This refines the earlier broad use of Intake for everything before Keep.
+Use **Staging** for the preparation step and **Staged** for its successful
+milestone, rather than describing all watchable undecided content as Intake.
+The three steps describe product responsibilities, not new database job states
+or a settled dashboard page layout.
+
+A webhook delivery, a processing job and an identified anime remain different
+records. These names do not merge their identities or lifecycles.
 
 ## What the user should understand
 
@@ -45,7 +57,7 @@ work. A section name does not make those actions interchangeable.
 3. Acquire only the approved selection and show its progress. If work cannot
    continue, explain why and offer the actions that are safe for that state.
 4. Verify the downloaded media, including required Japanese and English audio,
-   before publishing readable copies and metadata to the configured Intake folder.
+   before publishing readable copies and metadata to the configured staging folder.
    Make those copies available through Jellyfin without implying the user has
    chosen to retain the show.
 5. Let the user watch and decide. Keep begins a separate permanent-library
@@ -72,7 +84,9 @@ requires its own scoped design and must not be simulated with acquisition Cancel
 
 - Navigation/section: **Intake**.
 - Standalone planning heading: **Anime Intake**.
-- Proposed folder-setting label: **Intake folder**.
+- Proposed viewing-folder setting label: **Staging folder**.
+- Preparation step: **Staging**; completed viewing milestone: **Staged**.
+- Decision: **Keep** or **Reject**; permanent-library success follows verified Keep completion.
 - An item's status explains what is happening; Intake is not a job status.
   Examples include Downloading, Ready to watch and Needs attention. Exact
   mappings and readiness requirements remain part of feature planning.
@@ -106,4 +120,4 @@ authorize deletion or silently settle those policies.
 The pipeline architecture remains in [intake to the trial folder](INTAKE_TO_TRIAL.md)
 and [Keep to the permanent library](KEEP_TO_LIBRARY.md). Those existing technical
 filenames remain stable; this document supersedes their trial/preview wording
-only for the user-facing Intake area.
+for the user-facing Intake and Staging flow.

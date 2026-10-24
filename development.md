@@ -7,8 +7,10 @@
 ## Anime Intake terminology — 2026-10-23
 
 The agreed dashboard section name is **Intake**; use **Anime Intake** when
-standalone context is helpful. It holds incoming anime for consideration before
-Keep or Reject, including downloading work and episodes available to watch.
+standalone context is helpful. The agreed flow is **Intake → Staging → Keep or Reject**. Intake receives
+releases; Staging prepares verified episodes for viewing and consideration.
+Staged means available for the user's decision. Permanent-library status follows
+only after the explicit Keep operation succeeds and its copies are verified.
 This replaces trial/preview as the user-facing area name. Internal trial names,
 configuration keys and stored paths can stay unchanged. Application branding
 is not settled. See [Anime Intake planning](src/nextgen/architecture/ANIME_INTAKE.md).
