@@ -27,6 +27,13 @@ class AdminSocketTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(store.verify("correct horse battery staple")[1])
                 writer.close()
                 await writer.wait_closed()
+                invalid_reader, invalid_writer = await asyncio.open_unix_connection(path)
+                invalid_writer.write(json.dumps({"command": "set-password", "password": "x", "extra": "unexpected"}).encode() + bytes([10]))
+                await invalid_writer.drain()
+                invalid_result = json.loads(await asyncio.wait_for(invalid_reader.readline(), timeout=5))
+                self.assertFalse(invalid_result["ok"])
+                invalid_writer.close()
+                await invalid_writer.wait_closed()
             finally:
                 server.close()
                 await server.wait_closed()
