@@ -222,7 +222,6 @@ class Application:
             (b'x-content-type-options',b'nosniff'),(b'referrer-policy',b'no-referrer'),
             (b'content-security-policy',b"default-src 'none'; frame-ancestors 'none'"),
             (b'x-request-id',request_id.encode()),(b'content-length',str(len(encoded)).encode()),*extra]
-        if status==401:response_headers.append((b'www-authenticate',b'Bearer realm="anime-discovery"'))
         if status in (429,503):response_headers.append((b'retry-after',b'60'))
         await send({'type':'http.response.start','status':status,'headers':response_headers})
         await send({'type':'http.response.body','body':encoded})
