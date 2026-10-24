@@ -51,6 +51,8 @@ def receipt(db,job_id,*,reused=False):
             'reused':reused,'disable_action':True,
             'disabled_reason':disabled_reason(row[0],row[2])}
     if db.execute("SELECT 1 FROM management_actions WHERE job_id=? AND action='KEEP'",(job_id,)).fetchone():
+        from src.nextgen.post_keep_cleanup import status as cleanup_status
+        data['post_keep_cleanup']=cleanup_status(db,job_id)
         data['execution_available']=True
         data['availability_reason']=None
         data['completion']=(CATALOG.reason('KEEP_COMPLETE') if db.execute(
@@ -73,6 +75,15 @@ class ManagementActions:
                              (op[0],selected)).fetchone()
             if prior:
                 state=db.execute('SELECT state FROM jobs WHERE job_id=?',(prior[0],)).fetchone()[0]
+                if action=='keep' and state=='DONE':
+                    from src.nextgen.post_keep_cleanup import status as cleanup_status
+                    cleanup=cleanup_status(db,prior[0])
+                    if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
+                        now=self.queue.now()
+                        db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,cleanup['job_id']))
+                        records.append(append_job_history(db,job_id=cleanup['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        data=receipt(db,prior[0],reused=True);data['cleanup_resumed']=True
+                        return 202,data,tuple(records)
                 if action in ('cleanup','reject','keep') and state in ('NEEDS_REVIEW','BLOCKED'):
                     now=self.queue.now()
                     db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
@@ -149,6 +160,11 @@ class ManagementActions:
             code={'keep':'KEEP','reject':'REJECT'}.get(name,'CLEANUP')
             row=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',(op[0],code)).fetchone()
             resumable=name in ('cleanup','reject','keep') and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
+            if name=='keep' and row is not None:
+                from src.nextgen.post_keep_cleanup import status as cleanup_status
+                cleanup=cleanup_status(db,row[0])
+                if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
+                    resumable=True;enabled=True
             if name=='reject' and resumable:enabled=True
             allowed=bool(enabled and (row is None or resumable) and busy is None)
             job=None if row is None else receipt(db,row[0],reused=True)

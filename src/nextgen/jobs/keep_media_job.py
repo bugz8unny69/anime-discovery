@@ -18,6 +18,8 @@ DEFINITION=HandlerDefinition(KIND,'Keep staged video in the permanent library')
 def _persist(db,claim,value):
     if db.execute('SELECT phase FROM keep_imports WHERE job_id=?',(claim.job_id,)).fetchone()!=('COMPLETE',):
         raise CompletionRejected(Outcome('review','KEEP_IMPORT_REVIEW'))
+    from src.nextgen.post_keep_cleanup import enqueue as enqueue_cleanup
+    enqueue_cleanup(db,claim)
     if value and value.get('refresh'):
         from src.nextgen.jobs.refresh_jellyfin_job import enqueue
         enqueue(db,claim)

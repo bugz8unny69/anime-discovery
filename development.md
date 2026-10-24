@@ -4,6 +4,25 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Post-Keep selected staging cleanup — 2026-10-24
+
+Successful Keep completion now creates one independent CLEANUP_KEPT_MEDIA job
+and saves its ID/state in the existing keep_imports JSON journal in the same
+transaction. It rechecks Sonarr's episode binding and the readable permanent file
+at the expected size, then reuses selected staging cleanup for the video and
+episode NFO only. No destination video hashing; shared series NFOs stay.
+
+The API exposes cleanup progress on the Keep receipt. A stopped cleanup can be
+explicitly resumed by the Keep action; the dashboard labels this Retry staging
+cleanup and never resubmits the completed Sonarr import. Successful cleanup can
+queue an independent Jellyfin refresh. Existing completed Keeps are not backfilled.
+No SQL/configuration/secrets upgrade is needed (v22/v9/v5 unchanged).
+
+Kept episode reservations remain durable duplicate protection. Canceled-work
+reservation release, torrent/download cleanup, optional Shoko and service setup
+remain unfinished. Tests/CI and live media operations remain unrun; source checks
+only. This work is published as a draft for review.
+
 ## Consolidation of completed drafts — 2026-10-24
 
 User authorized reconciling completed NextGen work and merging it into NextGen.

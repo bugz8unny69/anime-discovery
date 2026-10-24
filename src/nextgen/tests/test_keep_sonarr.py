@@ -69,7 +69,7 @@ class FakeSonarr:
             return Response({'id':61})
         if path=='command':return Response([{'id':61,'body':self.payload}] if self.payload else [])
         if path=='command/61':return Response({'id':61,'status':'failed' if self.failed else 'completed'})
-        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':Path(self.selection.media_path).stat().st_size,
+        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':(self.root/'Series'/'episode.mkv').stat().st_size,
             'path':'/elsewhere/episode.mkv' if self.wrong_destination else str(self.root/'Series'/'episode.mkv')})
         raise AssertionError(path)
 

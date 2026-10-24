@@ -1,6 +1,6 @@
 # Jellyfin library scan follow-up
 
-After successful staging or Keep, a configured Jellyfin address queues an
+After successful staging, Keep or post-Keep staging cleanup, a configured Jellyfin address queues an
 independent REFRESH_JELLYFIN job in the same SQLite completion transaction.
 Staging and Keep finish independently of scan success. No extra video readback,
 checksum, file copy or deletion is introduced. Shoko remains optional.

@@ -15,4 +15,6 @@ from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanu
 
 from src.nextgen.jobs.refresh_jellyfin_job import DEFINITION as refresh
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh))
+from src.nextgen.post_keep_cleanup import DEFINITION as cleanup_kept
+
+HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept))

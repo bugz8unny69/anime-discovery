@@ -17,6 +17,10 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('POST_KEEP_CLEANUP_COMPLETE','Selected staged artifacts were removed after confirming the permanent result.','Selected staging files removed.','The episode remains in the permanent library.','INFO',False),
+    Reason('POST_KEEP_CLEANUP_WAITING','Another attempt is still cleaning this kept episode.','Waiting to finish staged-file cleanup.','The worker will check again. The episode remains kept.','INFO',None),
+    Reason('POST_KEEP_CLEANUP_UNAVAILABLE','Sonarr or the staging/permanent filesystem is temporarily unavailable.','The episode is kept, but staged-file cleanup will retry.','Check service and mount availability.','WARNING',True),
+    Reason('POST_KEEP_CLEANUP_REVIEW','The saved Keep result or selected staging artifacts could not be confirmed.','The episode is kept, but staged-file cleanup needs review.','Check the permanent file and selected staged artifacts, then submit Keep again to resume only cleanup.','WARNING',False),
     Reason('JELLYFIN_CONFIGURATION_INVALID','The Jellyfin endpoint or API key is missing or rejected.','Configure Jellyfin refresh settings and credentials.','Review the address and private API key. Completed staging and Keep remain valid.','WARNING',False),
     Reason('JELLYFIN_UNAVAILABLE','Jellyfin did not accept the library scan request.','Jellyfin refresh is temporarily unavailable.','The refresh job will retry; completed media operations remain valid.','WARNING',True),
     Reason('JELLYFIN_REFRESH_REVIEW','The server returned an unexpected scan response.','Jellyfin refresh needs review.','Check the address and server API compatibility.','WARNING',False),
