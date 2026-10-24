@@ -40,13 +40,16 @@ class AcquisitionBudgetMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
             db.executescript((SQL_DIR / "022_keep_imports.sql").read_text())
             db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
+            from src.nextgen.storage.migrations import SCRIPTS as current_scripts
+            for name in current_scripts[23:]:
+                db.executescript((SQL_DIR/name).read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             row=db.execute('SELECT * FROM acquisition_plans').fetchone()
             self.assertEqual(row[:-1],before)
             self.assertIsNone(row[-1])
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],len(current_scripts))
         finally:db.close();fresh.close()
 
     def test_wrong_start_and_partial_failure_roll_back_column_and_table(self):

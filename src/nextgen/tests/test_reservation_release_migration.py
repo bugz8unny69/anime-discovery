@@ -34,6 +34,7 @@ class ReservationReleaseMigrationTests(unittest.TestCase):
             plans=db.execute('SELECT * FROM acquisition_plans').fetchall()
             sql=(migrations.SQL_DIR/'023_reservation_release.sql').read_text()
             migrations._apply_step(db,sql,23,migrations._scripts())
+            for name in migrations.SCRIPTS[23:]:db.executescript((migrations.SQL_DIR/name).read_text())
             initialize(fresh)
             self.assertEqual(migrations._structure(db),migrations._structure(fresh))
             self.assertEqual([r[:13] for r in db.execute('SELECT * FROM episode_reservations')],old)

@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import socket
+import struct
 
 from src.nextgen.api.admin_socket import start_admin
 from src.nextgen.api.password_store import PasswordStore
@@ -38,6 +41,37 @@ class AdminSocketTests(unittest.IsolatedAsyncioTestCase):
                 server.close()
                 await server.wait_closed()
                 os.unlink(path)
+
+    async def test_if_unset_preserves_password_and_rejects_unprivileged_peer(self):
+        from src.nextgen.api.admin_socket import serve_admin
+        class Peer:
+            uid=os.geteuid()
+            def getsockopt(self,*args):return struct.pack('3i',123,self.uid,123)
+        class Writer:
+            def __init__(self):self.response=b''
+            def get_extra_info(self,name):return Peer()
+            def write(self,data):self.response+=data
+            async def drain(self):pass
+            def close(self):pass
+            async def wait_closed(self):pass
+        async def send(store,**request):
+            reader=asyncio.StreamReader()
+            reader.feed_data(json.dumps(request).encode()+b'\n')
+            reader.feed_eof()
+            writer=Writer()
+            await serve_admin(reader,writer,store)
+            return json.loads(writer.response)
+        with tempfile.TemporaryDirectory() as directory:
+            store=PasswordStore(directory)
+            result=await send(store,command='set-password',password='first password for testing',if_unset=True)
+            self.assertTrue(result['ok'])
+            result=await send(store,command='set-password',password='replacement password for testing',if_unset=True)
+            self.assertTrue(result['unchanged'])
+            self.assertTrue(store.verify('first password for testing')[1])
+            Peer.uid=os.geteuid()+1000
+            result=await send(store,command='set-password',password='unauthorized password')
+            self.assertFalse(result['ok'])
+            self.assertTrue(store.verify('first password for testing')[1])
 
     async def test_reject_unsafe_socket_directory(self):
         with tempfile.TemporaryDirectory() as directory:

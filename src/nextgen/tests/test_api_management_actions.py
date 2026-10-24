@@ -18,6 +18,10 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
     async def test_reserved_completed_jobs_expose_cancel_and_accept_it_after_api_restart(self):
         evaluation,target=await reserve_without_metadata(self)
         self.app.close();self.app=Application(self.root,origin='https://anime.example');self.addCleanup(self.app.close)
+        from src.nextgen.api.auth import COOKIE
+        session,csrf=self.app.sessions.create(self.app.passwords.read()[1])
+        self.admin_cookie=COOKIE+'='+session
+        self.admin_csrf=csrf
         for member in (evaluation,target):
             status,result,_=await self.request('GET',f'/api/v1/jobs/{member}',token=ADMIN)
             self.assertEqual(status,200)
@@ -57,6 +61,10 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data['disabled_reason']['message_key'],'reason.MANAGEMENT_JOB_QUEUED.message')
         self.assertEqual(headers[b'location'].decode(),data['status_url'])
         self.app.close();self.app=Application(self.root,origin='https://anime.example');self.addCleanup(self.app.close)
+        from src.nextgen.api.auth import COOKIE
+        session,csrf=self.app.sessions.create(self.app.passwords.read()[1])
+        self.admin_cookie=COOKIE+'='+session
+        self.admin_csrf=csrf
         _,duplicate,_=await self.request('POST',f'/api/v1/jobs/{target}/cleanup',{},token=ADMIN)
         self.assertEqual(duplicate['data']['job_id'],data['job_id']);self.assertTrue(duplicate['data']['reused'])
         status,job,_=await self.request('GET',data['status_url'],token=ADMIN)

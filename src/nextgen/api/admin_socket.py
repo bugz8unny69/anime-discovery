@@ -26,11 +26,16 @@ async def serve_admin(reader, writer, password_store):
         if len(line) > MAX_LINE or not line.endswith(bytes([10])):
             raise ValueError("Invalid request")
         request = json.loads(line)
-        if type(request) is not dict or set(request) != {"command", "password"} or request["command"] != "set-password":
+        if type(request) is not dict or set(request) not in ({"command", "password"}, {"command", "password", "if_unset"}) or request["command"] != "set-password":
+            raise ValueError("Invalid request")
+        if "if_unset" in request and type(request["if_unset"]) is not bool:
             raise ValueError("Invalid request")
         revision, _ = password_store.read()
-        next_revision = await asyncio.to_thread(password_store.replace, request["password"], expected_revision=revision)
-        response = {"ok": True, "revision": next_revision}
+        if request.get("if_unset") and revision:
+            response = {"ok": True, "unchanged": True}
+        else:
+            next_revision = await asyncio.to_thread(password_store.replace, request["password"], expected_revision=revision)
+            response = {"ok": True, "revision": next_revision}
     except (ValueError, TypeError, json.JSONDecodeError, PasswordConflict, PasswordStorageError, asyncio.TimeoutError):
         response = {"ok": False}
     except Exception:

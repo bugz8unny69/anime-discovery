@@ -71,7 +71,7 @@ class DownloadSecretTests(unittest.TestCase):
         self.store.update_qbittorrent_credentials('','',expected_revision=3)
         with self.assertRaises(DownloadConfigurationError):self.store.qbittorrent_credentials()
 
-    def test_v1_read_and_tvdb_write_preserve_format_until_explicit_qb_update(self):
+    def test_v1_read_preserves_format_and_updates_publish_password_first_schema(self):
         path=self.root/'secrets.json'
         path.write_text(json.dumps({'schema_version':1,'revision':1,'credentials':{'tvdb_api_key':'old-private'}}))
         path.chmod(0o600)
@@ -79,9 +79,9 @@ class DownloadSecretTests(unittest.TestCase):
         self.assertFalse(self.store.status().qbittorrent_configured)
         self.assertEqual(path.read_bytes(),before)
         self.store.update_tvdb_api_key('rotated-private',expected_revision=1)
-        self.assertEqual(json.loads(path.read_text())['schema_version'],1)
+        self.assertEqual(json.loads(path.read_text())['schema_version'],7)
         self.store.update_qbittorrent_credentials('qb-user','qb-pass',expected_revision=2)
-        self.assertEqual(json.loads(path.read_text())['schema_version'],2)
+        self.assertEqual(json.loads(path.read_text())['schema_version'],7)
         self.assertEqual(self.store.tvdb_credentials().api_key,'rotated-private')
         self.assertEqual(sorted(p.name for p in self.root.iterdir()),['.settings.lock','secrets.json'])
 

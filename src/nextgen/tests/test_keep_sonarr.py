@@ -206,7 +206,7 @@ class SonarrCredentialApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,200);self.assertTrue(data['data']['status']['sonarr_configured'])
         self.assertNotIn('private-sonarr-key',json.dumps(data))
         self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
-        self.assertEqual(json.loads((self.root/'secrets.json').read_text())['schema_version'],4)
+        self.assertEqual(json.loads((self.root/'secrets.json').read_text())['schema_version'],7)
         self.assertEqual(self.secrets.access_credentials().webhook_token,WEB)
         self.secrets.update_tvdb_api_key('tvdb-key',expected_revision=2)
         self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
@@ -219,10 +219,13 @@ class KeepMigrationTests(unittest.TestCase):
             for script in SCRIPTS[:21]:db.executescript((SQL_DIR/script).read_text())
             before=db.execute('SELECT * FROM management_actions').fetchall()
             db.executescript((SQL_DIR/'022_keep_imports.sql').read_text())
-            db.executescript((SQL_DIR / "023_reservation_release.sql").read_text());initialize(fresh)
+            db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
+            from src.nextgen.storage.migrations import SCRIPTS
+            for name in SCRIPTS[23:]:db.executescript((SQL_DIR/name).read_text())
+            initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],len(SCRIPTS))
         finally:db.close();fresh.close()
 
     def test_wrong_version_and_partial_failure_roll_back(self):

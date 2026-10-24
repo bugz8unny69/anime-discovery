@@ -99,8 +99,11 @@ class DiagnosticMigrationTests(unittest.TestCase):
             other.executescript(script("021_reject_decisions.sql"))
             other.executescript(script("022_keep_imports.sql"))
             other.executescript(script("023_reservation_release.sql"))
+            from src.nextgen.storage.migrations import SCRIPTS as current_scripts
+            for name in current_scripts[23:]:
+                other.executescript((SQL_DIR/name).read_text())
             self.assertEqual(structure(self.db), structure(other))
-            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0],23)
+            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0],len(current_scripts))
         finally:
             other.close()
 

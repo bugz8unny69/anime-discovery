@@ -3,17 +3,23 @@ import argparse
 import getpass
 import json
 import socket
+import sys
 
 
 def main():
     parser = argparse.ArgumentParser(description="NextGen local administrator recovery")
     parser.add_argument("command", choices=("set-password",))
     parser.add_argument("--socket", default="/run/anime-discovery/admin.sock")
+    parser.add_argument("--password-stdin", action="store_true", help="Read a password from standard input for automation")
+    parser.add_argument("--if-unset", action="store_true", help="Initialize only; preserve an existing password")
     args = parser.parse_args()
-    password = getpass.getpass("New administrator password: ")
-    confirmation = getpass.getpass("Confirm password: ")
-    if password != confirmation:
-        parser.error("Passwords do not match")
+    if args.password_stdin:
+        password = sys.stdin.buffer.read(1026).decode('utf-8').removesuffix('\n')
+    else:
+        password = getpass.getpass("New administrator password: ")
+        confirmation = getpass.getpass("Confirm password: ")
+        if password != confirmation:
+            parser.error("Passwords do not match")
     from src.nextgen.api.passwords import validate_password
     try:
         validate_password(password)
@@ -22,7 +28,9 @@ def main():
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(15)
         conn.connect(args.socket)
-        payload = json.dumps({"command": args.command, "password": password}).encode()
+        request = {"command": args.command, "password": password}
+        if args.if_unset:request["if_unset"] = True
+        payload = json.dumps(request).encode()
         conn.sendall(payload + bytes([10]))
         response = b""
         while not response.endswith(bytes([10])) and len(response) < 2048:
@@ -36,6 +44,9 @@ def main():
         parser.error("Invalid admin socket response")
     if result.get("ok") is not True:
         parser.error("Password change failed")
+    if result.get("unchanged"):
+        print("Existing administrator password preserved.")
+        return
     print("Administrator password updated; existing dashboard sessions are invalidated.")
 
 

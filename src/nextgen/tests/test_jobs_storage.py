@@ -77,14 +77,18 @@ class JobsStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0], 0)
                 self.assertEqual(db.execute("SELECT count(*) FROM job_history").fetchone()[0], 0)
                 with self.assertRaises(ValueError):
-                    initialize(db)
+                    from src.nextgen.storage.migrations import SCRIPTS
+                for name in SCRIPTS[23:]:db.executescript((sql_dir/name).read_text())
+                initialize(db)
                 v3 = (sql_dir / "003_incoming_events.sql").read_text(encoding="utf-8")
                 db.executescript(v3)
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
                 self.assertEqual(db.execute("SELECT count(*) FROM incoming_events").fetchone()[0], 1)
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
                 with self.assertRaises(ValueError):
-                    initialize(db)
+                    from src.nextgen.storage.migrations import SCRIPTS
+                for name in SCRIPTS[23:]:db.executescript((sql_dir/name).read_text())
+                initialize(db)
                 db.executescript((sql_dir / "004_diagnostic_components.sql").read_text())
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
                 try:
@@ -119,6 +123,8 @@ class JobsStorageTests(unittest.TestCase):
                 db.executescript((sql_dir / "022_keep_imports.sql").read_text())
                 db.executescript((sql_dir / "023_reservation_release.sql").read_text())
                 self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0],23)
+                from src.nextgen.storage.migrations import SCRIPTS
+                for name in SCRIPTS[23:]:db.executescript((sql_dir/name).read_text())
                 initialize(db)
             finally:
                 db.close()
