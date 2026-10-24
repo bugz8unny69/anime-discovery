@@ -65,7 +65,7 @@ class RefreshTests(unittest.TestCase):
             self.assertEqual(store.sonarr_api_key(),'sonarr-key')
             store.update_tvdb_api_key('tvdb-key',expected_revision=2)
             self.assertEqual(store.jellyfin_api_key(),'jellyfin-key')
-            self.assertEqual(json.loads((Path(directory)/'secrets.json').read_text())['schema_version'],5)
+            self.assertEqual(json.loads((Path(directory)/'secrets.json').read_text())['schema_version'],7)
             store.update_jellyfin_api_key('',expected_revision=3)
             self.assertFalse(store.status().jellyfin_configured)
 
