@@ -80,3 +80,11 @@ deduplication, exact TVDB mapping, copy proof, lost command response, wrong
 destination digest, secrets v4, configuration v8 and SQLite v22. No CI, live
 Sonarr/Jellyfin calls, filesystem moves, browser tests, migrations, merge or
 deployment have been run in this work.
+
+
+## Follow-up refresh handoff (draft)
+
+After this job completes successfully, a separately owned `REFRESH_JELLYFIN`
+job is atomically enqueued if `jellyfin.base_url` was configured at completion.
+It requests a library scan only; media success and cleanup never depend on
+Jellyfin availability. See [REFRESH_JELLYFIN](REFRESH_JELLYFIN.md).
