@@ -343,7 +343,7 @@ class Application:
                         "FROM recognized_seasons s "
                         "LEFT JOIN recognized_aliases a "
                         "ON a.tvdb_series_id=s.tvdb_series_id AND a.tvdb_season=s.tvdb_season "
-                        "LEFT JOIN release_verifications v "
+                        "LEFT JOIN recognized_episodes v "
                         "ON v.tvdb_series_id=s.tvdb_series_id AND v.tvdb_season=s.tvdb_season "
                         "AND v.anidb_id=s.anidb_id "
                         "GROUP BY s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title "
