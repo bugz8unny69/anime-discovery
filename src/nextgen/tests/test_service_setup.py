@@ -31,7 +31,7 @@ class ServiceSetupTests(unittest.TestCase):
         self.assertEqual(ConfigurationStore(self.root).read().value('storage.database_path'),str(self.database))
         self.assertEqual(self.database.stat().st_mode&0o777,0o600)
         db=connect(self.database)
-        try:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],23)
+        try:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],24)
         finally:db.close()
         # API readiness must not require either a webhook token or a password.
         self.assertFalse(check_local(self.root)['external_services_checked'])
@@ -52,7 +52,7 @@ class ServiceSetupTests(unittest.TestCase):
     def test_pending_maintenance_is_not_reported_ready_and_preview_does_not_resume(self):
         self.initialize();self.access();gate=MaintenanceGate(self.database);ticket=gate.request()
         with self.assertRaises(MaintenancePending):check_local(self.root)
-        with database_preview(self.root) as (_,plan):self.assertEqual(plan.from_version,23)
+        with database_preview(self.root) as (_,plan):self.assertEqual(plan.from_version,24)
         self.assertEqual(gate.status(),ticket)
 
     def test_plan_token_pins_scripts_and_source_version(self):
