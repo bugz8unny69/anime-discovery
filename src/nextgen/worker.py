@@ -12,6 +12,7 @@ import threading
 import uuid
 
 from src.nextgen.async_io import blocking
+from src.nextgen.systemd_notify import notify, watchdog_interval
 from src.nextgen.cancellation import OperationGate, CancellationRequested
 from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.configuration import ConfigurationStore
@@ -268,15 +269,20 @@ class Worker:
         except (MaintenanceBusy, MaintenancePending):
             return
 
-    async def run(self):
+    async def run(self, *, on_ready=None):
         if self._running or self._closed:
             raise RuntimeError("worker cannot be started in its current state")
         self._running = True
         try:
+            ready = False
             while not self._stop.is_set():
                 worked = False
                 if not self._paused:
                     await self._recover()
+                    if not ready:
+                        ready = True
+                        if on_ready is not None:
+                            on_ready()
                     while len(self._tasks) < self.concurrency and not self._stop.is_set():
                         task = asyncio.create_task(self.attempt())
                         self._tasks.add(task)
@@ -317,17 +323,34 @@ async def run_worker(config_directory, registrations, *, policy=Policy()):
     await serve_worker(worker)
 
 
+async def _systemd_watchdog(worker, interval):
+    """Heartbeat from the worker event loop; a blocked loop cannot fake health."""
+    while not worker._stop.is_set():
+        try:
+            await asyncio.wait_for(worker._stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            notify("WATCHDOG=1")
+
+
 async def serve_worker(worker):
     """Run a composed worker with service signal handling and guaranteed close."""
     import signal
     loop = asyncio.get_running_loop()
     installed = []
+    watchdog_task = None
     try:
         for selected in (signal.SIGTERM,signal.SIGINT):
             loop.add_signal_handler(selected,worker.stop)
             installed.append(selected)
-        await worker.run()
+        interval = watchdog_interval()
+        if interval is not None:
+            watchdog_task = asyncio.create_task(_systemd_watchdog(worker, interval))
+        await worker.run(on_ready=lambda: notify("READY=1"))
     finally:
+        worker.stop()
+        if watchdog_task is not None:
+            await watchdog_task
+        notify("STOPPING=1")
         for selected in installed:
             loop.remove_signal_handler(selected)
         await worker.close()
