@@ -58,7 +58,7 @@ def _missing_episode(client,sonarr_id,identity):
         raise SonarrReview()
 
 
-def registration(secrets):
+def registration(secrets=None):
     async def execute(context):
         actions=ManagementActions(context.configuration.value("storage.database_path"))
         journal=KeepJournal(actions.queue.database)
@@ -77,6 +77,7 @@ def registration(secrets):
             # replay a POST from the durable uncertain boundary.
             return Outcome("review","KEEP_COMMAND_UNCERTAIN")
         try:
+            if secrets is None:return Outcome("blocked","SONARR_CONFIGURATION_INVALID")
             key=await blocking(secrets.sonarr_api_key)
             options=_options(record,context.configuration,key)
             client=SonarrClient(options)
