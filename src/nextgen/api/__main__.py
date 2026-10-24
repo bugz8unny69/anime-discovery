@@ -3,6 +3,7 @@ import argparse
 import getpass
 import ipaddress
 import logging
+import re
 
 from src.nextgen.api.app import Application
 from src.nextgen.api.auth import ApiError
@@ -27,11 +28,8 @@ def main():
     if args.command=='init-access':
         store=SecretStore(args.config_dir)
         webhook=getpass.getpass('Autobrr webhook key (32–256 URL-safe characters): ')
-        from src.nextgen.secrets import _access_value
-        try:
-            if not webhook or not _access_value(webhook):raise ValueError()
-        except (ValueError,TypeError):
-            parser.error('A webhook key is required.')
+        if re.fullmatch(r'[A-Za-z0-9_-]{32,256}',webhook) is None:
+            parser.error('A URL-safe webhook key of 32–256 characters is required.')
         status=store.status()
         result=(store.initialize(webhook_token=webhook) if status.revision==0
                 else store.update_webhook_token(webhook,expected_revision=status.revision))
