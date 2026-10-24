@@ -69,6 +69,7 @@ def candidates(payload,*,series_title,season,episode):
             or type(season) is not int or season<0 or type(episode) is not int or episode<1):
         raise SearchConfigurationInvalid()
     found={}
+    conflicting=set()
     for item in payload:
         if type(item) is not dict:continue
         title=item.get("title")
@@ -82,10 +83,12 @@ def candidates(payload,*,series_title,season,episode):
         except (ValueError,TypeError):continue
         digest=_infohash(item)
         if not digest:continue
+        if digest in conflicting:continue
         if digest in found and found[digest]!=title:
             # One hash with conflicting release declarations needs review,
             # never choose a title based on provider ordering.
             found.pop(digest)
+            conflicting.add(digest)
             continue
         found[digest]=title
     return tuple(sorted(found.items()))[:25]
