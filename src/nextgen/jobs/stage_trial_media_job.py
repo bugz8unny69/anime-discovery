@@ -54,6 +54,6 @@ def registration(*,publisher_factory=Publisher,journal_factory=Journal,refresh_k
         except REVIEW as exc:return Outcome('review',exc.reason_code)
     def route(value):
         if refresh_kind is None or not value['refresh_required']:return ()
-        return (Successor.create(refresh_kind,{'source_kind':KIND,'source_job_id':value['source_job_id']}),)
+        return (Successor.create(refresh_kind,{'source_kind':KIND,'source_job_id':value['source_job_id']},independent=True),)
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
                         successor_kinds=() if refresh_kind is None else (refresh_kind,))
