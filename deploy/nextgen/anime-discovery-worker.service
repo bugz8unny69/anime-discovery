@@ -1,13 +1,20 @@
 [Unit]
 Description=Anime Discovery NextGen acquisition and media worker
 PartOf=anime-discovery.target
+Requires=anime-discovery-api.service
+BindsTo=anime-discovery-api.service
+After=anime-discovery-api.service
 Wants=network-online.target
 After=network-online.target remote-fs.target
 # Edit these paths together with settings and ReadWritePaths.
 RequiresMountsFor=/srv/anime-discovery/downloads /srv/anime-discovery/staging /srv/anime-discovery/library
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=60s
+StartLimitIntervalSec=300
+StartLimitBurst=5
 User=anime-discovery
 Group=anime-discovery
 WorkingDirectory=/opt/anime-discovery
