@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from src.nextgen.async_io import blocking
 from src.nextgen.systemd_notify import notify, watchdog_interval
 from src.nextgen.api.password_store import PasswordStore, PasswordConflict, PasswordStorageError
+from src.nextgen.api.passwords import verify_password
 from src.nextgen.api.admin_socket import start_admin
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
@@ -262,7 +263,7 @@ class Application:
             if query:raise ApiError(400,'API_REQUEST_INVALID')
             check_origin(headers,self.origin,required=True)
             self.sessions.attempt(peer);exact(body,('password',))
-            if not self.passwords.verify(body['password'])[1]:raise ApiError(401,'API_AUTH_REQUIRED')
+            if not verify_password(body['password'],password_digest):raise ApiError(401,'API_AUTH_REQUIRED')
             token,csrf=self.sessions.create(password_digest)
             event(self.logger,logging.INFO,'API_SESSION_CREATED',component='api')
             return 201,{'csrf_token':csrf,'expires_in':self.sessions.ttl},[(b'set-cookie',self._cookie(token).encode())]
@@ -283,7 +284,7 @@ class Application:
             if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
             if query:raise ApiError(400,'API_REQUEST_INVALID')
             exact(body,('current_password','new_password'))
-            if not self.passwords.verify(body['current_password'])[1]:raise ApiError(401,'API_AUTH_REQUIRED')
+            if not verify_password(body['current_password'],password_digest):raise ApiError(401,'API_AUTH_REQUIRED')
             try:
                 new_revision=self.passwords.replace(body['new_password'],expected_revision=password_revision)
             except PasswordConflict:
