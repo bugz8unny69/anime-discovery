@@ -9,6 +9,7 @@ import uuid
 from urllib.parse import parse_qs, urlsplit
 
 from src.nextgen.async_io import blocking
+from src.nextgen.systemd_notify import notify
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
@@ -124,8 +125,11 @@ class Application:
         if scope['type']=='lifespan':
             while True:
                 message=await receive()
-                if message['type']=='lifespan.startup':await send({'type':'lifespan.startup.complete'})
+                if message['type']=='lifespan.startup':
+                    await send({'type':'lifespan.startup.complete'})
+                    notify('READY=1')
                 elif message['type']=='lifespan.shutdown':
+                    notify('STOPPING=1')
                     await blocking(self.close)
                     await send({'type':'lifespan.shutdown.complete'});return
             return
