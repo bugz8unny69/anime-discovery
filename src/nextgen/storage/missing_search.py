@@ -75,9 +75,15 @@ def _batch(db,evaluation_job_id,event_id):
     reserved={x[0] for x in db.execute(
         "SELECT tvdb_episode FROM episode_reservations WHERE tvdb_series_id=? "
         "AND tvdb_season=? AND tvdb_order='official'",(tid,season))}
+    # A separately verified incoming release for this AniDB entry already
+    # supplies a candidate to the regular queue, even before reservation.
+    known={x[0] for x in db.execute(
+        "SELECT tvdb_episode FROM release_verifications WHERE anidb_id=? "
+        "AND tvdb_series_id=? AND tvdb_season=? AND tvdb_order='official'",
+        (aid,tid,season))}
     searched={x[0] for x in db.execute(
         "SELECT tvdb_episode FROM missing_episode_searches WHERE plan_id=?",(plan,))}
-    left=[n for n in positions if n not in reserved and n not in searched]
+    left=[n for n in positions if n not in reserved and n not in known and n not in searched]
     return Batch(evaluation_job_id,event_id,plan,aid,tid,season,title,
                  tuple(left[:8]),len(left)>8)
 
