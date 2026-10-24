@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 7
+CONFIGURATION_VERSION = 8
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -73,6 +73,14 @@ FIELDS = MappingProxyType({
         label="Torrent metadata source", help_text="Trusted HTTP(S) base folder serving lowercase-infohash.torrent files. No credentials, query, redirects or webhook URLs. Required before acquisition."),
     "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
         label="Torrent metadata timeout", help_text="Connect/read timeout and deadline checks between response chunks, in seconds."),
+    "sonarr.base_url": FieldDefinition("", "download_endpoint", "next_operation",
+        label="Sonarr address", help_text="Sonarr API v3 HTTP(S) origin, no credentials or subpath. Required before Keep."),
+    "sonarr.root_folder": FieldDefinition("", "directory", "next_operation",
+        label="Sonarr library root", help_text="Registered Sonarr root folder for permanent anime imports; must match Keep root."),
+    "sonarr.quality_profile_name": FieldDefinition("Anime", "sonarr_profile", "next_operation",
+        label="Sonarr quality profile", help_text="Exact existing Sonarr quality-profile name. Existing series settings are never silently changed."),
+    "sonarr.timeout_seconds": FieldDefinition(15, "integer", "next_operation", minimum=1, maximum=60,
+        label="Sonarr timeout", help_text="Maximum time per Sonarr API request, seconds."),
     "qbittorrent.base_url": FieldDefinition("", "download_endpoint", "next_operation",
         label="qBittorrent address", help_text="HTTP or HTTPS server address without credentials, query or subpath. Required before download work."),
     "qbittorrent.category": FieldDefinition("anime-discovery", "download_category", "next_operation",
@@ -184,6 +192,9 @@ def validate_values(value):
                     except ValueError:raise ConfigurationError() from None
             elif spec.kind == "download_category":
                 if type(item) is not str or not re.fullmatch('[A-Za-z0-9_-]{1,64}',item):raise ConfigurationError()
+            elif spec.kind == "sonarr_profile":
+                if (type(item) is not str or not 1 <= len(item) <= 128
+                        or any(ord(char)<32 or ord(char)==127 for char in item)):raise ConfigurationError()
             elif spec.kind == "client_name":
                 if type(item) is not str or (item and not re.fullmatch(r"[A-Za-z0-9_-]{3,32}",item)):
                     raise ConfigurationError()
@@ -219,6 +230,10 @@ def validate_values(value):
         raise ConfigurationError()
     database = PurePosixPath(result["storage"]["database_path"])
     if any(database.is_relative_to(root) for root in roots):
+        raise ConfigurationError()
+    if (result["sonarr"]["base_url"] and result["sonarr"]["root_folder"]
+            and result["storage"]["keep_root"]
+            and result["sonarr"]["root_folder"] != result["storage"]["keep_root"]):
         raise ConfigurationError()
     if result["trial"]["backfill_count"] == 0 and result["trial"]["following_count"] == 0:
         raise ConfigurationEpisodeSelectionError()
@@ -431,7 +446,7 @@ def _v5_to_v6(document):
 def _v6_values(values):
     """Keep published v6 shapes free of metadata-source fields."""
     if type(values) is not dict or 'torrent_metadata' in values:raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v7_values(values)
     del historical['torrent_metadata']
     return historical
 
@@ -441,12 +456,28 @@ def _v6_to_v7(document):
             or document['schema_version']!=6):raise ConfigurationError()
     current=revision(document['revision'])
     if current==MAX_REVISION:raise ConfigurationError()
-    return {'schema_version':7,'revision':current+1,'settings':validate_values(_v6_values(document['settings']))}
+    return {'schema_version':7,'revision':current+1,'settings':_v7_values(_v6_values(document['settings']))}
+
+
+def _v7_values(values):
+    """Keep the exact published v7 configuration shape without Sonarr fields."""
+    if type(values) is not dict or 'sonarr' in values:raise ConfigurationError()
+    historical=validate_values(values)
+    del historical['sonarr']
+    return historical
+
+
+def _v7_to_v8(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=7):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':8,'revision':current+1,'settings':validate_values(_v7_values(document['settings']))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8})
 
 
 def convert_document(document):
