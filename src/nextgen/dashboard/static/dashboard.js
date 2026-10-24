@@ -35,7 +35,7 @@ const node = (tag, text, cls) => {
 };
 const state = {
   csrf: null, generation: 0, requests: new Set(), jobs: [], pending: new Set(),
-  page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : 'intake',
+  page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : location.pathname === '/recognized' ? 'recognized' : 'intake',
   cursor: MAX_CURSOR, previous: [], next: null, loading: null, timer: null,
   settings: null, credentials: null, dirty: false,
   historyJob: null, historyCursor: 0, historyNext: null, historyVersion: 0,
@@ -55,6 +55,7 @@ function clearPrivate(message = '') {
   state.historyJob = null; state.historyVersion += 1;
   $('job-rows').replaceChildren(); $('settings-fields').replaceChildren();
   $('credential-forms').replaceChildren(); $('history-rows').replaceChildren();
+  $('recognized-rows').replaceChildren(); $('recognized-note').textContent = '';
   $('access-key').value = '';
   if ($('history-dialog').open) $('history-dialog').close();
   $('workspace').hidden = true; $('sign-out').hidden = true; $('login-panel').hidden = false;
@@ -351,11 +352,36 @@ function renderCredentials() {
   container.appendChild(node('p', 'Saved credentials are never revealed. The webhook token cannot administer the dashboard.', 'muted'));
   container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'}`, 'muted'));
 }
+async function loadRecognized() {
+  const generation = state.generation;
+  const table = $('recognized-rows');
+  try {
+    const result = await request(`${API}/recognized`);
+    if (generation !== state.generation || !state.csrf) return;
+    table.replaceChildren();
+    for (const item of result.items) {
+      const tr = node('tr');
+      for (const value of [item.title, item.season, item.anidb_id, item.tvdb_series_id,
+        item.alias_count, item.verified_episode_count]) {
+        tr.appendChild(node('td', value));
+      }
+      table.appendChild(tr);
+    }
+    $('recognized-note').textContent = result.items.length
+      ? `${result.items.length} verified series/season identities`
+      : 'No verified series/season identities yet.';
+  } catch (error) {
+    $('recognized-note').textContent = error.message;
+  }
+}
 async function showWorkspace() {
   $('login-panel').hidden = true; $('workspace').hidden = false; $('sign-out').hidden = false;
-  $('activity-panel').hidden = state.page === 'settings'; $('settings-panel').hidden = state.page !== 'settings';
+  $('activity-panel').hidden = state.page === 'settings' || state.page === 'recognized';
+  $('settings-panel').hidden = state.page !== 'settings';
+  $('recognized-panel').hidden = state.page !== 'recognized';
   for (const link of document.querySelectorAll('nav a')) link.classList.toggle('selected', new URL(link.href).pathname === location.pathname);
   if (state.page === 'settings') { await loadSettings(); return; }
+  if (state.page === 'recognized') { await loadRecognized(); return; }
   $('page-title').textContent = state.page === 'intake' ? 'Intake' : 'Jobs';
   $('activity-title').textContent = state.page === 'intake' ? 'Incoming anime' : 'Job activity';
   $('page-description').textContent = state.page === 'intake' ? 'Follow incoming anime through processing and staging.' : 'Track jobs and their recorded history. Status updates every five seconds.';
@@ -393,6 +419,7 @@ $('sign-out').addEventListener('click', async () => {
   catch (error) { displayError(error); }
 });
 $('refresh').addEventListener('click', () => loadActivity());
+$('refresh-recognized').addEventListener('click', () => loadRecognized());
 $('reload-settings').addEventListener('click', async () => {
   if (state.dirty && !confirm(COPY['dashboard.discard'])) return;
   await loadSettings();
