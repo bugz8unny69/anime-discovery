@@ -21,12 +21,9 @@ async def serve_admin(reader, writer, password_store):
         # File mode and directory ACLs gate connections; peer identity adds a
         # fail-closed second layer. Group membership is checked by the kernel.
         if uid not in (0, os.geteuid()):
-            # Administrators in the socket group may have distinct UIDs.
-            # Their authorization is controlled by kernel socket permissions.
-            if not os.access(writer.get_extra_info("sockname"), os.W_OK):
-                return
+            return
         line = await asyncio.wait_for(reader.readline(), timeout=10)
-        if len(line) > MAX_LINE or not line.endswith(b"\\n"):
+        if len(line) > MAX_LINE or not line.endswith(bytes([10])):
             return
         request = json.loads(line)
         if type(request) is not dict or set(request) != {"command", "password"} or request["command"] != "set-password":
