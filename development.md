@@ -12,6 +12,21 @@ for finishing missing functionality. Preserve the agreed staging move with no
 byte-for-byte destination comparison. Tests/CI remain unrun until authorized;
 no merge, deployment or live media operations are implied.
 
+## Jellyfin refresh — 2026-10-24 (draft; not yet validated)
+
+Staging and verified Sonarr Keep now optionally schedule independent
+`REFRESH_JELLYFIN` jobs when `jellyfin.base_url` is configured. The worker's
+fenced transaction enqueues each follow-up with original job/event provenance
+in a **new operation** so a staged operation remains closed to acquisition.
+The refresh handler checks the source's committed publication/Keep evidence,
+then requests `POST /Library/Refresh` using a private Jellyfin token;
+a successful HTTP response proves only that the scan was requested.
+Independent retries cannot undo stage/Keep or cause repeated Sonarr import.
+Configuration v9 and secrets v5 explicitly add this opt-in integration; SQLite
+remains v22. See [REFRESH_JELLYFIN](src/nextgen/jobs/REFRESH_JELLYFIN.md).
+Tests, browser checks, migrations, live scans, merges and deployment were
+**not run**.
+
 ## Keep through Sonarr — 2026-10-24 (draft; not yet validated)
 
 Implement the primary selected-episode Keep path without importing any legacy
