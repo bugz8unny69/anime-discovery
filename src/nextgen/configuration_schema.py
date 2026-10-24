@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 6
+CONFIGURATION_VERSION = 7
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -69,6 +69,10 @@ class FieldDefinition:
 # Register new fields with their actual component; do not expose speculative
 # provider/acquisition controls before those components define their semantics.
 FIELDS = MappingProxyType({
+    "torrent_metadata.base_url": FieldDefinition("", "metadata_source", "next_operation",
+        label="Torrent metadata source", help_text="Trusted HTTP(S) base folder serving lowercase-infohash.torrent files. No credentials, query, redirects or webhook URLs. Required before acquisition."),
+    "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
+        label="Torrent metadata timeout", help_text="Connect/read timeout and deadline checks between response chunks, in seconds."),
     "qbittorrent.base_url": FieldDefinition("", "download_endpoint", "next_operation",
         label="qBittorrent address", help_text="HTTP or HTTPS server address without credentials, query or subpath. Required before download work."),
     "qbittorrent.category": FieldDefinition("anime-discovery", "download_category", "next_operation",
@@ -166,6 +170,12 @@ def validate_values(value):
             if spec.kind == "integer":
                 if type(item) is not int or not spec.minimum <= item <= spec.maximum:
                     raise ConfigurationError()
+            elif spec.kind == "metadata_source":
+                if type(item) is not str:raise ConfigurationError()
+                if item:
+                    from src.nextgen.acquisition.metainfo_source import source_url
+                    try:source_url(item)
+                    except ValueError:raise ConfigurationError() from None
             elif spec.kind == "download_endpoint":
                 if type(item) is not str:raise ConfigurationError()
                 if item:
@@ -403,7 +413,7 @@ def _v5_values(values):
     if type(values) is not dict or set(values) & {'qbittorrent','acquisition'}:raise ConfigurationError()
     storage=values.get('storage',{})
     if type(storage) is not dict or 'download_root' in storage:raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v6_values(values)
     del historical['qbittorrent']
     del historical['acquisition']
     del historical['storage']['download_root']
@@ -415,12 +425,28 @@ def _v5_to_v6(document):
             or document['schema_version']!=5):raise ConfigurationError()
     current=revision(document['revision'])
     if current==MAX_REVISION:raise ConfigurationError()
-    return {'schema_version':6,'revision':current+1,'settings':validate_values(_v5_values(document['settings']))}
+    return {'schema_version':6,'revision':current+1,'settings':_v6_values(_v5_values(document['settings']))}
+
+
+def _v6_values(values):
+    """Keep published v6 shapes free of metadata-source fields."""
+    if type(values) is not dict or 'torrent_metadata' in values:raise ConfigurationError()
+    historical=validate_values(values)
+    del historical['torrent_metadata']
+    return historical
+
+
+def _v6_to_v7(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=6):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':7,'revision':current+1,'settings':validate_values(_v6_values(document['settings']))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7})
 
 
 def convert_document(document):

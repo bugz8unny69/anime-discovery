@@ -8,6 +8,8 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.providers.errors import ProviderDeferred, ProviderUnavailable
+from src.nextgen.acquisition.metainfo_source import (MetadataSourceWaiting, MetadataSourceUnavailable,
+    MetadataSourceConfigurationError, MetadataSourceDenied)
 from src.nextgen.storage.acquisition import load_acquisition_input, persist_acquisition, validate_declaration
 from src.nextgen.worker import blocking
 
@@ -40,6 +42,9 @@ def registration(read_metainfo,*,submission_kind=None):
             raw=await read_metainfo(source,context.configuration,context.cancelled)
             manifest=await blocking(parse_metainfo,raw,source.info_hash)
             validate_declaration(source,manifest)
+        except MetadataSourceWaiting as exc:return Outcome('defer',exc.reason_code,delay_ms=exc.delay_ms)
+        except MetadataSourceUnavailable as exc:return Outcome('retry',exc.reason_code)
+        except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:return Outcome('review',exc.reason_code)
         except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
         except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:return Outcome('review',exc.reason_code)

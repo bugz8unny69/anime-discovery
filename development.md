@@ -4,6 +4,22 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Hash-addressed metadata retrieval — 2026-10-23
+
+The identity worker now supplies an HTTP(S) metainfo reader and installs
+preparation/submission/download by default. A trusted configured base folder
+serves lowercase-infohash.torrent files; no third-party default or webhook URL
+is selected. Missing configuration enters review; absent metadata waits; bad
+hash/inventory/access cannot authorize submission. Custom readers still work.
+
+Configuration v7 explicitly adds metadata source/timeout settings, rendered by
+the dashboard, while preserving historical converter shapes. SQLite stays v18;
+secrets stay v3. Retrieval is bounded, cancellation-drained and redirect/proxy-free.
+It persists no raw metainfo and creates no temporary client entries. See
+[the metadata source contract](src/nextgen/acquisition/METAINFO_SOURCE.md).
+Video verification and staging remain next. Offline tests and CI are unexecuted;
+no live services, migrations, media operations or deployment.
+
 ## Reuse the dashboard through API v1 — 2026-10-23
 
 Adapt the legacy dark shell, jobs table, badges and schema-driven forms in an

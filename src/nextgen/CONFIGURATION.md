@@ -34,6 +34,8 @@ separately. No config-revision field is added to SQLite history in this PR.
 | worker.concurrency | 4 | Restart | Worker |
 | storage.trial_root | Unconfigured | Next operation | None |
 | storage.keep_root | Unconfigured | Next operation | None |
+| torrent_metadata.base_url | Unconfigured | Next operation | None |
+| torrent_metadata.timeout_seconds | 30 | Next operation | None |
 | storage.database_path | /var/lib/anime-discovery/nextgen.sqlite | Restart | All current components |
 
 FIELDS defines defaults, type/range validation and apply metadata.
@@ -50,13 +52,14 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=6, a positive revision, and a settings object
+Canonical JSON has schema_version=7, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 6,
+      "schema_version": 7,
       "revision": 1,
       "settings": {
+        "torrent_metadata": {"base_url": "", "timeout_seconds": 30},
         "qbittorrent": {"base_url": "", "category": "anime-discovery", "timeout_seconds": 30},
         "acquisition": {"max_episode_mb": 600, "max_plan_mb": 3000},
         "trial": {"backfill_count": 6, "following_count": 1},
@@ -69,7 +72,7 @@ containing the sections above. Example:
       }
     }
 
-Configuration version, publication revision, SQLite v15 and AnimeSeries v2 are
+Configuration version, publication revision, SQLite v18 and AnimeSeries v2 are
 independent. Effective no-op updates neither increment revision nor rewrite.
 Unversioned historical NextGen logging-only JSON is source v0. Explicit 0→1
 conversion preserves its logging values and adds the original v1 envelope/defaults.
@@ -269,4 +272,15 @@ returns desired/effective values, restart fields and shared field metadata.
 Host/port/database path remain pinned until restart. Public browser origin is an
 explicit server startup option, not a live settings override. See
 [api/README.md](api/README.md). No implicit settings/SQL migration or service restart
-is exposed; those management routes remain future work. Configuration stays v6.
+is exposed; those management routes remain future work.
+
+## Torrent metadata source — configuration v7
+
+Version 7 adds torrent_metadata.base_url (blank until configured) and
+torrent_metadata.timeout_seconds (30, bounded 1–60), both applied to new operation
+snapshots. The address is a trusted base folder serving lowercase-infohash.torrent
+files, not a delivery-supplied URL/template or secret-bearing query.
+The explicit v6→v7 conversion preserves existing settings and historical output
+shapes. Use the existing preview/backup/apply contract; no automatic startup
+conversion. The dashboard renders these new fields from metadata.
+See [the retrieval contract](acquisition/METAINFO_SOURCE.md).

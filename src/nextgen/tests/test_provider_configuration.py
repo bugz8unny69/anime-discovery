@@ -45,7 +45,7 @@ class ProviderConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 convert_document({**document,"settings":{**document["settings"],"anidb":{"client_name":"new"}}})
         current = convert_document(third)
-        self.assertEqual((current.schema_version,current.revision),(6,6))
+        self.assertEqual((current.schema_version,current.revision),(7,7))
         self.assertEqual(current.value("anidb.client_name"),"")
         self.assertEqual(current.value("providers.timeout_seconds"),30)
 
@@ -232,15 +232,17 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         db=connect(self.database)
         try:
             self.assertEqual(db.execute('SELECT kind,state FROM jobs ORDER BY job_id').fetchall(),
-                             [('IDENTIFY_ANIME','DONE'),('VERIFY_RELEASE','DONE'),('EVALUATE_TRIAL','DONE'),('RESERVE_EPISODE','DONE')])
+                             [('IDENTIFY_ANIME','DONE'),('VERIFY_RELEASE','DONE'),('EVALUATE_TRIAL','DONE'),('RESERVE_EPISODE','DONE'),('PREPARE_ACQUISITION','PENDING')])
             self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
         finally:db.close()
 
-    async def test_metadata_preparation_is_installed_only_with_trusted_reader(self):
+    async def test_metadata_preparation_is_installed_by_default_with_trusted_override(self):
         self.secrets.initialize('private-key')
         worker=await build_identity_worker(self.root)
         self.addAsyncCleanup(worker.close)
-        self.assertNotIn('PREPARE_ACQUISITION',worker.registry.entries)
+        self.assertIn('PREPARE_ACQUISITION',worker.registry.entries)
+        self.assertIn('SUBMIT_TORRENT',worker.registry.entries)
+        self.assertIn('DOWNLOAD_TORRENT',worker.registry.entries)
         self.assertIn('CLEANUP_CANCELED_OPERATION',worker.registry.entries)
         self.assertIn('KEEP_MEDIA',worker.registry.entries)
         async def reader(*args):raise AssertionError('startup must not read metadata')

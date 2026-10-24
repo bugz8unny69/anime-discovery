@@ -137,3 +137,8 @@ Its SQLite v15 journal pins the request and consumes one send right before a
 possible stopped add. Timeout/crash retries reconcile rather than resubmit.
 Transfer selection/start and a real metainfo retrieval adapter remain separate.
 See SUBMIT_TORRENT.md; PREPARED still does not mean downloaded or externally owned.
+The default composed identity worker now supplies a real hash-addressed metadata
+reader and installs preparation through download. Explicit trusted readers remain
+supported. Missing source settings stop at preparation with a readable review
+reason. See [the reader contract](../acquisition/METAINFO_SOURCE.md); this
+supersedes older default-reservation-only/reader-unimplemented notes here.

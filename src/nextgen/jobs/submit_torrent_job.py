@@ -10,6 +10,8 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.providers.errors import ProviderDeferred, ProviderUnavailable
+from src.nextgen.acquisition.metainfo_source import (MetadataSourceWaiting, MetadataSourceUnavailable,
+    MetadataSourceConfigurationError, MetadataSourceDenied)
 from src.nextgen.storage.submissions import SubmissionJournal, target_options, _plan, _intent
 from src.nextgen.worker import blocking
 
@@ -75,6 +77,9 @@ def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=S
             if state in ('EXTERNAL','REVIEW'):return Outcome('review',reason)
             return Outcome('defer',reason,delay_ms=60000)
         except ClientUnavailable:return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
+        except MetadataSourceWaiting as exc:return Outcome('defer',exc.reason_code,delay_ms=exc.delay_ms)
+        except MetadataSourceUnavailable as exc:return Outcome('retry',exc.reason_code)
+        except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:return Outcome('review',exc.reason_code)
         except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
         except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeEvidenceMissing,DownloadConfigurationError,

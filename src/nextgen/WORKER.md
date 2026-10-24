@@ -1,5 +1,12 @@
 # Async worker core
 
+Current metadata composition: the identity worker supplies the built-in
+hash-addressed HTTP(S) reader and installs acquisition through download by
+default. Source configuration is checked at use, not during unrelated identity
+startup. Missing source settings enter review. A trusted read_metainfo override
+remains supported. This supersedes older optional-reader/default-reservation-only
+notes below. See [metadata retrieval](acquisition/METAINFO_SOURCE.md).
+
 Implemented core only: worker.py, job_contracts.py and storage/job_queue.py.
 An opt-in identity handler/persistence adapter is now in jobs/identify_anime_job.py;
 its concrete verified-identity resolver is still required at composition time.

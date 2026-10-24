@@ -12,6 +12,7 @@ from src.nextgen.jobs.prepare_acquisition_job import KIND as PREPARE_KIND, regis
 from src.nextgen.jobs.submit_torrent_job import KIND as SUBMIT_KIND, registration as submit_registration
 from src.nextgen.jobs.download_torrent_job import KIND as DOWNLOAD_KIND, registration as download_registration
 from src.nextgen.jobs.management import registrations as management_registrations
+from src.nextgen.acquisition.metainfo_source import make_reader
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
 from src.nextgen.providers.identity import ClientPool, make_resolver
@@ -50,11 +51,12 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     pool=ClientPool()
     resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
-    preparation=() if read_metainfo is None else (prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
+    read_metainfo=make_reader() if read_metainfo is None else read_metainfo
+    preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
                                                 download_registration(secrets))
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
-                         release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=None if read_metainfo is None else PREPARE_KIND),
+                         release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=PREPARE_KIND),
                          *preparation,*management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 

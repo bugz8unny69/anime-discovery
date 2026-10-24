@@ -17,6 +17,14 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('TORRENT_METADATA_CONFIGURATION_INVALID', 'The trusted hash-addressed metainfo source is missing or invalid.',
+           'Configure the torrent metadata source before downloading.', 'Set the metadata source address in Settings, then review this job.', 'WARNING', False),
+    Reason('TORRENT_METADATA_UNAVAILABLE', 'The metadata source request failed or timed out before usable bytes were received.',
+           'The torrent metadata source is temporarily unavailable.', 'The job can retry. Check the source connection if this continues.', 'WARNING', True),
+    Reason('TORRENT_METADATA_WAITING', 'The source has no metainfo yet, is rate limited or requests a later check.',
+           'Waiting for torrent metadata.', 'The job will check the configured source again later.', 'INFO', None),
+    Reason('TORRENT_METADATA_DENIED', 'The configured metainfo source returned an access denial.',
+           'The torrent metadata source refused access.', 'Review the configured source and its access requirements.', 'WARNING', False),
     Reason('MANAGEMENT_JOB_QUEUED', 'An existing action job is queued, so another action cannot start.', 'A job is already queued.', 'Wait for the job to start.', 'INFO', None),
     Reason('MANAGEMENT_JOB_RUNNING', 'An existing action job is running, so another action cannot start.', 'A job is already in progress.', 'Wait for the job to finish.', 'INFO', None),
     Reason('MANAGEMENT_JOB_WAITING', 'An existing action job is waiting for its next check or attempt.', 'A job is waiting to continue.', 'Check the job status for details.', 'INFO', None),
