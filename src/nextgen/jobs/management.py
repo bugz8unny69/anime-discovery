@@ -5,5 +5,5 @@ from src.nextgen.jobs.keep_media_job import registration as keep
 
 from src.nextgen.jobs.reject_media_job import registration as reject
 
-def registrations(secrets):
-    return (cleanup(secrets),keep(secrets),reject())
+def registrations(secrets,*,refresh_kind=None):
+    return (cleanup(secrets),keep(secrets,refresh_kind=refresh_kind),reject())
