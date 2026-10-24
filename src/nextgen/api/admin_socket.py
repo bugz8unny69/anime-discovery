@@ -29,7 +29,7 @@ async def serve_admin(reader, writer, password_store):
         if type(request) is not dict or set(request) != {"command", "password"} or request["command"] != "set-password":
             return
         revision, _ = password_store.read()
-        next_revision = password_store.replace(request["password"], expected_revision=revision)
+        next_revision = await asyncio.to_thread(password_store.replace, request["password"], expected_revision=revision)
         response = {"ok": True, "revision": next_revision}
     except (ValueError, TypeError, json.JSONDecodeError, PasswordConflict, PasswordStorageError, asyncio.TimeoutError):
         response = {"ok": False}
