@@ -214,3 +214,24 @@ References checked during design:
 - [ASGI HTTP specification](https://asgi.readthedocs.io/en/latest/specs/www.html)
 - [Uvicorn configuration](https://www.uvicorn.org/)
 - [Python constant-time comparison](https://docs.python.org/3/library/hmac.html)
+
+## Reused dashboard
+
+The same ASGI process now serves `/`, `/jobs`, `/settings` and allowlisted local
+dashboard assets. See [the dashboard contract](../dashboard/README.md). Sign-in
+uses the existing management browser session, Origin and CSRF rules. Webhook
+authentication is unchanged. Serve dashboard and API paths on the same configured
+public origin; no private data is embedded in the unauthenticated shell.
+
+GET `/api/v1/intake` is a bounded newest-first acquisition view, one latest member
+per explicit operation, excluding control operations. It accepts `before_id`
+(operation cursor) and `limit` (1–100). GET `/api/v1/jobs` additionally accepts
+`before_id` for descending job pagination; existing `after_id` behavior remains
+ascending. Cursors cannot be mixed. History retains ascending `after_id` only.
+Responses supply `next_before_id` or `next_after_id` for the chosen direction.
+Status filters in this first dashboard apply only to the current page.
+
+Job views now include bounded release/title/timestamp context, a trusted readable
+handler label, catalog-keyed acquisition status and `is_management_action`.
+They never return raw bodies, source URLs, arbitrary payloads, credentials or
+leases. A job marked DONE is still distinct from successfully committed staging.

@@ -78,6 +78,8 @@ JOB_ACTIVITIES = MappingProxyType({
 _LABELS = {"PENDING": "Queued", "RUNNING": "Running",
            "RETRY_WAIT": "Waiting for another attempt", "NEEDS_REVIEW": "Needs review"}
 STATES = MappingProxyType({
+    "acquisition": MappingProxyType({"ACTIVE":"Not staged", "STAGED":"Staged",
+                                     "CANCEL_REQUESTED":"Cancellation requested", "CANCELED":"Canceled"}),
     "job": MappingProxyType({**_LABELS, "DONE": "Completed", "ON_HOLD": "On hold",
                              "BLOCKED": "Blocked", "CANCELED": "Canceled"}),
     "job_activity": JOB_ACTIVITIES,

@@ -17,6 +17,8 @@ from src.nextgen.diagnostics import configure_logging, event, log_history
 from src.nextgen.history import encode_details
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceError, MaintenancePending, MaintenanceBusy
 from src.nextgen.messages import MessageCatalog
+from src.nextgen.dashboard.assets import load_assets, CSP as DASHBOARD_CSP
+from src.nextgen.dashboard.presentation import HANDLERS
 from src.nextgen.secrets import SecretStore
 from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
 from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable, ActionNotFound
@@ -25,7 +27,7 @@ from src.nextgen.storage.sqlite import accept_event_and_job
 
 PREFIX='/api/v1'
 MAX_BODY=65536
-CATALOG=MessageCatalog()
+CATALOG=MessageCatalog(handlers=HANDLERS)
 
 
 def object_json(raw):
@@ -95,6 +97,7 @@ class Application:
         self.origin=public_origin(origin or 'http://'+authority)
         self.authorities={urlsplit(self.origin).netloc,authority.lower()}
         self.sessions=sessions or Sessions()
+        self.assets=load_assets()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
         self.logger=configure_logging(self.startup.logging_settings(),'api',logger=logging.Logger('nextgen.api.requests'))
@@ -146,7 +149,7 @@ class Application:
             if length is not None and (not re.fullmatch('[0-9]{1,8}',length) or int(length)>MAX_BODY):raise ApiError(413,'API_BODY_TOO_LARGE')
             raw_query=scope.get('query_string',b'')
             path=scope.get('path','')
-            if len(raw_query)>2048 or len(path)>512 or '%' in path or not path.startswith(PREFIX+'/'):raise ApiError(404,'API_ROUTE_NOT_FOUND')
+            if len(raw_query)>2048 or len(path)>512 or '%' in path or not (path.startswith(PREFIX+'/') or path in self.assets):raise ApiError(404,'API_ROUTE_NOT_FOUND')
             if scope.get('raw_path',path.encode('utf-8'))!=path.encode('utf-8'):raise ApiError(400,'API_REQUEST_INVALID')
             query=parse_qs(raw_query.decode('ascii'),keep_blank_values=True,max_num_fields=16,strict_parsing=True) if raw_query else {}
             raw=await asyncio.wait_for(self._body(receive),timeout=15)
@@ -154,6 +157,17 @@ class Application:
             if raw and headers.get('content-type','').lower() not in ('application/json','application/json; charset=utf-8'):raise ApiError(415,'API_MEDIA_TYPE_INVALID')
             body=object_json(raw) if raw else {}
             if scope['method']=='GET' and raw:raise ApiError(400,'API_REQUEST_INVALID')
+            if path in self.assets:
+                if scope['method']!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query or raw:raise ApiError(400,'API_REQUEST_INVALID')
+                mime,content=self.assets[path]
+                await send({'type':'http.response.start','status':200,'headers':[
+                    (b'content-type',mime.encode()),(b'content-length',str(len(content)).encode()),
+                    (b'cache-control',b'no-store'),(b'x-content-type-options',b'nosniff'),
+                    (b'referrer-policy',b'no-referrer'),(b'content-security-policy',DASHBOARD_CSP.encode()),
+                    (b'x-request-id',request_id.encode())]})
+                await send({'type':'http.response.body','body':content})
+                return
             peer=str((scope.get('client') or ('local',0))[0])
             async with self.slots:
                 status,data,extra=await blocking(self._dispatch,scope['method'],path,headers,query,body,peer,executor=self.pool)
@@ -270,7 +284,10 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','jobs','auth/session','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','webhook']},[]
+            if path==PREFIX+'/intake':
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                return 200,self._intake(configuration,query),[]
             if path==PREFIX+'/health' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 with JobQueue(configuration.value('storage.database_path')).connection():pass
@@ -313,13 +330,14 @@ class Application:
         return COOKIE+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+('0' if clear else str(self.sessions.ttl))+('; Secure' if self.origin.startswith('https://') else '')
 
     def _jobs(self,configuration,path,query):
-        if set(query)-{'after_id','limit'}:raise ApiError(400,'API_REQUEST_INVALID')
+        if set(query)-{'after_id','before_id','limit'} or 'after_id' in query and 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
         after=page_number(query,'after_id',0,0,(1<<63)-1);limit=page_number(query,'limit',50,1,100)
         queue=JobQueue(configuration.value('storage.database_path'))
         history=path.endswith('/history')
         with queue.connection() as db:
             db.execute('BEGIN')
             if history:
+                if 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
                 job=int(path.split('/')[-2])
                 if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
                 if db.execute('SELECT 1 FROM jobs WHERE job_id=?',(job,)).fetchone() is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
@@ -333,15 +351,48 @@ class Application:
                         'reason':None if row[3] is None else CATALOG.reason(row[3]),'component':row[4],'details':details,
                         'handler':None if row[6] is None else CATALOG.handler(row[6],recorded_label=row[7]),'invocation_id':row[8]})
             else:
+                newest='before_id' in query
+                cursor=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1) if newest else after
+                ordering='job_id<? ORDER BY job_id DESC' if newest else 'job_id>? ORDER BY job_id'
                 rows=db.execute('SELECT job_id,event_id,created_by_job_id,kind,state,activity_code,attempt_count,last_reason_code '
-                                'FROM jobs WHERE job_id>? ORDER BY job_id LIMIT ?',(after,limit+1)).fetchall()
+                                'FROM jobs WHERE '+ordering+' LIMIT ?',(cursor,limit+1)).fetchall()
                 items=[self._job(queue,db,r) for r in rows[:limit]]
+                if newest:return {'items':items,'next_before_id':rows[limit-1][0] if len(rows)>limit else None}
         return {'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
+
+    def _intake(self,configuration,query):
+        if set(query)-{'before_id','limit'}:raise ApiError(400,'API_REQUEST_INVALID')
+        before=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1)
+        limit=page_number(query,'limit',50,1,100)
+        queue=JobQueue(configuration.value('storage.database_path'))
+        with queue.connection() as db:
+            db.execute('BEGIN')
+            rows=db.execute('SELECT o.operation_id,j.job_id,j.event_id,j.created_by_job_id,j.kind,j.state,'
+                'j.activity_code,j.attempt_count,j.last_reason_code FROM job_operations o '
+                'JOIN jobs j ON j.job_id=(SELECT MAX(m.job_id) FROM job_operation_members m WHERE m.operation_id=o.operation_id) '
+                'WHERE o.operation_id<? AND NOT EXISTS (SELECT 1 FROM management_actions a WHERE a.job_id=j.job_id) '
+                'ORDER BY o.operation_id DESC LIMIT ?',(before,limit+1)).fetchall()
+            items=[self._job(queue,db,row[1:]) for row in rows[:limit]]
+        return {'items':items,'next_before_id':rows[limit-1][0] if len(rows)>limit else None}
 
     def _job(self,queue,db,row):
         op=db.execute('SELECT o.operation_id,o.state,o.cleanup_state,o.reason_code FROM job_operations o JOIN job_operation_members m USING(operation_id) WHERE m.job_id=?',(row[0],)).fetchone()
         actions=ManagementActions(queue.database).capabilities(db,row[0])
+        context=db.execute('SELECT j.created_at_ms,e.received_at_ms,CASE WHEN length(e.raw_body)<=65536 THEN e.raw_body ELSE NULL END '
+                           'FROM jobs j LEFT JOIN incoming_events e ON e.event_id=j.event_id WHERE j.job_id=?',(row[0],)).fetchone()
+        release=None
+        try:
+            declaration=json.loads(context[2] or b'{}')
+            value=declaration.get('release_name') if type(declaration) is dict else None
+            if type(value) is str and len(value.encode('utf-8'))<=1024:release=value
+        except (ValueError,UnicodeError,TypeError,RecursionError):pass
+        titles=db.execute('SELECT CASE WHEN length(CAST(a.title AS BLOB))<=1024 THEN a.title ELSE NULL END '
+                          'FROM identity_results r JOIN identified_anime a USING(anidb_id) WHERE r.event_id=? LIMIT 2',(row[1],)).fetchall()
         return {'job_id':row[0],'event_id':row[1],'created_by_job_id':row[2],'kind':row[3],'state':row[4],
+                'is_management_action':db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(row[0],)).fetchone() is not None,
+                'label':CATALOG.handler(row[3]),'created_at_ms':context[0],'received_at_ms':context[1],
+                'release_name':release,'anime_title':titles[0][0] if len(titles)==1 else None,
+                'acquisition_status':CATALOG.state('acquisition',op[1]),
                 'status':CATALOG.job_status(row[4],row[5]),'attempt_count':row[6],
                 'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],

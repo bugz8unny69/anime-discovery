@@ -4,6 +4,22 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Reuse the dashboard through API v1 — 2026-10-23
+
+Adapt the legacy dark shell, jobs table, badges and schema-driven forms in an
+independent NextGen dashboard served by the API process. All private data and
+actions use `/api/v1/`, management browser sessions and CSRF; webhook authority
+remains separate. Intake lists explicit acquisition scopes; Jobs lists individual
+steps and their history. Keep/Cancel/Cleanup use API button availability and
+catalog explanations. Keep remains visibly unavailable for execution.
+
+Settings and credential replacements use revision-checked API updates. No legacy
+runtime/data bridge, old action endpoints, saved-credential reveal, extra server
+or frontend dependency is introduced. Read [the dashboard contract](src/nextgen/dashboard/README.md)
+for scope, source attribution and deployment paths. No media pipeline step is
+implemented by this UI. Offline Python/UI cases are authored but unexecuted;
+syntax/source checks only, with no CI, live listener or deployment.
+
 ## Intake cancellation and presentation correction — 2026-10-23
 
 Follow-up to draft PR #120 and the Intake → Staging → Keep/Reject design in
