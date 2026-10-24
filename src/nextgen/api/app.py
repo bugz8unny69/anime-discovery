@@ -304,6 +304,7 @@ class Application:
                     except ConfigurationError as exc:raise ApiError(400,exc.reason_code) from None
                     return 200,{'configuration':result.snapshot.to_document(),'saved':result.saved,
                         'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
+                        'reason':None if result.reason_code is None else CATALOG.reason(result.reason_code),
                         'restart_fields':result.restart_fields,'restart_components':result.restart_components},[]
                 raise ApiError(405,'API_METHOD_INVALID')
             if path==PREFIX+'/credentials' and method=='GET':
@@ -320,7 +321,8 @@ class Application:
                 callback={'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
-                return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code},[]
+                return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,
+                            'reason':None if result.reason_code is None else CATALOG.reason(result.reason_code)},[]
             if method=='GET' and (path==PREFIX+'/jobs' or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path)):
                 return 200,self._jobs(configuration,path,query),[]
         if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
@@ -396,4 +398,5 @@ class Application:
                 'status':CATALOG.job_status(row[4],row[5]),'attempt_count':row[6],
                 'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
+                                 'reason':None if op[3] is None else CATALOG.reason(op[3]),
                                 'can_cancel':actions['cancel']['enabled'],'can_cleanup':actions['cleanup']['enabled']}}

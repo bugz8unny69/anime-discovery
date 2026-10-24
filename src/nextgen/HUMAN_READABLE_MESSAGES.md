@@ -199,3 +199,34 @@ BLOCKED, CANCELED and typed download/search/duplicate activities. It also
 registers their lifecycle/activity events. MessageCatalog.job_status chooses
 the display label from a validated pair; see JOB_STATUSES.md. Incoming-event
 PENDING/RUNNING labels are Received/Identifying, distinct from job Queued/Running.
+
+## 2026-10-24 source review: operator-facing markers and errors
+
+The current draft branch was inspected at the source level; no Python tests, browser
+checks, CI or live runtime calls were performed in this update.
+
+- `reasons.py` is the central reason-code registry with a nonblank English
+  message and an actionable suggestion for each registered reason.
+- `messages.py` owns event copy, status labels, stable namespaced keys,
+  immutable translation snapshots and English fallbacks. `history.py` rejects
+  unregistered event/reason pairs on new writes.
+- The management API resolves ordinary job status, last reason and each history
+  event/reason through `MessageCatalog`; the browser renders returned text as
+  text nodes rather than inventing English from underscore-separated codes.
+- **Gaps corrected in this draft:** the API cancellation subsection and
+  successful settings/credential update responses previously exposed machine
+  `reason_code` values without always including a resolved explanation. They
+  now also provide a catalog-resolved `reason` object (or null when there is
+  no reason), preserving original code fields for API compatibility.
+- Legacy machine keys for episode-selection settings, event history, reason
+  history and job kinds remain stable. Their operator-facing messages must use
+  **episode selection**, **staging** and **review**.
+- Archived status `WAITING_FOR_SEARCH` can still appear in historical data
+  and is retained for backwards-safe rendering; it does not install an anime
+  search feature. A separate search integration is expressly out of scope.
+
+The source review does **not** prove that every possible runtime path has
+registered and displayed its marker correctly. Before release, inspect newly
+emitted identifiers against the central catalogs, check that every public
+reason-bearing response has a resolved description and action, and run the
+authored offline tests and real dashboard checks when permitted.

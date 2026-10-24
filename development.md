@@ -4,6 +4,21 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Consolidation of completed drafts — 2026-10-24
+
+User authorized reconciling completed NextGen work and merging it into NextGen.
+Bring the #132 readable diagnostic responses and canonical no-search architecture
+into the current #134 Sonarr/Jellyfin implementation. Preserve the #121 planning
+proposals with historical banners; current code and user decisions supersede
+older copy/hash/search proposals. #128–#130 are alternative implementations,
+not additive migrations: retain the current v9/v5/v22 contracts and no destination
+video hashing. No extra automatic search work is required.
+
+Source checks only; tests, CI, browser checks and live media operations remain
+unrun. Repository integration does not deploy the service or establish lab
+readiness. Post-Keep cleanup/reservation release, optional Shoko and service
+supervision remain unfinished.
+
 ## Jellyfin scan follow-up — 2026-10-24
 
 Configured staging and Keep completions now enqueue independent Jellyfin scan

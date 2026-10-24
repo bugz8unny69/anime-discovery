@@ -40,8 +40,9 @@ that regular readable file exists under the configured local permanent folder
 with the expected size. There is no destination checksum or byte-for-byte
 comparison. A returned command ID alone is not a successful import.
 
-Staging files and NFOs remain after Keep. Post-Keep source cleanup, Jellyfin
-refresh and optional Shoko registration remain separate work. This job does not
+Staging files and NFOs remain after Keep. Post-Keep source cleanup and optional
+Shoko registration remain separate work. Configured Jellyfin refresh is now an
+independent follow-up; see JELLYFIN_REFRESH.md. This job does not
 delete staged videos, torrent data or permanent media. It imports the selected
 episode, not every staged episode for the anime. Subsequent selected episodes
 retain their own explicit acquisition/Keep scope.

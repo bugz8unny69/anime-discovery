@@ -110,7 +110,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['data']['effective']['settings']['api']['port'],8765)
         self.assertEqual(status,200)
         status,result,_=await self.request('PATCH','/api/v1/credentials/tvdb',{'expected_revision':1,'api_key':'private-provider-value'},token=ADMIN)
-        self.assertEqual(status,200);self.assertNotIn('private-provider-value',json.dumps(result))
+        self.assertEqual(status,200);self.assertIn('reason',result['data']);self.assertNotIn('private-provider-value',json.dumps(result))
         status,result,_=await self.request('GET','/api/v1/credentials',token=ADMIN)
         self.assertEqual(status,200);self.assertTrue(result['data']['management_configured'])
         self.assertNotIn(ADMIN,json.dumps(result));self.assertNotIn(WEB,json.dumps(result))
@@ -122,6 +122,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         job=result['data']['items'][0]
         self.assertNotIn('payload_json',job);self.assertNotIn('lease_token',job)
         self.assertTrue(job['cancellation']['can_cancel'])
+        self.assertIn('reason',job['cancellation'])
+        self.assertIsNone(job['cancellation']['reason'])
         status,result,_=await self.request('GET',f"/api/v1/jobs/{job['job_id']}/history",token=ADMIN)
         self.assertEqual(status,200)
         self.assertEqual(result['data']['items'][0]['event']['message'],'Job created.')

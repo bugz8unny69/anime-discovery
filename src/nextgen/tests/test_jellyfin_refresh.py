@@ -108,6 +108,7 @@ class RefreshCredentialApiTests(unittest.IsolatedAsyncioTestCase):
         status,data,_=await self.request('PATCH','/api/v1/credentials/jellyfin',body,token=ADMIN)
         self.assertEqual(status,200)
         self.assertTrue(data['data']['status']['jellyfin_configured'])
+        self.assertIn('reason',data['data'])
         self.assertNotIn('private-jellyfin-key',json.dumps(data))
         self.assertEqual(self.secrets.jellyfin_api_key(),'private-jellyfin-key')
         status,_,_=await self.request('PATCH','/api/v1/credentials/jellyfin',body,token=ADMIN)
