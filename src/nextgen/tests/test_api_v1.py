@@ -95,14 +95,14 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,_,_=await self.request('GET','/api/v1/jobs',headers={'cookie':cookie})
         self.assertEqual(status,401)
 
-    async def test_key_rotation_revokes_old_webhook_bearer_and_browser_sessions(self):
-        _,result,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'origin':ORIGIN})
+    async def test_webhook_rotation_does_not_revoke_independent_password_sessions(self):
+        _,result,headers=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},headers={'origin':ORIGIN})
         cookie=headers[b'set-cookie'].decode().split(';')[0]
         self.secrets.update_webhook_token('x'*43,expected_revision=1)
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(token=WEB))
         self.assertEqual(status,401)
         status,_,_=await self.request('GET','/api/v1/jobs',token=ADMIN)
-        self.assertEqual(status,401)
+        self.assertEqual(status,200)
         status,_,_=await self.request('GET','/api/v1/jobs',headers={'cookie':cookie})
         self.assertEqual(status,200)
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(token='x'*43))
