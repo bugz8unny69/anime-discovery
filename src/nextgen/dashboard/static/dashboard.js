@@ -290,6 +290,7 @@ function renderCredentials() {
   const container = $('credential-forms'); container.replaceChildren();
   const specs = [
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
+    ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
   ];
   for (const [service, title, presence, fields] of specs) {
