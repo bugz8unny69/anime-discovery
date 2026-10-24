@@ -220,12 +220,12 @@ class KeepMigrationTests(unittest.TestCase):
             before=db.execute('SELECT * FROM management_actions').fetchall()
             db.executescript((SQL_DIR/'022_keep_imports.sql').read_text())
             db.executescript((SQL_DIR / "023_reservation_release.sql").read_text())
-            from src.nextgen.storage.migrations import SCRIPTS
-            for name in SCRIPTS[23:]:db.executescript((SQL_DIR/name).read_text())
+            from src.nextgen.storage.migrations import SCRIPTS as current_scripts
+            for name in current_scripts[23:]:db.executescript((SQL_DIR/name).read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],len(SCRIPTS))
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],len(current_scripts))
         finally:db.close();fresh.close()
 
     def test_wrong_version_and_partial_failure_roll_back(self):
