@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 from src.nextgen.api.app import Application
+from src.nextgen.storage.management_actions import disabled_reason
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import connect, transaction
 from src.nextgen.tests.test_api_v1 import ApiV1Tests, ADMIN, WEB
@@ -26,6 +27,8 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,202);data=result['data']
         self.assertEqual(data['notification']['message'],'Job submitted.')
         self.assertTrue(data['disable_action']);self.assertEqual(data['state'],'PENDING')
+        self.assertEqual(data['disabled_reason']['message'],'A job is already queued.')
+        self.assertEqual(data['disabled_reason']['message_key'],'reason.MANAGEMENT_JOB_QUEUED.message')
         self.assertEqual(headers[b'location'].decode(),data['status_url'])
         self.app.close();self.app=Application(self.root,origin='https://anime.example');self.addCleanup(self.app.close)
         _,duplicate,_=await self.request('POST',f'/api/v1/jobs/{target}/cleanup',{},token=ADMIN)
@@ -37,6 +40,18 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(original['data']['actions']['cancel']['enabled'])
         self.assertFalse(original['data']['actions']['cleanup']['enabled'])
         self.assertEqual(original['data']['actions']['cleanup']['job']['job_id'],data['job_id'])
+        for name in ('keep','cancel','cleanup'):
+            action=original['data']['actions'][name]
+            self.assertFalse(action['enabled'])
+            self.assertEqual(action['disabled_reason']['code'],'MANAGEMENT_JOB_QUEUED')
+        claim,_=JobQueue(self.database).claim()
+        self.assertEqual(claim.job_id,data['job_id'])
+        _,running,_=await self.request('GET',f'/api/v1/jobs/{target}',token=ADMIN)
+        for name in ('keep','cancel','cleanup'):
+            action=running['data']['actions'][name]
+            self.assertFalse(action['enabled'])
+            self.assertEqual(action['disabled_reason']['message'],'A job is already in progress.')
+            self.assertEqual(action['disabled_reason']['message_key'],'reason.MANAGEMENT_JOB_RUNNING.message')
         _,history,_=await self.request('GET',data['history_url'],token=ADMIN)
         self.assertEqual(history['data']['items'][0]['event']['code'],'CREATED')
 
@@ -68,3 +83,21 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         _,original,_=await self.request('GET',f'/api/v1/jobs/{target}',token=ADMIN)
         self.assertFalse(original['data']['actions']['keep']['enabled'])
         self.assertFalse(original['data']['actions']['cancel']['enabled'])
+
+
+class ActionMessageTests(unittest.TestCase):
+    def test_disabled_explanations_follow_state_not_stale_progress_reason(self):
+        expected={'PENDING':'A job is already queued.',
+                  'RUNNING':'A job is already in progress.',
+                  'RETRY_WAIT':'A job is waiting to continue.',
+                  'DONE':'This job is already complete.',
+                  'CANCELED':'This job was canceled.'}
+        for state,message in expected.items():
+            with self.subTest(state=state):
+                reason=disabled_reason(state,'CANCELLATION_DRAINING')
+                self.assertEqual(reason['message'],message)
+                self.assertEqual(reason['message_key'],f"reason.{reason['code']}.message")
+        for state in ('ON_HOLD','BLOCKED','NEEDS_REVIEW'):
+            with self.subTest(state=state):
+                self.assertEqual(disabled_reason(state)['code'],'MANAGEMENT_JOB_ATTENTION')
+        self.assertEqual(disabled_reason('BLOCKED','KEEP_NOT_READY')['code'],'KEEP_NOT_READY')

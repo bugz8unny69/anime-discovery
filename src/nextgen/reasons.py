@@ -17,10 +17,16 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('MANAGEMENT_JOB_QUEUED', 'An existing action job is queued, so another action cannot start.', 'A job is already queued.', 'Wait for the job to start.', 'INFO', None),
+    Reason('MANAGEMENT_JOB_RUNNING', 'An existing action job is running, so another action cannot start.', 'A job is already in progress.', 'Wait for the job to finish.', 'INFO', None),
+    Reason('MANAGEMENT_JOB_WAITING', 'An existing action job is waiting for its next check or attempt.', 'A job is waiting to continue.', 'Check the job status for details.', 'INFO', None),
+    Reason('MANAGEMENT_JOB_ATTENTION', 'An existing action job stopped and needs operator attention.', 'The job needs attention before it can continue.', 'Review the job status for details.', 'WARNING', False),
+    Reason('MANAGEMENT_JOB_COMPLETE', 'The existing action job has finished.', 'This job is already complete.', 'Refresh the status to see available actions.', 'INFO', False),
+    Reason('MANAGEMENT_JOB_CANCELED', 'The existing action job has been canceled.', 'This job was canceled.', 'Review the job status for details.', 'INFO', False),
     Reason('MANAGEMENT_ACTION_UNAVAILABLE', 'The target is not eligible for the explicit management action.', 'This action is not available for this work.', 'Refresh the work status and review its available actions.', 'WARNING', False),
     Reason('MANAGEMENT_JOB_SUBMITTED', 'An authorized action and its control job were committed atomically.', 'Job submitted.', 'Follow the job status for progress.', 'INFO', None),
     Reason('MANAGEMENT_JOB_EXISTS', 'A durable action already exists for this operation and action kind.', 'This action already has a job.', 'Follow the existing job instead of submitting another.', 'INFO', False),
-    Reason('KEEP_NOT_READY', 'Media promotion requires the future verified staging and permanent-publication library.', 'Keeping videos is not available yet.', 'The request is recorded; the media-moving library must be implemented before it can proceed.', 'WARNING', False),
+    Reason('KEEP_NOT_READY', 'Media promotion requires the future verified staging and permanent-publication library.', 'Keeping videos is not available yet.', 'Keep is not available in this version. A submitted request will wait until Keep is supported.', 'WARNING', False),
     Reason('API_AUTH_REQUIRED', 'Request credentials are missing, invalid or conflicting.', 'Authentication is required.', 'Use the credential required for this API route.', 'WARNING', False),
     Reason('API_AUTH_UNCONFIGURED', 'Required route-specific access credentials are not configured.', 'API access has not been configured.', 'Initialize the separate management and webhook access keys locally.', 'WARNING', False),
     Reason('API_CSRF_REQUIRED', 'A browser mutation lacks the session-bound anti-forgery token.', 'This browser request could not be verified.', 'Refresh your session and try again.', 'WARNING', False),

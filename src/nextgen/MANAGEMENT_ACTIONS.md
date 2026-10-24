@@ -30,7 +30,18 @@ the same job. Do not optimistically tell the user that Keep/cleanup succeeded.
 The future dashboard should disable the clicked button while submitting, show
 the receipt's human-readable notification, and use each target job's `actions`
 object on subsequent reads to render availability. Keep/cancel/cleanup entries
-contain enabled plus an existing action job/receipt where applicable. A repeated
+contain enabled, disabled_reason, plus an existing action job/receipt where applicable.
+Use disabled_reason.message for the disabled button tooltip; its code and
+message_key come from the shared diagnostic catalog. Enabled actions have a null
+disabled_reason. An active action job disables competing Keep/Cancel/Cleanup
+buttons for that operation. Queued jobs say “A job is already queued.” Running
+jobs say “A job is already in progress.” Waiting jobs say “A job is waiting to
+continue.” Held, blocked, review, completed and canceled jobs must not be labeled
+as running. Receipts also expose disabled_reason for the submitted action;
+refresh action availability from the target read rather than using a stale receipt.
+Keep the notification “Job submitted.” These messages explain state without
+claiming the requested work is complete. Keep remains unavailable for execution;
+execution_available and availability_reason must still be respected by clients. A repeated
 click through another job in the same operation resolves to the same action.
 Refreshing/restarting the API does not lose this state. UI HTML and actual
 notification widgets are not part of this API change.

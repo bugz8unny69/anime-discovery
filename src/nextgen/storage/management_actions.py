@@ -31,13 +31,25 @@ def target(db,job_id):
     return operation(db,job_id)
 
 
+def disabled_reason(state,reason_code=None):
+    # Presentation only: never changes scheduling or authorizes an action.
+    code={'PENDING':'MANAGEMENT_JOB_QUEUED','RUNNING':'MANAGEMENT_JOB_RUNNING',
+          'RETRY_WAIT':'MANAGEMENT_JOB_WAITING','DONE':'MANAGEMENT_JOB_COMPLETE',
+          'CANCELED':'MANAGEMENT_JOB_CANCELED'}.get(state)
+    if code is None:
+        code=reason_code or ('MANAGEMENT_JOB_ATTENTION' if state in
+                            ('ON_HOLD','BLOCKED','NEEDS_REVIEW') else 'MANAGEMENT_ACTION_UNAVAILABLE')
+    return CATALOG.reason(code)
+
+
 def receipt(db,job_id,*,reused=False):
     row=db.execute('SELECT state,activity_code,last_reason_code FROM jobs WHERE job_id=?',(job_id,)).fetchone()
     data={'job_id':job_id,'state':row[0],'status':CATALOG.job_status(row[0],row[1]),
             'reason':None if row[2] is None else CATALOG.reason(row[2]),
             'status_url':f'/api/v1/jobs/{job_id}','history_url':f'/api/v1/jobs/{job_id}/history',
             'notification':CATALOG.reason('MANAGEMENT_JOB_EXISTS' if reused else 'MANAGEMENT_JOB_SUBMITTED'),
-            'reused':reused,'disable_action':True}
+            'reused':reused,'disable_action':True,
+            'disabled_reason':disabled_reason(row[0],row[2])}
     if db.execute("SELECT 1 FROM management_actions WHERE job_id=? AND action='KEEP'",(job_id,)).fetchone():
         data['execution_available']=False
         data['availability_reason']=CATALOG.reason('KEEP_NOT_READY')
@@ -105,19 +117,34 @@ class ManagementActions:
     def capabilities(self,db,job_id):
         # Read using caller's snapshot. No mutations or nested connection.
         control=db.execute('SELECT action FROM management_actions WHERE job_id=?',(job_id,)).fetchone()
-        if control:return {'keep':{'enabled':False},'cancel':{'enabled':False},'cleanup':{'enabled':False}}
+        if control:
+            return {name:{'enabled':False,'disabled_reason':CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE')}
+                    for name in ('keep','cancel','cleanup')}
         op=operation(db,job_id)
         members=db.execute('SELECT state FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=?',(op[0],)).fetchall()
         from src.nextgen.storage.cancellation import CANCELABLE
         cancelable=op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0]))
+        # An action job in this scope disables competing buttons as well.
+        # Held/review/blocked jobs are not described as still running.
+        busy=db.execute("SELECT j.state,j.last_reason_code FROM management_actions a JOIN jobs j USING(job_id) "
+                        "WHERE a.operation_id=? AND j.state IN ('PENDING','RUNNING','RETRY_WAIT') "
+                        "ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,j.job_id LIMIT 1",
+                        (op[0],)).fetchone()
         result={}
         for name,enabled in (('keep',op[1]=='STAGED'),('cancel',cancelable),
                              ('cleanup',op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE')):
             code='KEEP' if name=='keep' else 'CLEANUP'
             row=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',(op[0],code)).fetchone()
             resumable=name=='cleanup' and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
-            result[name]={'enabled':bool(enabled and (row is None or resumable)),
-                          'job':None if row is None else receipt(db,row[0],reused=True)}
+            allowed=bool(enabled and (row is None or resumable) and busy is None)
+            job=None if row is None else receipt(db,row[0],reused=True)
+            reason=None
+            if not allowed:
+                reason=(disabled_reason(*busy) if busy is not None else
+                        CATALOG.reason('KEEP_NOT_READY') if name=='keep' and row is None else
+                        job['disabled_reason'] if job is not None else
+                        CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE'))
+            result[name]={'enabled':allowed,'disabled_reason':reason,'job':job}
         result['keep']['execution_available']=False
         result['keep']['availability_reason']=CATALOG.reason('KEEP_NOT_READY')
         return result
