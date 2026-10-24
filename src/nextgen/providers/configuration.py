@@ -13,6 +13,7 @@ from src.nextgen.jobs.submit_torrent_job import KIND as SUBMIT_KIND, registratio
 from src.nextgen.jobs.download_torrent_job import KIND as DOWNLOAD_KIND, registration as download_registration
 from src.nextgen.jobs.verify_media_job import KIND as MEDIA_KIND, registration as media_registration
 from src.nextgen.jobs.stage_trial_media_job import KIND as STAGE_KIND, registration as stage_registration
+from src.nextgen.jobs.refresh_jellyfin_job import KIND as REFRESH_KIND, registration as refresh_registration
 from src.nextgen.jobs.management import registrations as management_registrations
 from src.nextgen.acquisition.metainfo_source import make_reader
 from src.nextgen.providers.errors import ProviderConfigurationError
@@ -56,10 +57,11 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     read_metainfo=make_reader() if read_metainfo is None else read_metainfo
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
-                                                download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
+                                                download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration(refresh_kind=REFRESH_KIND))
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
                          release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=PREPARE_KIND),
-                         *preparation,*management_registrations(secrets),*additional_registrations))
+                         *preparation,*management_registrations(secrets,refresh_kind=REFRESH_KIND),
+                         refresh_registration(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
 
