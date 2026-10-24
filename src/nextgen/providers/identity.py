@@ -2,6 +2,7 @@
 from collections import OrderedDict
 import re
 import threading
+from contextlib import closing
 from src.nextgen.storage.recognition import recognized_for_release
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
 
@@ -74,7 +75,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
         if len({int(value) for value in seasons}) > 1: raise IdentityNotReady()
         database = configuration.value("storage.database_path")
         if seasons:
-            with _open(database,readonly=True,timeout_ms=5000) as known_db:
+            with closing(_open(database,readonly=True,timeout_ms=5000)) as known_db:
                 if known_db.execute("PRAGMA user_version").fetchone()[0] == LATEST_VERSION:
                     known = recognized_for_release(known_db,title,season=int(seasons[0]))
                     if known is not None:
