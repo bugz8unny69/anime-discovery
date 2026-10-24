@@ -48,15 +48,17 @@ Run from `/opt/anime-discovery` as the service account:
 
 ```sh
 .venv/bin/python -m src.nextgen init --config-dir /var/lib/anime-discovery/config --database /var/lib/anime-discovery/nextgen.sqlite --settings-file /path/to/settings.json
-.venv/bin/python -m src.nextgen.api init-access --config-dir /var/lib/anime-discovery/config
-# After the API starts, set the dashboard password from the service account:
-.venv/bin/python -m src.nextgen.api.adm set-password
+
 ```
 
-The access command provisions only the independent Autobrr webhook token; it prompts without echo for one 32–256 character URL-safe token. Dashboard login never accepts webhook credentials or management bearer tokens. The password is established separately with `adm set-password` using the API process's restricted Unix socket. `init`
-creates only new local files; it refuses an existing configuration, credential
-file or database. A failure can leave a partial installation. Inspect that state
-before retrying; it never silently overwrites it or converts a legacy database.
+The configuration library creates fresh local configuration and storage; this does not import any earlier application's data. Start the API service before setting the dashboard password, then run the local administrator CLI under the service account:
+
+```sh
+systemctl start anime-discovery-api.service
+sudo -u anime-discovery /opt/anime-discovery/.venv/bin/python -m src.nextgen.api.adm set-password
+```
+
+The administrator password is never copied from earlier credentials. Sign in to the dashboard and set the independent Autobrr webhook token under Settings > Private credentials. Alternatively, `python -m src.nextgen.api init-access --config-dir ...` can provision the webhook token first; this command does not set an administrator password.
 
 Edit the API unit's placeholder origin to the exact dashboard HTTPS origin.
 Copy the three example units into `/etc/systemd/system` and reload the systemd
