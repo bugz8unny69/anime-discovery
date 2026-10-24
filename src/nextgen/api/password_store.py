@@ -93,7 +93,7 @@ class PasswordStore:
                     try:
                         temp_fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=fd)
                         with os.fdopen(temp_fd, "wb") as stream:
-                            stream.write(json.dumps({"revision": next_revision, "password_hash": digest}).encode() + b"\\n")
+                            stream.write(json.dumps({"revision": next_revision, "password_hash": digest}).encode() + bytes([10]))
                             stream.flush()
                             os.fsync(stream.fileno())
                         os.replace(temp, RECORD, src_dir_fd=fd, dst_dir_fd=fd)
