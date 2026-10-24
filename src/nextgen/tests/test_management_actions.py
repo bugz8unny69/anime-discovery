@@ -9,12 +9,26 @@ from src.nextgen.cancellation import OperationGate
 from src.nextgen.job_contracts import Policy, Registry
 from src.nextgen.jobs.cleanup_canceled_operation_job import registration as cleanup
 from src.nextgen.jobs.keep_media_job import registration as keep
+from src.nextgen.jobs.evaluate_trial_job import registration as evaluate
+from src.nextgen.jobs.reserve_episode_job import registration as reserve
 from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.storage.job_queue import JobQueue, LeaseLost
 from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable
 from src.nextgen.storage.sqlite import connect, enqueue_job, transaction
 from src.nextgen.tests import test_acquisition_preparation as fixture
 from src.nextgen.worker import Worker
+
+
+async def reserve_without_metadata(case):
+    """Real evaluation/reservation handoff, with no acquisition adapter installed."""
+    _,evaluation=fixture.AcquisitionPreparationTests.source(case)
+    worker=Worker(case.store,case.startup,Registry((
+        evaluate(reservation_kind='RESERVE_EPISODE'),reserve())))
+    case.addAsyncCleanup(worker.close)
+    await worker.attempt()
+    await worker.attempt()
+    target=case.rows("SELECT job_id FROM jobs WHERE kind='RESERVE_EPISODE'")[0][0]
+    return evaluation,target
 
 
 class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
@@ -28,6 +42,71 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         finally:db.close()
 
     def actions(self):return ManagementActions(self.database)
+
+    async def test_completed_reservation_remains_cancelable_without_metadata_or_media(self):
+        evaluation,target=await reserve_without_metadata(self)
+        reservations=self.rows('SELECT * FROM episode_reservations')
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE state<>'DONE'"),[(0,)])
+        self.assertEqual(self.rows('SELECT * FROM acquisition_plans'),[])
+        self.assertEqual(self.rows('SELECT * FROM staging_cleanup_artifacts'),[])
+        self.assertTrue(reservations)
+        for member in (evaluation,target):
+            self.assertTrue(CancellationStore(self.database).status(member)['can_cancel'])
+            db=connect(self.database)
+            try:self.assertTrue(self.actions().capabilities(db,member)['cancel']['enabled'])
+            finally:db.close()
+        with patch('src.nextgen.cancellation_service.CancellationService.cleanup',
+                   side_effect=AssertionError('A reservation needs no media cleanup')):
+            status,data,_=self.actions().submit(evaluation,'cancel')
+        self.assertEqual(status,200);self.assertTrue(data['completed'])
+        self.assertEqual(self.actions().submit(target,'cancel')[0],200)
+        self.assertFalse(CancellationStore(self.database).status(target)['can_cancel'])
+        self.assertEqual(self.rows('SELECT * FROM episode_reservations'),reservations)
+        self.assertEqual(self.rows('SELECT * FROM management_actions'),[])
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE state<>'DONE'"),[(0,)])
+        with self.assertRaises(ValueError):
+            db=connect(self.database)
+            try:
+                with transaction(db):enqueue_job(db,kind='PREPARE_ACQUISITION',
+                    payload={'evaluation_job_id':evaluation},component='worker',available_at_ms=0)
+            finally:db.close()
+
+    async def test_other_operations_reservation_does_not_enable_cancel_on_completed_work(self):
+        await reserve_without_metadata(self)
+        target=self.add();db=connect(self.database)
+        try:
+            with transaction(db):db.execute("UPDATE jobs SET state='DONE' WHERE job_id=?",(target,))
+            self.assertFalse(self.actions().capabilities(db,target)['cancel']['enabled'])
+        finally:db.close()
+        self.assertFalse(CancellationStore(self.database).status(target)['can_cancel'])
+        with self.assertRaises(ActionUnavailable):self.actions().submit(target,'cancel')
+
+    async def test_reserved_operation_still_requires_drain_before_immediate_cancel(self):
+        _,target=await reserve_without_metadata(self)
+        state=CancellationStore(self.database).status(target)
+        with OperationGate(self.database).hold(state['operation_id']):
+            status,data,_=self.actions().submit(target,'cancel')
+            self.assertEqual(status,202)
+            self.assertEqual(CancellationStore(self.database).status(target)['cleanup_state'],'PENDING')
+        worker=Worker(self.store,self.startup,Registry((cleanup(object()),)))
+        self.addAsyncCleanup(worker.close)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(data['job_id'],)),[('DONE',)])
+        self.assertEqual(CancellationStore(self.database).status(target)['cleanup_state'],'COMPLETE')
+        self.assertEqual(self.rows('SELECT count(*) FROM episode_reservations'),[(1,)])
+
+    async def test_staged_operation_is_not_cancelable_even_with_its_reservation(self):
+        _,target=await reserve_without_metadata(self)
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                # Synthetic published milestone; no filesystem staging is executed.
+                db.execute("UPDATE job_operations SET state='STAGED' WHERE operation_id="
+                           '(SELECT operation_id FROM job_operation_members WHERE job_id=?)',(target,))
+            self.assertFalse(self.actions().capabilities(db,target)['cancel']['enabled'])
+        finally:db.close()
+        self.assertFalse(CancellationStore(self.database).status(target)['can_cancel'])
+        with self.assertRaises(ActionUnavailable):self.actions().submit(target,'cancel')
 
     def staged(self):
         # Synthetic contract fixture, never a claim of real filesystem staging.

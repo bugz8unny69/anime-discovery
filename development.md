@@ -4,6 +4,22 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Intake cancellation and presentation correction — 2026-10-23
+
+Follow-up to draft PR #120 and the Intake → Staging → Keep/Reject design in
+draft PR #121: a completed episode reservation keeps unfinished acquisition
+cancelable even when no metadata adapter is installed and all member jobs are
+DONE. Capability reads and admission use the same predicate. Reservation-only
+cancellation completes locally once drain is proven; active handlers still
+require the existing cleanup control job. Reservation history and exclusivity
+remain protected. STAGED continues to close Cancel.
+
+Dashboard-facing settings now label storage.trial_root as Staging folder, and
+episode-selection catalog/handler wording uses Intake. Internal trial names,
+configuration/schema versions, codes, translation keys and stored records are
+unchanged. No staging/Keep execution or dashboard HTML is introduced. Regression
+cases are authored but unexecuted; source checks only, no tests or CI.
+
 ## Initial async worker core — 2026-10-22
 
 The worker follow-up builds on draft destination-settings PR #106. It implements

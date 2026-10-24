@@ -97,7 +97,7 @@ FIELDS = MappingProxyType({
     "api.port": FieldDefinition(8765, "integer", "restart", ("api",), 1, 65535),
     "worker.concurrency": FieldDefinition(4, "integer", "restart", ("worker",), 1, 32),
     "storage.trial_root": FieldDefinition("", "directory", "next_operation",
-        label="Trial video folder", help_text="Absolute destination for newly staged trial videos. Leave blank until configured. Existing files are not moved."),
+        label="Staging folder", help_text="Absolute destination for verified videos staged for viewing before Keep or Reject. Leave blank until configured. Existing files are not moved."),
     "storage.keep_root": FieldDefinition("", "directory", "next_operation",
         label="Keep video folder", help_text="Absolute permanent destination for approved Keep videos. Must agree with the library import target when Sonarr is used."),
     "storage.database_path": FieldDefinition(

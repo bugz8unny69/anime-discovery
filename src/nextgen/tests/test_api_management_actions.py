@@ -6,6 +6,7 @@ from src.nextgen.storage.management_actions import disabled_reason
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import connect, transaction
 from src.nextgen.tests.test_api_v1 import ApiV1Tests, ADMIN, WEB
+from src.nextgen.tests.test_management_actions import reserve_without_metadata
 
 
 class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
@@ -13,6 +14,31 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
     rows=ApiV1Tests.rows
     request=ApiV1Tests.request
     release=ApiV1Tests.release
+
+    async def test_reserved_completed_jobs_expose_cancel_and_accept_it_after_api_restart(self):
+        evaluation,target=await reserve_without_metadata(self)
+        self.app.close();self.app=Application(self.root,origin='https://anime.example');self.addCleanup(self.app.close)
+        for member in (evaluation,target):
+            status,result,_=await self.request('GET',f'/api/v1/jobs/{member}',token=ADMIN)
+            self.assertEqual(status,200)
+            self.assertEqual(result['data']['state'],'DONE')
+            self.assertTrue(result['data']['cancellation']['can_cancel'])
+            self.assertTrue(result['data']['actions']['cancel']['enabled'])
+            self.assertIsNone(result['data']['actions']['cancel']['disabled_reason'])
+        status,_,_=await self.request('POST',f'/api/v1/jobs/{target}/cancel',{},token=WEB)
+        self.assertEqual(status,401)
+        status,result,_=await self.request('POST',f'/api/v1/jobs/{target}/cancel',{},token=ADMIN)
+        self.assertEqual(status,200);self.assertTrue(result['data']['completed'])
+        _,result,_=await self.request('GET',f'/api/v1/jobs/{evaluation}',token=ADMIN)
+        self.assertFalse(result['data']['actions']['cancel']['enabled'])
+        self.assertEqual(result['data']['cancellation']['state'],'CANCELED')
+        self.assertEqual(self.rows('SELECT count(*) FROM episode_reservations'),[(1,)])
+
+    async def test_settings_use_staging_label_without_renaming_storage_key(self):
+        status,result,_=await self.request('GET','/api/v1/settings',token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertEqual(result['data']['fields']['storage.trial_root']['label'],'Staging folder')
+        self.assertIn('trial_root',result['data']['desired']['settings']['storage'])
 
     async def running(self):
         _,result,_=await self.request('POST','/api/v1/webhook',self.release(),token=WEB)

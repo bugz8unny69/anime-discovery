@@ -9,7 +9,7 @@ from src.nextgen.trial_policy import Window, TrialProposal, TrialConflict
 from src.nextgen.worker import blocking
 
 KIND='EVALUATE_TRIAL'
-DEFINITION=HandlerDefinition(KIND,'Evaluate trial episode selection')
+DEFINITION=HandlerDefinition(KIND,'Evaluate Intake episode selection')
 
 
 @dataclass(frozen=True)

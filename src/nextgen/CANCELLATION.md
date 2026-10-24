@@ -13,10 +13,19 @@ an unauthenticated route or accept a caller-provided torrent hash, path or manif
 | PENDING, RETRY_WAIT, ON_HOLD, BLOCKED, NEEDS_REVIEW | can_cancel while the operation is ACTIVE |
 | RUNNING | can_cancel; request a cooperative stop and drain before cleanup |
 | An earlier job is DONE but another member is unfinished | can_cancel on the overall operation |
-| All jobs DONE, with no acquisition resources or staging artifacts | No cancellation |
+| All jobs DONE, with an episode reservation but no acquisition plan yet | can_cancel; staging is unfinished |
+| All jobs DONE, with no episode reservation, acquisition resources or staging artifacts | No cancellation |
 | Download/preparation DONE, resources remain and staging is unfinished | can_cancel; job completion does not mean completed staging |
 | Verified staging committed as STAGED | No cancellation or cancellation cleanup |
 | Cancellation already requested/canceled | No second Cancel; show can_cleanup and durable pending/review/completed status |
+
+Capability reads and cancellation admission share the same operation predicate.
+A reservation is unfinished acquisition evidence, not a torrent/file receipt.
+If it is the only outstanding evidence and the operation lock confirms drainage,
+the management API finishes cancellation locally without a cleanup control job
+or client/filesystem deletion. If the lock is held, a control job waits for drain.
+Reservation history and exclusivity remain intact; automatic slot release is a
+separate policy. STAGED still disables Cancel even when reservations remain.
 
 Independent jobs and created_by_job_id remain unchanged. SQLite v17 adds explicit
 job_operations and job_operation_members as a cancellation boundary. This is not

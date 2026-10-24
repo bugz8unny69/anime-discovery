@@ -20,6 +20,24 @@ def unfinished_resources(db,operation_id):
                       'SELECT 1 FROM staging_cleanup_artifacts WHERE operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
 
 
+def can_cancel_operation(db,op):
+    """Queue completion is not acquisition completion; STAGED closes Cancel.
+
+    A reservation can outlive every completed job before a metadata adapter is
+    installed. It keeps cancellation available without asserting that torrent
+    or file cleanup is needed, or granting permission to release the slot.
+    """
+    if op[1]!='ACTIVE':return False
+    states=tuple(sorted(CANCELABLE))
+    waiting=db.execute('SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) '
+                       'WHERE m.operation_id=? AND j.state IN ('+','.join('?' for _ in states)+') LIMIT 1',
+                       (op[0],*states)).fetchone()
+    if waiting or unfinished_resources(db,op[0]):return True
+    return db.execute('SELECT 1 FROM episode_reservations r JOIN job_operation_members m '
+                      'ON m.job_id=r.owner_job_id WHERE m.operation_id=? LIMIT 1',
+                      (op[0],)).fetchone() is not None
+
+
 def cancel_job(db,job_id,now,component='worker'):
     row=db.execute('SELECT state,attempt_count FROM jobs WHERE job_id=?',(job_id,)).fetchone()
     if row is None or row[0] not in CANCELABLE:return ()
@@ -55,9 +73,8 @@ class CancellationStore:
         integer(job_id,positive=True)
         with self.queue.connection() as db,transaction(db):
             op=operation(db,job_id)
-            members=db.execute('SELECT j.state FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=?',(op[0],)).fetchall()
             return {'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
-                    'can_cancel':not db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(job_id,)).fetchone() and op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0])),
+                    'can_cancel':not db.execute('SELECT 1 FROM management_actions WHERE job_id=?',(job_id,)).fetchone() and can_cancel_operation(db,op),
                     'can_cleanup':op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE'}
     def request(self,job_id):
         integer(job_id,positive=True)
@@ -71,7 +88,7 @@ class CancellationStore:
         if op[1] in ('CANCEL_REQUESTED','CANCELED'):return op[0],()
         members=db.execute('SELECT j.job_id,j.state,j.attempt_count FROM jobs j JOIN job_operation_members m USING(job_id) '
                            'WHERE m.operation_id=?',(op[0],)).fetchall()
-        if op[1]!='ACTIVE' or not (any(r[1] in CANCELABLE for r in members) or unfinished_resources(db,op[0])):raise CancellationError()
+        if not can_cancel_operation(db,op):raise CancellationError()
         now=self.queue.now();receipts=[]
         db.execute("UPDATE job_operations SET state='CANCEL_REQUESTED',cleanup_state='PENDING',reason_code='CANCELLATION_DRAINING',"
                    'updated_at_ms=? WHERE operation_id=?',(now,op[0]))

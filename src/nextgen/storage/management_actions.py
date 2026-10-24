@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from src.nextgen.cancellation import CleanupBusy, OperationGate
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.messages import MessageCatalog
-from src.nextgen.storage.cancellation import CancellationStore, operation, unfinished_resources
+from src.nextgen.storage.cancellation import CancellationStore, operation, unfinished_resources, can_cancel_operation
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt, transaction
 
@@ -121,9 +121,7 @@ class ManagementActions:
             return {name:{'enabled':False,'disabled_reason':CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE')}
                     for name in ('keep','cancel','cleanup')}
         op=operation(db,job_id)
-        members=db.execute('SELECT state FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=?',(op[0],)).fetchall()
-        from src.nextgen.storage.cancellation import CANCELABLE
-        cancelable=op[1]=='ACTIVE' and (any(r[0] in CANCELABLE for r in members) or unfinished_resources(db,op[0]))
+        cancelable=can_cancel_operation(db,op)
         # An action job in this scope disables competing buttons as well.
         # Held/review/blocked jobs are not described as still running.
         busy=db.execute("SELECT j.state,j.last_reason_code FROM management_actions a JOIN jobs j USING(job_id) "

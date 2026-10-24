@@ -8,6 +8,23 @@ from src.nextgen.reasons import REGISTRY
 
 
 class MessageTests(unittest.TestCase):
+    def test_intake_copy_keeps_existing_diagnostic_keys(self):
+        expected={
+            'TRIAL_SELECTED':'This episode is selected for Intake.',
+            'TRIAL_OUTSIDE_WINDOW':'This episode is outside the Intake selection.',
+            'TRIAL_DISABLED':'Intake episode selection is disabled.',
+            'TRIAL_PLAN_CONFLICT':'The Intake selection plan needs review.',
+        }
+        for code,message in expected.items():
+            with self.subTest(code=code):
+                rendered=DEFAULT_CATALOG.reason(code)
+                self.assertEqual(rendered['message'],message)
+                self.assertEqual(rendered['message_key'],f'reason.{code}.message')
+                self.assertNotIn('trial',rendered['action'].lower())
+        event=DEFAULT_CATALOG.event('TRIAL_EVALUATED')
+        self.assertEqual(event['message'],'Intake episode selection evaluated.')
+        self.assertEqual(event['message_key'],'event.TRIAL_EVALUATED.message')
+
     def test_every_registered_marker_has_readable_copy_and_a_stable_key(self):
         for code, entry in EVENTS.items():
             view = DEFAULT_CATALOG.event(code)

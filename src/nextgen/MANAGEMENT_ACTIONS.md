@@ -20,6 +20,17 @@ fence, idle-member transitions, cleanup job, action association and audit are
 committed together before returning 202. Queue failure rolls the whole request
 back. No post-response in-memory task or API process lifetime owns the work.
 
+Completed reservation jobs remain cancelable until staging is committed. The
+shared eligibility check includes episode reservations in the explicit operation
+scope; another operation's reservation grants no capability. Reservations alone
+do not require torrent/file cleanup, and cancellation does not release them.
+Successful staging still closes acquisition Cancel.
+
+User-facing episode-selection messages use Intake and the viewing destination
+label is Staging folder. Existing trial configuration keys, job/reason/event codes,
+translation keys and persisted records retain their identities. No migration or
+media relocation is involved.
+
 A receipt contains job_id, status_url, history_url, state, readable status,
 notification (`Job submitted.`), reused and disable_action. Location points at
 GET `/api/v1/jobs/{job_id}`. Poll that URL and its history until the job completes,
