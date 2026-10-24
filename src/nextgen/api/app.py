@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from src.nextgen.async_io import blocking
 from src.nextgen.systemd_notify import notify, watchdog_interval
+from src.nextgen.api.password_store import PasswordStore, PasswordConflict, PasswordStorageError
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
@@ -98,6 +99,7 @@ class Application:
         self.origin=public_origin(origin or 'http://'+authority)
         self.authorities={urlsplit(self.origin).netloc,authority.lower()}
         self.sessions=sessions or Sessions()
+        self.passwords=PasswordStore(directory)
         self.assets=load_assets()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
@@ -236,32 +238,46 @@ class Application:
                     event_id,job_id=accept_event_and_job(db,'autobrr',normalized,kind='IDENTIFY_ANIME',payload={},component='api',logger=self.logger)
             return 202,{'event_id':event_id,'job_id':job_id},[]
         check_origin(headers,self.origin)
-        if not access.management_token:raise ApiError(503,'API_AUTH_UNCONFIGURED')
+        try:
+            password_revision, password_digest = self.passwords.read()
+        except PasswordStorageError:
+            raise ApiError(503,'API_AUTH_UNCONFIGURED') from None
+        if password_digest is None:
+            raise ApiError(503,'API_AUTH_UNCONFIGURED')
         if path==PREFIX+'/auth/session' and method=='POST':
             if query:raise ApiError(400,'API_REQUEST_INVALID')
             check_origin(headers,self.origin,required=True)
-            self.sessions.attempt(peer);exact(body,('token',))
-            if not matches(body['token'],access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-            if 'authorization' in headers and not matches(bearer(headers),access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-            token,csrf=self.sessions.create(access.management_token)
+            self.sessions.attempt(peer);exact(body,('password',))
+            if not self.passwords.verify(body['password'])[1]:raise ApiError(401,'API_AUTH_REQUIRED')
+            token,csrf=self.sessions.create(password_digest)
             event(self.logger,logging.INFO,'API_SESSION_CREATED',component='api')
             return 201,{'csrf_token':csrf,'expires_in':self.sessions.ttl},[(b'set-cookie',self._cookie(token).encode())]
-        supplied=bearer(headers)
-        digest=session=None
-        if supplied is not None:
-            if not matches(supplied,access.management_token):raise ApiError(401,'API_AUTH_REQUIRED')
-        else:
-            check_origin(headers,self.origin,required=method!='GET')
-            digest,session=self.sessions.require(headers,access.management_token,mutation=method!='GET')
+        if 'authorization' in headers:
+            raise ApiError(401,'API_AUTH_REQUIRED')
+        check_origin(headers,self.origin,required=method!='GET')
+        digest,session=self.sessions.require(headers,password_digest,mutation=method!='GET')
         if path==PREFIX+'/auth/session':
             if query:raise ApiError(400,'API_REQUEST_INVALID')
-            if method=='GET':return 200,{'authenticated':True,'csrf_token':None if session is None else session.csrf},[]
+            if method=='GET':return 200,{'authenticated':True,'csrf_token':session.csrf},[]
             if method=='DELETE':
                 exact(body,())
-                if digest is not None:self.sessions.remove(digest)
+                self.sessions.remove(digest)
                 event(self.logger,logging.INFO,'API_SESSION_CLOSED',component='api')
                 return 200,{'signed_out':True},[(b'set-cookie',self._cookie('',clear=True).encode())]
             raise ApiError(405,'API_METHOD_INVALID')
+        if path==PREFIX+'/auth/password':
+            if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
+            if query:raise ApiError(400,'API_REQUEST_INVALID')
+            exact(body,('current_password','new_password'))
+            if not self.passwords.verify(body['current_password'])[1]:raise ApiError(401,'API_AUTH_REQUIRED')
+            try:
+                new_revision=self.passwords.replace(body['new_password'],expected_revision=password_revision)
+            except PasswordConflict:
+                raise ApiError(409,'API_AUTH_REQUIRED') from None
+            except ValueError:
+                raise ApiError(400,'API_REQUEST_INVALID') from None
+            self.sessions.clear()
+            return 200,{'password_changed':True,'revision':new_revision},[(b'set-cookie',self._cookie('',clear=True).encode())]
         if 'token' in query:raise ApiError(400,'API_REQUEST_INVALID')
         desired=self.store.read();configuration=for_operation(desired,self.startup,component='api')
         configure_logging(configuration.logging_settings(),'api',logger=self.logger)
