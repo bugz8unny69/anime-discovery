@@ -49,8 +49,13 @@ Run from `/opt/anime-discovery` as the service account:
 ```sh
 .venv/bin/python -m src.nextgen init --config-dir /var/lib/anime-discovery/config --database /var/lib/anime-discovery/nextgen.sqlite --settings-file /path/to/settings.json
 .venv/bin/python -m src.nextgen.api init-access --config-dir /var/lib/anime-discovery/config
+# After the API starts, set the dashboard password from the service account:
+.venv/bin/python -m src.nextgen.api.adm set-password
 ```
 
+The access command still provisions legacy management and separate webhook
+keys during the transition; browser management uses only the password stored
+by the local adm command. The management token does not authenticate HTTP management requests.
 The access command prompts without echo for distinct management and webhook
 keys. Each must be 32–256 URL-safe characters. Store them privately. `init`
 creates only new local files; it refuses an existing configuration, credential
@@ -66,8 +71,8 @@ proxy request logging for credential-bearing webhook URLs; prefer a separate
 Bearer webhook token. The API does not trust forwarded headers or open a public
 listener. Set API host/port only through settings and restart the API after edits.
 
-The API and worker units use `Type=notify` with a 60-second watchdog. The API reports readiness after Uvicorn binds its listener; the worker reports readiness after its first recovery pass. Each sends watchdog heartbeats from its asyncio event loop. This detects a blocked event loop, but does not certify provider connectivity or the completion of individual long-running jobs. The API unit weakly wants the worker; the worker binds to and starts after the API, so an API stop also stops the worker. Worker failure does not stop the API. The API restart pulls the worker back in when its startup transaction runs. Use `systemctl status` and `journalctl` to inspect watchdog failures and restart throttling.\n\nStart only `anime-discovery-api.service` initially. Open the dashboard and sign
-in with the management key. The webhook key cannot manage settings or jobs.
+The API and worker units use `Type=notify` with a 60-second watchdog. The API reports readiness after Uvicorn binds its listener; the worker reports readiness after its first recovery pass. Each sends watchdog heartbeats from its asyncio event loop. This detects a blocked event loop, but does not certify provider connectivity or the completion of individual long-running jobs. The API unit can be started without the worker; the worker binds to and starts after the API, so an API stop also stops the worker. Worker failure does not stop the API. Start or restart the worker explicitly after API recovery. Use `systemctl status` and `journalctl` to inspect watchdog failures and restart throttling.\n\nStart only `anime-discovery-api.service` initially. Open the dashboard and sign
+in with the administrator password. The webhook key cannot manage settings or jobs.
 The dashboard uses session/CSRF protection and `/api/v1/` resources.
 
 Configure settings and private credentials through the dashboard:
