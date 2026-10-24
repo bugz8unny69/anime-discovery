@@ -26,11 +26,11 @@ Do not deploy the scrypt foundation as a completed authentication migration. It 
 - [x] Worker and API systemd readiness/watchdog implementation (previous CI #18 passed).
 - [x] Source-level dashboard route and feature audit.
 - [x] Versioned scrypt hash helper and initial tests (not integrated).
-- [ ] Add password-hash persistence with atomic updates, migration, and explicit concurrent revision handling.
-- [ ] Implement password-based login and password change; invalidate all sessions on rotation.
-- [ ] Remove management-token browser login and any legacy token bypass from administrative HTTP routes.
-- [ ] Implement same-process Unix socket with restricted ownership/mode, peer identity checks, and `adm set-password`.
-- [ ] Wire dashboard login and Settings > Security forms to the new API.
+- [x] Add separate password-hash persistence with atomic updates and concurrent revision handling (legacy provider secrets preserved; migration validation pending).
+- [x] Implement password-based login and password change; invalidate all sessions on rotation (integration tests pending).
+- [x] Remove management-token browser login and bearer-token bypass from administrative HTTP routes (legacy token storage retained pending migration).
+- [x] Implement same-process Unix socket (0600, root/service UID), peer identity checks, and `adm set-password` (host validation pending).
+- [x] Wire dashboard login and Settings > Security forms to the new API (browser testing pending).
 - [ ] Reconcile old secrets/access setup and installer provisioning; retain independent Autobrr webhook token.
 - [ ] Verify full legacy dashboard feature parity and worker-unavailable UX.
 - [ ] Add authorization, CSRF, socket, rotation, lifecycle, and browser/API integration tests.
