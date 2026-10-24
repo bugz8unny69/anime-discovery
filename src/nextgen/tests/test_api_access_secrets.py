@@ -41,6 +41,23 @@ class ApiAccessSecretsTests(unittest.TestCase):
         self.assertFalse(self.store.status().sonarr_configured)
         with self.assertRaises(SecretStorageError):self.store.sonarr_api_key()
 
+    def test_jellyfin_v5_upgrade_retains_sonarr_and_never_exposes_key(self):
+        self.store.initialize('tvdb-provider',sonarr_api_key='sonarr-token',
+                              management_token='m'*43,webhook_token='w'*43)
+        self.assertEqual(self.raw()['schema_version'],4)
+        saved=self.store.update_jellyfin_api_key('abcdef0123456789',expected_revision=1)
+        self.assertTrue(saved.status.jellyfin_configured)
+        self.assertEqual(self.raw()['schema_version'],5)
+        self.assertEqual(self.store.jellyfin_api_key(),'abcdef0123456789')
+        self.assertEqual(self.store.sonarr_api_key(),'sonarr-token')
+        self.assertNotIn('abcdef0123456789',repr(saved.status))
+        self.assertNotIn('abcdef0123456789',repr(self.store.status()))
+        self.store.update_sonarr_api_key('sonarr-next',expected_revision=2)
+        self.assertEqual(self.raw()['schema_version'],5)
+        self.store.update_jellyfin_api_key('',expected_revision=3)
+        self.assertFalse(self.store.status().jellyfin_configured)
+        with self.assertRaises(SecretStorageError):self.store.jellyfin_api_key()
+
     def test_missing_keys_are_blank_and_legacy_v1_reads_do_not_upgrade(self):
         self.assertEqual(self.store.access_credentials().webhook_token,'')
         path=self.root/'secrets.json'
