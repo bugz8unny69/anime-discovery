@@ -51,8 +51,7 @@ def receipt(db,job_id,*,reused=False):
             'reused':reused,'disable_action':True,
             'disabled_reason':disabled_reason(row[0],row[2])}
     if db.execute("SELECT 1 FROM management_actions WHERE job_id=? AND action='KEEP'",(job_id,)).fetchone():
-        data['execution_available']=False
-        data['availability_reason']=CATALOG.reason('KEEP_NOT_READY')
+        data['execution_available']=True
     return data
 
 
@@ -71,7 +70,13 @@ class ManagementActions:
                              (op[0],selected)).fetchone()
             if prior:
                 state=db.execute('SELECT state FROM jobs WHERE job_id=?',(prior[0],)).fetchone()[0]
-                if action in ('cleanup','reject') and state in ('NEEDS_REVIEW','BLOCKED'):
+                # Reopening a Keep job is safe only outside an uncertain
+                # external POST. IMPORT_INTENT must be reconciled manually.
+                safe_keep=False
+                if action=='keep' and state in ('NEEDS_REVIEW','BLOCKED'):
+                    phase=db.execute("SELECT phase FROM keep_imports WHERE keep_job_id=?",(prior[0],)).fetchone()
+                    safe_keep=bool(phase and phase[0] in ('APPROVED','SERIES_READY','COMMAND_ACCEPTED'))
+                if (action in ('cleanup','reject') or safe_keep) and state in ('NEEDS_REVIEW','BLOCKED'):
                     now=self.queue.now()
                     db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
                     records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
@@ -152,20 +157,22 @@ class ManagementActions:
                              ('cleanup',op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE')):
             code={'keep':'KEEP','reject':'REJECT'}.get(name,'CLEANUP')
             row=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',(op[0],code)).fetchone()
-            resumable=name in ('cleanup','reject') and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
-            if name=='reject' and resumable:enabled=True
+            resumable=name in ('cleanup','reject','keep') and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
+            if name=='keep' and resumable:
+                phase=db.execute('SELECT phase FROM keep_imports WHERE keep_job_id=?',(row[0],)).fetchone()
+                resumable=bool(phase and phase[0] in ('APPROVED','SERIES_READY','COMMAND_ACCEPTED'))
+            if name in ('reject','keep') and resumable:enabled=True
             allowed=bool(enabled and (row is None or resumable) and busy is None)
             job=None if row is None else receipt(db,row[0],reused=True)
             reason=None
             if not allowed:
                 reason=(disabled_reason(*busy) if busy is not None else
                         CATALOG.reason('ANIME_REJECTED') if rejected and name in ('keep','reject') else
-                        CATALOG.reason('KEEP_NOT_READY') if name=='keep' and row is None else
+                        CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE') if name=='keep' and row is None else
                         job['disabled_reason'] if job is not None else
                         CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE'))
             result[name]={'enabled':allowed,'disabled_reason':reason,'job':job}
-        result['keep']['execution_available']=False
-        result['keep']['availability_reason']=CATALOG.reason('KEEP_NOT_READY')
+        result['keep']['execution_available']=True
         return result
 
     def bind(self,claim,action):
