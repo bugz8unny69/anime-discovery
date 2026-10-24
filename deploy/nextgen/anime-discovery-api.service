@@ -3,7 +3,6 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 Description=Anime Discovery NextGen management API
 PartOf=anime-discovery.target
-Wants=anime-discovery-worker.service
 Wants=network-online.target
 After=network-online.target
 
@@ -15,6 +14,9 @@ User=anime-discovery
 Group=anime-discovery
 WorkingDirectory=/opt/anime-discovery
 Environment=PYTHONUNBUFFERED=1
+Environment=ANIME_DISCOVERY_ADMIN_SOCKET=/run/anime-discovery/admin.sock
+RuntimeDirectory=anime-discovery
+RuntimeDirectoryMode=0700
 # Replace the origin with the exact HTTPS dashboard origin before installing.
 ExecStart=/opt/anime-discovery/.venv/bin/python -m src.nextgen.api serve --config-dir /var/lib/anime-discovery/config --public-origin https://anime.example.invalid
 Restart=on-failure
