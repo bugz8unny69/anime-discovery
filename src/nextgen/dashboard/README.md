@@ -77,3 +77,12 @@ Later authorized UI checks: real-browser sign-in/expiry, mobile tables and dialo
 keyboard tooltips, settings conflicts, request-loss recovery and polling alongside
 active jobs. No live listener, provider/client request, cleanup or deployment has
 been performed for this change.
+
+## Reject follow-up
+
+Reject is now a supported versioned action with a confirmation explaining the
+AniDB-anime decision, future acquisition stop and selected staged-file cleanup.
+It uses API-provided capabilities, receipts and job status. See
+[REJECT_MEDIA.md](../jobs/REJECT_MEDIA.md). Earlier lists marking Reject entirely
+unimplemented describe the previous implementation stage. Keep execution remains
+unavailable until Sonarr import is implemented.

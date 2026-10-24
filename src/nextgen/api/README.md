@@ -235,3 +235,11 @@ Job views now include bounded release/title/timestamp context, a trusted readabl
 handler label, catalog-keyed acquisition status and `is_management_action`.
 They never return raw bodies, source URLs, arbitrary payloads, credentials or
 leases. A job marked DONE is still distinct from successfully committed staging.
+
+## Reject
+
+POST `/api/v1/jobs/<id>/reject` queues the explicit Reject action using existing
+management authentication, session/CSRF rules and empty JSON-body contract.
+Job capabilities now include `reject`; queued/running actions disable competing
+buttons. See [the Reject contract](../jobs/REJECT_MEDIA.md) for selected-file
+cleanup and future-arrival behavior. The HTTP handler performs no media deletion.

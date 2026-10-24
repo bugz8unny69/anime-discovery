@@ -22,10 +22,11 @@ class AcquisitionPlanMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
             db.executescript((SQL_DIR/'019_media_verifications.sql').read_text())
             db.executescript((SQL_DIR/'020_staging_publications.sql').read_text())
+            db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],20)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],21)
             indexes=db.execute("PRAGMA index_list('acquisition_plans')").fetchall()
             unique=[tuple(r[2] for r in db.execute('PRAGMA index_info('+row[1]+')')) for row in indexes if row[2]]
             for columns in (('job_id',),('reservation_id',),('info_hash',),('submission_marker',)):self.assertIn(columns,unique)

@@ -11,7 +11,11 @@ DEFINITION=HandlerDefinition(KIND,'Reserve episode for acquisition')
 
 
 def _persist(db,claim,value):
-    try:return (persist_reservation(db,claim,value),)
+    from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
+    try:
+        require_allowed(db,value.anidb_id)
+        return (persist_reservation(db,claim,value),)
+    except AnimeRejected as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except EpisodeReserved as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except ReservationConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 

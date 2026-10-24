@@ -4,6 +4,28 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Finish the functional flow first — 2026-10-23
+
+User priority: finish the code so it can be exercised in the lab, then improve it
+from observed behavior. Do not expand optional safeguards/hardening as a substitute
+for finishing missing functionality. Preserve the agreed staging move with no
+byte-for-byte destination comparison. Tests/CI remain unrun until authorized;
+no merge, deployment or live media operations are implied.
+
+## Reject decision and selected staging cleanup — 2026-10-23
+
+Reject is now wired through the dashboard, versioned management API and worker.
+Admission records the AniDB-anime decision and queued control job together;
+duplicate clicks reuse it. Future Intake selection/reservation stops for that
+anime. Cleanup removes only the selected staged video and episode NFO, preserving
+other episodes, shared series metadata and permanent files. A cleanup problem
+does not undo the decision. See [the Reject contract](src/nextgen/jobs/REJECT_MEDIA.md).
+SQLite v21 explicitly upgrades action vocabulary and decision storage.
+
+Keep/Sonarr execution remains the next missing functional part. Reconsideration,
+viewer refresh and optional integrations remain follow-ups. Tests and CI are
+authored/unrun; source checks only. No live deletion, migration or deployment.
+
 ## Verified-media staging — 2026-10-23
 
 The default worker now advances VERIFY_MEDIA into STAGE_TRIAL_MEDIA. Publish a

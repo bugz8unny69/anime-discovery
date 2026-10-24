@@ -28,6 +28,8 @@ def _source(db,evaluation_job_id,event_id):
         "WHERE s.evaluation_job_id=? AND j.event_id=? AND j.kind='RESERVE_EPISODE' AND j.state='DONE'",
         (evaluation_job_id,event_id)).fetchone()
     if row is None:raise AcquisitionConflict()
+    from src.nextgen.storage.review_decisions import require_allowed
+    require_allowed(db,row[4])
     try:proof=episode_facts(db,evaluation_job_id,event_id)
     except ReservationConflict:raise AcquisitionConflict() from None
     if not proof.selected or row[2:10]!=(proof.verification_id,proof.plan_id,proof.anidb_id,proof.anidb_episode_id,

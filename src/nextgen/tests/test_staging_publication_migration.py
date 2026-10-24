@@ -12,10 +12,11 @@ class StagingPublicationMigrationTests(unittest.TestCase):
             for script in SCRIPTS[:19]:db.executescript((SQL_DIR/script).read_text())
             db.execute("INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES('test',X'61',1)");db.commit()
             before=db.execute('SELECT * FROM incoming_events').fetchall()
-            db.executescript((SQL_DIR/'020_staging_publications.sql').read_text());initialize(fresh)
+            db.executescript((SQL_DIR/'020_staging_publications.sql').read_text())
+            db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text());initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],20)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],21)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 

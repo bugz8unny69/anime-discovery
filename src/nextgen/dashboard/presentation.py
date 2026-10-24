@@ -9,7 +9,8 @@ from src.nextgen.jobs.submit_torrent_job import DEFINITION as submit
 from src.nextgen.jobs.download_torrent_job import DEFINITION as download
 from src.nextgen.jobs.verify_media_job import DEFINITION as media
 from src.nextgen.jobs.stage_trial_media_job import DEFINITION as stage
+from src.nextgen.jobs.reject_media_job import DEFINITION as reject
 from src.nextgen.jobs.keep_media_job import DEFINITION as keep
 from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanup
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,cleanup))
+HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup))

@@ -37,13 +37,14 @@ class AcquisitionBudgetMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
             db.executescript((SQL_DIR/'019_media_verifications.sql').read_text())
             db.executescript((SQL_DIR/'020_staging_publications.sql').read_text())
+            db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             row=db.execute('SELECT * FROM acquisition_plans').fetchone()
             self.assertEqual(row[:-1],before)
             self.assertIsNone(row[-1])
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],20)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],21)
         finally:db.close();fresh.close()
 
     def test_wrong_start_and_partial_failure_roll_back_column_and_table(self):

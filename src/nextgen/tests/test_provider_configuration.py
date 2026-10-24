@@ -247,6 +247,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('STAGE_TRIAL_MEDIA',worker.registry.entries)
         self.assertIn('CLEANUP_CANCELED_OPERATION',worker.registry.entries)
         self.assertIn('KEEP_MEDIA',worker.registry.entries)
+        self.assertIn('REJECT_MEDIA',worker.registry.entries)
         async def reader(*args):raise AssertionError('startup must not read metadata')
         composed=await build_identity_worker(self.root,read_metainfo=reader)
         self.addAsyncCleanup(composed.close)

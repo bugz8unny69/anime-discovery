@@ -96,8 +96,9 @@ class DiagnosticMigrationTests(unittest.TestCase):
             other.executescript(script("018_management_actions.sql"))
             other.executescript(script("019_media_verifications.sql"))
             other.executescript(script("020_staging_publications.sql"))
+            other.executescript(script("021_reject_decisions.sql"))
             self.assertEqual(structure(self.db), structure(other))
-            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 20)
+            self.assertEqual(self.db.execute("PRAGMA user_version").fetchone()[0], 21)
         finally:
             other.close()
 

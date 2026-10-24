@@ -251,7 +251,7 @@ class Application:
         # Authentication and CSRF above apply equally to all explicit actions.
         # HTTP performs local admission only; network/filesystem cleanup is queued.
         with MaintenanceGate(configuration.value('storage.database_path')).operation():
-            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|cancel|cleanup|cancellation)',path)
+            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|reject|cancel|cleanup|cancellation)',path)
             if match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 job=int(match[1]);action=match[2]
@@ -264,7 +264,7 @@ class Application:
                         if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
                         data=self._job(actions.queue,db,row)
                         return 200,{**data['cancellation'],'actions':data['actions']},[]
-                if action in ('keep','cancel','cleanup') and method=='POST':
+                if action in ('keep','reject','cancel','cleanup') and method=='POST':
                     exact(body,())
                     status,data,records=actions.submit(job,action)
                     for record in records:log_history(self.logger,record)

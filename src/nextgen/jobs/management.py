@@ -3,5 +3,7 @@ from src.nextgen.jobs.cleanup_canceled_operation_job import registration as clea
 from src.nextgen.jobs.keep_media_job import registration as keep
 
 
+from src.nextgen.jobs.reject_media_job import registration as reject
+
 def registrations(secrets):
-    return (cleanup(secrets),keep())
+    return (cleanup(secrets),keep(),reject())

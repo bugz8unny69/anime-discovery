@@ -17,11 +17,12 @@ class CancellationMigrationTests(unittest.TestCase):
             db.executescript((SQL_DIR/'018_management_actions.sql').read_text())
             db.executescript((SQL_DIR/'019_media_verifications.sql').read_text())
             db.executescript((SQL_DIR/'020_staging_publications.sql').read_text())
+            db.executescript((SQL_DIR/'021_reject_decisions.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(db),_structure(fresh))
             self.assertEqual(db.execute('SELECT * FROM jobs ORDER BY job_id').fetchall(),before)
             self.assertEqual(db.execute('SELECT * FROM job_operation_members ORDER BY job_id').fetchall(),[(1,1),(2,2)])
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],20)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],21)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close();fresh.close()
 

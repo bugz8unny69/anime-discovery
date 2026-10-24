@@ -318,7 +318,7 @@ CREATE TABLE IF NOT EXISTS staging_cleanup_artifacts (
 );
 CREATE TABLE IF NOT EXISTS management_actions (
  operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
- action TEXT NOT NULL CHECK(action IN ('KEEP','CLEANUP')),
+ action TEXT NOT NULL CHECK(action IN ('KEEP','CLEANUP','REJECT')),
  target_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
  job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
@@ -348,6 +348,15 @@ CREATE TABLE IF NOT EXISTS staging_publications (
  CHECK(job_id<>verification_job_id),
  CHECK((state='PLANNED' AND receipts_json IS NULL AND published_at_ms IS NULL) OR
        (state='PUBLISHED' AND receipts_json IS NOT NULL AND published_at_ms IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS anime_review_decisions (
+ anidb_id INTEGER PRIMARY KEY REFERENCES identified_anime(anidb_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ decision TEXT NOT NULL CHECK(decision='REJECT'),
+ cleanup_state TEXT NOT NULL CHECK(cleanup_state IN ('PENDING','COMPLETE')),
+ decided_at_ms INTEGER NOT NULL CHECK(decided_at_ms>=0)
 );
 
 """
@@ -389,13 +398,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v20; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v21; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19 databases require explicit versioned SQL migrations
-    before accessing v20 storage.
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20 databases require explicit versioned SQL migrations
+    before accessing v21 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 20:
+    if version == 21:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -405,7 +414,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=20;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=21;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

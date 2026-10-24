@@ -23,10 +23,10 @@ class StageMediaJobTests(unittest.IsolatedAsyncioTestCase):
     due=TorrentTransferTests.due
     ready=VerifyMediaJobTests.ready
 
-    def worker(self,publisher=None):
+    def worker(self,publisher=None,additional=()):
         verification=verify_registration(verify=partial(verify_file,read_probe=lambda *_:probe_bytes()),staging_kind='STAGE_TRIAL_MEDIA')
         staging=stage_registration(publisher_factory=publisher or partial(Publisher,allow_root=True))
-        return TorrentTransferTests.worker(self,verification=verification,additional=(staging,))
+        return TorrentTransferTests.worker(self,verification=verification,additional=(staging,*additional))
 
     async def staged_ready(self,worker):
         event,preparation,path=await self.ready(worker)

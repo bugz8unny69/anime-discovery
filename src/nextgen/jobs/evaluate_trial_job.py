@@ -21,7 +21,11 @@ class EvaluationCompletion:
 def _persist(db,claim,value):
     if type(value) is not EvaluationCompletion or value.evaluation_job_id!=claim.job_id:
         raise ValueError('episode selection completion does not match its job')
-    try:return (persist_trial(db,claim,value.proposal),)
+    from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
+    try:
+        require_allowed(db,value.proposal.source.anidb_id)
+        return (persist_trial(db,claim,value.proposal),)
+    except AnimeRejected as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except TrialConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 

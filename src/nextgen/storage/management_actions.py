@@ -11,7 +11,7 @@ from src.nextgen.storage.cancellation import CancellationStore, operation, unfin
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt, transaction
 
-KINDS={'KEEP':'KEEP_MEDIA','CLEANUP':'CLEANUP_CANCELED_OPERATION'}
+KINDS={'KEEP':'KEEP_MEDIA','CLEANUP':'CLEANUP_CANCELED_OPERATION','REJECT':'REJECT_MEDIA'}
 CATALOG=MessageCatalog()
 
 
@@ -62,16 +62,16 @@ class ManagementActions:
         self.cancellations=CancellationStore(database)
 
     def submit(self,job_id,action):
-        if action not in ('keep','cancel','cleanup'):raise ActionUnavailable()
+        if action not in ('keep','reject','cancel','cleanup'):raise ActionUnavailable()
         records=[]
         with ExitStack() as locks,self.queue.connection() as db,transaction(db):
             op=target(db,job_id)
-            selected='KEEP' if action=='keep' else 'CLEANUP'
+            selected={'keep':'KEEP','reject':'REJECT'}.get(action,'CLEANUP')
             prior=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',
                              (op[0],selected)).fetchone()
             if prior:
                 state=db.execute('SELECT state FROM jobs WHERE job_id=?',(prior[0],)).fetchone()[0]
-                if action=='cleanup' and state in ('NEEDS_REVIEW','BLOCKED'):
+                if action in ('cleanup','reject') and state in ('NEEDS_REVIEW','BLOCKED'):
                     now=self.queue.now()
                     db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,prior[0]))
                     records.append(append_job_history(db,job_id=prior[0],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
@@ -79,8 +79,17 @@ class ManagementActions:
                     return 202,data,tuple(records)
                 return 202,receipt(db,prior[0],reused=True),()
             now=self.queue.now()
-            if action=='keep':
+            if action in ('keep','reject'):
                 if op[1]!='STAGED':raise ActionUnavailable()
+                from src.nextgen.storage.review_decisions import staged
+                from src.nextgen.staging import StagingReview
+                if action=='reject':
+                    try:anime=staged(db,op[0])[0]
+                    except StagingReview:raise ActionUnavailable() from None
+                    if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone():raise ActionUnavailable()
+                    if db.execute('SELECT 1 FROM anime_review_decisions WHERE anidb_id=?',(anime,)).fetchone():raise ActionUnavailable()
+                else:
+                    if db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
             else:
                 if action=='cancel':
                     _,audits=self.cancellations.request_in_transaction(db,job_id)
@@ -110,6 +119,8 @@ class ManagementActions:
             control,audit=enqueue_job_with_receipt(db,component='api',kind=KINDS[selected],event_id=event,
                 payload={'target_job_id':job_id},available_at_ms=now)
             db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',(op[0],selected,job_id,control,now))
+            if action=='reject':
+                db.execute("INSERT INTO anime_review_decisions(anidb_id,operation_id,job_id,decision,cleanup_state,decided_at_ms) VALUES(?,?,?,'REJECT','PENDING',?)",(anime,op[0],control,now))
             records.append(audit)
             data=receipt(db,control)
         return 202,data,tuple(records)
@@ -119,7 +130,7 @@ class ManagementActions:
         control=db.execute('SELECT action FROM management_actions WHERE job_id=?',(job_id,)).fetchone()
         if control:
             return {name:{'enabled':False,'disabled_reason':CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE')}
-                    for name in ('keep','cancel','cleanup')}
+                    for name in ('keep','reject','cancel','cleanup')}
         op=operation(db,job_id)
         cancelable=can_cancel_operation(db,op)
         # An action job in this scope disables competing buttons as well.
@@ -129,16 +140,20 @@ class ManagementActions:
                         "ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,j.job_id LIMIT 1",
                         (op[0],)).fetchone()
         result={}
-        for name,enabled in (('keep',op[1]=='STAGED'),('cancel',cancelable),
+        rejected=db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None
+        keep_exists=db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone() is not None
+        for name,enabled in (('keep',op[1]=='STAGED' and not rejected),('reject',op[1]=='STAGED' and not rejected and not keep_exists),('cancel',cancelable),
                              ('cleanup',op[1] in ('CANCEL_REQUESTED','CANCELED') and op[2]!='COMPLETE')):
-            code='KEEP' if name=='keep' else 'CLEANUP'
+            code={'keep':'KEEP','reject':'REJECT'}.get(name,'CLEANUP')
             row=db.execute('SELECT job_id FROM management_actions WHERE operation_id=? AND action=?',(op[0],code)).fetchone()
-            resumable=name=='cleanup' and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
+            resumable=name in ('cleanup','reject') and row is not None and db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0] in ('NEEDS_REVIEW','BLOCKED')
+            if name=='reject' and resumable:enabled=True
             allowed=bool(enabled and (row is None or resumable) and busy is None)
             job=None if row is None else receipt(db,row[0],reused=True)
             reason=None
             if not allowed:
                 reason=(disabled_reason(*busy) if busy is not None else
+                        CATALOG.reason('ANIME_REJECTED') if rejected and name in ('keep','reject') else
                         CATALOG.reason('KEEP_NOT_READY') if name=='keep' and row is None else
                         job['disabled_reason'] if job is not None else
                         CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE'))
@@ -158,6 +173,6 @@ class ManagementActions:
             if row is None or row[0]!=data['target_job_id'] or claim.kind!=KINDS[action]:raise ActionUnavailable()
             if operation(db,claim.job_id)[0]==row[1]:raise ActionUnavailable()
             op=operation(db,row[0])
-            if op[0]!=row[1] or (op[1]!='STAGED' if action=='KEEP' else op[1] not in ('CANCEL_REQUESTED','CANCELED')):
+            if op[0]!=row[1] or (op[1]!='STAGED' if action in ('KEEP','REJECT') else op[1] not in ('CANCEL_REQUESTED','CANCELED')):
                 raise ActionUnavailable()
             return row[0]
