@@ -179,7 +179,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT count(*) FROM incoming_events'),[(0,)])
 
     async def test_management_session_never_authenticates_webhook_and_logs_hide_keys(self):
-        _,_,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'origin':ORIGIN})
+        _,_,headers=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},headers={'origin':ORIGIN})
         cookie=headers[b'set-cookie'].decode().split(';')[0]
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(),headers={'cookie':cookie,'origin':ORIGIN})
         self.assertEqual(status,401)
