@@ -45,6 +45,7 @@ class StageMediaJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(list(target.rglob('*.mkv'))),1)
         self.assertEqual(len(list(target.rglob('*.nfo'))),2)
         self.assertFalse(source.exists())
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(0,)])
         job=self.rows("SELECT job_id FROM jobs WHERE kind='STAGE_TRIAL_MEDIA'")[0][0]
         self.assertFalse(CancellationStore(self.database).status(job)['can_cancel'])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='KEEP_MEDIA'"),[(0,)])

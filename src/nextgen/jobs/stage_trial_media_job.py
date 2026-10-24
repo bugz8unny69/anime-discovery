@@ -19,7 +19,13 @@ REVIEW=(StagingReview,MediaInvalid,AcquisitionConflict,MetadataInvalid,SourceMis
 
 
 def _persist(db,claim,value):
-    try:persist(db,claim,value)
+    try:
+        value=dict(value)
+        refresh=value.pop('refresh',False)
+        persist(db,claim,value)
+        if refresh:
+            from src.nextgen.jobs.refresh_jellyfin_job import enqueue
+            enqueue(db,claim)
     except REVIEW as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
@@ -37,7 +43,7 @@ def registration(*,publisher_factory=Publisher,journal_factory=Journal):
                 plan=journal.prepare(context.claim,verification,context.configuration)
                 receipts=publisher.publish(plan)
                 journal.guard(context.claim)
-                return {'verification_job_id':verification,'receipts':receipts}
+                return {'verification_job_id':verification,'receipts':receipts,'refresh':bool(context.configuration.value('jellyfin.base_url'))}
         try:return Outcome(value=await blocking(run))
         except StagingBusy as exc:return Outcome('defer',exc.reason_code,delay_ms=1000)
         except FileExistsError:return Outcome('review','STAGING_REVIEW')

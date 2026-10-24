@@ -13,4 +13,6 @@ from src.nextgen.jobs.reject_media_job import DEFINITION as reject
 from src.nextgen.jobs.keep_media_job import DEFINITION as keep
 from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanup
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup))
+from src.nextgen.jobs.refresh_jellyfin_job import DEFINITION as refresh
+
+HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh))

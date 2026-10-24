@@ -119,6 +119,18 @@ class KeepSonarrTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again['completion']['message'],'This episode has been kept.')
         self.assertNotIn('sonarr-private-key',str(self.rows('SELECT * FROM keep_imports')))
 
+    async def test_completed_keep_queues_refresh_in_an_independent_operation(self):
+        worker,fake,actions,target,job=await self.prepared()
+        current=self.store.read()
+        self.store.update({'jellyfin':{'base_url':'http://jellyfin.invalid'}},expected_revision=current.revision)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(self.rows("SELECT state,created_by_job_id FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[('PENDING',job)])
+        self.assertEqual(self.rows("SELECT count(DISTINCT operation_id) FROM job_operation_members WHERE job_id=? OR job_id IN (SELECT job_id FROM jobs WHERE kind='REFRESH_JELLYFIN')",(job,)),[(2,)])
+        _,again,_=actions.submit(target,'keep')
+        self.assertTrue(again['reused'])
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(1,)])
+
     async def test_lost_import_reply_reconciles_same_command_without_second_post(self):
         worker,fake,actions,target,job=await self.prepared(lose_import=True)
         await worker.attempt()
@@ -177,8 +189,8 @@ class SonarrSettingsTests(unittest.TestCase):
             self.assertNotIn('sonarr',doc['settings'])
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
-        self.assertEqual(upgraded.schema_version,8)
-        self.assertEqual(upgraded.revision,doc['revision']+1)
+        self.assertEqual(upgraded.schema_version,9)
+        self.assertEqual(upgraded.revision,doc['revision']+2)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
         for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
 

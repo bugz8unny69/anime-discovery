@@ -17,6 +17,9 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('JELLYFIN_CONFIGURATION_INVALID','The Jellyfin endpoint or API key is missing or rejected.','Configure Jellyfin refresh settings and credentials.','Review the address and private API key. Completed staging and Keep remain valid.','WARNING',False),
+    Reason('JELLYFIN_UNAVAILABLE','Jellyfin did not accept the library scan request.','Jellyfin refresh is temporarily unavailable.','The refresh job will retry; completed media operations remain valid.','WARNING',True),
+    Reason('JELLYFIN_REFRESH_REVIEW','The server returned an unexpected scan response.','Jellyfin refresh needs review.','Check the address and server API compatibility.','WARNING',False),
     Reason('KEEP_CONFIGURATION_INVALID','Sonarr endpoint, credentials, profile or library root is unconfigured.','Configure Sonarr before keeping this episode.','Review Sonarr settings and credentials, then submit Keep again.','WARNING',False),
     Reason('KEEP_IMPORT_WAITING','The saved series or import request is being reconciled.','The Keep job is in progress.','The job will check Sonarr again shortly.','INFO',None),
     Reason('KEEP_SERVICE_UNAVAILABLE','The configured Sonarr service could not be reached.','Sonarr is temporarily unavailable.','The job will retry; check the Sonarr connection if this continues.','WARNING',True),

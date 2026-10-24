@@ -253,3 +253,8 @@ Keep receipts expose completion with a catalog-keyed Kept message only after the
 saved import proof is complete. PATCH credentials/sonarr accepts api_key and
 expected_revision; credential reads add sonarr_configured, never the saved key.
 See [Keep/Sonarr](../KEEP_SONARR.md). Webhook and browser authorization are unchanged.
+
+Jellyfin uses PATCH /api/v1/credentials/jellyfin with api_key and
+expected_revision, with the same session/CSRF/revision contract as Sonarr.
+GET credentials adds jellyfin_configured, never the key. Settings expose
+jellyfin.base_url and jellyfin.timeout_seconds. See ../JELLYFIN_REFRESH.md.

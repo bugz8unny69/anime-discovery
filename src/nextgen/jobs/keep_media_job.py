@@ -18,6 +18,9 @@ DEFINITION=HandlerDefinition(KIND,'Keep staged video in the permanent library')
 def _persist(db,claim,value):
     if db.execute('SELECT phase FROM keep_imports WHERE job_id=?',(claim.job_id,)).fetchone()!=('COMPLETE',):
         raise CompletionRejected(Outcome('review','KEEP_IMPORT_REVIEW'))
+    if value and value.get('refresh'):
+        from src.nextgen.jobs.refresh_jellyfin_job import enqueue
+        enqueue(db,claim)
     return (append_job_history(db,job_id=claim.job_id,event_code='KEEP_COMPLETED',reason_code='KEEP_COMPLETE',
         component='worker',occurred_at_ms=time.time_ns()//1000000),)
 
@@ -30,7 +33,7 @@ def registration(secrets=None,*,service_factory=Service):
         try:
             complete=await blocking(service_factory(context.configuration,secrets).run,context.claim,
                                    context.data()['target_job_id'],context.cancelled)
-            return Outcome() if complete else Outcome('defer','KEEP_IMPORT_WAITING',delay_ms=30000)
+            return Outcome(value={'refresh':bool(context.configuration.value('jellyfin.base_url'))}) if complete else Outcome('defer','KEEP_IMPORT_WAITING',delay_ms=30000)
         except StagingBusy:return Outcome('defer','KEEP_IMPORT_WAITING',delay_ms=30000)
         except KeepUnavailable:return Outcome('retry','KEEP_SERVICE_UNAVAILABLE')
         except KeepReview as exc:return Outcome('review',exc.reason_code)

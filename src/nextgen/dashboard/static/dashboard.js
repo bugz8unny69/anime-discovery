@@ -290,6 +290,7 @@ async function loadSettings() {
 function renderCredentials() {
   const container = $('credential-forms'); container.replaceChildren();
   const specs = [
+    ['jellyfin', 'Jellyfin', 'jellyfin_configured', [['api_key', 'API key']]],
     ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],

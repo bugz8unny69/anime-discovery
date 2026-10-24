@@ -47,7 +47,7 @@ class TrialWindowTests(unittest.TestCase):
             document=CONVERSIONS[version](document)
             self.assertNotIn('trial',document['settings'])
         current=convert_document(document)
-        self.assertEqual((current.schema_version,current.revision),(8,8))
+        self.assertEqual((current.schema_version,current.revision),(9,9))
         self.assertEqual(current.value('trial.backfill_count'),6)
         self.assertEqual(current.value('trial.following_count'),1)
         with self.assertRaises(ConfigurationError):

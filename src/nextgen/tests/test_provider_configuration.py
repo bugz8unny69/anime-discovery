@@ -45,7 +45,7 @@ class ProviderConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 convert_document({**document,"settings":{**document["settings"],"anidb":{"client_name":"new"}}})
         current = convert_document(third)
-        self.assertEqual((current.schema_version,current.revision),(8,8))
+        self.assertEqual((current.schema_version,current.revision),(9,9))
         self.assertEqual(current.value("anidb.client_name"),"")
         self.assertEqual(current.value("providers.timeout_seconds"),30)
 
@@ -248,6 +248,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('CLEANUP_CANCELED_OPERATION',worker.registry.entries)
         self.assertIn('KEEP_MEDIA',worker.registry.entries)
         self.assertIn('REJECT_MEDIA',worker.registry.entries)
+        self.assertIn('REFRESH_JELLYFIN',worker.registry.entries)
         async def reader(*args):raise AssertionError('startup must not read metadata')
         composed=await build_identity_worker(self.root,read_metainfo=reader)
         self.addAsyncCleanup(composed.close)

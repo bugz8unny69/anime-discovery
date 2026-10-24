@@ -4,6 +4,17 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Jellyfin scan follow-up — 2026-10-24
+
+Configured staging and Keep completions now enqueue independent Jellyfin scan
+jobs. A failed refresh does not undo completed media work. Settings and private
+API-key entry are exposed through the existing API/dashboard; blank address
+keeps automatic refresh disabled. A successful job means scan accepted, not
+confirmed episode visibility. Configuration v9, backward-readable secrets v5,
+SQLite unchanged at v22. See [Jellyfin refresh](src/nextgen/JELLYFIN_REFRESH.md).
+Offline cases authored/unrun; source checks only. No live requests or deployment.
+Cleanup, optional Shoko and missing-episode search remain separate work.
+
 ## Keep through Sonarr — 2026-10-24
 
 Keep now uses the existing staged path and verified TVDB placement to find/add a
