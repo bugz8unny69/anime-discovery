@@ -315,6 +315,7 @@ function renderCredentials() {
     ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
+    ['access', 'Autobrr webhook', 'webhook_configured', [['webhook_token', 'Webhook token']]],
   ];
   for (const [service, title, presence, fields] of specs) {
     const form = node('form', null, 'integration'); form.autocomplete = 'off';
@@ -347,8 +348,8 @@ function renderCredentials() {
     });
     container.appendChild(form);
   }
-  container.appendChild(node('p', 'Saved credentials are never revealed. Webhook and management access use separate keys.', 'muted'));
-  container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'} · Management access: ${state.credentials.management_configured ? 'configured' : 'not configured'}`, 'muted'));
+  container.appendChild(node('p', 'Saved credentials are never revealed. The webhook token cannot administer the dashboard.', 'muted'));
+  container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'}`, 'muted'));
 }
 async function showWorkspace() {
   $('login-panel').hidden = true; $('workspace').hidden = false; $('sign-out').hidden = false;
