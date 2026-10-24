@@ -66,7 +66,7 @@ proxy request logging for credential-bearing webhook URLs; prefer a separate
 Bearer webhook token. The API does not trust forwarded headers or open a public
 listener. Set API host/port only through settings and restart the API after edits.
 
-Start only `anime-discovery-api.service` initially. Open the dashboard and sign
+The API and worker units use `Type=notify` with a 60-second watchdog. The API reports readiness after Uvicorn binds its listener; the worker reports readiness after its first recovery pass. Each sends watchdog heartbeats from its asyncio event loop. This detects a blocked event loop, but does not certify provider connectivity or the completion of individual long-running jobs. The API unit weakly wants the worker; the worker binds to and starts after the API, so an API stop also stops the worker. Worker failure does not stop the API. The API restart pulls the worker back in when its startup transaction runs. Use `systemctl status` and `journalctl` to inspect watchdog failures and restart throttling.\n\nStart only `anime-discovery-api.service` initially. Open the dashboard and sign
 in with the management key. The webhook key cannot manage settings or jobs.
 The dashboard uses session/CSRF protection and `/api/v1/` resources.
 
