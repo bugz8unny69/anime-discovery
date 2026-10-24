@@ -1,6 +1,6 @@
 [Unit]
 Description=Anime Discovery NextGen
-Wants=anime-discovery-api.service anime-discovery-worker.service
+Wants=anime-discovery-api.service
 After=network-online.target remote-fs.target
 
 [Install]
