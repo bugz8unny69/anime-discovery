@@ -288,10 +288,19 @@ class Application:
 
             if path==PREFIX+'/missing-episodes':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
-                if set(query)!={'plan_id'}:raise ApiError(400,'API_REQUEST_INVALID')
-                plan_id=page_number(query,'plan_id',None,1,(1<<63)-1)
+                if set(query) not in (set(),{'plan_id'}):raise ApiError(400,'API_REQUEST_INVALID')
+                plan_id=page_number(query,'plan_id',None,1,(1<<63)-1) if query else None
                 with JobQueue(configuration.value('storage.database_path')).connection() as db:
                     db.execute('BEGIN')
+                    if plan_id is None:
+                        plans=db.execute('SELECT p.plan_id,p.anidb_id,p.tvdb_series_id,p.tvdb_season,'
+                            'p.anchor_episode,p.backfill_count,p.following_count,a.title '
+                            'FROM trial_plans p JOIN identified_anime a ON a.anidb_id=p.anidb_id '
+                            'ORDER BY p.plan_id DESC LIMIT 50').fetchall()
+                        return 200,{'plans':[{'plan_id':p[0],'anidb_id':p[1],
+                            'tvdb_series_id':p[2],'tvdb_season':p[3],'anchor_episode':p[4],
+                            'backfill_count':p[5],'following_count':p[6],'anime_title':p[7]}
+                            for p in plans],'plan_limit':50},[]
                     plan=db.execute('SELECT anidb_id,tvdb_series_id,tvdb_season,anchor_episode,backfill_count,following_count '
                                     'FROM trial_plans WHERE plan_id=?',(plan_id,)).fetchone()
                     if plan is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
