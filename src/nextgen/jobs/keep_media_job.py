@@ -143,6 +143,6 @@ def registration(secrets=None,*,refresh_kind=None):
             return Outcome("retry","SONARR_UNAVAILABLE")
     def route(value):
         if refresh_kind is None or not value["refresh_required"]:return ()
-        return (Successor.create(refresh_kind,{"source_kind":KIND,"source_job_id":value["source_job_id"]}),)
+        return (Successor.create(refresh_kind,{"source_kind":KIND,"source_job_id":value["source_job_id"]},independent=True),)
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
                         successor_kinds=() if refresh_kind is None else (refresh_kind,))
