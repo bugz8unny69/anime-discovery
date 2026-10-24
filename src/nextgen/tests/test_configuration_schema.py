@@ -70,7 +70,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         migrated = convert_document(old)
         self.assertEqual(old, original)
         self.assertEqual(source_version(old), 0)
-        self.assertEqual(migrated.revision, 7)
+        self.assertEqual(migrated.revision, 8)
         self.assertEqual(migrated.value("logging.level"), "DEBUG")
         self.assertEqual(migrated.value("logging.components")["worker"], "TRACE")
         self.assertEqual(convert_document(migrated.to_document()), migrated)
@@ -78,6 +78,25 @@ class ConfigurationSchemaTests(unittest.TestCase):
             load_current(json.dumps(old).encode())
         with self.assertRaises(ConfigurationError):
             convert_document({"daemon": {"concurrency": 4}})  # Not a legacy production import.
+
+    def test_sonarr_v8_requires_explicit_upgrade_and_consistent_library_roots(self):
+        current=ConfigurationSnapshot(10, {"storage":{"keep_root":"/mnt/media/Anime"}})
+        v7=current.to_document();v7["schema_version"]=7
+        del v7["settings"]["sonarr"]
+        with self.assertRaises(ConfigurationMigrationRequired):
+            load_current(json.dumps(v7).encode())
+        converted=convert_document(v7)
+        self.assertEqual(converted.schema_version,8)
+        self.assertEqual(converted.revision,11)
+        self.assertEqual(converted.value("sonarr.quality_profile_name"),"Anime")
+        with self.assertRaises(ConfigurationError):
+            ConfigurationSnapshot(1,{"storage":{"keep_root":"/mnt/media/Anime"},
+                "sonarr":{"base_url":"https://sonarr.arr.internal",
+                          "root_folder":"/wrong/media"}})
+        validated=ConfigurationSnapshot(1,{"storage":{"keep_root":"/mnt/media/Anime"},
+            "sonarr":{"base_url":"https://sonarr.arr.internal",
+                      "root_folder":"/mnt/media/Anime","quality_profile_name":"Anime"}})
+        self.assertEqual(validated.value("sonarr.timeout_seconds"),15)
 
     def test_strict_decode_rejects_duplicate_nonfinite_oversized_or_invalid_input(self):
         for raw in (b'{"logging":{},"logging":{}}', b'{"x":NaN}', b'{"x":Infinity}',
@@ -108,7 +127,7 @@ class ConfigurationSchemaTests(unittest.TestCase):
         candidate, changed = patch_snapshot(initial, {"logging": {"level": "INFO"}})
         self.assertIs(candidate, initial)
         self.assertEqual(changed, ())
-        for version in (True, 0, 1, 2, 3, 4, 5, 6, 8, "1"):
+        for version in (True, 0, 1, 2, 3, 4, 5, 6, 7, 9, "1"):
             with self.subTest(version=version), self.assertRaises(ConfigurationError):
                 document_snapshot({"schema_version": version, "revision": 1, "settings": {}})
         for revision in (True, 0, -1, "1", MAX_REVISION + 1):
