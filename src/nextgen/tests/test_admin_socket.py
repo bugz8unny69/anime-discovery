@@ -40,7 +40,7 @@ class AdminSocketTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 server.close()
                 await server.wait_closed()
-                os.unlink(path)
+                Path(path).unlink(missing_ok=True)
 
     async def test_if_unset_preserves_password_and_rejects_unprivileged_peer(self):
         from src.nextgen.api.admin_socket import serve_admin
@@ -72,6 +72,30 @@ class AdminSocketTests(unittest.IsolatedAsyncioTestCase):
             result=await send(store,command='set-password',password='unauthorized password')
             self.assertFalse(result['ok'])
             self.assertTrue(store.verify('first password for testing')[1])
+
+    async def test_api_shutdown_accepts_socket_removed_by_asyncio(self):
+        from src.nextgen.api.app import Application
+        from unittest.mock import AsyncMock
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'admin.sock'
+            path.touch()
+            class Server:
+                def close(self):pass
+                async def wait_closed(self):path.unlink()
+            app=object.__new__(Application)
+            app.admin_path=str(path)
+            app.passwords=object()
+            app.admin_server=None
+            app.close=lambda:None
+            messages=iter([{'type':'lifespan.startup'},{'type':'lifespan.shutdown'}])
+            output=[]
+            async def receive():return next(messages)
+            async def send(message):output.append(message)
+            with patch('src.nextgen.api.app.start_admin',new=AsyncMock(return_value=Server())), \
+                 patch('src.nextgen.api.app.watchdog_interval',return_value=None):
+                await app({'type':'lifespan'},receive,send)
+            self.assertEqual([message['type'] for message in output],
+                ['lifespan.startup.complete','lifespan.shutdown.complete'])
 
     async def test_reject_unsafe_socket_directory(self):
         with tempfile.TemporaryDirectory() as directory:

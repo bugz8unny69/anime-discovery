@@ -156,7 +156,8 @@ class Application:
                     if self.admin_server is not None:
                         self.admin_server.close()
                         await self.admin_server.wait_closed()
-                        os.unlink(self.admin_path)
+                        try:os.unlink(self.admin_path)
+                        except FileNotFoundError:pass  # Python 3.13 asyncio owns socket cleanup.
                     if watchdog_task is not None:
                         watchdog_task.cancel()
                         await asyncio.gather(watchdog_task, return_exceptions=True)
