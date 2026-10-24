@@ -243,3 +243,13 @@ management authentication, session/CSRF rules and empty JSON-body contract.
 Job capabilities now include `reject`; queued/running actions disable competing
 buttons. See [the Reject contract](../jobs/REJECT_MEDIA.md) for selected-file
 cleanup and future-arrival behavior. The HTTP handler performs no media deletion.
+
+## Keep execution and Sonarr credentials
+
+KEEP_MEDIA now runs the Sonarr import service; execution_available is true.
+The existing authenticated POST jobs/{id}/keep returns a durable job receipt,
+resumes the same stopped job on explicit retry and reuses successful results.
+Keep receipts expose completion with a catalog-keyed Kept message only after the
+saved import proof is complete. PATCH credentials/sonarr accepts api_key and
+expected_revision; credential reads add sonarr_configured, never the saved key.
+See [Keep/Sonarr](../KEEP_SONARR.md). Webhook and browser authorization are unchanged.

@@ -52,11 +52,11 @@ operation-scoped adapter or explicit process configuration.
 
 ## Independent format version and publication revision
 
-Canonical JSON has schema_version=7, a positive revision, and a settings object
+Canonical JSON has schema_version=8, a positive revision, and a settings object
 containing the sections above. Example:
 
     {
-      "schema_version": 7,
+      "schema_version": 8,
       "revision": 1,
       "settings": {
         "torrent_metadata": {"base_url": "", "timeout_seconds": 30},
@@ -284,3 +284,12 @@ The explicit v6→v7 conversion preserves existing settings and historical outpu
 shapes. Use the existing preview/backup/apply contract; no automatic startup
 conversion. The dashboard renders these new fields from metadata.
 See [the retrieval contract](acquisition/METAINFO_SOURCE.md).
+
+## Sonarr configuration v8
+
+sonarr.base_url, timeout_seconds, quality_profile_id, staging_root and library_root
+are applied to new operations. Defaults are unconfigured addresses/mappings,
+30-second timeout and profile 0 (unconfigured for adding a series). The existing
+storage.keep_root is the local permanent folder. Explicit v7→v8 conversion adds
+these defaults without changing earlier values or historical converter output.
+See [Keep through Sonarr](KEEP_SONARR.md) for mapping and saved-import behavior.

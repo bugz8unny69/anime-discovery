@@ -106,7 +106,7 @@ class MetainfoSourceTests(unittest.TestCase):
         upgraded=convert_document(doc)
         self.assertEqual(doc,before)
         self.assertEqual(upgraded.schema_version,CONFIGURATION_VERSION)
-        self.assertEqual(upgraded.revision,doc['revision']+1)
+        self.assertEqual(upgraded.revision,doc['revision']+2)
         self.assertEqual(upgraded.value('torrent_metadata.base_url'),'')
         self.assertEqual(upgraded.value('torrent_metadata.timeout_seconds'),30)
         for section,values in before['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],values)

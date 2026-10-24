@@ -1,3 +1,9 @@
+Current Keep execution: KEEP_MEDIA now calls the Sonarr import service. Its
+execution_available flag is true; staged eligibility and job-state explanations
+still apply. Explicit Keep can resume the same stopped job. A completion message
+comes from the durable import result. See [Keep/Sonarr](KEEP_SONARR.md). This
+supersedes the older blocked-boundary notes below; old history remains readable.
+
 # Durable dashboard and ADM actions
 
 The API authenticates and records intent. The separate async Worker executes

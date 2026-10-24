@@ -4,6 +4,34 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Keep through Sonarr — 2026-10-24
+
+Keep now uses the existing staged path and verified TVDB placement to find/add a
+Sonarr series and request one exact-file copy import. The worker records durable
+intent, reconciles lost replies and checks the episode-file result without
+hashing the permanent file. Shoko remains optional and separate. Source staging
+files stay available; post-Keep cleanup and Jellyfin refresh remain next work.
+
+Settings/API/dashboard now expose Sonarr address, profile, path mappings and
+private credential replacement. Keep is available on staged work; readable job
+receipts and a durable Kept result drive the dashboard. Configuration v8,
+secrets v4 and SQLite v22 are explicit upgrades. Older SQL migrations stay intact.
+See [Keep through Sonarr](src/nextgen/KEEP_SONARR.md). Tests/CI remain unrun;
+source checks only. No live imports, migrations, media changes or deployment.
+
+
+## Keep/Sonarr implementation in progress — 2026-10-23
+
+User clarification: Shoko is optional. Keep must use verified TVDB series and
+season/episode placement for Sonarr; Shoko results do not override or block it.
+Reuse the stored staged path and existing NFO output. KeepSelection now reads
+that existing manifest and carries both AniDB and TVDB identities, matching a
+Sonarr episode by TVDB-authoritative placement rather than title or AniDB ID.
+This is the first local implementation step, not completed Sonarr import.
+Sonarr settings/credentials, HTTP adapter and import execution remain unfinished.
+No duplicate staging/NFO pipeline or mandatory Shoko call is introduced.
+Offline mapping cases are authored/unrun; Python syntax checks only.
+
 ## Finish the functional flow first — 2026-10-23
 
 User priority: finish the code so it can be exercised in the lab, then improve it

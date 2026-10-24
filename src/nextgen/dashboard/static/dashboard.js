@@ -155,11 +155,12 @@ function renderJobs() {
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
     } else if (!job.is_management_action && job.state === 'DONE' && job.cancellation.state === 'ACTIVE') {
       details.appendChild(node('p', COPY['dashboard.not_staged']));
-    } else if (job.cancellation.state === 'STAGED') details.appendChild(node('p', COPY['dashboard.staged']));
+    } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
     const activeAction = ['cleanup', 'keep', 'reject'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
       details.appendChild(node('p', `Job #${activeAction.job_id}: ${activeAction.status.message}`));
       if (activeAction.reason) details.appendChild(node('small', activeAction.reason.message, 'muted'));
+      if (activeAction.completion) details.appendChild(node('p', activeAction.completion.message));
       const controlHistory = node('button', 'Action job history', 'secondary');
       controlHistory.addEventListener('click', () => openHistory(activeAction.job_id)); details.appendChild(controlHistory);
     }
@@ -289,6 +290,7 @@ async function loadSettings() {
 function renderCredentials() {
   const container = $('credential-forms'); container.replaceChildren();
   const specs = [
+    ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
     ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
   ];

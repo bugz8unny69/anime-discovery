@@ -157,7 +157,7 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0][1]['job_id'],results[1][1]['job_id'])
         self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(1,)])
 
-    async def test_keep_requires_staged_and_stays_explicitly_blocked_without_media_library(self):
+    async def test_keep_requires_staged_and_reviews_a_missing_staging_receipt(self):
         pending=self.add()
         with self.assertRaises(ActionUnavailable):self.actions().submit(pending,'keep')
         self.actions().submit(pending,'cancel')
@@ -165,7 +165,7 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         worker=Worker(self.store,self.startup,Registry((keep(),)))
         self.addAsyncCleanup(worker.close)
         await worker.attempt()
-        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(data['job_id'],)),[('BLOCKED','KEEP_NOT_READY')])
+        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(data['job_id'],)),[('NEEDS_REVIEW','KEEP_IMPORT_REVIEW')])
         self.assertEqual(self.actions().submit(target,'keep')[1]['job_id'],data['job_id'])
         self.assertEqual(self.rows('SELECT state FROM job_operations WHERE operation_id=(SELECT operation_id FROM job_operation_members WHERE job_id=?)',(target,)),[('STAGED',)])
 

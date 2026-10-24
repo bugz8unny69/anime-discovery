@@ -22,6 +22,7 @@ class EventDefinition:
 
 
 _EVENTS = (
+    EventDefinition('KEEP_COMPLETED','job','Episode kept in the permanent library.',True),
     EventDefinition("MANAGEMENT_ACTION_RESUMED", "job", "The action was submitted again after review."),
     EventDefinition("API_SESSION_CREATED", "runtime", "A management browser session was created."),
     EventDefinition("API_SESSION_CLOSED", "runtime", "A management browser session was closed."),

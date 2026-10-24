@@ -224,3 +224,7 @@ unchanged; no historical action associations are guessed. Fresh SCHEMA and the
 runner manifest match v18. Scripts 001–017 remain immutable. Offline preservation,
 fresh equivalence, guard, uniqueness and rollback cases are written but unrun.
 See [MANAGEMENT_ACTIONS.md](../MANAGEMENT_ACTIONS.md).
+Current Keep addition: schema v22 adds 022_keep_imports.sql, the durable Sonarr
+series/import intent and permanent-file result. Published 001–021 remain unchanged.
+Use the existing maintenance preview/backup/apply contract; startup never upgrades
+an existing v21 database implicitly. Configuration v8 and secrets v4 are independent.

@@ -1,3 +1,8 @@
+Current Keep behavior: eligible staged work can now run Keep through Sonarr.
+The dashboard shows the API's durable Kept result and permits explicit resume
+of stopped Keep jobs. See [Keep/Sonarr](../KEEP_SONARR.md). This supersedes the
+older unavailable-execution boundary described below.
+
 # Dashboard using API v1
 
 The API process serves the browser dashboard at `/`, `/jobs` and `/settings`,

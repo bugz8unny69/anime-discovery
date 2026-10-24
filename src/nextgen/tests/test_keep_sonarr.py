@@ -1,0 +1,226 @@
+"""Offline Sonarr transport, staged Keep and uncertain-response recovery; unrun."""
+from functools import partial
+import io
+import json
+from pathlib import Path
+import shutil
+import sqlite3
+import unittest
+import urllib.error
+from urllib.parse import urlsplit
+
+from src.nextgen.jobs.keep_media_job import registration as keep
+from src.nextgen.keep_service import Service
+from src.nextgen.keep_selection import load_selection
+from src.nextgen.secrets import SecretStore
+from src.nextgen.sonarr import Client
+from src.nextgen.storage.management_actions import ManagementActions
+from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
+from src.nextgen.storage.sqlite import connect, initialize, transaction
+from src.nextgen.tests.test_stage_media_job import StageMediaJobTests
+from src.nextgen.tests.test_verify_media_job import VerifyMediaJobTests
+from src.nextgen.tests.test_torrent_transfer import TorrentTransferTests
+from src.nextgen.tests.test_acquisition_preparation import AcquisitionPreparationTests
+from src.nextgen.configuration_schema import CONVERSIONS, ConfigurationError, convert_document
+from src.nextgen.tests.test_api_v1 import ApiV1Tests, ADMIN, WEB
+
+
+class Response(io.BytesIO):
+    def __init__(self,value):super().__init__(json.dumps(value).encode())
+    def getcode(self):return 200
+
+
+class FakeSonarr:
+    def __init__(self):self.selection=None;self.root=None;self.present=True;self.imported=False;self.posts=[];self.payload=None;self.lose_import=False;self.lose_add=False;self.failed=False;self.wrong_destination=False
+    def __call__(self,request,timeout):
+        assert request.get_header('X-api-key')=='sonarr-private-key'
+        path=urlsplit(request.full_url).path.removeprefix('/api/v3/')
+        body=json.loads(request.data) if request.data is not None else None
+        series={'id':31,'tvdbId':self.selection.tvdb_series_id,'path':str(self.root/'Series')}
+        episode={'id':41,'seriesId':31,'tvdbId':self.selection.tvdb_episode_id,'seasonNumber':self.selection.tvdb_season,
+                 'episodeNumber':self.selection.tvdb_episode,'hasFile':self.imported,'episodeFileId':51 if self.imported else 0}
+        if body is not None:self.posts.append(path)
+        if path=='system/status':return Response({'version':'4.0.16.1'})
+        if path=='qualityprofile':return Response([{'id':1}])
+        if path=='rootfolder':return Response([{'path':str(self.root)}])
+        if path=='series/lookup':return Response([{'tvdbId':self.selection.tvdb_series_id,'title':'Test Anime'}])
+        if path=='series':
+            if body is not None:
+                assert body['tvdbId']==self.selection.tvdb_series_id
+                assert body['addOptions']['searchForMissingEpisodes'] is False
+                self.present=True
+                if self.lose_add:self.lose_add=False;raise urllib.error.URLError('lost reply')
+                return Response(series)
+            return Response([series] if self.present else [])
+        if path=='episode':return Response([episode])
+        quality={'quality':{'id':1},'revision':{'version':1,'real':0,'isRepack':False}}
+        if path=='manualimport':
+            if body is None:return Response([{'path':self.selection.media_path,'quality':quality,'languages':[{'id':1,'name':'English'}]}])
+            assert body[0]['episodeIds']==[41]
+            return Response([{**body[0],'episodes':[episode],'rejections':[]}])
+        if path=='command' and body is not None:
+            assert body['importMode']=='copy' and len(body['files'])==1
+            assert body['files'][0]['seriesId']==31 and body['files'][0]['episodeIds']==[41]
+            self.payload=body
+            if not self.failed:
+                destination=self.root/'Series'/'episode.mkv';destination.parent.mkdir(exist_ok=True)
+                shutil.copyfile(self.selection.media_path,destination);self.imported=True
+            if self.lose_import:self.lose_import=False;raise urllib.error.URLError('lost reply')
+            return Response({'id':61})
+        if path=='command':return Response([{'id':61,'body':self.payload}] if self.payload else [])
+        if path=='command/61':return Response({'id':61,'status':'failed' if self.failed else 'completed'})
+        if path=='episodefile/51':return Response({'id':51,'seriesId':31,'size':Path(self.selection.media_path).stat().st_size,
+            'path':'/elsewhere/episode.mkv' if self.wrong_destination else str(self.root/'Series'/'episode.mkv')})
+        raise AssertionError(path)
+
+
+class KeepSonarrTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp=AcquisitionPreparationTests.asyncSetUp
+    rows=AcquisitionPreparationTests.rows
+    source=AcquisitionPreparationTests.source
+    queued=TorrentTransferTests.queued
+    due=TorrentTransferTests.due
+    ready=VerifyMediaJobTests.ready
+    staged_ready=StageMediaJobTests.staged_ready
+
+    async def prepared(self,**flags):
+        fake=FakeSonarr()
+        for name,value in flags.items():setattr(fake,name,value)
+        secrets=SecretStore(self.root);secrets.initialize(sonarr_api_key='sonarr-private-key')
+        factory=partial(Service,client_factory=lambda options,key:Client(options,key,transport=fake))
+        worker=StageMediaJobTests.worker(self,additional=(keep(secrets,service_factory=factory),))
+        staging,_=await self.staged_ready(worker);await worker.attempt()
+        target=self.rows("SELECT job_id FROM jobs WHERE kind='STAGE_TRIAL_MEDIA'")[0][0]
+        db=connect(self.database)
+        try:fake.selection=load_selection(db,target)
+        finally:db.close()
+        fake.root=self.root/'permanent';fake.root.mkdir()
+        current=self.store.read()
+        self.store.update({'storage':{'keep_root':str(fake.root)},'sonarr':{'base_url':'http://sonarr.invalid','quality_profile_id':1}},expected_revision=current.revision)
+        actions=ManagementActions(self.database);_,receipt,_=actions.submit(target,'keep')
+        return worker,fake,actions,target,receipt['job_id']
+
+    async def make_due(self,job):
+        db=connect(self.database)
+        try:
+            with transaction(db):db.execute('UPDATE jobs SET available_at_ms=0 WHERE job_id=?',(job,))
+        finally:db.close()
+
+    async def test_keep_imports_one_tvdb_episode_and_reports_kept_without_removing_staging(self):
+        worker,fake,actions,target,job=await self.prepared()
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(fake.posts.count('command'),1)
+        self.assertTrue(Path(fake.selection.media_path).is_file())
+        self.assertTrue((fake.root/'Series'/'episode.mkv').is_file())
+        _,again,_=actions.submit(target,'keep')
+        self.assertEqual(again['job_id'],job);self.assertTrue(again['reused'])
+        self.assertEqual(again['completion']['message'],'This episode has been kept.')
+        self.assertNotIn('sonarr-private-key',str(self.rows('SELECT * FROM keep_imports')))
+
+    async def test_lost_import_reply_reconciles_same_command_without_second_post(self):
+        worker,fake,actions,target,job=await self.prepared(lose_import=True)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('IMPORT_UNCERTAIN',)])
+        await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+        self.assertEqual(fake.posts.count('command'),1)
+
+    async def test_lost_new_series_reply_reconciles_tvdb_before_import(self):
+        worker,fake,actions,target,job=await self.prepared(present=False,lose_add=True)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('ADD_UNCERTAIN',)])
+        await self.make_due(job);await worker.attempt()
+        self.assertEqual(fake.posts.count('series'),1);self.assertEqual(fake.posts.count('command'),1)
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+
+    async def test_failed_command_preserves_source_and_does_not_get_reimported_on_resume(self):
+        worker,fake,actions,target,job=await self.prepared(failed=True)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW','KEEP_IMPORT_REVIEW')])
+        _,resumed,_=actions.submit(target,'keep');self.assertTrue(resumed['resumed'])
+        await worker.attempt()
+        self.assertEqual(fake.posts.count('command'),1)
+        self.assertTrue(Path(fake.selection.media_path).is_file())
+
+    async def test_completed_command_with_wrong_destination_cannot_report_kept(self):
+        worker,fake,actions,target,job=await self.prepared(wrong_destination=True)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('IMPORT_UNCERTAIN',)])
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+
+    async def test_modified_staged_file_stops_before_any_import(self):
+        worker,fake,actions,target,job=await self.prepared()
+        Path(fake.selection.media_path).write_bytes(b'changed')
+        await worker.attempt()
+        self.assertNotIn('command',fake.posts)
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+
+    async def test_later_settings_do_not_retarget_an_uncertain_import(self):
+        worker,fake,actions,target,job=await self.prepared(lose_import=True)
+        await worker.attempt()
+        snapshot=self.store.read()
+        self.store.update({'sonarr':{'base_url':'http://different.invalid'},'storage':{'keep_root':str(self.root/'different')}},expected_revision=snapshot.revision)
+        await self.make_due(job);await worker.attempt()
+        saved=json.loads(self.rows('SELECT data_json FROM keep_imports')[0][0])
+        self.assertEqual(saved['options']['base_url'],'http://sonarr.invalid')
+        self.assertEqual(saved['options']['keep_root'],str(fake.root))
+        self.assertEqual(fake.posts.count('command'),1)
+
+
+class SonarrSettingsTests(unittest.TestCase):
+    def test_v7_conversion_preserves_values_and_rejects_new_fields_in_old_formats(self):
+        doc={}
+        for version in range(7):
+            doc=CONVERSIONS[version](doc)
+            self.assertNotIn('sonarr',doc['settings'])
+            with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
+        upgraded=convert_document(doc)
+        self.assertEqual(upgraded.schema_version,8)
+        self.assertEqual(upgraded.revision,doc['revision']+1)
+        self.assertEqual(upgraded.value('sonarr.base_url'),'')
+        for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
+
+
+class SonarrCredentialApiTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp=ApiV1Tests.asyncSetUp
+    request=ApiV1Tests.request
+
+    async def test_separate_management_auth_and_secret_v4_presence_only(self):
+        status,_,_=await self.request('PATCH','/api/v1/credentials/sonarr',{'expected_revision':1,'api_key':'private-sonarr-key'},token=WEB)
+        self.assertEqual(status,401)
+        status,data,_=await self.request('PATCH','/api/v1/credentials/sonarr',{'expected_revision':1,'api_key':'private-sonarr-key'},token=ADMIN)
+        self.assertEqual(status,200);self.assertTrue(data['data']['status']['sonarr_configured'])
+        self.assertNotIn('private-sonarr-key',json.dumps(data))
+        self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
+        self.assertEqual(json.loads((self.root/'secrets.json').read_text())['schema_version'],4)
+        self.assertEqual(self.secrets.access_credentials().webhook_token,WEB)
+        self.secrets.update_tvdb_api_key('tvdb-key',expected_revision=2)
+        self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
+
+
+class KeepMigrationTests(unittest.TestCase):
+    def test_upgrade_preserves_existing_schema_and_matches_fresh(self):
+        db=sqlite3.connect(':memory:');fresh=sqlite3.connect(':memory:')
+        try:
+            for script in SCRIPTS[:21]:db.executescript((SQL_DIR/script).read_text())
+            before=db.execute('SELECT * FROM management_actions').fetchall()
+            db.executescript((SQL_DIR/'022_keep_imports.sql').read_text());initialize(fresh)
+            self.assertEqual(_structure(db),_structure(fresh))
+            self.assertEqual(db.execute('SELECT * FROM management_actions').fetchall(),before)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],22)
+        finally:db.close();fresh.close()
+
+    def test_wrong_version_and_partial_failure_roll_back(self):
+        for version in (20,21,22):
+            db=sqlite3.connect(':memory:')
+            try:
+                db.execute('PRAGMA user_version='+str(version))
+                sql=(SQL_DIR/'022_keep_imports.sql').read_text()
+                if version==21:sql=sql.replace('PRAGMA user_version=22;','SELECT * FROM missing;\nPRAGMA user_version=22;')
+                with self.assertRaises(sqlite3.Error):db.executescript(sql)
+                db.rollback()
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],version)
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='keep_imports'").fetchone())
+            finally:db.close()

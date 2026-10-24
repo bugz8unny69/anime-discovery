@@ -17,6 +17,11 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('KEEP_CONFIGURATION_INVALID','Sonarr endpoint, credentials, profile or library root is unconfigured.','Configure Sonarr before keeping this episode.','Review Sonarr settings and credentials, then submit Keep again.','WARNING',False),
+    Reason('KEEP_IMPORT_WAITING','The saved series or import request is being reconciled.','The Keep job is in progress.','The job will check Sonarr again shortly.','INFO',None),
+    Reason('KEEP_SERVICE_UNAVAILABLE','The configured Sonarr service could not be reached.','Sonarr is temporarily unavailable.','The job will retry; check the Sonarr connection if this continues.','WARNING',True),
+    Reason('KEEP_IMPORT_REVIEW','The selected file, TVDB mapping or saved import result could not be confirmed.','The Keep job needs review.','Check the staged file and Sonarr import result, then submit Keep again.','WARNING',False),
+    Reason('KEEP_COMPLETE','Sonarr episode-file binding and the permanent file are confirmed.','This episode has been kept.','The episode is available in the permanent library.','INFO',False),
     Reason('ANIME_REJECTED', 'An explicit Reject decision stops acquisition for this AniDB anime.', 'This anime was rejected; automatic acquisition is stopped.', 'Review the recorded Reject decision before acquiring more episodes.', 'INFO', False),
     Reason('REJECT_CLEANUP_REVIEW', 'Selected staged files could not be removed according to their recorded paths.', 'The anime is rejected, but staged-file cleanup needs attention.', 'Review the selected staged files and the existing Reject job.', 'WARNING', False),
     Reason('STAGING_REVIEW', 'Destination, copy identity, source digest or publication evidence could not be reconciled.', 'Staging needs review; existing files have been preserved.', 'Review the recorded files and publication intent before retrying.', 'WARNING', False),

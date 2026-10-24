@@ -117,3 +117,11 @@ to an administrator password. Browser mutation requires Origin and session-bound
 CSRF. Rotation is read on every request and revokes old-key browser sessions on
 next use. Bootstrap is local and explicit, without echoing keys. See
 [API v1](api/README.md) for the supported token locations and proxy log rules.
+
+## Sonarr credentials, secrets v4
+
+Sonarr's API key is private sonarr_api_key. SecretStore.sonarr_api_key obtains it
+for trusted import code; update_sonarr_api_key revision-checks replacement/clear.
+PATCH /api/v1/credentials/sonarr accepts expected_revision and api_key with the
+existing management/CSRF contract. Public status adds sonarr_configured only.
+v1–v3 stay readable; Sonarr writes upgrade to v4 and preserve other credentials.
