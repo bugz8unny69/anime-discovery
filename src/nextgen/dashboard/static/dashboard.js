@@ -364,9 +364,24 @@ async function showWorkspace() {
 $('login-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true;
   try {
-    const result = await request(`${API}/auth/session`, {method: 'POST', body: {token: $('access-key').value}});
+    const result = await request(`${API}/auth/session`, {method: 'POST', body: {password: $('access-key').value}});
     $('access-key').value = ''; state.csrf = result.csrf_token; notice(); await showWorkspace();
   } catch (error) { $('access-key').value = ''; displayError(error); }
+  finally { button.disabled = false; }
+});
+$('password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button');
+  button.disabled = true;
+  try {
+    await request(`${API}/auth/password`, {method: 'POST', body: {
+      current_password: form.elements.namedItem('current_password').value,
+      new_password: form.elements.namedItem('new_password').value
+    }});
+    form.reset();
+    clearPrivate('Password changed. Sign in again.');
+  } catch (error) { form.reset(); displayError(error); }
   finally { button.disabled = false; }
 });
 $('sign-out').addEventListener('click', async () => {
