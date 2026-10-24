@@ -376,6 +376,9 @@ $('password-form').addEventListener('submit', async event => {
   const button = form.querySelector('button');
   button.disabled = true;
   try {
+    if (form.elements.namedItem('new_password').value !== form.elements.namedItem('confirm_password').value) {
+      throw new Error('New passwords do not match.');
+    }
     await request(`${API}/auth/password`, {method: 'POST', body: {
       current_password: form.elements.namedItem('current_password').value,
       new_password: form.elements.namedItem('new_password').value
