@@ -3,7 +3,7 @@ import time
 import sqlite3
 
 from src.nextgen.history import integer
-from src.nextgen.storage.recognition import remember_verified_release, RecognitionConflict
+from src.nextgen.storage.recognition import remember_verified_release, remember_verified_episode, RecognitionConflict
 from src.nextgen.job_contracts import parse_payload
 from src.nextgen.release_contracts import ReleaseInput, VerifiedRelease, ReleaseConflict, ReleaseNotReady
 from src.nextgen.schema.anime_series import AnimeSeries
@@ -63,6 +63,7 @@ def persist_release(db, claim, value):
 
     try:
         remember_verified_release(db,verification_id=cursor.lastrowid,source=source,season=value.tvdb_season)
+        remember_verified_episode(db,verification_id=cursor.lastrowid)
     except RecognitionConflict:
         # Contradictory season identity is not silently reclassified.
         raise ReleaseConflict() from None
