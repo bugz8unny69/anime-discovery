@@ -1,9 +1,9 @@
 # Architecture proposal: Keep to the permanent library
 
-Status: **planning draft for review, not implemented behavior**.
+Status: **architecture reference; initial one-episode Sonarr Keep path now implemented in an untested draft**. See [KEEP_MEDIA](../jobs/KEEP_MEDIA.md) for the actual worker contract and what remains unsupported.
 Date: 2026-10-22. Starts after [intake to trial](INTAKE_TO_TRIAL.md) has produced
-verified trial artifacts. No code, configuration fields, SQL or cleanup is
-implemented/authorized by this document.
+verified trial artifacts. The original end-state graph below is an aspirational design: optional refresh,
+source cleanup and multi-episode scopes remain future work.
 
 Working assumption: the user's "default directory" is the configured permanent
 library root, and Sonarr owns admission/import into it, following legacy behavior.
@@ -231,3 +231,16 @@ Media destination follow-up: configuration v3 now registers storage.trial_root
 and storage.keep_root. Both are unconfigured by default; Keep's actual Sonarr
 root must agree with keep_root when that integration is implemented. Other
 integration, permissions and retention settings above remain future work.
+
+
+## 2026-10-24 implementation note
+
+The stacked draft introduces Sonarr configuration v8, private API-key storage v4,
+SQLite Keep journal v22, an exact staged-file/TVDB approval snapshot, a guarded
+copy-only `KEEP_MEDIA` worker, and permanent-file checksum verification. Only
+**one approved episode** is supported per Keep action. Actual import follows the
+recorded verified TVDB mapping; Shoko is not a dependency. The command-intent
+recovery boundary deliberately requires review after an uncertain POST rather
+than blind command replay. The original multi-kind graph above is not the
+current handler inventory; see the current [KEEP_MEDIA](../jobs/KEEP_MEDIA.md)
+document. Live and automated validation remain unrun.
