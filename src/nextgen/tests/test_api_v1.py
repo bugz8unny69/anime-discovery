@@ -16,9 +16,13 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await fixture.AcquisitionPreparationTests.asyncSetUp(self)
         self.secrets=SecretStore(self.root)
-        self.secrets.initialize(webhook_token=WEB,management_token=ADMIN)
+        self.secrets.initialize(webhook_token=WEB)
         self.calls=[]
         self.app=Application(self.root,origin=ORIGIN)
+        self.app.passwords.replace(ADMIN,expected_revision=0)
+        session,csrf=self.app.sessions.create(self.app.passwords.read()[1])
+        self.admin_cookie=COOKIE+'='+session
+        self.admin_csrf=csrf
         self.addCleanup(self.app.close)
 
     async def request(self,method,path,body=None,*,token=None,headers=None,raw=None,scope_changes=None):
@@ -26,6 +30,10 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         raw=(b'' if body is None else json.dumps(body).encode()) if raw is None else raw
         base=[(b'host',b'anime.example'),(b'content-length',str(len(raw)).encode())]
         if raw:base.append((b'content-type',b'application/json'))
+        if token==ADMIN:
+            session_headers={'cookie':self.admin_cookie}
+            if method!='GET':session_headers.update({'origin':ORIGIN,'x-csrf-token':self.admin_csrf})
+            headers={**session_headers,**(headers or {})};token=None
         if token is not None:base.append((b'authorization',('Bearer '+token).encode()))
         base.extend((k.lower().encode(),v.encode()) for k,v in (headers or {}).items())
         scope={'type':'http','http_version':'1.1','method':method,'path':route,'raw_path':route.encode(),
@@ -54,8 +62,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT component FROM job_history WHERE event_code='CREATED'"),[('api',)]*3)
 
     async def test_bad_conflicting_or_management_webhook_credentials_create_no_work(self):
-        for path,body,token in [('/api/v1/webhook',self.release(),None),('/api/v1/webhook',self.release(),ADMIN),
-             ('/api/v1/webhook',self.release(token=WEB),ADMIN),('/api/v1/webhook?token='+WEB+'&token='+WEB,self.release(),None)]:
+        for path,body,token in [('/api/v1/webhook',self.release(),None),('/api/v1/webhook',self.release(),'n'*43),
+             ('/api/v1/webhook',self.release(token=WEB),'n'*43),('/api/v1/webhook?token='+WEB+'&token='+WEB,self.release(),None)]:
             status,_,_=await self.request('POST',path,body,token=token)
             self.assertEqual(status,401)
         self.assertEqual(self.rows('SELECT count(*) FROM incoming_events'),[(0,)])
@@ -70,7 +78,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cookie_mutations_require_origin_and_session_csrf_and_logout_revokes(self):
         await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
-        status,result,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'origin':ORIGIN})
+        status,result,headers=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},headers={'origin':ORIGIN})
         self.assertEqual(status,201)
         cookie=headers[b'set-cookie'].decode().split(';')[0]
         self.assertIn(b'HttpOnly',headers[b'set-cookie']);self.assertIn(b'Secure',headers[b'set-cookie'])
@@ -90,13 +98,13 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_key_rotation_revokes_old_webhook_bearer_and_browser_sessions(self):
         _,result,headers=await self.request('POST','/api/v1/auth/session',{'token':ADMIN},headers={'origin':ORIGIN})
         cookie=headers[b'set-cookie'].decode().split(';')[0]
-        self.secrets.update_access_tokens('x'*43,'y'*43,expected_revision=1)
+        self.secrets.update_webhook_token('x'*43,expected_revision=1)
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(token=WEB))
         self.assertEqual(status,401)
         status,_,_=await self.request('GET','/api/v1/jobs',token=ADMIN)
         self.assertEqual(status,401)
         status,_,_=await self.request('GET','/api/v1/jobs',headers={'cookie':cookie})
-        self.assertEqual(status,401)
+        self.assertEqual(status,200)
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(token='x'*43))
         self.assertEqual(status,202)
 
@@ -112,7 +120,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,result,_=await self.request('PATCH','/api/v1/credentials/tvdb',{'expected_revision':1,'api_key':'private-provider-value'},token=ADMIN)
         self.assertEqual(status,200);self.assertIn('reason',result['data']);self.assertNotIn('private-provider-value',json.dumps(result))
         status,result,_=await self.request('GET','/api/v1/credentials',token=ADMIN)
-        self.assertEqual(status,200);self.assertTrue(result['data']['management_configured'])
+        self.assertEqual(status,200);self.assertFalse(result['data']['management_configured'])
         self.assertNotIn(ADMIN,json.dumps(result));self.assertNotIn(WEB,json.dumps(result))
 
     async def test_jobs_history_are_readable_bounded_and_do_not_expose_payload_or_lease(self):
@@ -176,7 +184,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,_,_=await self.request('POST','/api/v1/webhook',self.release(),headers={'cookie':cookie,'origin':ORIGIN})
         self.assertEqual(status,401)
         with self.assertLogs(self.app.logger,level='WARNING') as captured:
-            status,_,_=await self.request('POST','/api/v1/webhook?token='+WEB,self.release(token=WEB),token=ADMIN)
+            status,_,_=await self.request('POST','/api/v1/webhook?token='+WEB,self.release(token=WEB),token='n'*43)
         self.assertEqual(status,401)
         logged='\n'.join(captured.output)
         self.assertNotIn(WEB,logged);self.assertNotIn(ADMIN,logged);self.assertNotIn('token=',logged)
