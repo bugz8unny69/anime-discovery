@@ -34,7 +34,7 @@ class ApiAccessSecretsTests(unittest.TestCase):
     def test_provider_credentials_survive_webhook_rotation(self):
         self.store.initialize("provider-key", webhook_token="w" * 43)
         self.store.update_webhook_token("x" * 43, expected_revision=1)
-        self.assertEqual(self.store.tvdb_credentials().value, "provider-key")
+        self.assertEqual(self.store.tvdb_credentials().api_key, "provider-key")
 
     def test_stale_revision_invalid_values_and_permissions_fail_closed(self):
         self.store.initialize(webhook_token="w" * 43)
