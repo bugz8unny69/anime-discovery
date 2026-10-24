@@ -2,7 +2,7 @@
 
 The source now includes an explicit local setup/maintenance CLI, a composed worker
 entry point and systemd examples under `deploy/nextgen/`. They have not been
-installed or run here. Configuration is v10, secrets support v1–v6 and SQLite
+installed or run here. Configuration is v10, secrets support a fresh v7 schema (older schemas readable) and SQLite
 remains v23. The v23 migration from the earlier draft stack is still unvalidated.
 No service starts, schema upgrades or media operations happen on Python import.
 
@@ -53,11 +53,7 @@ Run from `/opt/anime-discovery` as the service account:
 .venv/bin/python -m src.nextgen.api.adm set-password
 ```
 
-The access command still provisions legacy management and separate webhook
-keys during the transition; browser management uses only the password stored
-by the local adm command. The management token does not authenticate HTTP management requests.
-The access command prompts without echo for distinct management and webhook
-keys. Each must be 32–256 URL-safe characters. Store them privately. `init`
+The access command provisions only the independent Autobrr webhook token; it prompts without echo for one 32–256 character URL-safe token. Dashboard login never accepts webhook credentials or management bearer tokens. The password is established separately with `adm set-password` using the API process's restricted Unix socket. `init`
 creates only new local files; it refuses an existing configuration, credential
 file or database. A failure can leave a partial installation. Inspect that state
 before retrying; it never silently overwrites it or converts a legacy database.
