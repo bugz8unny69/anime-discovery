@@ -71,3 +71,13 @@ On verification of a declared episode, NextGen now remembers a `(TVDB series, TV
 Unresolved cases fail closed: unknown titles, colliding aliases, contradictory season mappings, mixed season labels, and season 2+ without a previously verified season binding. Releases without an explicit season label continue through the existing provider path rather than presuming an arbitrary season. No manual "Remember" step, legacy settings import, or per-episode identity key is used.
 
 Pending before declaring this feature complete: proper TVDB/AniDB mapping for multipart seasons, specials, sequel anime, alternate numbering orders, refresh/revocation of stale provider proofs, conflict review workflows, richer recognized-alias management, bounded API pagination, and actual integration/browser verification. New tests are authored but **not executed** per CI gate.
+
+## Exact episode placement reuse (v25 implementation)
+
+A second, independent table now stores verified episode placements underneath a recognized series/season: AniDB anime ID and AniDB episode number/ID, TVDB series ID, TVDB season/episode/episode ID, immutable source verification reference, and timestamp. It is populated in the same worker transaction as the release proof and season recognition; conflicting numbering or reused IDs raise a review conflict and roll back.
+
+On later releases, the release verifier first parses a **single, unambiguous** episode declaration and searches the local placement catalog. A matching `SxxExx` looks up exact TVDB season/episode; an explicitly parsed AniDB number looks up that AniDB episode number for the already identified AniDB work. A hit returns the previously verified placement without network calls; a miss uses the full existing AniDB/Anime-Lists/TVDB verification path. No guessed offsets, batch coverage, manual alias authority, download permission, or inferred episode ranges. User cancellation still preempts cache reuse.
+
+The authenticated `/api/v1/recognized/<TVDB series>/<season>/episodes` endpoint and dashboard expansion render the nested verified episodes. Limits currently reject more than 500 rows rather than silently truncating; pagination is pending.
+
+**Still open:** explicitly managed proof invalidation/revalidation and correcting remaps, multipart season support, provider-side changes and freshness policy, recognizing unlabeled sequels, browser testing, end-to-end replay and CI. This is not yet validated and no CI was triggered.
