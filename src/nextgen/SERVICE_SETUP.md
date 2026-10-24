@@ -3,7 +3,7 @@
 The source now includes an explicit local setup/maintenance CLI, a composed worker
 entry point and systemd examples under `deploy/nextgen/`. They have not been
 installed or run here. Configuration is v10, secrets support a fresh v7 schema (older schemas readable) and SQLite
-remains v23. The v23 migration from the earlier draft stack is still unvalidated.
+uses v24. The v24 recognized-series/season schema is unvalidated; it is a NextGen schema change, not an import from the older application.
 No service starts, schema upgrades or media operations happen on Python import.
 
 ## Prepare the host
