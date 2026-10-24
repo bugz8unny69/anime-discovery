@@ -33,11 +33,6 @@ def remember_verified_release(db, *, verification_id, source, season):
     aid,tid,_,when,title = proof
     if not 1 <= len(title.strip()) <= 512:
         raise RecognitionConflict("Unsafe verified title")
-    existing = db.execute(
-        "SELECT anidb_id FROM recognized_seasons WHERE tvdb_series_id=? AND tvdb_season=?",
-        (tid, season)).fetchone()
-    if existing and existing[0] != aid:
-        raise RecognitionConflict("Conflicting season identity")
     db.execute(
         "INSERT OR IGNORE INTO recognized_seasons "
         "(tvdb_series_id,tvdb_season,anidb_id,display_title,evidence_verification_id,recognized_at_ms) "
@@ -55,12 +50,6 @@ def remember_verified_release(db, *, verification_id, source, season):
     for text in aliases:
         key=_alias(text)
         if key is None:
-            continue
-        owner=db.execute(
-            "SELECT tvdb_series_id,anidb_id FROM recognized_aliases WHERE alias_key=? AND tvdb_season=?",
-            (key,season)).fetchone()
-        if owner and owner!=(tid,aid):
-            # Do not poison or replace prior verified mappings on a common name.
             continue
         db.execute(
             "INSERT OR IGNORE INTO recognized_aliases(alias_key,tvdb_season,tvdb_series_id,anidb_id) "
@@ -80,7 +69,7 @@ def recognized_for_release(db, name, *, season=None):
     rows=db.execute(
         "SELECT s.tvdb_series_id,s.tvdb_season,s.anidb_id,s.display_title "
         "FROM recognized_aliases a JOIN recognized_seasons s "
-        "ON s.tvdb_series_id=a.tvdb_series_id AND s.tvdb_season=a.tvdb_season "
+        "ON s.tvdb_series_id=a.tvdb_series_id AND s.tvdb_season=a.tvdb_season AND s.anidb_id=a.anidb_id "
         "WHERE a.alias_key=?" + (" AND a.tvdb_season=?" if season is not None else ""),
         (key,season) if season is not None else (key,)).fetchall()
     if len(rows)!=1:

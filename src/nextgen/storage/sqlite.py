@@ -169,15 +169,14 @@ CREATE TABLE IF NOT EXISTS recognized_seasons (
  display_title TEXT NOT NULL CHECK(length(trim(display_title)) BETWEEN 1 AND 512),
  evidence_verification_id INTEGER NOT NULL REFERENCES release_verifications(verification_id),
  recognized_at_ms INTEGER NOT NULL CHECK(recognized_at_ms>=0),
- PRIMARY KEY(tvdb_series_id,tvdb_season),
- UNIQUE(tvdb_series_id,tvdb_season,anidb_id)
+ PRIMARY KEY(tvdb_series_id,tvdb_season,anidb_id)
 );
 CREATE TABLE IF NOT EXISTS recognized_aliases (
  alias_key TEXT NOT NULL CHECK(length(alias_key) BETWEEN 3 AND 256),
  tvdb_season INTEGER NOT NULL CHECK(tvdb_season>=0),
  tvdb_series_id INTEGER NOT NULL,
  anidb_id INTEGER NOT NULL,
- PRIMARY KEY(alias_key,tvdb_season),
+ PRIMARY KEY(alias_key,tvdb_season,tvdb_series_id,anidb_id),
  FOREIGN KEY(tvdb_series_id,tvdb_season,anidb_id)
   REFERENCES recognized_seasons(tvdb_series_id,tvdb_season,anidb_id)
 );
@@ -453,13 +452,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v25; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v26; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v25 storage.
+    before accessing v26 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 25:
+    if version == 26:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -469,7 +468,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=25;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=26;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
