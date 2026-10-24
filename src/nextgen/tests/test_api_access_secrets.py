@@ -24,6 +24,23 @@ class ApiAccessSecretsTests(unittest.TestCase):
         self.assertEqual(self.raw()['schema_version'],3)
         self.assertNotIn('m'*43,repr(self.store.access_credentials()))
         self.assertNotIn('w'*43,repr(self.store.status()))
+    def test_sonarr_v4_upgrade_is_private_and_preserves_existing_credentials(self):
+        self.store.initialize('tvdb-provider',qbittorrent_username='downloader',
+                              qbittorrent_password='private-pass',webhook_token='w'*43,
+                              management_token='m'*43)
+        self.assertEqual(self.raw()['schema_version'],3)
+        updated=self.store.update_sonarr_api_key('sonarr-private-key',expected_revision=1)
+        self.assertEqual(self.raw()['schema_version'],4)
+        self.assertTrue(updated.status.sonarr_configured)
+        self.assertEqual(self.store.sonarr_api_key(),'sonarr-private-key')
+        self.assertNotIn('sonarr-private-key',repr(self.store.status()))
+        self.assertEqual(self.store.access_credentials().management_token,'m'*43)
+        self.store.update_tvdb_api_key('tvdb-rotated',expected_revision=2)
+        self.assertEqual(self.raw()['schema_version'],4)
+        self.store.update_sonarr_api_key('',expected_revision=3)
+        self.assertFalse(self.store.status().sonarr_configured)
+        with self.assertRaises(SecretStorageError):self.store.sonarr_api_key()
+
     def test_missing_keys_are_blank_and_legacy_v1_reads_do_not_upgrade(self):
         self.assertEqual(self.store.access_credentials().webhook_token,'')
         path=self.root/'secrets.json'
