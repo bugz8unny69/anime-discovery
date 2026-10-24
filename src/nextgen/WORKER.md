@@ -225,3 +225,12 @@ VERIFY_MEDIA completion into it atomically. See
 [jobs/STAGE_TRIAL_MEDIA.md](jobs/STAGE_TRIAL_MEDIA.md). Use a non-root worker and an
 accessible existing staging folder. SQLite v20 upgrades explicitly; Keep and
 viewer refresh remain separate, unimplemented integrations.
+
+## Current Shoko and service setup contract
+
+The latest draft adds optional Shoko AniDB metadata after Keep (configuration v10,
+backward-readable secrets v6; SQLite stays v23). It also provides explicit local
+setup/maintenance commands and composed worker/systemd examples. See
+[Shoko metadata](SHOKO_METADATA.md) and [Service setup](SERVICE_SETUP.md).
+These supersede earlier remaining-Shoko/supervision/version notes above.
+Tests, migrations and services have not been executed.

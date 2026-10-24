@@ -171,6 +171,12 @@ function renderJobs() {
         details.appendChild(node('small', cleanup.completed ? cleanup.completion.message : `Download cleanup: ${cleanup.status.message}`, 'muted'));
         if (cleanup.reason) details.appendChild(node('small', cleanup.reason.message, 'muted'));
       }
+      if (activeAction.optional_shoko) {
+        const shoko = activeAction.optional_shoko;
+        details.appendChild(node('small', `Optional Shoko metadata: ${shoko.status.message}`, 'muted'));
+        if (shoko.metadata) details.appendChild(node('small', `${shoko.metadata.title} · ${shoko.metadata.episode_title}`, 'muted'));
+        if (shoko.reason) details.appendChild(node('small', shoko.reason.message, 'muted'));
+      }
       const controlHistory = node('button', 'Action job history', 'secondary');
       controlHistory.addEventListener('click', () => openHistory(activeAction.job_id)); details.appendChild(controlHistory);
     }
@@ -179,7 +185,8 @@ function renderJobs() {
       const cleanup = job.actions?.keep?.job?.post_keep_cleanup;
       const retryCleanup = cleanup && ['NEEDS_REVIEW', 'BLOCKED'].includes(cleanup.state);
       const retryDownload = name => ['NEEDS_REVIEW', 'BLOCKED'].includes(job.actions?.[name]?.job?.download_cleanup?.state);
-      actions.appendChild(actionButton(job, 'keep', retryDownload('keep') ? 'Retry download cleanup' : retryCleanup ? 'Retry staging cleanup' : 'Keep'));
+      const retryShoko = ['NEEDS_REVIEW', 'BLOCKED'].includes(job.actions?.keep?.job?.optional_shoko?.state);
+      actions.appendChild(actionButton(job, 'keep', retryDownload('keep') ? 'Retry download cleanup' : retryCleanup ? 'Retry staging cleanup' : retryShoko ? 'Retry Shoko metadata' : 'Keep'));
       if (job.actions?.reject) actions.appendChild(actionButton(job, 'reject', retryDownload('reject') ? 'Retry download cleanup' : 'Reject'));
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
@@ -303,6 +310,7 @@ async function loadSettings() {
 function renderCredentials() {
   const container = $('credential-forms'); container.replaceChildren();
   const specs = [
+    ['shoko', 'Shoko (optional)', 'shoko_configured', [['api_key', 'API key']]],
     ['jellyfin', 'Jellyfin', 'jellyfin_configured', [['api_key', 'API key']]],
     ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
     ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],

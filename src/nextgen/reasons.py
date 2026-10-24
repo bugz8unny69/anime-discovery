@@ -17,6 +17,9 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('SHOKO_CONFIGURATION_INVALID','Optional Shoko address or API key is missing or rejected.','Configure optional Shoko metadata.','Update Shoko settings/credentials, then retry Shoko metadata. The episode remains kept.','WARNING',False),
+    Reason('SHOKO_UNAVAILABLE','Optional Shoko metadata could not be read.','Optional Shoko metadata will retry.','Check Shoko availability. Keep and cleanup remain independent.','WARNING',True),
+    Reason('SHOKO_METADATA_REVIEW','Shoko did not return the expected AniDB anime and episode records.','Optional Shoko metadata needs review.','Check the Shoko catalog and saved AniDB IDs, then retry Shoko metadata. The Sonarr mapping is unchanged.','WARNING',False),
     Reason('DECISION_DOWNLOAD_CLEANUP_COMPLETE','The owned torrent is absent and its recorded download files have been removed.','Download cleanup completed.','Staged/shared metadata, permanent media and episode history are retained.','INFO',False),
     Reason('DECISION_DOWNLOAD_CLEANUP_WAITING','Waiting for drained work or reconciliation of a saved torrent control request.','Download cleanup is waiting.','The worker will check again; uncertain stop/remove requests are never repeated.','INFO',None),
     Reason('DECISION_DOWNLOAD_CLEANUP_UNAVAILABLE','The download client or filesystem is temporarily unavailable.','Download cleanup will retry.','Check the download client and storage mounts. The Keep or Reject result remains valid.','WARNING',True),

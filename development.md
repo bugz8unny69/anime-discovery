@@ -4,6 +4,29 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Optional Shoko metadata and service setup — 2026-10-24
+
+Finish the planned source implementation with independent AniDB-ID metadata
+lookups after Keep and explicit local setup/maintenance/worker entry points.
+Shoko titles are display-only; no file registration, scanning, hashing, renaming
+or Sonarr mapping changes. The dashboard exposes optional status/private keys
+and retry without reimport. Config v10 converts explicitly from v9; secrets v6
+remains backward-readable. SQLite remains v23 with earlier SQL untouched.
+
+`python -m src.nextgen` now provides fresh init, local check, worker run and
+explicit config/database preview/apply commands. Fresh init never replaces old
+files. Failed database apply retains maintenance; plan tokens pin schema/scripts.
+API startup also checks local readiness. Add dedicated non-root systemd unit
+examples, mount/path controls and a fresh-install/upgrade/lab-validation guide.
+See [Shoko metadata](src/nextgen/SHOKO_METADATA.md) and
+[Service setup](src/nextgen/SERVICE_SETUP.md).
+
+The source work is ready for review, not runtime-proven completion. Tests/CI,
+service installation, SQLite upgrades, client calls and media operations remain
+unrun. Lab validation, including the v23 migration, is the next required milestone.
+This draft is stacked on #137 and includes the earlier unmerged cleanup drafts.
+No new merge or deployment is authorized or performed by this implementation.
+
 ## Keep/Reject download cleanup — 2026-10-24
 
 New completed Reject decisions and completed post-Keep staging cleanups now

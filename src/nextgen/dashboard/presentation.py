@@ -19,4 +19,6 @@ from src.nextgen.post_keep_cleanup import DEFINITION as cleanup_kept
 
 from src.nextgen.decision_download_cleanup import DEFINITION as cleanup_download
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download))
+from src.nextgen.jobs.enrich_shoko_job import DEFINITION as shoko
+
+HANDLERS=HandlerCatalog((identify,verify,evaluate,reserve,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download,shoko))

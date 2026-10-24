@@ -125,3 +125,12 @@ for trusted import code; update_sonarr_api_key revision-checks replacement/clear
 PATCH /api/v1/credentials/sonarr accepts expected_revision and api_key with the
 existing management/CSRF contract. Public status adds sonarr_configured only.
 v1–v3 stay readable; Sonarr writes upgrade to v4 and preserve other credentials.
+
+## Current Shoko and service setup contract
+
+The latest draft adds optional Shoko AniDB metadata after Keep (configuration v10,
+backward-readable secrets v6; SQLite stays v23). It also provides explicit local
+setup/maintenance commands and composed worker/systemd examples. See
+[Shoko metadata](SHOKO_METADATA.md) and [Service setup](SERVICE_SETUP.md).
+These supersede earlier remaining-Shoko/supervision/version notes above.
+Tests, migrations and services have not been executed.

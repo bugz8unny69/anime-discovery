@@ -1,0 +1,27 @@
+[Unit]
+Description=Anime Discovery NextGen acquisition and media worker
+PartOf=anime-discovery.target
+Wants=network-online.target
+After=network-online.target remote-fs.target
+# Edit these paths together with settings and ReadWritePaths.
+RequiresMountsFor=/srv/anime-discovery/downloads /srv/anime-discovery/staging /srv/anime-discovery/library
+
+[Service]
+Type=simple
+User=anime-discovery
+Group=anime-discovery
+WorkingDirectory=/opt/anime-discovery
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/anime-discovery/.venv/bin/python -m src.nextgen worker --config-dir /var/lib/anime-discovery/config
+Restart=on-failure
+RestartSec=10
+KillMode=mixed
+TimeoutStopSec=infinity
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/anime-discovery /srv/anime-discovery/downloads /srv/anime-discovery/staging /srv/anime-discovery/library
+StandardOutput=journal
+StandardError=journal

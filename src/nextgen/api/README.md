@@ -266,3 +266,12 @@ owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
 can resume through Keep/Reject with the dashboard label Retry download cleanup.
 Decision/import completion and episode protection remain intact. Current contract:
 [Download cleanup](../DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.
+
+## Optional Shoko and service startup
+
+The dashboard now exposes the optional Shoko address/timeout and private key
+replacement through PATCH `/api/v1/credentials/shoko`. Keep receipts include
+`optional_shoko` metadata/status, with explicit retry without another import.
+See [Shoko](../SHOKO_METADATA.md) and [Service setup](../SERVICE_SETUP.md).
+The API command checks local readiness before serving; no implicit initialization,
+upgrade or worker startup occurs. Tests/CI and service startup remain unrun.

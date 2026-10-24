@@ -53,6 +53,8 @@ def receipt(db,job_id,*,reused=False):
     if db.execute("SELECT 1 FROM management_actions WHERE job_id=? AND action='KEEP'",(job_id,)).fetchone():
         from src.nextgen.post_keep_cleanup import status as cleanup_status
         data['post_keep_cleanup']=cleanup_status(db,job_id)
+        from src.nextgen.jobs.enrich_shoko_job import status as shoko_status
+        data['optional_shoko']=shoko_status(db,job_id)
         data['execution_available']=True
         data['availability_reason']=None
         data['completion']=(CATALOG.reason('KEEP_COMPLETE') if db.execute(
@@ -102,6 +104,15 @@ class ManagementActions:
                         db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,cleanup['job_id']))
                         records.append(append_job_history(db,job_id=cleanup['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
                         data=receipt(db,prior[0],reused=True);data['cleanup_resumed']=True
+                        return 202,data,tuple(records)
+                if action=='keep' and state=='DONE':
+                    from src.nextgen.jobs.enrich_shoko_job import status as shoko_status
+                    shoko=shoko_status(db,prior[0])
+                    if shoko and shoko['state'] in ('NEEDS_REVIEW','BLOCKED'):
+                        now=self.queue.now()
+                        db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,last_reason_code=NULL,activity_code=NULL,updated_at_ms=? WHERE job_id=?",(now,now,shoko['job_id']))
+                        records.append(append_job_history(db,job_id=shoko['job_id'],event_code='MANAGEMENT_ACTION_RESUMED',component='api',occurred_at_ms=now))
+                        data=receipt(db,prior[0],reused=True);data['shoko_resumed']=True
                         return 202,data,tuple(records)
                 if action in ('cleanup','reject','keep') and state in ('NEEDS_REVIEW','BLOCKED'):
                     now=self.queue.now()
@@ -198,6 +209,11 @@ class ManagementActions:
                 from src.nextgen.decision_download_cleanup import status as download_status, STOPPED_JOBS
                 download=download_status(db,row[0])
                 if download and download['state'] in STOPPED_JOBS:
+                    resumable=True;enabled=True
+            if name=='keep' and row is not None:
+                from src.nextgen.jobs.enrich_shoko_job import status as shoko_status
+                shoko=shoko_status(db,row[0])
+                if shoko and shoko['state'] in ('NEEDS_REVIEW','BLOCKED'):
                     resumable=True;enabled=True
             if name=='reject' and resumable:enabled=True
             allowed=bool(enabled and (row is None or resumable) and busy is None)

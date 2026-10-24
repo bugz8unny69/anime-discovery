@@ -310,15 +310,15 @@ class Application:
             if path==PREFIX+'/credentials' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 return 200,asdict(self.secrets.status()),[]
-            secret_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|sonarr|jellyfin|qbittorrent|access)',path)
+            secret_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|sonarr|jellyfin|shoko|qbittorrent|access)',path)
             if secret_match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 if method!='PATCH':raise ApiError(405,'API_METHOD_INVALID')
                 kind=secret_match[1]
-                fields={'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token')}[kind]
+                fields={'shoko':('api_key',),'jellyfin':('api_key',),'sonarr':('api_key',),'tvdb':('api_key',),'qbittorrent':('username','password'),'access':('webhook_token','management_token')}[kind]
                 exact(body,('expected_revision',*fields))
                 validate_secret_fields(kind,body,fields)
-                callback={'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens}[kind]
+                callback={'shoko':self.secrets.update_shoko_api_key,'jellyfin':self.secrets.update_jellyfin_api_key,'sonarr':self.secrets.update_sonarr_api_key,'tvdb':self.secrets.update_tvdb_api_key,'qbittorrent':self.secrets.update_qbittorrent_credentials,'access':self.secrets.update_access_tokens}[kind]
                 result=callback(*(body[k] for k in fields),expected_revision=body['expected_revision'])
                 if result.saved:event(self.logger,logging.INFO,'API_CREDENTIALS_UPDATED',component='api')
                 return 200,{'status':asdict(result.status),'saved':result.saved,'durability_confirmed':result.durability_confirmed,'reason_code':result.reason_code,

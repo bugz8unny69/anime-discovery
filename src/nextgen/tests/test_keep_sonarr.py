@@ -189,7 +189,7 @@ class SonarrSettingsTests(unittest.TestCase):
             self.assertNotIn('sonarr',doc['settings'])
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
-        self.assertEqual(upgraded.schema_version,9)
+        self.assertEqual(upgraded.schema_version,10)
         self.assertEqual(upgraded.revision,doc['revision']+2)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
         for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)

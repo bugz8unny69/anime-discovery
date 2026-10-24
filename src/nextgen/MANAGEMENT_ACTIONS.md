@@ -134,3 +134,12 @@ owned-download cleanup job. Receipts expose `download_cleanup`; a stopped job
 can resume through Keep/Reject with the dashboard label Retry download cleanup.
 Decision/import completion and episode protection remain intact. Current contract:
 [Download cleanup](DECISION_DOWNLOAD_CLEANUP.md). This supersedes earlier remaining-download-cleanup notes above. Tests remain unrun.
+
+## Current Shoko and service setup contract
+
+The latest draft adds optional Shoko AniDB metadata after Keep (configuration v10,
+backward-readable secrets v6; SQLite stays v23). It also provides explicit local
+setup/maintenance commands and composed worker/systemd examples. See
+[Shoko metadata](SHOKO_METADATA.md) and [Service setup](SERVICE_SETUP.md).
+These supersede earlier remaining-Shoko/supervision/version notes above.
+Tests, migrations and services have not been executed.

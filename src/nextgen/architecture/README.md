@@ -29,3 +29,9 @@ Staging moves the selected video into the review folder and writes metadata, wit
 As of the consolidated work in [PR #134](https://github.com/bugz8unny69/anime-discovery/pull/134), intake, acquisition, media verification, staging, Reject, journaled Keep → Sonarr, and independent Jellyfin scan handoffs have draft implementations. They are **not validated end to end or deployed as a finished product**. Repository integration and lab validation are separate milestones. Optional Shoko, post-Keep/Reject torrent/download cleanup and startup supervision, and lab integration remain incomplete. The earlier architecture proposals are preserved in Git history; this page and its linked documents describe the current agreed direction.
 
 Earlier planning proposals from PR #121 are retained with historical banners at [Anime Intake](ANIME_INTAKE.md) and [the original end-to-end proposal](INTAKE_STAGING_KEEP.md). They do not override the current flow.
+
+The subsequent draft stack implements staging/download cleanup, canceled
+reservation release, optional display-only Shoko metadata and explicit service
+setup. See [Service setup](../SERVICE_SETUP.md) for the current runbook and lab
+validation checklist. Source completion does not establish runtime completion;
+all tests/CI, migration execution and deployment remain unrun.

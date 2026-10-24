@@ -293,3 +293,12 @@ are applied to new operations. Defaults are unconfigured addresses/mappings,
 storage.keep_root is the local permanent folder. Explicit v7→v8 conversion adds
 these defaults without changing earlier values or historical converter output.
 See [Keep through Sonarr](KEEP_SONARR.md) for mapping and saved-import behavior.
+
+## Current Shoko and service setup contract
+
+The latest draft adds optional Shoko AniDB metadata after Keep (configuration v10,
+backward-readable secrets v6; SQLite stays v23). It also provides explicit local
+setup/maintenance commands and composed worker/systemd examples. See
+[Shoko metadata](SHOKO_METADATA.md) and [Service setup](SERVICE_SETUP.md).
+These supersede earlier remaining-Shoko/supervision/version notes above.
+Tests, migrations and services have not been executed.
