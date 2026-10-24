@@ -241,6 +241,18 @@ class SonarrClient:
             raise SonarrReview()
         return response["id"]
 
+    def command_status(self, command_id):
+        """Inspect one recorded command. Never search by guessed source filename."""
+        if not self._positive(command_id):
+            raise SonarrReview()
+        response=self._get("command/"+str(command_id))
+        if not isinstance(response,dict) or response.get("id")!=command_id:
+            raise SonarrReview()
+        value=response.get("status")
+        if value not in ("queued","started","completed","failed","aborted","cancelled"):
+            raise SonarrReview()
+        return value
+
     def inventory(self, sonarr_id):
         """Read episode and file references; never infer proof from filenames."""
         if not self._positive(sonarr_id):
