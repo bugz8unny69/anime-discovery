@@ -73,7 +73,7 @@ class SonarrClient:
         self._open = opener or build_opener(ProxyHandler({}), _NoRedirect()).open
 
     def _request(self, method, route, payload=None, query=None):
-        if method not in ("GET", "POST") or not route or any(x in route for x in "?&#/\\"):
+        if method not in ("GET", "POST") or not route or any(x in route for x in "?&#\\"):
             raise SonarrReview()
         suffix = "?" + urlencode(query) if query else ""
         body = None if payload is None else json.dumps(payload, allow_nan=False,
