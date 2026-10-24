@@ -20,7 +20,7 @@
   </section>
   <div id="workspace" hidden>
     <nav aria-label="Main navigation">
-      <a class="tab" href="/">Intake</a><a class="tab" href="/jobs">Jobs</a><a class="tab" href="/settings">Settings</a>
+      <a class="tab" href="/">Intake</a><a class="tab" href="/jobs">Jobs</a><a class="tab" href="/recognized">Recognized Names</a><a class="tab" href="/settings">Settings</a>
     </nav>
     <section id="activity-panel" hidden>
       <h1 id="page-title">Intake</h1><p id="page-description" class="muted"></p>
@@ -38,6 +38,16 @@
         <table class="jobs-table"><thead><tr><th>Received</th><th>Release / Anime</th><th>Job</th><th>Status</th><th>Activity details</th><th>Actions</th></tr></thead><tbody id="job-rows"></tbody></table>
         <div id="no-jobs" class="empty" hidden>No items on this page.</div>
         <div class="page-controls"><button id="previous-page" class="secondary">Previous</button><button id="next-page" class="secondary">Next</button></div>
+      </section>
+    </section>
+    <section id="recognized-panel" hidden>
+      <h1>Recognized Names</h1>
+      <p class="muted">Automatically remembered verified AniDB identities, grouped by TVDB series and season. Each new episode still requires independent verification.</p>
+      <button id="refresh-recognized" class="secondary">Refresh recognized names</button>
+      <section class="panel">
+        <table class="jobs-table"><thead><tr><th>Series</th><th>Season</th><th>AniDB ID</th><th>TVDB ID</th><th>Aliases</th><th>Verified episodes</th></tr></thead>
+        <tbody id="recognized-rows"></tbody></table>
+        <p id="recognized-note" role="status"></p>
       </section>
     </section>
     <section id="settings-panel" hidden>
