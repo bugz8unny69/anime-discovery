@@ -122,6 +122,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,result,_=await self.request('PATCH',path,{'expected_revision':1,'api_key':'abcdef0123456789'},token=ADMIN)
         self.assertEqual(status,200)
         self.assertTrue(result['data']['status']['jellyfin_configured'])
+        self.assertIn('reason',result['data'])
         self.assertNotIn('abcdef0123456789',json.dumps(result))
         status,result,_=await self.request('GET','/api/v1/credentials',token=ADMIN)
         self.assertEqual(status,200)
