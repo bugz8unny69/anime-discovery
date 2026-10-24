@@ -74,7 +74,7 @@ def check_local(directory,*,worker=False):
     with database_preview(directory) as (_,plan):
         if plan.from_version!=migrations.LATEST_VERSION:raise ValueError('Run the explicit database upgrade before starting services.')
     credentials=SecretStore(directory).status()
-    if not credentials.management_configured or not credentials.webhook_configured:raise ValueError('Initialize separate management and webhook access keys.')
+    if not credentials.webhook_configured:raise ValueError('Configure the independent Autobrr webhook key.')
     if worker:
         if os.geteuid()==0:raise ValueError('Run the worker as the dedicated non-root service account.')
         from src.nextgen.providers.configuration import validate_provider_configuration
