@@ -213,9 +213,11 @@ checks, CI or live runtime calls were performed in this update.
 - The management API resolves ordinary job status, last reason and each history
   event/reason through `MessageCatalog`; the browser renders returned text as
   text nodes rather than inventing English from underscore-separated codes.
-- **Gap corrected in this draft:** the API cancellation subsection previously
-  exposed only a machine `reason_code`. It now also provides the resolved
-  `reason` object while keeping the original code for API compatibility.
+- **Gaps corrected in this draft:** the API cancellation subsection and
+  successful settings/credential update responses previously exposed machine
+  `reason_code` values without always including a resolved explanation. They
+  now also provide a catalog-resolved `reason` object (or null when there is
+  no reason), preserving original code fields for API compatibility.
 - Legacy machine keys for episode-selection settings, event history, reason
   history and job kinds remain stable. Their operator-facing messages must use
   **episode selection**, **staging** and **review**.
