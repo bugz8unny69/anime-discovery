@@ -1,11 +1,16 @@
 [Unit]
 Description=Anime Discovery NextGen management API
 PartOf=anime-discovery.target
+Wants=anime-discovery-worker.service
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=60s
+StartLimitIntervalSec=300
+StartLimitBurst=5
 User=anime-discovery
 Group=anime-discovery
 WorkingDirectory=/opt/anime-discovery
