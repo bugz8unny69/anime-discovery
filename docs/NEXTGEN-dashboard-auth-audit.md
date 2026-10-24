@@ -20,3 +20,20 @@ Status: source inspection, not deployment verification (2026-10-24).
 
 ## Security constraint
 Do not deploy the scrypt foundation as a completed authentication migration. It is currently only a helper and tests; existing API authentication remains active.
+
+## Delivery tracker (CI intentionally deferred until requested)
+
+- [x] Worker and API systemd readiness/watchdog implementation (previous CI #18 passed).
+- [x] Source-level dashboard route and feature audit.
+- [x] Versioned scrypt hash helper and initial tests (not integrated).
+- [ ] Add password-hash persistence with atomic updates, migration, and explicit concurrent revision handling.
+- [ ] Implement password-based login and password change; invalidate all sessions on rotation.
+- [ ] Remove management-token browser login and any legacy token bypass from administrative HTTP routes.
+- [ ] Implement same-process Unix socket with restricted ownership/mode, peer identity checks, and `adm set-password`.
+- [ ] Wire dashboard login and Settings > Security forms to the new API.
+- [ ] Reconcile old secrets/access setup and installer provisioning; retain independent Autobrr webhook token.
+- [ ] Verify full legacy dashboard feature parity and worker-unavailable UX.
+- [ ] Add authorization, CSRF, socket, rotation, lifecycle, and browser/API integration tests.
+- [ ] Review complete diff, then ask for approval to run CI; fix failures after approval.
+
+**Gate:** No CI trigger, merge, or deployment until the user approves CI after checklist completion.
