@@ -119,6 +119,12 @@ class ManagementActions:
             control,audit=enqueue_job_with_receipt(db,component='api',kind=KINDS[selected],event_id=event,
                 payload={'target_job_id':job_id},available_at_ms=now)
             db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',(op[0],selected,job_id,control,now))
+            if action=='keep':
+                # Freeze the exact stage manifest and verified TVDB episode before
+                # acknowledging Keep, in this same action/job transaction.
+                from src.nextgen.storage.keep import KeepReview, approve
+                try:approve(db,op[0],control,now)
+                except KeepReview:raise ActionUnavailable() from None
             if action=='reject':
                 db.execute("INSERT INTO anime_review_decisions(anidb_id,operation_id,job_id,decision,cleanup_state,decided_at_ms) VALUES(?,?,?,'REJECT','PENDING',?)",(anime,op[0],control,now))
             records.append(audit)
