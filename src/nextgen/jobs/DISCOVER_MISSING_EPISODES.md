@@ -53,7 +53,7 @@ a new eligible evaluation can search previously unsearched positions.
 - Run the **NextGen-only** v22→v23 SQLite migration under exclusive
   maintenance before using the updated worker. No production migration ran
   while authoring this draft.
-- With management credentials, `GET /api/v1/missing-episodes?plan_id=ID`
+- With management credentials, `GET /api/v1/missing-episodes` lists recent plan IDs; `GET /api/v1/missing-episodes?plan_id=ID`
   returns selected window positions, RESERVED/NOT_SEARCHED/FOUND/NO_MATCH
   states and at most 100 raw candidate summaries. It is read-only; there is
   no public user-provided search or download endpoint.
