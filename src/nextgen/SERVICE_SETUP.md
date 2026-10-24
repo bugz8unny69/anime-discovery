@@ -158,23 +158,3 @@ been executed in this work:
 Uncertain client commands that remain present are deliberately not reissued.
 Review the recorded job history and client state; do not reset journals to grant
 a second mutation. These cases require operator investigation during validation.
-
-## Local Unix administration socket (opt-in)
-
-The existing HTTP API remains available on loopback. A separate, optional systemd
-socket activates the same API on `/run/anime-discovery/admin.sock`. Install
-`deploy/nextgen/anime-discovery-admin.socket` and
-`deploy/nextgen/anime-discovery-admin.service` in `/etc/systemd/system`, then
-run `systemctl daemon-reload` and `systemctl enable --now anime-discovery-admin.socket`.
-The socket is owned by `anime-discovery:anime-discovery`, mode `0660`, with a
-restricted parent directory. Root and explicitly authorized members of the
-`anime-discovery` group can connect. Group membership grants local transport
-access only: the existing API still requires the management token. Do not grant
-socket group membership to untrusted users.
-
-The socket-activated API receives fd 3 from systemd. No TCP port is opened by
-this service. The `--socket-activated` option must only be used under systemd
-socket activation. Check with `systemctl status anime-discovery-admin.socket`
-and `stat /run/anime-discovery/admin.sock`. This does **not** yet provide
-password reset, an `adm` CLI, or tokenless privileged local API operations.
-Those require separate authentication and authorization design and tests.
