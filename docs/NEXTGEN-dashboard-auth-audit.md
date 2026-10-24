@@ -63,3 +63,11 @@ The last six capabilities require native NextGen application/service operations 
 ### Fresh-install invariant
 
 There is no conversion or migration step. Use the NextGen configuration library and management API. A fresh API can start before the administrator password or webhook key exists, `adm set-password` bootstraps authentication via the same-process local socket, and the dashboard configures the separate webhook key.
+
+## Automatically recognized series and seasons (implementation started)
+
+On verification of a declared episode, NextGen now remembers a `(TVDB series, TVDB season) -> AniDB anime` record, the provider-verified title, safe normalized release aliases, and the original release verification ID in schema v24. The Recognized Names page lists these records with the count of distinct verified episodes. The identity resolver checks an **exact season-qualified** alias first and, on a unique proven hit, reuses the series relationship without requerying AniDB titles/anime metadata/Anime-Lists or TVDB series metadata. The downstream VERIFY_RELEASE job **still independently validates the episode**, and other acquisitions retain their existing verification and gating.
+
+Unresolved cases fail closed: unknown titles, colliding aliases, contradictory season mappings, mixed season labels, and season 2+ without a previously verified season binding. Releases without an explicit season label continue through the existing provider path rather than presuming an arbitrary season. No manual "Remember" step, legacy settings import, or per-episode identity key is used.
+
+Pending before declaring this feature complete: proper TVDB/AniDB mapping for multipart seasons, specials, sequel anime, alternate numbering orders, refresh/revocation of stale provider proofs, conflict review workflows, richer recognized-alias management, bounded API pagination, and actual integration/browser verification. New tests are authored but **not executed** per CI gate.
