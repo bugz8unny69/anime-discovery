@@ -62,6 +62,15 @@ class FreshAdministrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(result["authenticated"])
 
+    def test_recognized_names_requires_admin_session(self):
+        self.passwords.replace("correct horse battery staple", expected_revision=0)
+        with self.assertRaises(ApiError) as error:
+            self.request("GET", "/recognized")
+        self.assertEqual(error.exception.status, 401)
+        with self.assertRaises(ApiError) as error:
+            self.request("GET", "/recognized", {"authorization": "Bearer " + "w"*40})
+        self.assertEqual(error.exception.status, 401)
+
     def test_password_rotation_rejects_old_cookie(self):
         self.passwords.replace("correct horse battery staple", expected_revision=0)
         _, data, headers = self.request("POST", "/auth/session",
