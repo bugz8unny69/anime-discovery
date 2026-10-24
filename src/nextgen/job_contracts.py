@@ -55,10 +55,11 @@ def parse_payload(raw):
 class Successor:
     kind: str
     payload: str = field(repr=False)  # Detached canonical JSON, not a mutable map.
+    independent: bool = False  # New operation, independent of a staged/Kept parent
 
     @classmethod
-    def create(cls, kind, payload):
-        return cls(kind, payload_json(payload))
+    def create(cls, kind, payload, *, independent=False):
+        return cls(kind, payload_json(payload), independent)
 
     def __post_init__(self):
         if type(self.kind) is not str or not self.kind.strip() or len(self.kind) > 64:
@@ -66,6 +67,8 @@ class Successor:
         if type(self.payload) is not str or len(self.payload.encode("utf-8")) > 65536:
             raise ValueError("invalid successor payload")
         parse_payload(self.payload)
+        if type(self.independent) is not bool:
+            raise ValueError("invalid successor operation scope")
 
 
 _STATES = {"complete":"DONE", "retry":"RETRY_WAIT", "defer":"RETRY_WAIT",
