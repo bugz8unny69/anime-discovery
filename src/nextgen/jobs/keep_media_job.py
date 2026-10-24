@@ -6,7 +6,7 @@ silently authorize repeating a ManualImport command. Trial files are preserved.
 """
 from src.nextgen.async_io import blocking
 from src.nextgen.handlers import HandlerDefinition
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.secrets import SecretStorageError
 from src.nextgen.sonarr import SonarrClient, SonarrOptions, SonarrReview, SonarrUnavailable
 from src.nextgen.keep_files import KeepFileReview, staged, verified_library
@@ -18,11 +18,13 @@ DEFINITION = HandlerDefinition(KIND, "Keep one approved episode through Sonarr")
 
 
 def _persist(db, claim, value):
-    if type(value) is not dict:
+    if (type(value) is not dict or set(value)!={"proof","source_job_id","refresh_required"}
+            or value["source_job_id"]!=claim.job_id or type(value["refresh_required"]) is not bool
+            or type(value["proof"]) is not dict):
         raise CompletionRejected(Outcome("review", "KEEP_FILE_REVIEW"))
     try:
         # Runs in the SAME lease-fenced transaction as jobs.DONE.
-        KeepJournal("").verified(db,claim,value)
+        KeepJournal("").verified(db,claim,value["proof"])
     except (KeepReview,ValueError,TypeError,KeyError):
         raise CompletionRejected(Outcome("review", "KEEP_FILE_REVIEW")) from None
 
@@ -58,7 +60,10 @@ def _missing_episode(client,sonarr_id,identity):
         raise SonarrReview()
 
 
-def registration(secrets=None):
+def registration(secrets=None,*,refresh_kind=None):
+    if refresh_kind is not None and (type(refresh_kind) is not str or not refresh_kind.strip()
+            or refresh_kind==KIND or len(refresh_kind)>64):
+        raise ValueError("invalid refresh successor")
     async def execute(context):
         actions=ManagementActions(context.configuration.value("storage.database_path"))
         journal=KeepJournal(actions.queue.database)
@@ -71,7 +76,8 @@ def registration(secrets=None):
         if record["phase"]=="VERIFIED":
             if type(record["evidence"]) is not dict:
                 return Outcome("review","KEEP_FILE_REVIEW")
-            return Outcome(value=record["evidence"])
+            return Outcome(value={"proof":record["evidence"],"source_job_id":context.claim.job_id,
+                                  "refresh_required":bool(context.configuration.value("jellyfin.base_url"))})
         if record["phase"]=="IMPORT_INTENT":
             # A previous attempt may already have submitted this command. Never
             # replay a POST from the durable uncertain boundary.
@@ -123,7 +129,8 @@ def registration(secrets=None):
                 proof=await blocking(staged,record,context.cancelled)
                 result=await blocking(verified_library,record,client,context.cancelled,proof)
                 # Only worker finish may commit VERIFIED and jobs.DONE together.
-                return Outcome(value=result)
+                return Outcome(value={"proof":result,"source_job_id":context.claim.job_id,
+                                      "refresh_required":bool(context.configuration.value("jellyfin.base_url"))})
 
             return Outcome("review","KEEP_FILE_REVIEW")
         except SonarrUnavailable:
@@ -134,4 +141,8 @@ def registration(secrets=None):
             return Outcome("review","SONARR_IMPORT_REVIEW")
         except OSError:
             return Outcome("retry","SONARR_UNAVAILABLE")
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        if refresh_kind is None or not value["refresh_required"]:return ()
+        return (Successor.create(refresh_kind,{"source_kind":KIND,"source_job_id":value["source_job_id"]}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if refresh_kind is None else (refresh_kind,))
