@@ -4,6 +4,16 @@
 >
 > **Operational guardrails:** Draft work on branches/PRs; do not merge, deploy, restart services, change production databases, acquire/delete torrents, or touch user media without explicit authorization. Use `NextGen` as the PR target for new NextGen work. Keep `develop` for the existing legacy application. Current policy: include offline tests but do not execute them or CI; record tests as unrun.
 
+## Anime Intake terminology — 2026-10-23
+
+The agreed dashboard section name is **Intake**; use **Anime Intake** when
+standalone context is helpful. It holds incoming anime for consideration before
+Keep or Reject, including downloading work and episodes available to watch.
+This replaces trial/preview as the user-facing area name. Internal trial names,
+configuration keys and stored paths can stay unchanged. Application branding
+is not settled. See [Anime Intake planning](src/nextgen/architecture/ANIME_INTAKE.md).
+This is a documentation-only decision; dashboard implementation remains future work.
+
 ## Initial async worker core — 2026-10-22
 
 The worker follow-up builds on draft destination-settings PR #106. It implements
