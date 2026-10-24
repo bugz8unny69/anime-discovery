@@ -179,6 +179,7 @@ class SecretStore:
         return AccessCredentials(values['webhook_token'],values['management_token'])
 
     def initialize(self, tvdb_api_key='', *, qbittorrent_username='', qbittorrent_password='', webhook_token='', management_token='', sonarr_api_key='', jellyfin_api_key='', shoko_api_key=''):
+        if management_token:raise SecretStorageError()
         values={'tvdb_api_key':_value(tvdb_api_key),**_download_values(qbittorrent_username,qbittorrent_password),
                 **_access_values(webhook_token,management_token),'sonarr_api_key':_value(sonarr_api_key),'jellyfin_api_key':_value(jellyfin_api_key),'shoko_api_key':_value(shoko_api_key)}
         try:
