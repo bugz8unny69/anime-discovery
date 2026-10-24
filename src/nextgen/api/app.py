@@ -9,7 +9,7 @@ import uuid
 from urllib.parse import parse_qs, urlsplit
 
 from src.nextgen.async_io import blocking
-from src.nextgen.systemd_notify import notify
+from src.nextgen.systemd_notify import notify, watchdog_interval
 from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
@@ -108,6 +108,13 @@ class Application:
         self.closed=True
         self.pool.shutdown(wait=True,cancel_futures=False)
 
+    async def _watchdog(self, interval):
+        """Heartbeat from the serving event loop, not a background OS thread."""
+        while True:
+            await asyncio.sleep(interval)
+            if not self.closed:
+                notify('WATCHDOG=1')
+
     async def _body(self,receive):
         chunks=[];size=0
         while True:
@@ -123,13 +130,20 @@ class Application:
 
     async def __call__(self,scope,receive,send):
         if scope['type']=='lifespan':
+            watchdog_task = None
             while True:
                 message=await receive()
                 if message['type']=='lifespan.startup':
                     await send({'type':'lifespan.startup.complete'})
                     notify('READY=1')
+                    interval = watchdog_interval()
+                    if interval is not None:
+                        watchdog_task = asyncio.create_task(self._watchdog(interval))
                 elif message['type']=='lifespan.shutdown':
                     notify('STOPPING=1')
+                    if watchdog_task is not None:
+                        watchdog_task.cancel()
+                        await asyncio.gather(watchdog_task, return_exceptions=True)
                     await blocking(self.close)
                     await send({'type':'lifespan.shutdown.complete'});return
             return
