@@ -36,6 +36,11 @@ class ApiAccessSecretsTests(unittest.TestCase):
         self.store.update_webhook_token("x" * 43, expected_revision=1)
         self.assertEqual(self.store.tvdb_credentials().api_key, "provider-key")
 
+    def test_fresh_install_refuses_obsolete_management_token(self):
+        with self.assertRaises(SecretStorageError):
+            self.store.initialize(webhook_token='w' * 43, management_token='m' * 43)
+        self.assertFalse((self.root / 'secrets.json').exists())
+
     def test_stale_revision_invalid_values_and_permissions_fail_closed(self):
         self.store.initialize(webhook_token="w" * 43)
         with self.assertRaises(ConfigurationConflict):
