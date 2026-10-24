@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 9
+CONFIGURATION_VERSION = 10
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -73,6 +73,10 @@ FIELDS = MappingProxyType({
         label="Torrent metadata source", help_text="Trusted HTTP(S) base folder serving lowercase-infohash.torrent files. No credentials, query, redirects or webhook URLs. Required before acquisition."),
     "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
         label="Torrent metadata timeout", help_text="Connect/read timeout and deadline checks between response chunks, in seconds."),
+    "prowlarr.base_url": FieldDefinition("", "download_endpoint", "next_operation",
+        label="Prowlarr address", help_text="Optional internal Prowlarr HTTP(S) origin for indexed missing-episode candidate discovery. No automatic downloading."),
+    "prowlarr.timeout_seconds": FieldDefinition(15, "integer", "next_operation", minimum=1, maximum=60,
+        label="Prowlarr timeout", help_text="Maximum seconds per bounded indexer search request."),
     "jellyfin.base_url": FieldDefinition("", "download_endpoint", "next_operation",
         label="Jellyfin address", help_text="Optional Jellyfin HTTP(S) origin. When set, stage and verified Keep queue independent library scans."),
     "jellyfin.timeout_seconds": FieldDefinition(15, "integer", "next_operation", minimum=1, maximum=60,
@@ -482,7 +486,7 @@ def _v7_to_v8(document):
 def _v8_values(values):
     """Keep published v8 shape, without v9 Jellyfin integration fields."""
     if type(values) is not dict or 'jellyfin' in values:raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v9_values(values)
     del historical['jellyfin']
     return historical
 
@@ -492,12 +496,28 @@ def _v8_to_v9(document):
             or document['schema_version']!=8):raise ConfigurationError()
     current=revision(document['revision'])
     if current==MAX_REVISION:raise ConfigurationError()
-    return {'schema_version':9,'revision':current+1,'settings':validate_values(_v8_values(document['settings']))}
+    return {'schema_version':9,'revision':current+1,'settings':_v9_values(_v8_values(document['settings']))}
+
+
+def _v9_values(values):
+    """Preserve the published v9 shape without Prowlarr settings."""
+    if type(values) is not dict or 'prowlarr' in values:raise ConfigurationError()
+    historical=validate_values(values)
+    del historical['prowlarr']
+    return historical
+
+
+def _v9_to_v10(document):
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=9):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    return {'schema_version':10,'revision':current+1,'settings':validate_values(_v9_values(document['settings']))}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10})
 
 
 def convert_document(document):
