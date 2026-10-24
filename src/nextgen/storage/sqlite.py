@@ -359,6 +359,22 @@ CREATE TABLE IF NOT EXISTS anime_review_decisions (
  decided_at_ms INTEGER NOT NULL CHECK(decided_at_ms>=0)
 );
 
+CREATE TABLE IF NOT EXISTS keep_imports (
+ operation_id INTEGER PRIMARY KEY REFERENCES job_operations(operation_id),
+ keep_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ staging_plan_id INTEGER NOT NULL UNIQUE REFERENCES staging_publications(plan_id),
+ approval_json TEXT NOT NULL CHECK(json_valid(approval_json) AND length(CAST(approval_json AS BLOB)) BETWEEN 1 AND 131072),
+ approval_sha256 TEXT NOT NULL CHECK(length(approval_sha256)=64 AND approval_sha256 NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('APPROVED','SERIES_INTENT','SERIES_READY','IMPORT_INTENT','COMMAND_ACCEPTED','VERIFIED','REVIEW')),
+ sonarr_series_id INTEGER CHECK(sonarr_series_id IS NULL OR sonarr_series_id>0),
+ sonarr_command_id INTEGER CHECK(sonarr_command_id IS NULL OR sonarr_command_id>0),
+ library_evidence_json TEXT CHECK(library_evidence_json IS NULL OR (json_valid(library_evidence_json) AND length(CAST(library_evidence_json AS BLOB)) BETWEEN 1 AND 65536)),
+ approved_at_ms INTEGER NOT NULL CHECK(approved_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=approved_at_ms),
+ CHECK(phase NOT IN ('IMPORT_INTENT','COMMAND_ACCEPTED','VERIFIED') OR sonarr_series_id IS NOT NULL),
+ CHECK(phase NOT IN ('COMMAND_ACCEPTED','VERIFIED') OR sonarr_command_id IS NOT NULL),
+ CHECK(phase<>'VERIFIED' OR library_evidence_json IS NOT NULL)
+);
 """
 
 def connect(path):
@@ -400,7 +416,7 @@ def admitted_connection(gate):
 def initialize(db):
     """Initialize a *new* NextGen database at schema v21; never implicitly upgrade.
 
-    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20 databases require explicit versioned SQL migrations
+    Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21 databases require explicit versioned SQL migrations
     before accessing v21 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
@@ -414,7 +430,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=21;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=22;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
