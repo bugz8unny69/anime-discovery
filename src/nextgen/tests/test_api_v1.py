@@ -115,6 +115,21 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,200);self.assertTrue(result['data']['management_configured'])
         self.assertNotIn(ADMIN,json.dumps(result));self.assertNotIn(WEB,json.dumps(result))
 
+    async def test_jellyfin_credential_endpoint_is_management_only_and_presence_only(self):
+        path='/api/v1/credentials/jellyfin'
+        status,_,_=await self.request('PATCH',path,{'expected_revision':1,'api_key':'abcdef0123456789'},token=WEB)
+        self.assertEqual(status,401)
+        status,result,_=await self.request('PATCH',path,{'expected_revision':1,'api_key':'abcdef0123456789'},token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertTrue(result['data']['status']['jellyfin_configured'])
+        self.assertNotIn('abcdef0123456789',json.dumps(result))
+        status,result,_=await self.request('GET','/api/v1/credentials',token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertTrue(result['data']['jellyfin_configured'])
+        self.assertNotIn('abcdef0123456789',json.dumps(result))
+        status,_,_=await self.request('PATCH',path,{'expected_revision':1,'api_key':'abcdef0123456789'},token=ADMIN)
+        self.assertEqual(status,409)
+
     async def test_jobs_history_are_readable_bounded_and_do_not_expose_payload_or_lease(self):
         await self.request('POST','/api/v1/webhook',self.release(token=WEB))
         status,result,_=await self.request('GET','/api/v1/jobs?limit=1',token=ADMIN)
