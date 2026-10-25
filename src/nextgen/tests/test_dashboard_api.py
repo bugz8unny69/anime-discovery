@@ -86,6 +86,33 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
             status,_,_=await self.asset(route,method=method,host=host)
             self.assertEqual(status,expected)
 
+    async def test_credentials_reveal_requires_session_csrf_and_never_exposes_admin_password(self):
+        current = self.app.secrets.status()
+        self.app.secrets.update_sonarr_api_key('integration-test-sonarr-key', expected_revision=current.revision)
+        status, summary, _ = await self.request('GET', '/api/v1/credentials', token=ADMIN)
+        self.assertEqual(status, 200)
+        self.assertNotIn('integration-test-sonarr-key', json.dumps(summary))
+        status, _, _ = await self.request('POST', '/api/v1/credentials/sonarr/reveal', {}, token=WEB)
+        self.assertEqual(status, 401)
+        status, session, headers = await self.request('POST', '/api/v1/auth/session',
+            {'password': ADMIN}, headers={'Origin': ORIGIN})
+        self.assertEqual(status, 201)
+        cookie = headers[b'set-cookie'].decode().split(';', 1)[0]
+        status, _, _ = await self.request('POST', '/api/v1/credentials/sonarr/reveal', {},
+            headers={'Cookie': cookie, 'Origin': ORIGIN})
+        self.assertEqual(status, 403)
+        status, result, response_headers = await self.request('POST', '/api/v1/credentials/sonarr/reveal', {},
+            headers={'Cookie': cookie, 'Origin': ORIGIN,
+                     'X-CSRF-Token': session['data']['csrf_token']})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['data'], {'api_key': 'integration-test-sonarr-key'})
+        self.assertNotIn(ADMIN, json.dumps(result))
+        self.assertEqual(response_headers[b'cache-control'], b'no-store')
+        status, _, _ = await self.request('POST', '/api/v1/credentials/management/reveal', {},
+            headers={'Cookie': cookie, 'Origin': ORIGIN,
+                     'X-CSRF-Token': session['data']['csrf_token']})
+        self.assertEqual(status, 404)
+
     async def test_intake_uses_management_session_and_presents_one_row_per_explicit_scope(self):
         evaluation,target=await reserve_without_metadata(self)
         for credential in (None,WEB):
