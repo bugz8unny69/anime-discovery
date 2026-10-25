@@ -113,6 +113,58 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
                      'X-CSRF-Token': session['data']['csrf_token']})
         self.assertEqual(status, 404)
 
+    async def test_matching_details_are_authenticated_durable_and_available_on_later_jobs(self):
+        from src.nextgen.history import append_job_history
+        from src.nextgen.matching import MatchingTrace
+        from src.nextgen.storage.sqlite import enqueue_job
+        status, receipt, _ = await self.request('POST', '/api/v1/webhook',
+                                               self.release(), token=WEB)
+        self.assertEqual(status, 202)
+        job=receipt['data']['job_id']
+        trace=MatchingTrace()
+        trace.queries(['Higurashi When They Cry'], season=2)
+        trace.check('release_title','passed')
+        trace.check('season_scope','failed','unverified_sequel')
+        with connect(self.database) as db, transaction(db):
+            db.execute("UPDATE jobs SET state='NEEDS_REVIEW',attempt_count=1,"
+                       "last_reason_code='IDENTITY_INCOMPLETE' WHERE job_id=?",(job,))
+            append_job_history(db,job_id=job,event_code='NEEDS_REVIEW',
+                               reason_code='IDENTITY_INCOMPLETE',component='worker',
+                               occurred_at_ms=1000,details={'attempt':1,'matching':trace.data})
+            followup=enqueue_job(db,kind='VERIFY_RELEASE',payload={'anidb_id':123},
+                                 component='worker',event_id=receipt['data']['event_id'],
+                                 created_by_job_id=job)
+        for credential in (None,WEB):
+            status,_,_=await self.request('GET',f'/api/v1/jobs/{job}/matching',token=credential)
+            self.assertEqual(status,401)
+        for requested in (job,followup):
+            status,result,headers=await self.request('GET',f'/api/v1/jobs/{requested}/matching',token=ADMIN)
+            self.assertEqual(status,200)
+            data=result['data']
+            self.assertTrue(data['available'])
+            self.assertEqual(data['job_id'],job)
+            self.assertEqual(data['requested_job_id'],requested)
+            self.assertEqual(data['evidence']['season'],2)
+            self.assertIn({'step':'season_scope','status':'failed','note':'unverified_sequel'},
+                          data['evidence']['checks'])
+            self.assertEqual(headers[b'cache-control'],b'no-store')
+            self.assertNotIn(WEB,json.dumps(result))
+            self.assertNotIn(ADMIN,json.dumps(result))
+        for path,method,expected in [
+            (f'/api/v1/jobs/{job}/matching?token=secret','GET',400),
+            (f'/api/v1/jobs/{job}/matching','POST',405),
+            ('/api/v1/jobs/999999/matching','GET',404)]:
+            status,_,_=await self.request(method,path,{} if method=='POST' else None,token=ADMIN)
+            self.assertEqual(status,expected)
+
+    async def test_matching_details_report_no_recorded_evidence_for_legacy_attempts(self):
+        _,receipt,_=await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
+        job=receipt['data']['job_id']
+        status,result,_=await self.request('GET',f'/api/v1/jobs/{job}/matching',token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertFalse(result['data']['available'])
+        self.assertIsNone(result['data']['evidence'])
+
     async def test_intake_uses_management_session_and_presents_one_row_per_explicit_scope(self):
         evaluation,target=await reserve_without_metadata(self)
         for credential in (None,WEB):
