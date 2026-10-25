@@ -20,6 +20,7 @@ from src.nextgen.configuration_schema import ConfigurationError, ConfigurationCo
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.diagnostics import configure_logging, event, log_history
 from src.nextgen.history import encode_details
+from src.nextgen.matching import validated as validate_matching
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceError, MaintenancePending, MaintenanceBusy
 from src.nextgen.messages import MessageCatalog
 from src.nextgen.dashboard.assets import load_assets, address_mismatch, CSP as DASHBOARD_CSP
@@ -319,6 +320,36 @@ class Application:
                     for record in records:log_history(self.logger,record)
                     return status,data,([] if 'status_url' not in data else [(b'location',data['status_url'].encode())])
                 raise ApiError(405,'API_METHOD_INVALID')
+            matching=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/matching',path)
+            if matching:
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                job=int(matching[1])
+                if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    row=db.execute('SELECT kind,state,attempt_count,last_reason_code FROM jobs WHERE job_id=?',(job,)).fetchone()
+                    if row is None or row[0]!='IDENTIFY_ANIME':raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    evidence=None
+                    # Review a bounded set of durable, fenced lifecycle outcomes.
+                    # Older jobs legitimately have no trace and must not be guessed.
+                    records=db.execute(
+                        "SELECT details_json FROM job_history WHERE job_id=? AND "
+                        "event_code IN ('NEEDS_REVIEW','DONE','RETRY_SCHEDULED','DEFERRED','ON_HOLD','BLOCKED') "
+                        "ORDER BY history_id DESC LIMIT 64",(job,)).fetchall()
+                    for record in records:
+                        try:
+                            details=json.loads(record[0] or '{}')
+                            if type(details) is not dict or 'matching' not in details:continue
+                            validate_matching(details['matching'])
+                            evidence=details['matching']
+                            break
+                        except (ValueError,TypeError,KeyError,OverflowError):
+                            continue
+                return 200,{'job_id':job,'available':evidence is not None,
+                    'attempts':row[2],'state':row[1],
+                    'reason':None if row[3] is None else CATALOG.reason(row[3]),
+                    'evidence':evidence},[]
             single=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})',path)
             if single:
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
@@ -333,7 +364,7 @@ class Application:
                     return 200,self._job(queue,db,row),[]
             if path==PREFIX+'/' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
-                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','auth/session','auth/password','recognized','webhook']},[]
+                return 200,{'version':'v1','resources':['health','settings','credentials','intake','jobs','jobs/{id}/matching','auth/session','auth/password','recognized','webhook']},[]
             season_match=re.fullmatch(PREFIX+r'/recognized/([1-9][0-9]{0,17})/([0-9]{1,3})(?:/([1-9][0-9]{0,17}))?/episodes',path)
             if season_match:
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
@@ -426,7 +457,7 @@ class Application:
                             'reason':None if result.reason_code is None else CATALOG.reason(result.reason_code)},[]
             if method=='GET' and (path==PREFIX+'/jobs' or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path)):
                 return 200,self._jobs(configuration,path,query),[]
-        if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
+        if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/(history|matching)',path):raise ApiError(405,'API_METHOD_INVALID')
         raise ApiError(404,'API_ROUTE_NOT_FOUND')
 
     def _cookie(self,token,*,clear=False,secure=False):
