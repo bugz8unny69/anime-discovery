@@ -52,7 +52,7 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         host=b'anime.proxy.example'
         headers=[(b'host',host),(b'origin',b'https://anime.proxy.example'),(b'content-length',b'0')]
         scope={'headers':headers}
-        status,_,_=await self.request('GET','/',scope_changes=scope)
+        status,_,_=await self.request('GET','/api/v1/jobs',token=ADMIN,scope_changes={'headers':[(b'host',host),(b'cookie',self.admin_cookie.encode()),(b'content-length',b'0')]})
         self.assertEqual(status,200)
         status,_,_=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},
             scope_changes={'headers':[(b'host',host),(b'origin',b'https://anime.proxy.example'),
