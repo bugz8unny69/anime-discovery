@@ -8,11 +8,16 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(description="Anime Discovery local administration")
-    parser.add_argument("command", choices=("set-password",))
+    parser.add_argument("command", nargs="?", choices=("set-password",))
+    parser.add_argument("--set-password", action="store_true",
+                        help="Alias for the set-password subcommand")
     parser.add_argument("--socket", default="/run/anime-discovery/admin.sock")
     parser.add_argument("--password-stdin", action="store_true", help="Read a password from standard input for automation")
     parser.add_argument("--if-unset", action="store_true", help="Initialize only; preserve an existing password")
     args = parser.parse_args()
+    if bool(args.command) == args.set_password:
+        parser.error("Specify exactly one of set-password or --set-password")
+    command = args.command or "set-password"
     if args.password_stdin:
         password = sys.stdin.buffer.read(1026).decode('utf-8').removesuffix('\n')
     else:
@@ -28,7 +33,7 @@ def main():
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(15)
         conn.connect(args.socket)
-        request = {"command": args.command, "password": password}
+        request = {"command": command, "password": password}
         if args.if_unset:request["if_unset"] = True
         payload = json.dumps(request).encode()
         conn.sendall(payload + bytes([10]))
