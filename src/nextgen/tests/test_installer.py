@@ -139,7 +139,7 @@ class InstallerSupportTests(unittest.TestCase):
                'state_dir':str(self.root/'state'), 'unit_dir':str(self.root/'units'),
                'ref':'NextGen', 'origin':'https://anime.example.test'}
         with patch.object(installer,'saved_defaults',return_value=saved), \
-             patch.object(installer,'apply',return_value={'installed':True}) as apply, \\
+             patch.object(installer,'apply',return_value={'installed':True}) as apply, \
              patch('builtins.input',side_effect=AssertionError('upgrade must not prompt')), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(installer.main(['--upgrade']),0)
