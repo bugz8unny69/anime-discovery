@@ -48,10 +48,43 @@ def public_origin(value):
     except (ValueError,TypeError,AttributeError):raise ApiError(400,'API_ORIGIN_INVALID') from None
 
 
+def valid_host(host):
+    """Validate the immediate request authority, without trusting forwarded headers."""
+    if not isinstance(host,str) or not host or len(host)>255 or any(c in host for c in ('/', '\\', '@', ' ', '\t', '#', '?', ',')):
+        return False
+    try:
+        parsed=urlsplit('http://'+host)
+        if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+            return False
+        port=parsed.port
+        return parsed.netloc.lower()==host.lower() and (port is None or 1<=port<=65535)
+    except ValueError:
+        return False
+
+
 def check_origin(headers,origin,*,required=False):
+    """Match browser Origin to request Host, not the application's bind address.
+
+    Nginx must preserve Host. Ignore X-Forwarded-Host/Proto for authority,
+    since they can be supplied by clients unless the proxy sanitizes them.
+    """
+    host=headers.get('host','')
+    if not valid_host(host):
+        raise ApiError(403,'API_ORIGIN_INVALID')
     found=headers.get('origin')
-    if (required and found is None) or found is not None and found!=origin:raise ApiError(403,'API_ORIGIN_INVALID')
-    if headers.get('sec-fetch-site') not in (None,'same-origin','none'):raise ApiError(403,'API_ORIGIN_INVALID')
+    if required and found is None:
+        raise ApiError(403,'API_ORIGIN_INVALID')
+    if found is not None:
+        try:
+            parsed=urlsplit(found)
+            normalized=public_origin(found)
+            expected_host=parsed.netloc.lower()
+            if normalized!=found or expected_host!=host.lower():
+                raise ValueError()
+        except (ValueError,ApiError):
+            raise ApiError(403,'API_ORIGIN_INVALID') from None
+    if headers.get('sec-fetch-site') not in (None,'same-origin','none'):
+        raise ApiError(403,'API_ORIGIN_INVALID')
 
 
 def webhook_key(headers,query,body,expected):
