@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import shutil
@@ -137,20 +138,36 @@ def migrate(source,output,database,*,apply=False,overrides=None,expected_fingerp
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--legacy-config-dir',required=True,type=Path)
-    parser.add_argument('--output-dir',required=True,type=Path)
-    parser.add_argument('--database',required=True,type=Path)
+    parser.add_argument('--legacy-config-dir',type=Path,default=Path('/etc/anime-discovery'))
+    parser.add_argument('--output-dir',type=Path,default=Path('/etc/anime-discovery-converted'))
+    parser.add_argument('--database',type=Path,default=Path('/var/lib/anime-discovery/anime-discovery.sqlite'),help=argparse.SUPPRESS)
     parser.add_argument('--settings-file',type=Path,help='Explicit Anime Discovery overrides for incompatible settings.')
-    parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--apply',action='store_true',help='Write without asking for confirmation')
+    parser.add_argument('--preview',action='store_true',help='Show the conversion summary without writing')
     parser.add_argument('--expected-fingerprint')
     parser.add_argument('--uid',type=int);parser.add_argument('--gid',type=int)
     args=parser.parse_args(argv)
     try:
         if (args.uid is None)!=(args.gid is None) or any(n is not None and n<0 for n in (args.uid,args.gid)):raise ValueError('Provide both nonnegative owner IDs.')
         overrides=None if args.settings_file is None else read_object(args.settings_file)[1]
+        if args.uid is None and os.geteuid()==0:
+            try:
+                account=pwd.getpwnam('anime-discovery')
+                args.uid,args.gid=account.pw_uid,account.pw_gid
+            except KeyError:
+                print('Create the anime-discovery service account first: useradd --system --user-group --home-dir /var/lib/anime-discovery --shell /usr/sbin/nologin anime-discovery',file=sys.stderr)
+                return 1
+        if not args.apply and not args.preview:
+            print('Convert settings from '+str(args.legacy_config_dir)+' to '+str(args.output_dir)+'.')
+            print('Original files stay unchanged. No database or administrator password is imported.')
+            if input('Continue? [y/N]: ').strip().lower() not in ('y','yes'):return 0
+            args.apply=True
         result=migrate(args.legacy_config_dir,args.output_dir,args.database,apply=args.apply,overrides=overrides,
             expected_fingerprint=args.expected_fingerprint,uid=args.uid,gid=args.gid)
-        print(json.dumps(result,sort_keys=True));return 0
+        print(json.dumps(result,sort_keys=True))
+        if result.get('changed'):
+            print('Converted settings saved in '+str(args.output_dir)+'. Originals remain in '+str(args.legacy_config_dir)+'.')
+        return 0
     except (OSError,ValueError,TypeError,RuntimeError):
         print('SETTINGS_IMPORT_FAILED: Review source types, paths and destination; no legacy files were changed.',file=sys.stderr);return 1
 

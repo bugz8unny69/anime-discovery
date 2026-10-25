@@ -1,15 +1,15 @@
 # One-time settings conversion
 
-This script copies compatible legacy settings and provider credentials into a separate private configuration directory. It leaves the originals unchanged and never imports the operational database or administrator password. Set the administrator password through ADM after installation.
-
-Preview (does not change files):
+Run from your checkout:
 
 ```sh
-python3 fixes/migrate_legacy_settings.py --legacy-config-dir /etc/anime-discovery --output-dir /etc/anime-discovery-converted --database /var/lib/anime-discovery/anime-discovery.sqlite
+sudo python3 fixes/migrate_legacy_settings.py
 ```
 
-Review the mapped and unsupported field names, then repeat with `--apply`. Use `--uid SERVICE_UID --gid SERVICE_GID` for the anime-discovery service account, so the service can read and update the private files. If the account does not yet exist, create the dedicated system account first. Output files have mode 0600 and the directory has mode 0700.
+The script reads `/etc/anime-discovery`, asks for confirmation, and writes converted settings to `/etc/anime-discovery-converted`. Your original files stay unchanged. It uses the existing `anime-discovery` service account for ownership; that account must exist first.
 
-Keep the original directory as a backup. Once conversion succeeds and the old service is stopped, move the original directory aside and move the converted directory to `/etc/anime-discovery`, then run the installer. Do not run the converter with the same source and destination. The converter never moves directories or stops services itself.
+No database is read or imported. The new database location is set automatically. The old administrator password is not imported; set the new password through ADM after installation.
 
-Use `--settings-file` with a native settings object to explicitly override incompatible values. A repeat with identical source inputs preserves subsequent edits to the converted configuration. Changed inputs require a new output directory.
+After successful conversion, stop the old service, keep the original configuration directory as a backup, and put the converted directory at `/etc/anime-discovery` before running the installer.
+
+Optional: `--preview` prints the summary without writing, and `--apply` writes without asking. Custom source/destination paths and overrides remain available in `--help`.
