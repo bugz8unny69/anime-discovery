@@ -22,7 +22,7 @@ from src.nextgen.diagnostics import configure_logging, event, log_history
 from src.nextgen.history import encode_details
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceError, MaintenancePending, MaintenanceBusy
 from src.nextgen.messages import MessageCatalog
-from src.nextgen.dashboard.assets import load_assets, CSP as DASHBOARD_CSP
+from src.nextgen.dashboard.assets import load_assets, address_mismatch, CSP as DASHBOARD_CSP
 from src.nextgen.dashboard.presentation import HANDLERS
 from src.nextgen.secrets import SecretStore
 from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
@@ -177,7 +177,26 @@ class Application:
                 key=raw_key.decode('ascii').lower();value=raw_value.decode('latin-1')
                 if key in headers or any(ord(c)<32 or ord(c)==127 for c in value):raise ApiError(400,'API_REQUEST_INVALID')
                 headers[key]=value
-            if headers.get('host','').lower() not in self.authorities:raise ApiError(400,'API_ORIGIN_INVALID')
+            if headers.get('host','').lower() not in self.authorities:
+                # A browser navigation must not render an internal API JSON
+                # error. Keep Host validation for all API and asset requests.
+                path=scope.get('path','')
+                if (scope['method']=='GET' and path in ('/','/jobs','/settings','/recognized')
+                        and not scope.get('query_string',b'')
+                        and not any(k in headers for k in ('authorization','cookie'))):
+                    content=address_mismatch(self.origin)
+                    await send({'type':'http.response.start','status':421,'headers':[
+                        (b'content-type',b'text/html; charset=utf-8'),
+                        (b'content-length',str(len(content)).encode()),
+                        (b'cache-control',b'no-store'),
+                        (b'x-content-type-options',b'nosniff'),
+                        (b'referrer-policy',b'no-referrer'),
+                        (b'content-security-policy',b"default-src 'none'; style-src 'none'; "
+                         b"frame-ancestors 'none'; base-uri 'none'; form-action 'none'"),
+                        (b'x-request-id',request_id.encode())]})
+                    await send({'type':'http.response.body','body':content})
+                    return
+                raise ApiError(400,'API_ORIGIN_INVALID')
             if 'content-encoding' in headers:raise ApiError(415,'API_MEDIA_TYPE_INVALID')
             if headers.get('transfer-encoding') not in (None,'chunked') or 'transfer-encoding' in headers and 'content-length' in headers:raise ApiError(400,'API_REQUEST_INVALID')
             length=headers.get('content-length')
