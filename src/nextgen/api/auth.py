@@ -78,8 +78,14 @@ def check_origin(headers,origin,*,required=False):
         try:
             parsed=urlsplit(found)
             normalized=public_origin(found)
-            expected_host=parsed.netloc.lower()
-            if normalized!=found or expected_host!=host.lower():
+            # A browser may spell out a scheme's default port. Normalize
+            # both authorities before comparison while retaining the strict
+            # actual Host check (never trust X-Forwarded-Host).
+            host_parts=urlsplit(parsed.scheme+'://'+host)
+            if (host_parts.hostname is None or
+                    host_parts.hostname.lower()!=parsed.hostname.lower() or
+                    (host_parts.port or (443 if parsed.scheme=='https' else 80)) !=
+                    (parsed.port or (443 if parsed.scheme=='https' else 80))):
                 raise ValueError()
         except (ValueError,ApiError):
             raise ApiError(403,'API_ORIGIN_INVALID') from None
