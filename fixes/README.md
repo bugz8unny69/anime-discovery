@@ -1,15 +1,13 @@
-# One-time settings conversion
+# One-time settings fix
 
-Run from your checkout:
+Stop the old service, then run:
 
 ```sh
 sudo python3 fixes/migrate_legacy_settings.py
 ```
 
-The script reads `/etc/anime-discovery`, asks for confirmation, and writes converted settings to `/etc/anime-discovery-converted`. Your original files stay unchanged. It uses the existing `anime-discovery` service account for ownership; that account must exist first.
+It backs up the original settings and credentials under a private `.settings-backup-*` directory inside `/etc/anime-discovery`, then converts those two files in place. Compatible values and file ownership are retained. A repeat run validates the converted configuration and does nothing. Interrupted writes are recovered from the backup on the next run.
 
-No database is read or imported. The new database location is set automatically. The old administrator password is not imported; set the new password through ADM after installation.
+No database is read or changed. The new application database location is recorded automatically. The old administrator password remains in the backup; use ADM to set the new password. Unsupported settings are reported by name and remain in the backup.
 
-After successful conversion, stop the old service, keep the original configuration directory as a backup, and put the converted directory at `/etc/anime-discovery` before running the installer.
-
-Optional: `--preview` prints the summary without writing, and `--apply` writes without asking. Custom source/destination paths and overrides remain available in `--help`.
+Run the installer normally afterward. No manual directory moves are needed. `--config-dir` is available only for installations using another location.

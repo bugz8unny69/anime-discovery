@@ -85,3 +85,28 @@ class LegacySettingsImportTests(unittest.TestCase):
         with self.assertRaises(OSError):converter.migrate(self.old,self.output,self.database,apply=True)
 
 
+
+class InPlaceTests(LegacySettingsImportTests):
+    def test_in_place_backup_and_repeat(self):
+        original=(self.old/'settings.json').read_bytes()
+        result=converter.fix_in_place(self.old)
+        self.assertTrue(result['changed'])
+        self.assertEqual((Path(result['backup'])/'settings.json').read_bytes(),original)
+        self.assertEqual(ConfigurationStore(self.old).read().value('worker.concurrency'),2)
+        self.assertEqual(SecretStore(self.old).tvdb_credentials().api_key,'private-tvdb')
+        before=(self.old/'settings.json').read_bytes()
+        self.assertFalse(converter.fix_in_place(self.old)['changed'])
+        self.assertEqual((self.old/'settings.json').read_bytes(),before)
+
+    def test_interrupted_conversion_recovers(self):
+        from unittest.mock import patch
+        real=converter.replace_private
+        calls=[]
+        def interrupted(path,*args):
+            calls.append(path)
+            if len(calls)==2:raise OSError('simulated interruption')
+            return real(path,*args)
+        with patch.object(converter,'replace_private',side_effect=interrupted):
+            with self.assertRaises(OSError):converter.fix_in_place(self.old)
+        self.assertTrue(converter.fix_in_place(self.old)['changed'])
+        self.assertEqual(SecretStore(self.old).tvdb_credentials().api_key,'private-tvdb')

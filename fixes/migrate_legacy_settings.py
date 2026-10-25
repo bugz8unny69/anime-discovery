@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """One-time, explicit legacy-settings import. Never reads an operational database."""
 import argparse
+import fcntl
+import uuid
 import hashlib
 import json
 import os
@@ -136,40 +138,79 @@ def migrate(source,output,database,*,apply=False,overrides=None,expected_fingerp
     return {**report,'already_imported':False,'changed':True}
 
 
+def fix_in_place(directory, *, uid=None, gid=None):
+    directory=Path(directory)
+    if directory.is_symlink():raise ValueError('Configuration directory must not be a symlink.')
+    uid=directory.stat().st_uid if uid is None else uid
+    gid=directory.stat().st_gid if gid is None else gid
+    lock=os.open(directory/'.settings-conversion.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+    try:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        pending=directory/'.settings-conversion-pending.json'
+        if pending.exists():
+            _,journal=read_object(pending)
+            backup=directory/journal['backup']
+            if backup.parent!=directory or not backup.name.startswith('.settings-backup-'):
+                raise ValueError('Invalid recovery backup.')
+            for name in ('settings.json','secrets.json'):
+                raw,_=read_object(backup/name)
+                replace_private(directory/name,raw,uid,gid)
+            pending.unlink()
+        _,settings=read_object(directory/'settings.json')
+        if 'schema_version' in settings:
+            from src.nextgen.configuration import ConfigurationStore
+            from src.nextgen.secrets import SecretStore
+            ConfigurationStore(directory).read()
+            SecretStore(directory).status()
+            return {'changed':False,'message':'Settings are already converted.'}
+        snapshot,values,report=plan(directory,Path('/var/lib/anime-discovery/anime-discovery.sqlite'))
+        backup=directory/('.settings-backup-'+uuid.uuid4().hex)
+        backup.mkdir(mode=0o700)
+        for name in ('settings.json','secrets.json'):
+            raw,_=read_object(directory/name)
+            write_private(backup/name,raw,os.geteuid(),os.getegid())
+        write_private(pending,json.dumps({'backup':backup.name}).encode(),os.geteuid(),os.getegid())
+        sync_directory(directory)
+        try:
+            replace_private(directory/'settings.json',encode(snapshot),uid,gid)
+            replace_private(directory/'secrets.json',json.dumps({'schema_version':7,'revision':1,'credentials':values}).encode(),uid,gid)
+            sync_directory(directory)
+            pending.unlink()
+            sync_directory(directory)
+        except BaseException:
+            # Leave the journal for deterministic recovery on the next run.
+            raise
+        return {'changed':True,'backup':str(backup),'warnings':report['warnings'],
+                'retained_legacy_settings':report['retained_legacy_settings'],
+                'retained_legacy_credentials':report['retained_legacy_credentials']}
+    finally:os.close(lock)
+
+
+def sync_directory(directory):
+    fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+
+
+def replace_private(path,raw,uid,gid):
+    temporary=path.with_name('.convert-'+uuid.uuid4().hex)
+    try:
+        write_private(temporary,raw,uid,gid)
+        os.replace(temporary,path)
+    finally:temporary.unlink(missing_ok=True)
+
+
 def main(argv=None):
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--legacy-config-dir',type=Path,default=Path('/etc/anime-discovery'))
-    parser.add_argument('--output-dir',type=Path,default=Path('/etc/anime-discovery-converted'))
-    parser.add_argument('--database',type=Path,default=Path('/var/lib/anime-discovery/anime-discovery.sqlite'),help=argparse.SUPPRESS)
-    parser.add_argument('--settings-file',type=Path,help='Explicit Anime Discovery overrides for incompatible settings.')
-    parser.add_argument('--apply',action='store_true',help='Write without asking for confirmation')
-    parser.add_argument('--preview',action='store_true',help='Show the conversion summary without writing')
-    parser.add_argument('--expected-fingerprint')
-    parser.add_argument('--uid',type=int);parser.add_argument('--gid',type=int)
+    parser=argparse.ArgumentParser(description='One-time in-place settings compatibility fix. Stop the old service before running.')
+    parser.add_argument('--config-dir',type=Path,default=Path('/etc/anime-discovery'))
     args=parser.parse_args(argv)
     try:
-        if (args.uid is None)!=(args.gid is None) or any(n is not None and n<0 for n in (args.uid,args.gid)):raise ValueError('Provide both nonnegative owner IDs.')
-        overrides=None if args.settings_file is None else read_object(args.settings_file)[1]
-        if args.uid is None and os.geteuid()==0:
-            try:
-                account=pwd.getpwnam('anime-discovery')
-                args.uid,args.gid=account.pw_uid,account.pw_gid
-            except KeyError:
-                print('Create the anime-discovery service account first: useradd --system --user-group --home-dir /var/lib/anime-discovery --shell /usr/sbin/nologin anime-discovery',file=sys.stderr)
-                return 1
-        if not args.apply and not args.preview:
-            print('Convert settings from '+str(args.legacy_config_dir)+' to '+str(args.output_dir)+'.')
-            print('Original files stay unchanged. No database or administrator password is imported.')
-            if input('Continue? [y/N]: ').strip().lower() not in ('y','yes'):return 0
-            args.apply=True
-        result=migrate(args.legacy_config_dir,args.output_dir,args.database,apply=args.apply,overrides=overrides,
-            expected_fingerprint=args.expected_fingerprint,uid=args.uid,gid=args.gid)
+        result=fix_in_place(args.config_dir)
         print(json.dumps(result,sort_keys=True))
-        if result.get('changed'):
-            print('Converted settings saved in '+str(args.output_dir)+'. Originals remain in '+str(args.legacy_config_dir)+'.')
         return 0
     except (OSError,ValueError,TypeError,RuntimeError):
-        print('SETTINGS_IMPORT_FAILED: Review source types, paths and destination; no legacy files were changed.',file=sys.stderr);return 1
+        print('SETTINGS_FIX_FAILED: Conversion could not complete. Original files are retained in any .settings-backup-* directory; rerun to recover an interrupted conversion. Stop the old service before retrying.',file=sys.stderr)
+        return 1
 
 
 if __name__=='__main__':raise SystemExit(main())
