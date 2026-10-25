@@ -336,6 +336,31 @@ function renderCredentials() {
       input.autocomplete = 'new-password'; input.required = true; input.maxLength = 4096;
       wrapper.appendChild(input); form.appendChild(wrapper);
     }
+    // Reveal is explicit; never prefill editable fields or expose values on page load.
+    const reveal = node('button', 'Show saved credentials', 'secondary');
+    reveal.type = 'button';
+    const savedValues = node('div', null, 'credential-reveal'); savedValues.hidden = true;
+    reveal.addEventListener('click', async () => {
+      if (!savedValues.hidden) {
+        savedValues.replaceChildren(); savedValues.hidden = true;
+        reveal.textContent = 'Show saved credentials'; return;
+      }
+      reveal.disabled = true;
+      try {
+        const values = await request(`${API}/credentials/${service}/reveal`, {method: 'POST', body: {}});
+        savedValues.replaceChildren();
+        for (const [name, value] of Object.entries(values)) {
+          const line = node('label', null, 'setting-field');
+          line.appendChild(node('span', name.replaceAll('_', ' ')));
+          const field = node('input'); field.type = 'text'; field.readOnly = true;
+          field.value = value; field.autocomplete = 'off';
+          line.appendChild(field); savedValues.appendChild(line);
+        }
+        savedValues.hidden = false; reveal.textContent = 'Hide saved credentials';
+      } catch (error) { displayError(error); }
+      finally { reveal.disabled = false; }
+    });
+    form.appendChild(reveal); form.appendChild(savedValues);
     const save = node('button', 'Replace credentials'); save.type = 'submit'; form.appendChild(save);
     const result = node('p', '', 'form-status'); result.setAttribute('role', 'status'); form.appendChild(result);
     form.addEventListener('input', () => { state.dirty = true; });
@@ -348,6 +373,8 @@ function renderCredentials() {
         for (const [name] of fields) payload[name] = form.elements.namedItem(name).value;
         const saved = await request(`${API}/credentials/${service}`, {method: 'PATCH', body: payload});
         state.credentials = saved.status; form.reset();
+        savedValues.replaceChildren(); savedValues.hidden = true;
+        reveal.textContent = 'Show saved credentials';
         status.textContent = saved.status[presence] ? 'Credentials saved' : 'Not configured';
         result.textContent = saved.durability_confirmed ? COPY['dashboard.credentials_saved'] : COPY['dashboard.saved_unconfirmed'];
         state.dirty = [...document.querySelectorAll('[data-kind]')].some(input => input.value !== input.dataset.original) ||
