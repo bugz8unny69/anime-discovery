@@ -59,6 +59,33 @@ class IdentifyAnimeJobTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(worker.close)
         return worker
 
+    async def test_s02_review_persists_matching_reason_without_guessing_anidb_identity(self):
+        from src.nextgen.providers.identity import make_resolver
+        from src.nextgen.providers.http import Credentials, Options
+        name = "[Dyna] Higurashi When They Cry S02 - 01 [Dual Audio]"
+        _, job = self.enqueue(raw_body=json.dumps({"release_name": name}).encode())
+        def no_provider(*args, **kwargs):
+            self.fail("Unverified Season 2 must not be guessed from Season 1 providers")
+        resolver = make_resolver(Options("registeredclient", 1),
+                                 lambda: Credentials("private-tvdb-test-key"),
+                                 client_factory=no_provider)
+        worker = self.worker(registration(resolver))
+        self.assertTrue(await worker.attempt())
+        self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE job_id=?",(job,)),
+                         [("NEEDS_REVIEW","IDENTITY_INCOMPLETE")])
+        record = self.rows("SELECT details_json FROM job_history WHERE job_id=? AND event_code='NEEDS_REVIEW'",(job,))
+        self.assertEqual(len(record),1)
+        details = json.loads(record[0][0])
+        self.assertEqual(details["attempt"],1)
+        trace = details["matching"]
+        self.assertEqual(trace["season"],2)
+        self.assertIsNone(trace["selected_anidb_id"])
+        self.assertIsNone(trace["selected_tvdb_id"])
+        self.assertIn({"step":"season_scope","status":"failed","note":"unverified_sequel"},trace["checks"])
+        self.assertFalse(trace["anidb_candidates"])
+        self.assertNotIn("private-tvdb-test-key",record[0][0])
+        self.assertNotIn("webhook_token",record[0][0])
+
     async def test_series_only_identity_and_release_handoff_commit_together(self):
         event,job = self.enqueue()
         requests = []
