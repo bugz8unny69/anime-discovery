@@ -250,7 +250,7 @@ def apply(options,args,execute=run):
                 with os.fdopen(fd,'r') as stream:
                     if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):raise ValueError('Expected a private key file.')
                     access[key]=stream.read(4097).strip()
-        if not args.yes and not(config/'secrets.json').exists():
+        if not (args.yes or args.upgrade) and not(config/'secrets.json').exists():
             import getpass
             for key,label in [('webhook_token','Webhook key')]:
                 if key not in access:access[key]=getpass.getpass(label+' (blank generates a new key): ')
