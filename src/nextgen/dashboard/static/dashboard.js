@@ -20,7 +20,6 @@ const COPY = Object.freeze({
   'dashboard.credentials_saved': 'Credentials saved.',
   'dashboard.invalid_value': 'Check the setting value before saving.',
   'dashboard.no_history': 'No history has been recorded yet.',
-  'dashboard.not_staged': 'Staging is unfinished. A completed job does not mean the anime is ready to watch.',
   'dashboard.staged': 'Staged for viewing. Choose Keep when it is available.',
   'dashboard.scope': 'Intake shows each acquisition separately. Several releases may belong to the same anime.',
   'dashboard.page_filter': 'The status filter applies to this page.',
@@ -159,8 +158,6 @@ function renderJobs() {
     if (job.reason) {
       details.appendChild(node('p', job.reason.message));
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
-    } else if (!job.is_management_action && job.state === 'DONE' && job.cancellation.state === 'ACTIVE') {
-      details.appendChild(node('p', COPY['dashboard.not_staged']));
     } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
     const activeAction = ['cleanup', 'keep', 'reject'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
