@@ -197,7 +197,7 @@ function renderJobs() {
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
     }
-    if (job.kind === 'IDENTIFY_ANIME') {
+    if (job.event_id && !job.is_management_action) {
       const matching = node('button', 'Matching details', 'secondary');
       matching.type = 'button';
       matching.addEventListener('click', () => openMatching(job.job_id));
