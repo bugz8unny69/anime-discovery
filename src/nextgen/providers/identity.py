@@ -58,59 +58,151 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
         raise ValueError("provider composition is incomplete")
     pool = client_pool or ClientPool(client_factory)
 
-    def identify(request,configuration,cancelled):
-        if cancelled.is_set(): raise IdentityNotReady()
-        actual_options = options(configuration) if callable(options) else options
-        if type(actual_options) is not Options: raise ValueError("provider options required")
-        secret = credentials()  # Capture once before contacting either provider.
-        if type(secret) is not Credentials:
-            from src.nextgen.providers.errors import ProviderAuthenticationFailed
-            raise ProviderAuthenticationFailed()
-        title = title_extractor(request)
-        if type(title) is not str or len(title)>2048: raise IdentityNotReady()
-        # Reuse only an exact season-scoped mapping backed by earlier verified
-        # AniDB and TVDB episode evidence. This skips series-level HTTP work,
-        # but never authorizes the new release or its episode.
-        seasons = re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])",title)
-        if len({int(value) for value in seasons}) > 1: raise IdentityNotReady()
-        database = configuration.value("storage.database_path")
-        if seasons:
-            with closing(_open(database,readonly=True,timeout_ms=5000)) as known_db:
-                if known_db.execute("PRAGMA user_version").fetchone()[0] == LATEST_VERSION:
-                    known = recognized_for_release(known_db,title,season=int(seasons[0]))
-                    if known is not None:
-                        return {"schema_version":2,"anime":{
-                            "anidb_id":known["anidb_id"],
-                            "tvdb_series_id":known["tvdb_series_id"],
-                            "title":known["title"]},"episodes":[],"attributes":{}}
-        # An unfamiliar sequel is not silently mapped to the first AniDB work.
-        if any(int(value)>1 for value in seasons): raise IdentityNotReady()
-        aliases,_ = release_title(title)
-        if not aliases: raise IdentityNotReady()
-        database = configuration.value("storage.database_path")
-        client = pool.get(database,actual_options)
-        candidates = client.title_candidates(aliases)  # AniDB always comes first.
-        if len(candidates)!=1: raise IdentityNotReady()
-        aid = next(iter(candidates))
-        if cancelled.is_set(): raise IdentityNotReady()
-        anime = client.anime(aid)  # Independent ID-specific AniDB HTTP evidence.
-        if not {norm(x) for x in anime["titles"]} & {norm(x) for x in candidates[aid]}:
-            raise IdentityConflict()
-        tid = client.mapping(aid)  # Explicit Anime-Lists relation, never guessed.
-        if cancelled.is_set(): raise IdentityNotReady()
-        tvdb = client.series(tid,secret)
-        if tvdb["live"]: raise IdentityConflict()
-        if not tvdb["animation"]: raise IdentityNotReady()
-        if tvdb["anidb_ids"] and aid not in tvdb["anidb_ids"]: raise IdentityConflict()
-        if not {norm(x) for x in anime["titles"]} & {norm(x) for x in tvdb["titles"]}:
-            raise IdentityConflict()
-        if cancelled.is_set(): raise IdentityNotReady()
-        return {"schema_version":2,"anime":{"anidb_id":aid,"tvdb_series_id":tid,"title":anime["title"]},
-                "episodes":[],"attributes":{}}
+    def identify(request, configuration, cancelled, matching=None):
+        # One trace per attempted job. Never use trace content to authorize identity.
+        stage = "release_title"
 
-    async def resolve(request,configuration,cancelled):
-        # Own blocking network/parsing through completion; cancellation retains
-        # the job's maintenance admission until the thread has finished.
-        return await blocking(identify,request,configuration,cancelled)
+        def check(step, status, note=None):
+            if matching is not None:
+                matching.check(step, status, note)
+
+        def incomplete(note):
+            check(stage, "failed", note)
+            raise IdentityNotReady()
+
+        try:
+            if cancelled.is_set():
+                incomplete("canceled")
+            actual_options = options(configuration) if callable(options) else options
+            if type(actual_options) is not Options:
+                raise ValueError("provider options required")
+            secret = credentials()
+            if type(secret) is not Credentials:
+                from src.nextgen.providers.errors import ProviderAuthenticationFailed
+                raise ProviderAuthenticationFailed()
+            title = title_extractor(request)
+            if type(title) is not str or len(title) > 2048:
+                incomplete("invalid_release_title")
+            seasons = re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])", title)
+            aliases, episode = release_title(title)
+            if matching is not None:
+                matching.queries(aliases, episode, int(seasons[0]) if len(seasons) == 1 else None)
+            if len({int(value) for value in seasons}) > 1:
+                stage = "season_scope"
+                incomplete("multiple_seasons")
+            if not aliases:
+                incomplete("no_title_aliases")
+            check("release_title", "passed")
+
+            # First reuse existing season-scoped *verified* observations only.
+            database = configuration.value("storage.database_path")
+            stage = "recognized_season"
+            if seasons:
+                with closing(_open(database, readonly=True, timeout_ms=5000)) as known_db:
+                    if known_db.execute("PRAGMA user_version").fetchone()[0] == LATEST_VERSION:
+                        known = recognized_for_release(known_db, title, season=int(seasons[0]))
+                        if known is not None:
+                            if matching is not None:
+                                matching.anidb(known["anidb_id"])
+                                matching.tvdb(known["tvdb_series_id"], (known["title"],))
+                            check(stage, "passed", "recognized_season_reused")
+                            check("identity_verified", "passed", "verified")
+                            return {"schema_version": 2, "anime": {
+                                "anidb_id": known["anidb_id"],
+                                "tvdb_series_id": known["tvdb_series_id"],
+                                "title": known["title"]}, "episodes": [], "attributes": {}}
+                check(stage, "failed", "not_previously_recognized")
+            else:
+                check(stage, "skipped")
+
+            # An unfamiliar sequel must not be assigned the first AniDB work.
+            # Later season-aware evidence can add trusted discovery here.
+            stage = "season_scope"
+            if any(int(value) > 1 for value in seasons):
+                incomplete("unverified_sequel")
+            check(stage, "passed" if seasons else "skipped")
+
+            stage = "anidb_candidates"
+            client = pool.get(database, actual_options)
+            candidates = client.title_candidates(aliases)
+            if matching is not None:
+                matching.candidates(candidates)
+            if len(candidates) != 1:
+                incomplete("no_unique_anidb_candidate")
+            check(stage, "passed")
+            aid = next(iter(candidates))
+            if matching is not None:
+                matching.anidb(aid)
+
+            if cancelled.is_set():
+                incomplete("canceled")
+            stage = "anidb_record"
+            anime = client.anime(aid)
+            if not {norm(x) for x in anime["titles"]} & {norm(x) for x in candidates[aid]}:
+                check(stage, "failed", "anidb_titles_disagree")
+                raise IdentityConflict()
+            check(stage, "passed")
+
+            stage = "anime_lists"
+            tid = client.mapping(aid)
+            if matching is not None:
+                matching.tvdb(tid, ())
+            check(stage, "passed")
+            if cancelled.is_set():
+                incomplete("canceled")
+
+            stage = "tvdb_series"
+            tvdb = client.series(tid, secret)
+            if matching is not None:
+                matching.tvdb(tid, tvdb["titles"])
+            check(stage, "passed")
+            if tvdb["live"]:
+                check("tvdb_animation", "failed", "tvdb_live_action")
+                raise IdentityConflict()
+            if not tvdb["animation"]:
+                stage = "tvdb_animation"
+                incomplete("tvdb_not_animation")
+            check("tvdb_animation", "passed")
+
+            stage = "provider_link"
+            if tvdb["anidb_ids"] and aid not in tvdb["anidb_ids"]:
+                check(stage, "failed", "tvdb_anidb_conflict")
+                raise IdentityConflict()
+            check(stage, "passed")
+            stage = "provider_titles"
+            if not {norm(x) for x in anime["titles"]} & {norm(x) for x in tvdb["titles"]}:
+                check(stage, "failed", "provider_titles_disagree")
+                raise IdentityConflict()
+            check(stage, "passed")
+            if cancelled.is_set():
+                incomplete("canceled")
+            check("identity_verified", "passed", "verified")
+            return {"schema_version": 2, "anime": {
+                "anidb_id": aid, "tvdb_series_id": tid, "title": anime["title"]},
+                "episodes": [], "attributes": {}}
+        except ProviderDeferred:
+            check(stage, "waiting", "upstream_deferred")
+            raise
+        except ProviderUnavailable:
+            check(stage, "waiting", "upstream_unavailable")
+            raise
+        except ProviderInvalidResponse:
+            check(stage, "failed", "invalid_provider_response")
+            raise
+        except IdentityNotReady:
+            if matching is not None and not any(
+                    check["step"] == stage and check["status"] == "failed"
+                    for check in matching.data["checks"]):
+                check(stage, "failed", "missing_verification")
+            raise
+        except IdentityConflict:
+            if matching is not None and not any(
+                    check["step"] == stage and check["status"] == "failed"
+                    for check in matching.data["checks"]):
+                check(stage, "failed", "identity_conflict")
+            raise
+
+    async def resolve(request, configuration, cancelled, *, matching=None):
+        return await blocking(identify, request, configuration, cancelled, matching)
 
     return resolve
