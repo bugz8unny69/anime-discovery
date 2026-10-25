@@ -403,6 +403,14 @@ class Application:
             if path==PREFIX+'/credentials' and method=='GET':
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 return 200,asdict(self.secrets.status()),[]
+            reveal_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|sonarr|jellyfin|shoko|qbittorrent|access)/reveal',path)
+            if reveal_match:
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
+                exact(body,())
+                # POST requires an authenticated session, same-origin and CSRF above.
+                # Values are never logged or included in a general settings read.
+                return 200,self.secrets.reveal_integration(reveal_match[1]),[]
             secret_match=re.fullmatch(PREFIX+r'/credentials/(tvdb|sonarr|jellyfin|shoko|qbittorrent|access)',path)
             if secret_match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
