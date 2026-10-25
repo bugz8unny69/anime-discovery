@@ -7,7 +7,7 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NextGen local administrator recovery")
+    parser = argparse.ArgumentParser(description="Anime Discovery local administration")
     parser.add_argument("command", choices=("set-password",))
     parser.add_argument("--socket", default="/run/anime-discovery/admin.sock")
     parser.add_argument("--password-stdin", action="store_true", help="Read a password from standard input for automation")

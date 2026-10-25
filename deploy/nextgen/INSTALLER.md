@@ -37,7 +37,7 @@ Fresh installations start only the API. The API and worker are separate Type=not
 Set the administrator password locally after API startup:
 
 ```sh
-sudo -u anime-discovery /opt/anime-discovery/current/.venv/bin/python -m src.nextgen.api.adm set-password
+sudo adm set-password
 ```
 
 The API itself serves the restricted `/run/anime-discovery/admin.sock`. ADM uses that socket; no management bearer token or separate admin daemon is created. For unattended first-time setup, supply a protected `--admin-password-file` with `--start api` or `--start all`. The installer passes it through stdin to ADM with `--if-unset`, so upgrades preserve an existing password. The separate optional `--webhook-key-file` seeds only an absent webhook key. Credentials are never printed or placed in command arguments.
@@ -56,3 +56,5 @@ If setup or activation fails, Anime Discovery remains stopped and `installation.
 No live installation has been performed by the implementation tests. Follow `src/nextgen/SERVICE_SETUP.md` for host validation: password setup/login, verified webhook intake appearing in Recognized Names, worker crash isolation, API recovery followed by worker restart, mount access, and provider connectivity.
 
 The installer prints a readable completion summary and service instructions by default. Use `--json --yes` for automation; progress messages go to stderr and the JSON result goes to stdout. `--plan --json` provides a machine-readable preview.
+
+The executable `bin/adm` is also usable directly from the checkout. The installer installs its launcher beside the installer command (by default `/usr/local/bin/adm`), pointing at the current release. Run it as root or the service account; the API must be running.

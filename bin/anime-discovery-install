@@ -179,7 +179,7 @@ def apply(options,args,execute=run):
             revision=execute(['git','-C',str(release),'rev-parse','FETCH_HEAD']).stdout.strip()
             execute(['git','-C',str(release),'checkout','--detach',revision])
         if not re.fullmatch('[a-f0-9]{40,64}',revision):raise ValueError('Source did not resolve to an exact revision.')
-        for required in ('src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install'):
+        for required in ('src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install','bin/adm'):
             if not (release/required).is_file():raise ValueError('Selected source does not contain the Anime Discovery installer.')
         execute([options['python'],'-m','venv',str(release/'.venv')])
         execute([str(release/'.venv/bin/python'),'-m','pip','install','--disable-pip-version-check','-r',str(release/'requirements-nextgen-api.txt')])
@@ -235,6 +235,9 @@ def apply(options,args,execute=run):
                 'src.nextgen.api.adm','set-password','--if-unset','--password-stdin'],cwd=release,input=password)
         destination=Path(options['destination']);destination.parent.mkdir(parents=True,exist_ok=True)
         atomic_file(destination,(release/'bin/anime-discovery-install').read_bytes(),0o755)
+        adm_command=destination.parent/'adm'
+        launcher='#!/bin/sh\nexec '+shlex.quote(str(root/'current/.venv/bin/python'))+' '+shlex.quote(str(root/'current/bin/adm'))+' "$@"\n'
+        atomic_file(adm_command,launcher.encode(),0o755)
         saved={k:options[k] for k in (*DEFAULTS,'origin')}
         atomic_file(Path(str(destination)+'.json'),(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
         result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
@@ -287,7 +290,7 @@ def main(argv=None):
             if SERVICES[0] not in started:
                 print('Start the API: systemctl start anime-discovery-api.service')
             print('Set or reset the dashboard password:')
-            print('  '+shlex.join(['sudo','-u',options['user'],str(Path(options['root'])/'current/.venv/bin/python'),'-m','src.nextgen.api.adm','set-password']))
+            print('  '+shlex.join(['sudo',str(Path(options['destination']).parent/'adm'),'set-password']))
             if options.get('origin'):print('Dashboard: '+options['origin'])
             if SERVICES[1] not in started:
                 print('Configure providers in the dashboard before starting the worker.')

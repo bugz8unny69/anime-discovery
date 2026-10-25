@@ -157,7 +157,7 @@ class InstallerOrchestrationTests(unittest.TestCase):
             self.options=installer.resolve(self.args)
 
     def candidate(self,source,release,revision,execute):
-        for name in ['src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install']:
+        for name in ['src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install','bin/adm']:
             path=release/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# test candidate')
         return 'a'*40
 
@@ -188,6 +188,10 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertTrue((self.root/'current').is_symlink());self.assertTrue(self.command.is_file())
         self.assertEqual(self.command.stat().st_mode&0o777,0o755)
         self.assertTrue(Path(str(self.command)+'.json').is_file())
+        adm=self.command.parent/'adm'
+        self.assertEqual(adm.stat().st_mode&0o777,0o755)
+        self.assertIn(str(self.root/'current/bin/adm'),adm.read_text())
+        self.assertIn('"$@"',adm.read_text())
         self.assertFalse(any(event[:2]==['systemctl','stop'] for event in self.events))
         self.assertIn(['native','prepare'],self.events);self.assertIn(['native','render'],self.events)
         self.assertFalse(any('apt-get' in event for event in self.events))
