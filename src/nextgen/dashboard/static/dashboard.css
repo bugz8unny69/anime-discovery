@@ -76,3 +76,15 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .job-note{display:block;margin-top:8px}.history-entry{padding:14px 0;border-bottom:1px solid #34465c}
 .integration button{align-self:flex-start}.form-status{white-space:pre-wrap}button.danger{background:#713646}
 @media(max-width:650px){.setting-field{grid-template-columns:1fr}.setting-field small{grid-column:1}}
+
+/* Inline integration credentials: a single input with an embedded eye button. */
+.credential-input{position:relative;min-width:0;width:100%}
+.credential-input input{width:100%;padding-right:56px}
+.credential-input .credential-eye{
+  position:absolute;top:0;right:0;height:100%;width:48px;padding:0;
+  border-radius:0 8px 8px 0;display:flex;align-items:center;justify-content:center;
+  background:#354a69;border-left:1px solid #55708f;color:#e8edf7
+}
+.credential-input .credential-eye:hover{background:#445f86}
+.credential-input .credential-eye:focus-visible{outline:2px solid #87c8ff;outline-offset:2px}
+.credential-input .credential-eye svg{pointer-events:none}
