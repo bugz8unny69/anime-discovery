@@ -269,8 +269,11 @@ def apply(options,args,execute=run):
         atomic_file(adm_command,launcher.encode(),0o755)
         saved={k:options[k] for k in (*DEFAULTS,'origin')}
         atomic_file(root/'installer.json',(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
-        # Older versions used an adjacent launcher JSON. Keep any existing
-        # legacy metadata untouched; the destination copy is authoritative.
+        # A nondefault installation needs a tiny root locator because the
+        # standalone command itself lives outside that application directory.
+        # Never store mutable installation settings in the launcher directory.
+        if root!=Path(DEFAULTS['root']):
+            atomic_file(Path(str(destination)+'.json'),(json.dumps({'root':str(root)},sort_keys=True)+'\n').encode(),0o600)
         result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
             'configuration_preserved':True,'started_services':selected,
             'credentials_file':str(config/'secrets.json'),'command':str(destination)}
