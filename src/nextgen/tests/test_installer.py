@@ -137,6 +137,32 @@ class InstallerSupportTests(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(installer.main([]),0);apply.assert_not_called();self.assertEqual(ask.call_count,5)
 
+    def test_upgrade_uses_saved_installation_without_interactive_prompts(self):
+        self.config.joinpath('settings.json').write_text(json.dumps({
+            'schema_version':10, 'settings':{'storage':{'database_path':str(self.database)}}}))
+        saved={'root':str(self.root/'app'), 'config_dir':str(self.config),
+               'state_dir':str(self.root/'state'), 'unit_dir':str(self.root/'units'),
+               'ref':'NextGen', 'origin':'https://anime.example.test'}
+        with patch.object(installer,'saved_defaults',return_value=saved), \\
+             patch.object(installer,'apply',return_value={'installed':True}) as apply, \\
+             patch('builtins.input',side_effect=AssertionError('upgrade must not prompt')), \\
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(installer.main(['--upgrade']),0)
+        self.assertEqual(apply.call_count,1)
+        options, args = apply.call_args.args
+        self.assertEqual(options['config_dir'],str(self.config))
+        self.assertEqual(options['origin'],'https://anime.example.test')
+        self.assertEqual(options['ref'],'NextGen')
+        self.assertEqual(options['database'],str(self.database))
+        self.assertTrue(args.upgrade)
+
+    def test_upgrade_without_existing_native_config_fails_closed(self):
+        with patch.object(installer,'saved_defaults',return_value={'config_dir':str(self.config)}), \\
+             patch.object(installer,'apply',side_effect=AssertionError('must not install')), \\
+             patch('builtins.input',side_effect=AssertionError('must not prompt')), \\
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(installer.main(['--upgrade']),1)
+
     def test_shell_metacharacters_and_invalid_revision_are_refused(self):
         for argv in [['--plan','--root','/opt/$(touch bad)'],['--plan','--revision','HEAD'],['--plan','--source','https://token@example.com/repo.git']]:
             with patch.object(installer,'saved_defaults',return_value={}),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(argv),1)
