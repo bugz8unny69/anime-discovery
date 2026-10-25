@@ -139,7 +139,7 @@ class InstallerSupportTests(unittest.TestCase):
                'state_dir':str(self.root/'state'), 'unit_dir':str(self.root/'units'),
                'ref':'NextGen', 'origin':'https://anime.example.test'}
         with patch.object(installer,'saved_defaults',return_value=saved), \
-             patch.object(installer,'apply',return_value={'installed':True}) as apply, \
+             patch.object(installer,'apply',return_value={'installed':True,'revision':'a'*40,'started_services':['anime-discovery-api.service'],'remaining_stopped_services':['anime-discovery-worker.service']}) as apply, \
              patch('builtins.input',side_effect=AssertionError('upgrade must not prompt')), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(installer.main(['--upgrade']),0)
@@ -150,6 +150,31 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertEqual(options['ref'],'NextGen')
         self.assertEqual(options['database'],str(self.database))
         self.assertTrue(args.upgrade)
+
+    def test_completion_messages_are_specific_to_install_and_upgrade(self):
+        self.config.joinpath('settings.json').write_text(json.dumps({
+            'schema_version':10,'settings':{'storage':{'database_path':str(self.database)}}}))
+        defaults={'root':str(self.root/'app'),'config_dir':str(self.config)}
+        report={'revision':'b'*40,'started_services':['anime-discovery-api.service'],
+                'remaining_stopped_services':['anime-discovery-worker.service']}
+        for flags in (['--upgrade'],['--yes']):
+            output=io.StringIO()
+            with patch.object(installer,'saved_defaults',return_value=defaults), \
+                 patch.object(installer,'apply',return_value=report), \
+                 patch('builtins.input',side_effect=AssertionError('unexpected prompt')), \
+                 contextlib.redirect_stdout(output):
+                self.assertEqual(installer.main(flags),0)
+            self.assertNotIn('Configure providers',output.getvalue())
+            if '--upgrade' in flags:
+                self.assertIn('upgraded successfully',output.getvalue())
+                self.assertIn('Revision:',output.getvalue())
+                self.assertIn('Restarted services: anime-discovery-api.service',output.getvalue())
+                self.assertIn('Remained stopped: anime-discovery-worker.service',output.getvalue())
+                self.assertNotIn('set-password',output.getvalue())
+                self.assertNotIn('Future upgrades:',output.getvalue())
+            else:
+                self.assertIn('installation completed successfully',output.getvalue())
+                self.assertIn('Started services: anime-discovery-api.service',output.getvalue())
 
     def test_upgrade_refuses_changes_to_saved_installation(self):
         self.config.joinpath('settings.json').write_text(json.dumps({
@@ -255,6 +280,41 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertFalse(any(event[:2]==['systemctl','stop'] for event in self.events))
         self.assertIn(['native','prepare'],self.events);self.assertIn(['native','render'],self.events)
         self.assertFalse(any('apt-get' in event for event in self.events))
+
+    def test_upgrade_restarts_only_services_active_before_upgrade(self):
+        self.args.upgrade=True
+        for initial in (['anime-discovery-api.service','anime-discovery-worker.service'],
+                        ['anime-discovery-api.service'],[]):
+            with self.subTest(initial=initial):
+                self.events.clear()
+                def execute(args,**kwargs):
+                    args=[str(x) for x in args]
+                    if args[:3]==['systemctl','is-active','--quiet']:
+                        # Initial sampling occurs before any stop/start commands.
+                        started=any(e[:2]==['systemctl','start'] for e in self.events)
+                        active=args[3] in (initial if not started else initial)
+                        self.events.append(args)
+                        return subprocess.CompletedProcess(args,0 if active else 3,'','')
+                    return self.execute(args,**kwargs)
+                with self.patches():result=installer.apply(self.options,self.args,execute)
+                self.assertEqual(result['started_services'],initial)
+                self.assertEqual(result['remaining_stopped_services'],
+                    [s for s in installer.SERVICES if s not in initial])
+                start=[event for event in self.events if event[:2]==['systemctl','start']]
+                self.assertEqual(start,[['systemctl','start',*initial]] if initial else [])
+
+    def test_upgrade_reports_failed_service_restart(self):
+        self.args.upgrade=True
+        def execute(args,**kwargs):
+            args=[str(x) for x in args]
+            if args[:3]==['systemctl','is-active','--quiet']:
+                started=any(e[:2]==['systemctl','start'] for e in self.events)
+                self.events.append(args)
+                return subprocess.CompletedProcess(args,3 if started else 0,'','')
+            return self.execute(args,**kwargs)
+        with self.patches(),self.assertRaisesRegex(RuntimeError,
+                'Service did not return to active state after upgrade: anime-discovery-api.service'):
+            installer.apply(self.options,self.args,execute)
 
     def test_automated_password_is_sent_through_adm_stdin_only(self):
         password=self.folder/'password'
