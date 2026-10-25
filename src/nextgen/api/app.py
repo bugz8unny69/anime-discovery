@@ -328,15 +328,23 @@ class Application:
                 if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
                 with JobQueue(configuration.value('storage.database_path')).connection() as db:
                     db.execute('BEGIN')
-                    row=db.execute('SELECT kind,state,attempt_count,last_reason_code FROM jobs WHERE job_id=?',(job,)).fetchone()
-                    if row is None or row[0]!='IDENTIFY_ANIME':raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    row=db.execute('SELECT kind,state,attempt_count,last_reason_code,event_id FROM jobs WHERE job_id=?',(job,)).fetchone()
+                    if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    identity_job=job
+                    if row[0]!='IDENTIFY_ANIME':
+                        if row[4] is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                        source=db.execute("SELECT job_id,kind,state,attempt_count,last_reason_code,event_id FROM jobs "
+                            "WHERE event_id=? AND kind='IDENTIFY_ANIME' ORDER BY job_id LIMIT 1",(row[4],)).fetchone()
+                        if source is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                        identity_job=source[0]
+                        row=source[1:]
                     evidence=None
                     # Review a bounded set of durable, fenced lifecycle outcomes.
                     # Older jobs legitimately have no trace and must not be guessed.
                     records=db.execute(
                         "SELECT details_json FROM job_history WHERE job_id=? AND "
                         "event_code IN ('NEEDS_REVIEW','DONE','RETRY_SCHEDULED','DEFERRED','ON_HOLD','BLOCKED') "
-                        "ORDER BY history_id DESC LIMIT 64",(job,)).fetchall()
+                        "ORDER BY history_id DESC LIMIT 64",(identity_job,)).fetchall()
                     for record in records:
                         try:
                             details=json.loads(record[0] or '{}')
@@ -346,7 +354,7 @@ class Application:
                             break
                         except (ValueError,TypeError,KeyError,OverflowError):
                             continue
-                return 200,{'job_id':job,'available':evidence is not None,
+                return 200,{'job_id':identity_job,'requested_job_id':job,'available':evidence is not None,
                     'attempts':row[2],'state':row[1],
                     'reason':None if row[3] is None else CATALOG.reason(row[3]),
                     'evidence':evidence},[]
