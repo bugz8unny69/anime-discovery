@@ -257,7 +257,10 @@ def apply(options,args,execute=run):
         payload={**options,'settings':settings,'access':access}
         service_call(release,options,'prepare',payload,execute)
         units=service_call(release,options,'render',options,execute)
-        selected=(list(SERVICES) if args.start=='all' else [SERVICES[0]] if args.start=='api' else [] if args.start=='none' else active if previous or had_config or active else [SERVICES[0]])
+        # Preserve the pre-upgrade runtime state. Never start a worker that was
+        # intentionally stopped; start API before worker when both were active.
+        selected=(list(SERVICES) if args.start=='all' else [SERVICES[0]] if args.start=='api' else [] if args.start=='none'
+            else active if args.upgrade else active if previous or had_config or active else [SERVICES[0]])
         if SERVICES[1] in selected:service_call(release,options,'check-worker',{},execute)
         unit_dir=Path(options['unit_dir']);unit_dir.mkdir(parents=True,exist_ok=True)
         backup=root/'unit-backups'/release.name;backup.mkdir(parents=True,mode=0o700)
@@ -271,7 +274,12 @@ def apply(options,args,execute=run):
         if args.enable and selected:execute(['systemctl','enable',*selected])
         if selected:
             execute(['systemctl','start',*selected])
-            for name in selected:execute(['systemctl','is-active','--quiet',name])
+            for name in selected:
+                status=execute(['systemctl','is-active','--quiet',name],check=False)
+                if status.returncode:
+                    raise RuntimeError('Service did not return to active state after '
+                        + ('upgrade' if args.upgrade else 'installation') + ': '+name
+                        +' (systemctl is-active status '+str(status.returncode)+')')
         if args.admin_password_file:
             if SERVICES[0] not in selected:raise ValueError('Password provisioning requires --start api or all.')
             # ADM is the sole password bootstrap path; never write the password store directly.
@@ -295,6 +303,8 @@ def apply(options,args,execute=run):
             atomic_file(Path(str(destination)+'.json'),(json.dumps({'root':str(root)},sort_keys=True)+'\n').encode(),0o600)
         result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
             'configuration_preserved':True,'started_services':selected,
+            'previously_running_services':active,
+            'remaining_stopped_services':[name for name in SERVICES if name not in selected],
             'credentials_file':str(config/'secrets.json'),'command':str(destination)}
         atomic_file(root/'installation.json',(json.dumps(result,sort_keys=True)+'\n').encode(),0o600)
         (root/'installation.pending.json').unlink()
@@ -320,22 +330,32 @@ def main(argv=None):
         if args.json:
             print(json.dumps(result,sort_keys=True))
         else:
-            print('\nAnime Discovery installation completed successfully.')
-            print('Configuration: '+options['config_dir'])
-            print('Existing settings and credentials were preserved.')
             started=result.get('started_services',[])
-            if started:
-                print('Started services: '+', '.join(started))
+            if args.upgrade:
+                print('\nAnime Discovery upgraded successfully.')
+                print('Revision: '+result['revision'])
+                if started:
+                    print('Restarted services: '+', '.join(started))
+                else:
+                    print('Restarted services: none (no services were running before upgrade).')
+                remaining=result.get('remaining_stopped_services',[])
+                if remaining:
+                    print('Remained stopped: '+', '.join(remaining))
+                print('Configuration and credentials preserved.')
             else:
-                print('No services were started.')
-            if SERVICES[0] not in started:
-                print('Start the API: systemctl start anime-discovery-api.service')
-            print('Set or reset the dashboard password:')
-            print('  '+shlex.join(['sudo',str(Path(options['destination']).parent/'adm'),'set-password']))
-            if options.get('origin'):print('Dashboard: '+options['origin'])
-            if SERVICES[1] not in started:
-                print('Configure providers in the dashboard before starting the worker.')
-            print('Future upgrades: '+shlex.join([options['destination'],'--upgrade']))
+                print('\nAnime Discovery installation completed successfully.')
+                print('Configuration: '+options['config_dir'])
+                print('Existing settings and credentials were preserved.')
+                if started:
+                    print('Started services: '+', '.join(started))
+                else:
+                    print('No services were started.')
+                if SERVICES[0] not in started:
+                    print('Start the API: systemctl start anime-discovery-api.service')
+                print('Set or reset the dashboard password:')
+                print('  '+shlex.join(['sudo',str(Path(options['destination']).parent/'adm'),'set-password']))
+                if options.get('origin'):print('Dashboard: '+options['origin'])
+                print('Future upgrades: '+shlex.join([options['destination'],'--upgrade']))
         return 0
     except (OSError,ValueError,RuntimeError,KeyError) as exc:
         print(f'Upgrade failed: {type(exc).__name__}: {exc}' if args.upgrade
