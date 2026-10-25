@@ -9,10 +9,11 @@ import json
 from src.nextgen.handlers import EMPTY_HANDLERS, HANDLER_EVENTS, HandlerCatalog, HandlerDefinition, invocation_id as validate_invocation_id
 from src.nextgen.messages import validate_event, validate_job_activity
 from src.nextgen.reasons import safe_details
+from src.nextgen.matching import validated as validate_matching
 from src.nextgen.settings import COMPONENTS
 
 MAX_INTEGER = (1 << 63) - 1
-MAX_DETAILS_BYTES = 4096
+MAX_DETAILS_BYTES = 4096  # The previous bound still applies to non-matching events.
 
 
 def integer(value, *, positive=False):
@@ -33,12 +34,18 @@ def encode_details(details=None):
     if type(details) is not dict:
         raise ValueError("invalid diagnostic details")
     allowed = {"missing_fields", "invalid_fields", "attempt", "max_attempts",
-               "retry_at_ms", "cause_reason_code"}
+               "retry_at_ms", "cause_reason_code", "matching"}
     if any(type(key) is not str or key not in allowed for key in details):
         raise ValueError("invalid diagnostic detail key")
-    encoded = json.dumps(safe_details(**details), sort_keys=True,
+    safe = safe_details(**{k: v for k, v in details.items() if k != "matching"})
+    if "matching" in details:
+        # Only the tightly validated public matching format may exceed the
+        # ordinary audit bound; never persist arbitrary provider responses.
+        validate_matching(details["matching"])
+        safe["matching"] = details["matching"]
+    encoded = json.dumps(safe, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
-    if len(encoded.encode("utf-8")) > MAX_DETAILS_BYTES:
+    if len(encoded.encode("utf-8")) > (8192 if "matching" in details else MAX_DETAILS_BYTES):
         raise ValueError("diagnostic details too large")
     return encoded
 
