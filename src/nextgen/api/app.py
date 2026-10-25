@@ -182,8 +182,7 @@ class Application:
                 # error. Keep Host validation for all API and asset requests.
                 path=scope.get('path','')
                 if (scope['method']=='GET' and path in ('/','/jobs','/settings','/recognized')
-                        and not scope.get('query_string',b'')
-                        and not any(k in headers for k in ('authorization','cookie'))):
+                        and not scope.get('query_string',b'')):
                     content=address_mismatch(self.origin)
                     await send({'type':'http.response.start','status':421,'headers':[
                         (b'content-type',b'text/html; charset=utf-8'),
