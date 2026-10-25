@@ -165,6 +165,22 @@ class SecretStore:
         number,values,_ = self._current()
         return _status(number,values)
 
+    def reveal_integration(self, kind):
+        """Explicit authenticated dashboard reveal; never includes the admin password."""
+        fields = {
+            'tvdb': ('api_key', 'tvdb_api_key'),
+            'sonarr': ('api_key', 'sonarr_api_key'),
+            'jellyfin': ('api_key', 'jellyfin_api_key'),
+            'shoko': ('api_key', 'shoko_api_key'),
+            'qbittorrent': ('username', 'qbittorrent_username', 'password', 'qbittorrent_password'),
+            'access': ('webhook_token', 'webhook_token'),
+        }
+        if kind not in fields:
+            raise ValueError('Unknown integration')
+        _, values, _ = self._current()
+        names = fields[kind]
+        return {names[i]: values[names[i + 1]] for i in range(0, len(names), 2)}
+
     def tvdb_credentials(self):
         _,values,_ = self._current()
         if not values['tvdb_api_key']:raise ProviderConfigurationError()
