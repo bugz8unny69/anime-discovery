@@ -92,7 +92,9 @@ def resolve(args):
     options={**DEFAULTS,**saved_defaults()}
     for k in (*DEFAULTS,'origin'):
         if getattr(args,k,None) is not None:options[k]=getattr(args,k)
-    interactive=not(args.yes or args.plan)
+    # Upgrades reuse the saved installation configuration. Only a fresh
+    # installation asks the operator to choose paths and a public origin.
+    interactive=not(args.yes or args.plan or args.upgrade)
     if interactive:
         for name,label in [('root','Application folder'),('config_dir','Anime Discovery config folder'),('user','Service account')]:
             if getattr(args,name) is None:options[name]=input(label+' ['+options[name]+']: ').strip() or options[name]
@@ -273,7 +275,7 @@ def main(argv=None):
                 print('Service start policy: '+args.start)
                 print('No changes made.')
             return 0
-        if not args.yes and input('Install/upgrade Anime Discovery with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
+        if not args.yes and not args.upgrade and input('Install Anime Discovery with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
             result=apply(options,args)
         if args.json:
