@@ -7,6 +7,7 @@ from types import MappingProxyType
 from src.nextgen.handlers import HandlerCatalog, HandlerDefinition
 from src.nextgen.messages import validate_job_activity
 from src.nextgen.reasons import get_reason
+from src.nextgen.matching import from_json as matching_from_json
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ class Outcome:
     delay_ms: int | None = None
     activity_code: str | None = None
     value: object = field(default=None, repr=False)
+    matching: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if type(self.kind) is not str or self.kind not in _STATES:
@@ -95,6 +97,8 @@ class Outcome:
             raise ValueError("deferred work requires a delay")
         if self.kind != "complete" and self.value is not None:
             raise ValueError("only completion can publish result facts")
+        if self.matching is not None:
+            matching_from_json(self.matching)
         validate_job_activity(_STATES[self.kind], self.activity_code)
 
 
