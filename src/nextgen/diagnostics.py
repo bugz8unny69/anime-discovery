@@ -69,6 +69,8 @@ class SafeFormatter(logging.Formatter):
     def format(self, record):
         # Another handler may have cached an unsafe full traceback on record.
         safe_record = copy.copy(record)
+        if safe_record.name == "nextgen" or safe_record.name.startswith("nextgen."):
+            safe_record.name = "anime-discovery" + safe_record.name[len("nextgen"): ]
         safe_record.exc_text = None
         if not safe_record.exc_info and record.exc_text:
             safe_record.exc_text = "Exception details omitted."
