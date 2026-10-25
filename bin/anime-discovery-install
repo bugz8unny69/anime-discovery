@@ -60,12 +60,29 @@ def atomic_file(path,content,mode):
         if os.path.exists(name):os.unlink(name)
 
 
-def saved_defaults():
-    path=Path(str(Path(__file__).resolve())+'.json')
-    if not path.exists():return {}
+def _saved_installation_file(path):
     info=path.lstat();parent=path.parent.stat()
-    if path.is_symlink() or info.st_uid!=0 or info.st_mode&0o022 or parent.st_uid!=0 or parent.st_mode&0o022:raise ValueError('Installer defaults must be root-owned and protected.')
+    if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o077:
+        raise ValueError('Installer metadata must be a private root-owned regular file.')
+    if parent.st_uid!=0 or parent.st_mode&0o022:
+        raise ValueError('Installer metadata directory must be root-owned and protected.')
     return {k:v for k,v in private_json(path).items() if k in (*DEFAULTS,'origin')}
+
+
+def saved_defaults():
+    # The installation directory owns the authoritative upgrade metadata.
+    # A pre-existing global launcher may still have its old adjacent JSON;
+    # read that only to locate the installed root during a one-time upgrade.
+    legacy=Path(str(Path(__file__).resolve())+'.json')
+    bootstrap=_saved_installation_file(legacy) if legacy.exists() else {}
+    root=Path(bootstrap.get('root',DEFAULTS['root']))
+    canonical=root/'installer.json'
+    if canonical.exists():
+        return _saved_installation_file(canonical)
+    if bootstrap:
+        return bootstrap
+    # A default-path installation does not need the legacy launcher JSON.
+    return {}
 
 
 def parser():
@@ -88,9 +105,20 @@ def parser():
 
 
 def resolve(args):
-    options={**DEFAULTS,**saved_defaults()}
-    for k in (*DEFAULTS,'origin'):
-        if getattr(args,k,None) is not None:options[k]=getattr(args,k)
+    saved=saved_defaults()
+    options={**DEFAULTS,**saved}
+    if args.upgrade:
+        if not saved:
+            raise ValueError('Upgrade requires existing installer metadata. Run --install first.')
+        for k in (*DEFAULTS,'origin'):
+            requested=getattr(args,k,None)
+            if requested is not None and requested!=options.get(k):
+                raise ValueError('Upgrade cannot change installation settings: '+k)
+        if any((args.database,args.settings_file,args.webhook_key_file,args.admin_password_file,args.install_system_deps)):
+            raise ValueError('Upgrade cannot reconfigure installation or credentials.')
+    else:
+        for k in (*DEFAULTS,'origin'):
+            if getattr(args,k,None) is not None:options[k]=getattr(args,k)
     # Upgrades reuse the saved installation configuration. Only a fresh
     # installation asks the operator to choose paths and a public origin.
     interactive=not(args.yes or args.upgrade)
@@ -240,7 +268,9 @@ def apply(options,args,execute=run):
         launcher='#!/bin/sh\nexec '+shlex.quote(str(root/'current/.venv/bin/python'))+' '+shlex.quote(str(root/'current/bin/adm'))+' "$@"\n'
         atomic_file(adm_command,launcher.encode(),0o755)
         saved={k:options[k] for k in (*DEFAULTS,'origin')}
-        atomic_file(Path(str(destination)+'.json'),(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
+        atomic_file(root/'installer.json',(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
+        # Older versions used an adjacent launcher JSON. Keep any existing
+        # legacy metadata untouched; the destination copy is authoritative.
         result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
             'configuration_preserved':True,'started_services':selected,
             'credentials_file':str(config/'secrets.json'),'command':str(destination)}
