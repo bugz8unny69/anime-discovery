@@ -29,6 +29,26 @@ def delivery_title(request):
     return value
 
 
+
+def explicit_sequel_alias(title, base_aliases):
+    """Extract a distinct pipe-delimited sequel title as a search hint only."""
+    if type(title) is not str or title.count(" | ") != 1 or not base_aliases:
+        return None
+    suffix = title.split(" | ", 1)[1].strip()
+    if not suffix or len(suffix.encode("utf-8")) > 256:
+        return None
+    titles, _ = release_title(suffix)
+    if not titles:
+        return None
+    alias = titles[0]
+    if (not 4 <= len(norm(alias)) <= 160
+            or len(alias.encode("utf-8")) > 160
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in alias)
+            or norm(alias) == norm(base_aliases[0])):
+        return None
+    return alias
+
+
 class ClientPool:
     """Share bounded option-specific clients across identity and release jobs."""
     def __init__(self, factory=Clients):
@@ -116,12 +136,19 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             else:
                 check(stage, "skipped")
 
-            # An unfamiliar sequel must not be assigned the first AniDB work.
-            # Later season-aware evidence can add trusted discovery here.
+            # S02+ is not itself a rejection. Prefer a separately named
+            # sequel work over the generic season-one title for lookup.
             stage = "season_scope"
             if any(int(value) > 1 for value in seasons):
-                incomplete("unverified_sequel")
-            check(stage, "passed" if seasons else "skipped")
+                sequel = explicit_sequel_alias(title, aliases)
+                if sequel is None:
+                    incomplete("unverified_sequel")
+                aliases = [sequel]
+                if matching is not None:
+                    matching.queries(aliases, episode, int(seasons[0]))
+                check(stage, "passed", "sequel_alias_selected")
+            else:
+                check(stage, "passed" if seasons else "skipped")
 
             stage = "anidb_candidates"
             client = pool.get(database, actual_options)
