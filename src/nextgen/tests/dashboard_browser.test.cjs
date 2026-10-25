@@ -18,7 +18,20 @@ class Element {
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
-  querySelectorAll() { return []; }
+  querySelectorAll(selector) {
+    const matches = element => {
+      if (selector === 'form.integration') return element.tagName === 'form' && element.className === 'integration';
+      if (selector === '[data-kind]') return Boolean(element.dataset.kind);
+      if (selector === '[data-secret]') return Boolean(element.dataset.secret);
+      return false;
+    };
+    const result = [];
+    const walk = element => {
+      for (const child of element.children) { if (matches(child)) result.push(child); walk(child); }
+    };
+    walk(this);
+    return result;
+  }
   querySelector() { return new Element('button'); }
   showModal() { this.open = true; }
   close() { this.open = false; this.listeners.close?.(); }
@@ -31,7 +44,9 @@ async function harness() {
   const ctx = vm.createContext({
     document: {
       getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
-      createElement: tag => new Element(tag), querySelectorAll: () => [], addEventListener() {}, hidden: false,
+      createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag),
+      querySelectorAll: selector => elements.get('settings-fields')?.querySelectorAll(selector) || [],
+      addEventListener() {}, hidden: false,
     },
     window: {addEventListener() {}}, location: {pathname: '/'},
     URL, AbortController, DOMException, console, confirm: () => true,
@@ -131,24 +146,73 @@ test('dashboard login sends password, never the webhook or old management token 
 });
 
 
-test('credential editors live in their integration panels, not a separate page section', async () => {
+function descendants(element) {
+  return [element, ...element.children.flatMap(descendants)];
+}
+test('one save button per integration and credential inputs use an embedded eye', async () => {
   const h = await harness();
   const services = ['shoko', 'jellyfin', 'sonarr', 'tvdb', 'qbittorrent', 'access'];
-  h.run(`state.credentials = {
-    revision: 1, shoko_configured: false, jellyfin_configured: true,
-    sonarr_configured: true, tvdb_api_key_configured: false,
-    qbittorrent_configured: true, webhook_configured: false
-  }; renderCredentials();`);
+  h.run("state.credentials = {revision: 1}; renderCredentials();");
   const container = h.elements.get('settings-fields');
   assert.deepEqual(container.children.map(panel => panel.dataset.section), services);
   for (const panel of container.children) {
     assert.equal(panel.tagName, 'details');
-    assert.equal(panel.children[1].tagName, 'form');
+    const forms = panel.children.filter(child => child.tagName === 'form');
+    assert.equal(forms.length, 1);
+    const buttons = descendants(forms[0]).filter(el => el.tagName === 'button');
+    assert.equal(buttons.filter(el => el.type === 'submit').length, 1);
+    assert.equal(forms[0]._saveButton.textContent, 'Save changes');
+    assert.equal(forms[0]._saveButton.disabled, true);
+    assert.equal(buttons.some(el => el.textContent === 'Show saved credentials'), false);
+    assert.equal(buttons.some(el => el.textContent === 'Replace credentials'), false);
   }
   const qb = container.children.find(panel => panel.dataset.section === 'qbittorrent');
-  const qbForm = qb.children[1];
-  assert.ok(qbForm.children.some(child => child.children.some(field => field.name === 'username')));
-  assert.ok(qbForm.children.some(child => child.children.some(field => field.name === 'password')));
+  const inputs = descendants(qb).filter(el => el.dataset.secret);
+  assert.deepEqual(inputs.map(input => input.name), ['username', 'password']);
+  assert.equal(inputs[1].type, 'password');
   const html = fs.readFileSync(path.join(__dirname, '../dashboard/static/index.html'), 'utf8');
   assert.doesNotMatch(html, /id="credential-forms"|<h2>Private credentials<\/h2>/);
+});
+
+test('opening an integration populates masked saved values and editing enables saving', async () => {
+  const h = await harness();
+  h.run('state.credentials = {revision: 1, qbittorrent_configured: true}; renderCredentials();');
+  const panel = h.elements.get('settings-fields').children.find(el => el.dataset.section === 'qbittorrent');
+  const form = panel.children.find(el => el.tagName === 'form');
+  const inputs = descendants(form).filter(el => el.dataset.secret);
+  const toggle = descendants(form).find(el => el.className === 'credential-eye secondary');
+  const requests = [];
+  h.ctx.fetch = async (url, options) => {
+    requests.push({url, options});
+    if (url.endsWith('/reveal')) return response({username: 'alice', password: 'stored-password'});
+    if (url === '/api/v1/credentials/qbittorrent' && options.method === 'PATCH')
+      return response({status: {revision: 2, qbittorrent_configured: true}, durability_confirmed: true});
+    throw Error('unexpected API request ' + url);
+  };
+  assert.equal(requests.length, 0, 'credentials must not load before opening panel');
+  panel.open = true; panel.listeners.toggle();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(inputs.map(input => input.value), ['alice', 'stored-password']);
+  assert.equal(inputs[1].type, 'password');
+  assert.equal(form._saveButton.disabled, true, 'loading values alone is not an edit');
+  assert.equal(requests[0].url, '/api/v1/credentials/qbittorrent/reveal');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(requests[0].options.headers['X-CSRF-Token'], 'session-csrf');
+  toggle.listeners.click();
+  assert.equal(inputs[1].type, 'text');
+  assert.equal(form._saveButton.disabled, true, 'visibility change is not an edit');
+  toggle.listeners.click();
+  assert.equal(inputs[1].type, 'password');
+  inputs[1].value = 'updated-password';
+  form.listeners.input();
+  assert.equal(form._saveButton.disabled, false);
+  await form.listeners.submit({preventDefault() {}});
+  const patch = requests.find(call => call.options.method === 'PATCH');
+  assert.deepEqual(JSON.parse(patch.options.body), {
+    expected_revision: 1, username: 'alice', password: 'updated-password',
+  });
+  assert.equal(form._saveButton.disabled, true);
+  assert.equal(inputs[1].value, 'updated-password');
+  assert.equal(inputs[1].type, 'password');
+  assert.equal(h.run('state.dirty'), false);
 });
