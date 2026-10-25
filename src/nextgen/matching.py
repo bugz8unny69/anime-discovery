@@ -31,6 +31,18 @@ def _label(value):
     return value
 
 
+def _display(value):
+    """Shorten Unicode labels by encoded bytes; do not persist raw responses."""
+    if type(value) is not str or not value:
+        return None
+    value = value.strip()
+    if not value or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        return None
+    while len(value.encode("utf-8")) > 160:
+        value = value[:-1]
+    return value or None
+
+
 def _identifier(value):
     if value is not None and (type(value) is not int or not 1 <= value < 1 << 63):
         raise ValueError("invalid matching evidence identifier")
@@ -101,7 +113,7 @@ class MatchingTrace:
             self.data["checks"].append({"step": step, "status": status, "note": note})
 
     def queries(self, aliases, episode=None, season=None):
-        self.data["queries"] = [x[:100] for x in aliases[:4] if x and x[:100].isprintable()]
+        self.data["queries"] = [display for x in aliases[:4] if (display := _display(x)) is not None]
         self.data["episode"] = episode if type(episode) is int and 1 <= episode <= 9999 else None
         self.data["season"] = season if type(season) is int and 1 <= season <= 9999 else None
 
@@ -110,16 +122,16 @@ class MatchingTrace:
         for aid, titles in list(candidates.items())[:6]:
             if type(aid) is int and 1 <= aid < 1 << 63:
                 items.append({"anidb_id": aid, "titles": [
-                    title[:100] for title in list(titles)[:3]
-                    if type(title) is str and title and title[:100].isprintable()
+                    display for title in list(titles)[:3]
+                    if (display := _display(title)) is not None
                 ]})
         self.data["anidb_candidates"] = items
 
     def tvdb(self, tid, titles):
         self.data["selected_tvdb_id"] = tid
         self.data["tvdb_titles"] = [
-            x[:100] for x in list(titles)[:4]
-            if type(x) is str and x and x[:100].isprintable()
+            display for x in list(titles)[:4]
+            if (display := _display(x)) is not None
         ]
 
     def anidb(self, aid):
