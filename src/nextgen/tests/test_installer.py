@@ -99,14 +99,9 @@ class InstallerSupportTests(unittest.TestCase):
         result=subprocess.run(['systemd-analyze','verify',*paths],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
-    def test_plan_is_read_only_noninteractive_and_honors_existing_database(self):
-        ConfigurationStore(self.config).initialize({'storage':{'database_path':str(self.database)}})
-        output=io.StringIO()
-        with patch.object(installer,'saved_defaults',return_value={}),patch.object(installer,'apply',side_effect=AssertionError()),contextlib.redirect_stdout(output):
-            status=installer.main(['--plan','--json','--config-dir',str(self.config),'--database',str(self.root/'ignored.sqlite')])
-        self.assertEqual(status,0);result=json.loads(output.getvalue())
-        self.assertFalse(result['changes_made']);self.assertEqual(result['database'],str(self.database))
-        self.assertFalse(self.database.exists())
+    def test_installer_has_no_plan_option(self):
+        with self.assertRaises(SystemExit):
+            installer.parser().parse_args(['--plan'])
 
     def test_default_completion_is_readable_and_json_is_opt_in(self):
         result={'installed':True,'started_services':[]}
@@ -143,9 +138,9 @@ class InstallerSupportTests(unittest.TestCase):
         saved={'root':str(self.root/'app'), 'config_dir':str(self.config),
                'state_dir':str(self.root/'state'), 'unit_dir':str(self.root/'units'),
                'ref':'NextGen', 'origin':'https://anime.example.test'}
-        with patch.object(installer,'saved_defaults',return_value=saved), \\
+        with patch.object(installer,'saved_defaults',return_value=saved), \
              patch.object(installer,'apply',return_value={'installed':True}) as apply, \\
-             patch('builtins.input',side_effect=AssertionError('upgrade must not prompt')), \\
+             patch('builtins.input',side_effect=AssertionError('upgrade must not prompt')), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(installer.main(['--upgrade']),0)
         self.assertEqual(apply.call_count,1)
@@ -157,15 +152,16 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertTrue(args.upgrade)
 
     def test_upgrade_without_existing_native_config_fails_closed(self):
-        with patch.object(installer,'saved_defaults',return_value={'config_dir':str(self.config)}), \\
-             patch.object(installer,'apply',side_effect=AssertionError('must not install')), \\
-             patch('builtins.input',side_effect=AssertionError('must not prompt')), \\
+        with patch.object(installer,'saved_defaults',return_value={'config_dir':str(self.config)}), \
+             patch.object(installer,'apply',side_effect=AssertionError('must not install')), \
+             patch('builtins.input',side_effect=AssertionError('must not prompt')), \
              contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(installer.main(['--upgrade']),1)
 
     def test_shell_metacharacters_and_invalid_revision_are_refused(self):
-        for argv in [['--plan','--root','/opt/$(touch bad)'],['--plan','--revision','HEAD'],['--plan','--source','https://token@example.com/repo.git']]:
-            with patch.object(installer,'saved_defaults',return_value={}),contextlib.redirect_stderr(io.StringIO()):self.assertEqual(installer.main(argv),1)
+        for argv in [['--root','/opt/$(touch bad)'],['--revision','HEAD'],['--source','https://token@example.com/repo.git']]:
+            with patch.object(installer,'saved_defaults',return_value={}):
+                with self.assertRaises(ValueError):installer.resolve(installer.parser().parse_args(argv))
 
 
 class InstallerOrchestrationTests(unittest.TestCase):
