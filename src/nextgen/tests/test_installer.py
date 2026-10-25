@@ -167,6 +167,27 @@ class InstallerSupportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'installer metadata'):
                 installer.resolve(installer.parser().parse_args(['--upgrade']))
 
+    def test_upgrade_failure_reports_reason_instead_of_generic_message(self):
+        saved={'root':str(self.root/'app'),'config_dir':str(self.config)}
+        self.config.joinpath('settings.json').write_text(json.dumps({'schema_version':10,'settings':{}}))
+        output=io.StringIO()
+        with patch.object(installer,'saved_defaults',return_value=saved), \
+             patch.object(installer,'apply',side_effect=RuntimeError('git exited with status 128')), \
+             contextlib.redirect_stderr(output):
+            self.assertEqual(installer.main(['--upgrade']),1)
+        self.assertIn('git exited with status 128',output.getvalue())
+        self.assertNotIn('Review prerequisites',output.getvalue())
+
+    def test_upgrade_metadata_lookup_uses_global_installer_even_from_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'app'
+            root.mkdir()
+            meta=root/'installer.json'
+            meta.write_text(json.dumps({'root':str(root),'ref':'NextGen'}))
+            with patch.object(installer,'_saved_installation_file',side_effect=lambda path: json.loads(path.read_text())), \
+                 patch.object(installer,'DEFAULTS',{**installer.DEFAULTS,'root':str(root),'destination':str(Path(temp)/'bin/install')}):
+                self.assertEqual(installer.saved_defaults()['root'],str(root))
+
     def test_upgrade_without_existing_native_config_fails_closed(self):
         with patch.object(installer,'saved_defaults',return_value={'config_dir':str(self.config)}), \
              patch.object(installer,'apply',side_effect=AssertionError('must not install')), \
