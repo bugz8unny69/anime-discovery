@@ -84,7 +84,6 @@ def parser():
     p.add_argument('--enable',action='store_true',help='Enable the selected API/worker services at boot.')
     p.add_argument('--yes',action='store_true',help='Do not ask questions. Never enables optional OS package installation implicitly.')
     p.add_argument('--json',action='store_true',help='Print machine-readable results; use --yes for unattended installation.')
-    p.add_argument('--plan',action='store_true',help='Print the action plan without fetching, creating files or changing services.')
     return p
 
 
@@ -94,7 +93,7 @@ def resolve(args):
         if getattr(args,k,None) is not None:options[k]=getattr(args,k)
     # Upgrades reuse the saved installation configuration. Only a fresh
     # installation asks the operator to choose paths and a public origin.
-    interactive=not(args.yes or args.plan or args.upgrade)
+    interactive=not(args.yes or args.upgrade)
     if interactive:
         for name,label in [('root','Application folder'),('config_dir','Anime Discovery config folder'),('user','Service account')]:
             if getattr(args,name) is None:options[name]=input(label+' ['+options[name]+']: ').strip() or options[name]
@@ -146,7 +145,7 @@ def service_call(release,options,command,payload,execute=run):
 
 
 def apply(options,args,execute=run):
-    if os.geteuid()!=0:raise PermissionError('Run the installer with sudo; --plan does not require root.')
+    if os.geteuid()!=0:raise PermissionError('Run the installer with sudo.')
     if args.install_system_deps:
         if not shutil.which('apt-get'):raise RuntimeError('Automatic OS dependencies support apt-get. Install Python 3.11+, venv, pip, git and ffprobe manually on other systems.')
         execute(['apt-get','update']);execute(['env','DEBIAN_FRONTEND=noninteractive','apt-get','install','-y','git','python3','python3-venv','python3-pip','ffmpeg'])
@@ -263,18 +262,6 @@ def main(argv=None):
     args=parser().parse_args(argv)
     try:
         options=resolve(args)
-        if args.plan:
-            report={'mode':'upgrade' if args.upgrade else 'install-or-upgrade','root':options['root'],
-                'config_dir':options['config_dir'],'database':options['database'],'start':args.start,'existing_settings_preserved':True,'changes_made':False}
-            if args.json:print(json.dumps(report,sort_keys=True))
-            else:
-                print('Anime Discovery installation plan')
-                print('Application: '+options['root'])
-                print('Configuration: '+options['config_dir'])
-                print('Database: '+options['database'])
-                print('Service start policy: '+args.start)
-                print('No changes made.')
-            return 0
         if not args.yes and not args.upgrade and input('Install Anime Discovery with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
             result=apply(options,args)
