@@ -39,6 +39,7 @@ const state = {
   cursor: MAX_CURSOR, previous: [], next: null, loading: null, timer: null,
   settings: null, credentials: null, dirty: false, settingsVersion: 0,
   historyJob: null, historyCursor: 0, historyNext: null, historyVersion: 0,
+  matchingJob: null, matchingVersion: 0,
 };
 function notice(message = '', error = false) {
   $('notice').textContent = message;
@@ -54,11 +55,14 @@ function clearPrivate(message = '') {
   state.previous = []; state.cursor = MAX_CURSOR; state.next = null; state.dirty = false;
   state.settingsVersion += 1;
   state.historyJob = null; state.historyVersion += 1;
+  state.matchingJob = null; state.matchingVersion += 1;
   $('job-rows').replaceChildren(); $('settings-fields').replaceChildren();
   $('history-rows').replaceChildren();
+  $('matching-body').replaceChildren(); $('matching-summary').textContent = '';
   $('recognized-rows').replaceChildren(); $('recognized-note').textContent = '';
   $('access-key').value = '';
   if ($('history-dialog').open) $('history-dialog').close();
+  if ($('matching-dialog').open) $('matching-dialog').close();
   $('workspace').hidden = true; $('sign-out').hidden = true; $('login-panel').hidden = false;
   notice(message);
 }
@@ -193,6 +197,12 @@ function renderJobs() {
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
     }
+    if (job.kind === 'IDENTIFY_ANIME') {
+      const matching = node('button', 'Matching details', 'secondary');
+      matching.type = 'button';
+      matching.addEventListener('click', () => openMatching(job.job_id));
+      actions.appendChild(matching);
+    }
     const history = node('button', 'History', 'secondary');
     history.addEventListener('click', () => openHistory(job.job_id)); actions.appendChild(history);
     tbody.appendChild(tr);
@@ -249,6 +259,113 @@ async function loadHistory() {
   } catch (error) { displayError(error); }
   finally { if (version === state.historyVersion) $('history-more').disabled = false; }
 }
+const MATCHING_STEPS = Object.freeze({
+  release_title: 'Release title parsed',
+  recognized_season: 'Previously verified season',
+  season_scope: 'Release season compatibility',
+  anidb_candidates: 'AniDB exact title candidates',
+  anidb_record: 'AniDB anime record',
+  anime_lists: 'Anime-Lists identity mapping',
+  tvdb_series: 'TVDB series verification',
+  tvdb_animation: 'TVDB animation classification',
+  provider_link: 'AniDB ↔ TVDB cross-reference',
+  provider_titles: 'Provider title agreement',
+  identity_verified: 'Anime identity verified',
+});
+const MATCHING_NOTES = Object.freeze({
+  invalid_release_title: 'The incoming release title could not be parsed.',
+  multiple_seasons: 'The release contains more than one explicit season.',
+  not_previously_recognized: 'No previously verified mapping matches this title and season.',
+  recognized_season_reused: 'Reused an exact, previously verified season mapping.',
+  unverified_sequel: 'This unfamiliar later season cannot safely inherit Season 1’s AniDB identity. Season-specific proof is required.',
+  no_title_aliases: 'No usable anime title could be extracted.',
+  no_unique_anidb_candidate: 'AniDB returned zero or multiple exact title candidates.',
+  anidb_titles_disagree: 'The AniDB record does not corroborate the catalog titles.',
+  no_anime_lists_mapping: 'No unique AniDB ↔ TVDB mapping was verified.',
+  tvdb_live_action: 'TVDB identifies this work as live action.',
+  tvdb_not_animation: 'TVDB did not confirm an animation classification.',
+  tvdb_anidb_conflict: 'The TVDB series identifies a different AniDB work.',
+  provider_titles_disagree: 'The independently fetched provider titles did not agree.',
+  missing_verification: 'Required independent verification evidence was unavailable.',
+  verified: 'Provider-verified identity established.',
+  upstream_deferred: 'The provider call is waiting for a permitted retry.',
+  upstream_unavailable: 'A provider could not be reached; the job may retry.',
+  invalid_provider_response: 'The provider supplied an unusable response.',
+  provider_auth_failed: 'The provider did not authorize this request.',
+  identity_conflict: 'Independent identity facts disagreed.',
+  canceled: 'Processing was canceled before verification completed.',
+});
+function matchingSection(root, title) {
+  const section = node('section', null, 'trace-section');
+  section.appendChild(node('h3', title)); root.appendChild(section);
+  return section;
+}
+function matchingCard(root, label, value) {
+  const card = node('div', null, 'trace-card');
+  card.appendChild(node('span', label, 'trace-label'));
+  card.appendChild(node('strong', value ?? 'Not recorded'));
+  root.appendChild(card);
+}
+async function openMatching(jobId) {
+  const version = ++state.matchingVersion;
+  state.matchingJob = jobId;
+  $('matching-title').textContent = `Job #${jobId} · Matching details`;
+  const summary = $('matching-summary'), body = $('matching-body');
+  body.replaceChildren(); summary.textContent = 'Loading recorded identity evidence…';
+  if (!$('matching-dialog').open) $('matching-dialog').showModal();
+  try {
+    const result = await request(`${API}/jobs/${jobId}/matching`);
+    if (version !== state.matchingVersion || state.matchingJob !== jobId || !state.csrf) return;
+    summary.textContent = `Attempt ${result.attempts} · ${result.state.replaceAll('_',' ').toLowerCase()}`;
+    if (result.reason?.message) summary.textContent += ` · ${result.reason.message}`;
+    if (!result.available || !result.evidence) {
+      body.appendChild(node('p',
+        result.attempts === 0 ? 'Identification has not started yet.' :
+          'No detailed evidence was saved for this attempt. Older jobs cannot be reconstructed retroactively.',
+        'muted'));
+      return;
+    }
+    const ev = result.evidence;
+    const lookup = matchingSection(body, 'Release and lookup');
+    const lookupGrid = node('div', null, 'trace-grid'); lookup.appendChild(lookupGrid);
+    matchingCard(lookupGrid, 'Release season', ev.season == null ? 'Not specified' : `Season ${ev.season}`);
+    matchingCard(lookupGrid, 'Episode candidate', ev.episode == null ? 'Not parsed' : `Episode ${ev.episode}`);
+    matchingCard(lookupGrid, 'AniDB search queries', ev.queries?.length ? ev.queries.join(' · ') : 'Not searched');
+    const checks = matchingSection(body, 'Verification checks');
+    if (!ev.checks?.length) checks.appendChild(node('p', 'No checks were recorded.', 'muted'));
+    for (const check of ev.checks || []) {
+      const line = node('div', null, 'trace-check');
+      const symbols = {passed: '✓', failed: '✕', waiting: '…', skipped: '—'};
+      const css = {passed: 'trace-pass', failed: 'trace-fail', waiting: 'trace-unknown', skipped: 'trace-unknown'};
+      line.appendChild(node('span', symbols[check.status] || '?', 'trace-state ' + (css[check.status] || 'trace-unknown')));
+      const content = node('div');
+      content.appendChild(node('strong', MATCHING_STEPS[check.step] || 'Unknown check'));
+      if (check.note) content.appendChild(node('small', MATCHING_NOTES[check.note] || 'No additional details recorded.', 'muted'));
+      line.appendChild(content); checks.appendChild(line);
+    }
+    const candidates = matchingSection(body, 'AniDB candidates');
+    if (!ev.anidb_candidates?.length)
+      candidates.appendChild(node('p', 'No AniDB candidates recorded. The worker may have stopped before querying AniDB.', 'muted'));
+    for (const candidate of ev.anidb_candidates || []) {
+      const card = node('div', null, 'trace-card');
+      card.appendChild(node('strong', `AniDB #${candidate.anidb_id}`));
+      card.appendChild(node('p', candidate.titles?.length ? candidate.titles.join(' · ') : 'No provider titles recorded', 'muted'));
+      candidates.appendChild(card);
+    }
+    const mapping = matchingSection(body, 'Verified provider identities');
+    const mappingGrid = node('div', null, 'trace-grid'); mapping.appendChild(mappingGrid);
+    matchingCard(mappingGrid, 'Selected AniDB work', ev.selected_anidb_id ? `AniDB #${ev.selected_anidb_id}` : 'Not verified');
+    matchingCard(mappingGrid, 'Selected TVDB series', ev.selected_tvdb_id ? `TVDB #${ev.selected_tvdb_id}` : 'Not verified');
+    matchingCard(mappingGrid, 'TVDB titles', ev.tvdb_titles?.length ? ev.tvdb_titles.join(' · ') : 'Not recorded');
+    mapping.appendChild(node('p', 'Title agreement alone never authorizes an episode download. Exact season and episode mapping is verified separately.', 'muted'));
+  } catch (error) {
+    if (version === state.matchingVersion) {
+      summary.textContent = 'Unable to load matching details.';
+      body.replaceChildren(node('p', error.message || COPY['dashboard.request_failed'], 'muted'));
+    }
+  }
+}
+
 function settingInput(path, definition, value) {
   const label = node('label', null, 'setting-field'); label.appendChild(node('span', definition.label));
   const input = node(definition.type === 'levels' ? 'textarea' : 'input');
@@ -588,6 +705,11 @@ $('previous-page').addEventListener('click', async () => {
   state.cursor = state.previous.pop(); await loadActivity();
 });
 $('history-close').addEventListener('click', () => $('history-dialog').close());
+$('matching-close').addEventListener('click', () => $('matching-dialog').close());
+$('matching-dialog').addEventListener('close', () => {
+  state.matchingJob = null; state.matchingVersion += 1;
+  $('matching-body').replaceChildren();
+});
 $('history-dialog').addEventListener('close', () => { state.historyJob = null; state.historyVersion += 1; });
 $('history-more').addEventListener('click', async () => {
   if (state.historyNext === null) return; state.historyCursor = state.historyNext; await loadHistory();
