@@ -18,6 +18,7 @@ from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
 from src.nextgen.storage.sqlite import IdentityConflict, IdentityNotReady, persist_identity
 from src.nextgen.worker import blocking
+from src.nextgen.matching import MatchingTrace
 
 KIND = "IDENTIFY_ANIME"
 DEFINITION = HandlerDefinition(KIND, "Identify anime series")
@@ -91,6 +92,7 @@ def registration(resolve, *, release_kind=None):
     """
     if not inspect.iscoroutinefunction(resolve):
         raise ValueError("an async identity resolver is required")
+    supports_matching = "matching" in inspect.signature(resolve).parameters
     if release_kind is not None and (type(release_kind) is not str or not release_kind.strip()
                                      or len(release_kind) > 64 or release_kind == KIND):
         raise ValueError("invalid release successor kind")
@@ -99,25 +101,32 @@ def registration(resolve, *, release_kind=None):
         # The delivery is the durable source. Never accept a candidate schema,
         # verified flag, executable name or alternate event ID from payload.
         if context.data() != {} or context.claim.event_id is None:
-            return Outcome("review","JOB_PAYLOAD_INVALID")
+            return Outcome("review", "JOB_PAYLOAD_INVALID")
+        trace = MatchingTrace()
+        def evidence():
+            return trace.dump()
         try:
-            request = await blocking(_request,context.configuration.value("storage.database_path"),
+            request = await blocking(_request, context.configuration.value("storage.database_path"),
                                      context.claim.event_id)
-            candidate = await resolve(request,context.configuration,context.cancelled)
+            if supports_matching:
+                candidate = await resolve(request, context.configuration, context.cancelled, matching=trace)
+            else:
+                candidate = await resolve(request, context.configuration, context.cancelled)
         except ProviderDeferred as exc:
-            return Outcome("defer","JOB_WAITING",delay_ms=exc.delay_ms)
+            return Outcome("defer", "JOB_WAITING", delay_ms=exc.delay_ms, matching=evidence())
         except (ProviderUnavailable, ProviderInvalidResponse) as exc:
-            return Outcome("retry",exc.reason_code)
+            return Outcome("retry", exc.reason_code, matching=evidence())
         except ProviderAuthenticationFailed:
-            return Outcome("review","PROVIDER_AUTH_FAILED")
+            trace.check("tvdb_series", "failed", "provider_auth_failed")
+            return Outcome("review", "PROVIDER_AUTH_FAILED", matching=evidence())
         except (IdentityNotReady, IdentityConflict) as exc:
-            return Outcome("review",exc.reason_code)
+            return Outcome("review", exc.reason_code, matching=evidence())
         try:
             validated = AnimeSeries.from_dict(candidate)
-            result = IdentifiedSeries(request.event_id,payload_json(validated.to_dict()))
+            result = IdentifiedSeries(request.event_id, payload_json(validated.to_dict()))
         except (ValueError, TypeError, RecursionError, OverflowError):
-            return Outcome("review","IDENTITY_INVALID")
-        return Outcome(value=result)
+            return Outcome("review", "IDENTITY_INVALID", matching=evidence())
+        return Outcome(value=result, matching=evidence())
 
     def route(result):
         if type(result) is not IdentifiedSeries:
