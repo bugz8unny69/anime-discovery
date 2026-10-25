@@ -226,7 +226,7 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertTrue((self.root/'current').is_symlink());self.assertTrue(self.command.is_file())
         self.assertEqual(self.command.stat().st_mode&0o777,0o755)
         self.assertTrue((self.root/'installer.json').is_file())
-        self.assertFalse(Path(str(self.command)+'.json').exists())
+        self.assertEqual(json.loads(Path(str(self.command)+'.json').read_text()),{'root':str(self.root)})
         adm=self.command.parent/'adm'
         self.assertEqual(adm.stat().st_mode&0o777,0o755)
         self.assertIn(str(self.root/'current/bin/adm'),adm.read_text())
