@@ -129,3 +129,26 @@ test('dashboard login sends password, never the webhook or old management token 
   assert.equal(h.elements.get('access-key').value, '');
   assert.equal(h.run('state.csrf'), 'new-session-csrf');
 });
+
+
+test('credential editors live in their integration panels, not a separate page section', async () => {
+  const h = await harness();
+  const services = ['shoko', 'jellyfin', 'sonarr', 'tvdb', 'qbittorrent', 'access'];
+  h.run(`state.credentials = {
+    revision: 1, shoko_configured: false, jellyfin_configured: true,
+    sonarr_configured: true, tvdb_api_key_configured: false,
+    qbittorrent_configured: true, webhook_configured: false
+  }; renderCredentials();`);
+  const container = h.elements.get('settings-fields');
+  assert.deepEqual(container.children.map(panel => panel.dataset.section), services);
+  for (const panel of container.children) {
+    assert.equal(panel.tagName, 'details');
+    assert.equal(panel.children[1].tagName, 'form');
+  }
+  const qb = container.children.find(panel => panel.dataset.section === 'qbittorrent');
+  const qbForm = qb.children[1];
+  assert.ok(qbForm.children.some(child => child.children.some(field => field.name === 'username')));
+  assert.ok(qbForm.children.some(child => child.children.some(field => field.name === 'password')));
+  const html = fs.readFileSync(path.join(__dirname, '../dashboard/static/index.html'), 'utf8');
+  assert.doesNotMatch(html, /id="credential-forms"|<h2>Private credentials<\/h2>/);
+});
