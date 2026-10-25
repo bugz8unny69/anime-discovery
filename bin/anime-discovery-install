@@ -33,7 +33,16 @@ SERVICES=('anime-discovery-api.service','anime-discovery-worker.service')
 
 def run(args,*,cwd=None,input=None,check=True):
     result=subprocess.run([str(x) for x in args],cwd=cwd,input=input,text=True,capture_output=True)
-    if check and result.returncode:raise RuntimeError('Command failed: '+Path(str(args[0])).name+'. Output withheld to protect credentials.')
+    if check and result.returncode:
+        command=Path(str(args[0])).name
+        detail=(result.stderr or result.stdout).strip()
+        # Provider output may embed credentials; report the failing operation
+        # and exit status, with diagnostic output only for local safe tools.
+        safe={'systemctl','python3','runuser','useradd','git'}
+        if command not in safe:detail=''
+        if command=='git' and ('@' in detail or 'token' in detail.lower()):detail=''
+        suffix=('; detail: '+detail[:400]) if detail else ''
+        raise RuntimeError(f'{command} exited with status {result.returncode}{suffix}')
     return result
 
 
@@ -70,18 +79,28 @@ def _saved_installation_file(path):
 
 
 def saved_defaults():
-    # The installation directory owns the authoritative upgrade metadata.
-    # A pre-existing global launcher may still have its old adjacent JSON;
-    # read that only to locate the installed root during a one-time upgrade.
-    legacy=Path(str(Path(__file__).resolve())+'.json')
-    bootstrap=_saved_installation_file(legacy) if legacy.exists() else {}
+    # This executable may be run from a checkout or /usr/local/bin. Neither
+    # the working directory nor the launcher location identifies the install.
+    candidates=[
+        Path(str(Path(__file__).resolve())+'.json'),
+        Path(str(Path(DEFAULTS['destination']))+'.json'),
+    ]
+    bootstrap={}
+    for locator in candidates:
+        if locator.exists():
+            bootstrap=_saved_installation_file(locator)
+            break
     root=Path(bootstrap.get('root',DEFAULTS['root']))
     canonical=root/'installer.json'
     if canonical.exists():
         return _saved_installation_file(canonical)
     if bootstrap:
         return bootstrap
-    # A default-path installation does not need the legacy launcher JSON.
+    # Older installs can be found from their native configuration even when
+    # the prior launcher metadata has been lost.
+    existing=Path(DEFAULTS['config_dir'])/'settings.json'
+    if existing.is_file() and (root/'current').is_symlink():
+        return DEFAULTS.copy()
     return {}
 
 
@@ -318,8 +337,10 @@ def main(argv=None):
                 print('Configure providers in the dashboard before starting the worker.')
             print('Future upgrades: '+shlex.join([options['destination'],'--upgrade']))
         return 0
-    except (OSError,ValueError,RuntimeError,KeyError):
-        print('INSTALL_FAILED: Review prerequisites, settings and service state. Existing Anime Discovery configuration values are preserved. A failed candidate is retained; setup failures leave Anime Discovery services stopped.',file=sys.stderr);return 1
+    except (OSError,ValueError,RuntimeError,KeyError) as exc:
+        print(f'Upgrade failed: {type(exc).__name__}: {exc}' if args.upgrade
+              else f'Installation failed: {type(exc).__name__}: {exc}',file=sys.stderr)
+        return 1
 
 
 if __name__=='__main__':raise SystemExit(main())
