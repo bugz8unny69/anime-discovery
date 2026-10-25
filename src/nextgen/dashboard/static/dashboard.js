@@ -272,7 +272,8 @@ async function loadSettings() {
     $('restart-notice').textContent = settings.pending_restart_fields.length ? COPY['dashboard.restart'] : '';
     const panels = $('settings-fields'); panels.replaceChildren();
     for (const section of Object.keys(settings.desired.settings)) {
-      const panel = node('details', null, 'panel'); panel.appendChild(node('summary', section === 'trial' ? 'Intake selection' : section));
+      const panel = node('details', null, 'panel'); panel.dataset.section = section;
+      panel.appendChild(node('summary', section === 'trial' ? 'Intake selection' : section));
       const form = node('form', null, 'integration');
       for (const [path, definition] of Object.entries(settings.fields)) {
         if (!path.startsWith(section + '.')) continue;
@@ -309,7 +310,8 @@ async function loadSettings() {
   } catch (error) { displayError(error); }
 }
 function renderCredentials() {
-  const container = $('credential-forms'); container.replaceChildren();
+  const container = $('settings-fields');
+  const panels = new Map([...container.children].map(panel => [panel.dataset.section, panel]));
   const specs = [
     ['shoko', 'Shoko (optional)', 'shoko_configured', [['api_key', 'API key']]],
     ['jellyfin', 'Jellyfin', 'jellyfin_configured', [['api_key', 'API key']]],
@@ -319,8 +321,14 @@ function renderCredentials() {
     ['access', 'Autobrr webhook', 'webhook_configured', [['webhook_token', 'Webhook token']]],
   ];
   for (const [service, title, presence, fields] of specs) {
+    let panel = panels.get(service);
+    if (!panel) {
+      panel = node('details', null, 'panel'); panel.dataset.section = service;
+      panel.appendChild(node('summary', title)); container.appendChild(panel);
+      panels.set(service, panel);
+    }
     const form = node('form', null, 'integration'); form.autocomplete = 'off';
-    form.appendChild(node('h2', title));
+    form.appendChild(node('h3', `${title} credentials`));
     const status = node('p', state.credentials[presence] ? 'Credentials saved' : 'Not configured', 'muted'); form.appendChild(status);
     for (const [name, label] of fields) {
       const wrapper = node('label', null, 'setting-field'); wrapper.appendChild(node('span', label));
@@ -347,10 +355,8 @@ function renderCredentials() {
       } catch (error) { result.textContent = error.message; }
       finally { save.disabled = false; for (const input of inputs) input.disabled = false; }
     });
-    container.appendChild(form);
+    panel.appendChild(form);
   }
-  container.appendChild(node('p', 'Saved credentials are never revealed. The webhook token cannot administer the dashboard.', 'muted'));
-  container.appendChild(node('p', `Webhook access: ${state.credentials.webhook_configured ? 'configured' : 'not configured'}`, 'muted'));
 }
 async function loadRecognized() {
   const generation = state.generation;
