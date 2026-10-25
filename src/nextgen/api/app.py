@@ -14,7 +14,7 @@ from src.nextgen.systemd_notify import notify, watchdog_interval
 from src.nextgen.api.password_store import PasswordStore, PasswordConflict, PasswordStorageError
 from src.nextgen.api.passwords import verify_password
 from src.nextgen.api.admin_socket import start_admin
-from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, webhook_key)
+from src.nextgen.api.auth import (ApiError, COOKIE, Sessions, bearer, matches, public_origin, check_origin, valid_host, webhook_key)
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError, ConfigurationConflict, ConfigurationSnapshot, for_operation, field_definitions
 from src.nextgen.cancellation import CancellationError
@@ -177,24 +177,7 @@ class Application:
                 key=raw_key.decode('ascii').lower();value=raw_value.decode('latin-1')
                 if key in headers or any(ord(c)<32 or ord(c)==127 for c in value):raise ApiError(400,'API_REQUEST_INVALID')
                 headers[key]=value
-            if headers.get('host','').lower() not in self.authorities:
-                # A browser navigation must not render an internal API JSON
-                # error. Keep Host validation for all API and asset requests.
-                path=scope.get('path','')
-                if (scope['method']=='GET' and path in ('/','/jobs','/settings','/recognized')
-                        and not scope.get('query_string',b'')):
-                    content=address_mismatch(self.origin)
-                    await send({'type':'http.response.start','status':421,'headers':[
-                        (b'content-type',b'text/html; charset=utf-8'),
-                        (b'content-length',str(len(content)).encode()),
-                        (b'cache-control',b'no-store'),
-                        (b'x-content-type-options',b'nosniff'),
-                        (b'referrer-policy',b'no-referrer'),
-                        (b'content-security-policy',b"default-src 'none'; style-src 'none'; "
-                         b"frame-ancestors 'none'; base-uri 'none'; form-action 'none'"),
-                        (b'x-request-id',request_id.encode())]})
-                    await send({'type':'http.response.body','body':content})
-                    return
+            if not valid_host(headers.get('host','')):
                 raise ApiError(400,'API_ORIGIN_INVALID')
             if 'content-encoding' in headers:raise ApiError(415,'API_MEDIA_TYPE_INVALID')
             if headers.get('transfer-encoding') not in (None,'chunked') or 'transfer-encoding' in headers and 'content-length' in headers:raise ApiError(400,'API_REQUEST_INVALID')
@@ -284,7 +267,7 @@ class Application:
             if not verify_password(body['password'],password_digest):raise ApiError(401,'API_AUTH_REQUIRED')
             token,csrf=self.sessions.create(password_digest)
             event(self.logger,logging.INFO,'API_SESSION_CREATED',component='api')
-            return 201,{'csrf_token':csrf,'expires_in':self.sessions.ttl},[(b'set-cookie',self._cookie(token).encode())]
+            return 201,{'csrf_token':csrf,'expires_in':self.sessions.ttl},[(b'set-cookie',self._cookie(token,secure=headers.get('origin','').startswith('https://')).encode())]
         if 'authorization' in headers:
             raise ApiError(401,'API_AUTH_REQUIRED')
         check_origin(headers,self.origin,required=method!='GET')
@@ -296,7 +279,7 @@ class Application:
                 exact(body,())
                 self.sessions.remove(digest)
                 event(self.logger,logging.INFO,'API_SESSION_CLOSED',component='api')
-                return 200,{'signed_out':True},[(b'set-cookie',self._cookie('',clear=True).encode())]
+                return 200,{'signed_out':True},[(b'set-cookie',self._cookie('',clear=True,secure=headers.get('origin','').startswith('https://')).encode())]
             raise ApiError(405,'API_METHOD_INVALID')
         if path==PREFIX+'/auth/password':
             if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
@@ -438,8 +421,8 @@ class Application:
         if path in (PREFIX+'/',PREFIX+'/health',PREFIX+'/credentials',PREFIX+'/jobs') or re.fullmatch(PREFIX+r'/jobs/[1-9][0-9]{0,18}/history',path):raise ApiError(405,'API_METHOD_INVALID')
         raise ApiError(404,'API_ROUTE_NOT_FOUND')
 
-    def _cookie(self,token,*,clear=False):
-        return COOKIE+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+('0' if clear else str(self.sessions.ttl))+('; Secure' if self.origin.startswith('https://') else '')
+    def _cookie(self,token,*,clear=False,secure=False):
+        return COOKIE+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+('0' if clear else str(self.sessions.ttl))+('; Secure' if secure else '')
 
     def _jobs(self,configuration,path,query):
         if set(query)-{'after_id','before_id','limit'} or 'after_id' in query and 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
