@@ -1,9 +1,9 @@
-# NextGen setup and first lab run
+# Anime Discovery setup and first lab run
 
 The source now includes an explicit local setup/maintenance CLI, a composed worker
 entry point and systemd examples under `deploy/nextgen/`. They have not been
 installed or run here. Configuration is v10, secrets support a fresh v7 schema (older schemas readable) and SQLite
-uses v26. Recognized Names saves verified webhook release aliases and exact episode placements automatically in the verification transaction. Multiple AniDB works may share a TVDB season. Shared aliases remain ambiguous and fall through to normal identity resolution. Episode details are scoped to the selected AniDB work. Existing NextGen databases require the explicit maintenance upgrade; v26 preserves v25 recognition evidence. This does not import data from the older application.
+uses v26. Recognized Names saves verified webhook release aliases and exact episode placements automatically in the verification transaction. Multiple AniDB works may share a TVDB season. Shared aliases remain ambiguous and fall through to normal identity resolution. Episode details are scoped to the selected AniDB work. Existing Anime Discovery databases require the explicit maintenance upgrade; v26 preserves v25 recognition evidence. This does not import data from the older application.
 No service starts, schema upgrades or media operations happen on Python import.
 
 For the interactive or unattended installer and native upgrades, see [INSTALLER.md](../../deploy/nextgen/INSTALLER.md).
@@ -24,7 +24,7 @@ Provision these directories, owned/writable by the service account:
 | Path | Purpose |
 | --- | --- |
 | `/var/lib/anime-discovery` | Local SQLite/WAL, lock files and maintenance backups |
-| `/var/lib/anime-discovery/config` | Private settings and credentials; directory mode 0700 |
+| `/etc/anime-discovery` | Private settings and credentials; directory mode 0700 |
 | `/srv/anime-discovery/downloads` | Shared qBittorrent payload root |
 | `/srv/anime-discovery/staging` | Review media and generated NFOs |
 | `/srv/anime-discovery/library` | Permanent media managed by Sonarr |
@@ -49,7 +49,7 @@ settings object, not a versioned settings envelope; never put API keys in it.
 Run from `/opt/anime-discovery` as the service account:
 
 ```sh
-.venv/bin/python -m src.nextgen init --config-dir /var/lib/anime-discovery/config --database /var/lib/anime-discovery/nextgen.sqlite --settings-file /path/to/settings.json
+.venv/bin/python -m src.nextgen init --config-dir /etc/anime-discovery --database /var/lib/anime-discovery/anime-discovery.sqlite --settings-file /path/to/settings.json
 
 ```
 
@@ -95,7 +95,7 @@ Configure settings and private credentials through the dashboard:
 Run local readiness before starting the worker:
 
 ```sh
-.venv/bin/python -m src.nextgen check --config-dir /var/lib/anime-discovery/config --worker
+.venv/bin/python -m src.nextgen check --config-dir /etc/anime-discovery --worker
 ```
 
 This checks local configuration, schema/integrity, credential presence, non-root
@@ -111,17 +111,17 @@ directory/database. Settings marked restart-required need the indicated process
 restart; the units do not invent an IPC reload mechanism. Use journald for both
 units' readable diagnostics; there is no additional log-file rotation setup.
 
-## Upgrading an existing NextGen lab
+## Upgrading an existing Anime Discovery lab
 
 Stop `anime-discovery.target` and both component units, then install the matching
 reviewed source/virtual environment. Do not run old and new versions together.
 Use the explicit configuration preview, then the returned source fingerprint:
 
 ```sh
-.venv/bin/python -m src.nextgen config-preview --config-dir /var/lib/anime-discovery/config
-.venv/bin/python -m src.nextgen config-upgrade --config-dir /var/lib/anime-discovery/config --fingerprint RETURNED_SOURCE_FINGERPRINT --services-stopped
-.venv/bin/python -m src.nextgen database-preview --config-dir /var/lib/anime-discovery/config
-.venv/bin/python -m src.nextgen database-upgrade --config-dir /var/lib/anime-discovery/config --plan-token RETURNED_PLAN_TOKEN --services-stopped
+.venv/bin/python -m src.nextgen config-preview --config-dir /etc/anime-discovery
+.venv/bin/python -m src.nextgen config-upgrade --config-dir /etc/anime-discovery --fingerprint RETURNED_SOURCE_FINGERPRINT --services-stopped
+.venv/bin/python -m src.nextgen database-preview --config-dir /etc/anime-discovery
+.venv/bin/python -m src.nextgen database-upgrade --config-dir /etc/anime-discovery --plan-token RETURNED_PLAN_TOKEN --services-stopped
 ```
 
 The assertions mean both services are stopped and this source is the version you

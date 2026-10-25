@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install/upgrade NextGen. Interactive by default; --yes uses explicit flags/defaults.
+"""Install/upgrade Anime Discovery. Interactive by default; --yes uses explicit flags/defaults.
 
 This standalone launcher needs only Python's standard library. It provisions a
 versioned release, uses native setup commands as the service user, and preserves
@@ -24,7 +24,7 @@ import uuid
 from urllib.parse import urlsplit
 
 DEFAULTS={'root':'/opt/anime-discovery','state_dir':'/var/lib/anime-discovery',
-    'config_dir':'/var/lib/anime-discovery/config','user':'anime-discovery',
+    'config_dir':'/etc/anime-discovery','user':'anime-discovery',
     'source':'git@github.com:bugz8unny69/anime-discovery.git','ref':'NextGen',
     'destination':'/usr/local/bin/anime-discovery-install','unit_dir':'/etc/systemd/system','python':'python3'}
 SERVICES=('anime-discovery-api.service','anime-discovery-worker.service')
@@ -74,7 +74,7 @@ def parser():
     p.add_argument('--public-origin',dest='origin',help='Exact HTTPS dashboard origin, or loopback HTTP. Existing installed origin is retained.')
     p.add_argument('--source-dir',type=Path,help='Use tracked files from an existing local Git checkout instead of fetching.')
     p.add_argument('--revision',help='Exact Git commit to install; defaults to the selected branch head.')
-    p.add_argument('--database',type=Path,help='New NextGen database path; existing configuration always wins.')
+    p.add_argument('--database',type=Path,help='New Anime Discovery database path; existing configuration always wins.')
     p.add_argument('--settings-file',type=Path,help='Initial native settings object.')
     p.add_argument('--webhook-key-file',type=Path)
     p.add_argument('--admin-password-file',type=Path,help='Provision a fresh administrator through ADM after API startup. Existing passwords are preserved.')
@@ -92,7 +92,7 @@ def resolve(args):
         if getattr(args,k,None) is not None:options[k]=getattr(args,k)
     interactive=not(args.yes or args.plan)
     if interactive:
-        for name,label in [('root','Application folder'),('config_dir','NextGen config folder'),('user','Service account')]:
+        for name,label in [('root','Application folder'),('config_dir','Anime Discovery config folder'),('user','Service account')]:
             if getattr(args,name) is None:options[name]=input(label+' ['+options[name]+']: ').strip() or options[name]
     for name in ('root','state_dir','config_dir','destination','unit_dir'):
         value=options[name]
@@ -113,13 +113,13 @@ def resolve(args):
     if interactive and args.origin is None:
         options['origin']=input('Public dashboard origin ['+(options.get('origin') or 'loopback HTTP')+']: ').strip() or options.get('origin')
     options.setdefault('origin',None)
-    options['database']=str(args.database or Path(options['state_dir'])/'nextgen.sqlite')
+    options['database']=str(args.database or Path(options['state_dir'])/'anime-discovery.sqlite')
     existing=Path(options['config_dir'])/'settings.json'
     if existing.exists():
         doc=private_json(existing)
-        if 'schema_version' not in doc:raise ValueError('Choose a separate fresh NextGen configuration directory; legacy conversion is unsupported.')
+        if 'schema_version' not in doc:raise ValueError('Choose a separate fresh Anime Discovery configuration directory; legacy conversion is unsupported.')
         options['database']=doc.get('settings',{}).get('storage',{}).get('database_path',options['database'])
-    if args.upgrade and not existing.exists():raise ValueError('Upgrade needs an existing native NextGen configuration.')
+    if args.upgrade and not existing.exists():raise ValueError('Upgrade needs an existing native Anime Discovery configuration.')
     return options
 
 
@@ -178,7 +178,7 @@ def apply(options,args,execute=run):
             execute(['git','-C',str(release),'checkout','--detach',revision])
         if not re.fullmatch('[a-f0-9]{40,64}',revision):raise ValueError('Source did not resolve to an exact revision.')
         for required in ('src/nextgen/__main__.py','src/nextgen/install_support.py','bin/anime-discovery-install'):
-            if not (release/required).is_file():raise ValueError('Selected source does not contain the NextGen installer.')
+            if not (release/required).is_file():raise ValueError('Selected source does not contain the Anime Discovery installer.')
         execute([options['python'],'-m','venv',str(release/'.venv')])
         execute([str(release/'.venv/bin/python'),'-m','pip','install','--disable-pip-version-check','-r',str(release/'requirements-nextgen-api.txt')])
         # Build first; stop only once the candidate is ready for local setup.
@@ -186,7 +186,7 @@ def apply(options,args,execute=run):
         previous=os.readlink(root/'current') if (root/'current').is_symlink() else None
         had_config=(config/'settings.json').exists()
         atomic_file(root/'installation.pending.json',(json.dumps({'candidate':str(release),'previous_release':previous,'revision':revision},sort_keys=True)+'\n').encode(),0o600)
-        print('Stopping NextGen services for local setup...',flush=True)
+        print('Stopping Anime Discovery services for local setup...',flush=True)
         installed=[name for name in ('anime-discovery.target',*SERVICES)
             if execute(['systemctl','show','--property=LoadState','--value',name],check=False).stdout.strip() not in ('','not-found')]
         setup_started=True
@@ -259,10 +259,10 @@ def main(argv=None):
         if args.plan:
             print(json.dumps({'mode':'upgrade' if args.upgrade else 'install-or-upgrade','root':options['root'],
                 'config_dir':options['config_dir'],'database':options['database'],'start':args.start,'existing_settings_preserved':True,'changes_made':False},sort_keys=True));return 0
-        if not args.yes and input('Install/upgrade NextGen with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
+        if not args.yes and input('Install/upgrade Anime Discovery with these paths? [y/N]: ').strip().lower() not in ('y','yes'):return 0
         print(json.dumps(apply(options,args),sort_keys=True));return 0
     except (OSError,ValueError,RuntimeError,KeyError):
-        print('INSTALL_FAILED: Review prerequisites, settings and service state. Existing NextGen configuration values are preserved. A failed candidate is retained; setup failures leave NextGen services stopped.',file=sys.stderr);return 1
+        print('INSTALL_FAILED: Review prerequisites, settings and service state. Existing Anime Discovery configuration values are preserved. A failed candidate is retained; setup failures leave Anime Discovery services stopped.',file=sys.stderr);return 1
 
 
 if __name__=='__main__':raise SystemExit(main())
