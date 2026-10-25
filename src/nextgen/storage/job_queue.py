@@ -14,6 +14,7 @@ import uuid
 from src.nextgen.cancellation import CancellationRequested
 from src.nextgen.history import HistoryRecord, append_job_history, integer
 from src.nextgen.job_contracts import Outcome, Policy, Successor, payload_json, parse_payload
+from src.nextgen.matching import from_json as matching_from_json
 from src.nextgen.messages import validate_job_activity
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt, transaction
@@ -124,6 +125,10 @@ class JobQueue:
 
     def _transition(self, db, claim, outcome, now):
         details = {"attempt":claim.attempt}
+        if outcome.matching is not None:
+            if claim.kind != "IDENTIFY_ANIME":
+                raise ValueError("matching evidence only belongs to an identity attempt")
+            details["matching"] = matching_from_json(outcome.matching)
         activity = outcome.activity_code
         reason = outcome.reason_code
         if outcome.kind == "complete":
