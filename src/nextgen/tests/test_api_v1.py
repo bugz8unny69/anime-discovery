@@ -47,6 +47,24 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
 
     def release(self,**extra):return {'release_name':'Test Anime - 10','torrent_infohash':'a'*40,**extra}
 
+    async def test_reverse_proxy_hostname_is_not_bound_to_local_api_origin(self):
+        # Simulate HTTPS Nginx forwarding an externally addressed request.
+        host=b'anime.proxy.example'
+        headers=[(b'host',host),(b'origin',b'https://anime.proxy.example'),(b'content-length',b'0')]
+        scope={'headers':headers}
+        status,_,_=await self.request('GET','/',scope_changes=scope)
+        self.assertEqual(status,200)
+        status,_,_=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},
+            scope_changes={'headers':[(b'host',host),(b'origin',b'https://anime.proxy.example'),
+                (b'content-type',b'application/json'),
+                (b'content-length',str(len(json.dumps({'password':ADMIN}).encode())).encode())]})
+        self.assertEqual(status,201)
+        status,_,_=await self.request('POST','/api/v1/auth/session',{'password':ADMIN},
+            scope_changes={'headers':[(b'host',host),(b'origin',b'https://evil.example'),
+                (b'content-type',b'application/json'),
+                (b'content-length',str(len(json.dumps({'password':ADMIN}).encode())).encode())]})
+        self.assertEqual(status,403)
+
     async def test_webhook_body_bearer_and_query_auth_commit_sanitized_intake(self):
         attempts=[('/api/v1/webhook',self.release(token=WEB,source='untrusted-feed',tvdb_id=123),None),
                   ('/api/v1/webhook',self.release(),WEB),('/api/v1/webhook?token='+WEB,self.release(),None)]
