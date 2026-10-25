@@ -103,10 +103,25 @@ class InstallerSupportTests(unittest.TestCase):
         ConfigurationStore(self.config).initialize({'storage':{'database_path':str(self.database)}})
         output=io.StringIO()
         with patch.object(installer,'saved_defaults',return_value={}),patch.object(installer,'apply',side_effect=AssertionError()),contextlib.redirect_stdout(output):
-            status=installer.main(['--plan','--config-dir',str(self.config),'--database',str(self.root/'ignored.sqlite')])
+            status=installer.main(['--plan','--json','--config-dir',str(self.config),'--database',str(self.root/'ignored.sqlite')])
         self.assertEqual(status,0);result=json.loads(output.getvalue())
         self.assertFalse(result['changes_made']);self.assertEqual(result['database'],str(self.database))
         self.assertFalse(self.database.exists())
+
+    def test_default_completion_is_readable_and_json_is_opt_in(self):
+        result={'installed':True,'started_services':[]}
+        defaults={'config_dir':str(self.config),'root':str(self.root/'app')}
+        for flags in (['--yes'],['--yes','--json']):
+            output=io.StringIO()
+            with patch.object(installer,'saved_defaults',return_value=defaults), \
+                 patch.object(installer,'apply',return_value=result),contextlib.redirect_stdout(output):
+                self.assertEqual(installer.main(flags),0)
+            if '--json' in flags:self.assertEqual(json.loads(output.getvalue()),result)
+            else:
+                self.assertIn('installation completed successfully',output.getvalue())
+                self.assertIn('No services were started.',output.getvalue())
+                self.assertIn('systemctl start anime-discovery-api.service',output.getvalue())
+                self.assertNotIn('"installed"',output.getvalue())
 
     def test_yes_never_prompts_and_interactive_mode_asks_before_changes(self):
         defaults={'root':str(self.root/'app'),'config_dir':str(self.root/'native'),

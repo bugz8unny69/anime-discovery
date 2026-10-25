@@ -54,3 +54,5 @@ sudo systemctl enable --now anime-discovery-worker.service
 If setup or activation fails, Anime Discovery remains stopped and `installation.pending.json` identifies the candidate and previous release. Existing units are backed up under `unit-backups`. Do not point old code at a database whose schema has advanced. Correct the cause and rerun; database/source rollback is not automatic.
 
 No live installation has been performed by the implementation tests. Follow `src/nextgen/SERVICE_SETUP.md` for host validation: password setup/login, verified webhook intake appearing in Recognized Names, worker crash isolation, API recovery followed by worker restart, mount access, and provider connectivity.
+
+The installer prints a readable completion summary and service instructions by default. Use `--json --yes` for automation; progress messages go to stderr and the JSON result goes to stdout. `--plan --json` provides a machine-readable preview.
