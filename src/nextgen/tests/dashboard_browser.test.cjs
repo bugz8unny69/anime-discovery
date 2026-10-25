@@ -216,3 +216,61 @@ test('opening an integration populates masked saved values and editing enables s
   assert.equal(inputs[1].type, 'password');
   assert.equal(h.run('state.dirty'), false);
 });
+
+test('Matching details stays separate from History and renders recorded season checks as text', async () => {
+  const h = await harness();
+  const job = target();
+  job.kind = 'IDENTIFY_ANIME';
+  job.event_id = 1;
+  job.state = 'NEEDS_REVIEW';
+  job.reason = {message: 'Anime identification is incomplete.'};
+  h.ctx.fixture = job;
+  h.run('state.jobs = [fixture]; renderJobs();');
+  const tr = h.elements.get('job-rows').children[0];
+  const buttons = descendants(tr).filter(el => el.tagName === 'button');
+  const matching = buttons.find(el => el.textContent === 'Matching details');
+  assert.ok(matching);
+  assert.ok(buttons.some(el => el.textContent === 'History'));
+  const calls = [];
+  h.ctx.fetch = async (url, options) => {
+    calls.push({url, options});
+    return response({
+      job_id: 7, requested_job_id: 7, attempts: 1,
+      state: 'NEEDS_REVIEW', reason: {message: 'Anime identification is incomplete.'},
+      available: true, evidence: {
+        version: 1, season: 2, episode: 1,
+        queries: ['Higurashi When They Cry'],
+        anidb_candidates: [], selected_anidb_id: null, selected_tvdb_id: null,
+        tvdb_titles: [], checks: [
+          {step: 'release_title', status: 'passed', note: null},
+          {step: 'season_scope', status: 'failed', note: 'unverified_sequel'},
+        ],
+      },
+    });
+  };
+  await matching.listeners.click();
+  assert.equal(h.elements.get('matching-dialog').open, true);
+  assert.equal(calls[0].url, '/api/v1/jobs/7/matching');
+  assert.equal(calls[0].options.credentials, 'same-origin');
+  const visible = descendants(h.elements.get('matching-body'))
+    .map(item => item.textContent || '').join(' ');
+  assert.match(visible, /Season 2/);
+  assert.match(visible, /Release season compatibility/);
+  assert.match(visible, /cannot safely inherit Season 1/);
+  assert.match(visible, /No AniDB candidates recorded/);
+  assert.equal(h.elements.get('history-dialog').open, undefined);
+  h.elements.get('matching-dialog').close();
+  assert.equal(h.elements.get('matching-body').children.length, 0);
+});
+
+test('Matching details does not fabricate evidence for older or queued jobs', async () => {
+  const h = await harness();
+  h.ctx.fetch = async () => response({
+    job_id: 11, requested_job_id: 11, attempts: 1,
+    state: 'NEEDS_REVIEW', reason: null, available: false, evidence: null,
+  });
+  await h.run('openMatching(11)');
+  const text = descendants(h.elements.get('matching-body'))
+    .map(item => item.textContent || '').join(' ');
+  assert.match(text, /No detailed evidence was saved/);
+});
