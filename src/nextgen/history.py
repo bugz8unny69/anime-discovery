@@ -43,9 +43,9 @@ def encode_details(details=None):
         # ordinary audit bound; never persist arbitrary provider responses.
         validate_matching(details["matching"])
         safe["matching"] = details["matching"]
-    encoded = json.dumps(safe, sort_keys=True,
+    encoded = json.dumps(safe, sort_keys=True, ensure_ascii="matching" not in details,
                          separators=(",", ":"), allow_nan=False)
-    if len(encoded.encode("utf-8")) > (8192 if "matching" in details else MAX_DETAILS_BYTES):
+    if len(encoded.encode("utf-8")) > (9216 if "matching" in details else MAX_DETAILS_BYTES):
         raise ValueError("diagnostic details too large")
     return encoded
 
