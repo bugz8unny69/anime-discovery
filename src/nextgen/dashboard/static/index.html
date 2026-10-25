@@ -63,6 +63,11 @@
       </form></section>
     </section>
   </div>
+  <dialog id="matching-dialog" class="match-trace" aria-labelledby="matching-title">
+    <div class="toolbar"><h2 id="matching-title">Matching details</h2><button id="matching-close" class="secondary" type="button">Close</button></div>
+    <p id="matching-summary" class="muted" role="status"></p>
+    <div id="matching-body"></div>
+  </dialog>
   <dialog id="history-dialog" class="match-trace" aria-labelledby="history-title">
     <div class="toolbar"><h2 id="history-title">Job history</h2><button id="history-close" class="secondary">Close</button></div>
     <div id="history-rows"></div><button id="history-more" class="secondary" hidden>Load more</button>
