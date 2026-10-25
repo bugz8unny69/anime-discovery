@@ -54,7 +54,7 @@ function clearPrivate(message = '') {
   state.previous = []; state.cursor = MAX_CURSOR; state.next = null; state.dirty = false;
   state.historyJob = null; state.historyVersion += 1;
   $('job-rows').replaceChildren(); $('settings-fields').replaceChildren();
-  $('credential-forms').replaceChildren(); $('history-rows').replaceChildren();
+  $('history-rows').replaceChildren();
   $('recognized-rows').replaceChildren(); $('recognized-note').textContent = '';
   $('access-key').value = '';
   if ($('history-dialog').open) $('history-dialog').close();
