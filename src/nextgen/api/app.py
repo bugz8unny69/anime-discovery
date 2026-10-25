@@ -108,7 +108,7 @@ class Application:
         self.assets=load_assets()
         self.pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='nextgen-api')
         self.slots=asyncio.Semaphore(8)
-        self.logger=configure_logging(self.startup.logging_settings(),'api',logger=logging.Logger('nextgen.api.requests'))
+        self.logger=configure_logging(self.startup.logging_settings(),'api',logger=logging.Logger('api.request'))
         self.closed=False
 
     def close(self):
