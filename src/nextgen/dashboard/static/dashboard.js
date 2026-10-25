@@ -37,7 +37,7 @@ const state = {
   csrf: null, generation: 0, requests: new Set(), jobs: [], pending: new Set(),
   page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : location.pathname === '/recognized' ? 'recognized' : 'intake',
   cursor: MAX_CURSOR, previous: [], next: null, loading: null, timer: null,
-  settings: null, credentials: null, dirty: false,
+  settings: null, credentials: null, dirty: false, settingsVersion: 0,
   historyJob: null, historyCursor: 0, historyNext: null, historyVersion: 0,
 };
 function notice(message = '', error = false) {
@@ -52,6 +52,7 @@ function clearPrivate(message = '') {
   clearTimeout(state.timer);
   state.jobs = []; state.pending.clear(); state.settings = null; state.credentials = null;
   state.previous = []; state.cursor = MAX_CURSOR; state.next = null; state.dirty = false;
+  state.settingsVersion += 1;
   state.historyJob = null; state.historyVersion += 1;
   $('job-rows').replaceChildren(); $('settings-fields').replaceChildren();
   $('history-rows').replaceChildren();
@@ -264,125 +265,212 @@ function settingInput(path, definition, value) {
   label.appendChild(node('small', definition.help + (definition.apply_mode === 'restart' ? ' Requires a restart.' : ''), 'muted'));
   return label;
 }
+// Credentials are loaded when their integration is opened. Until then, no
+// stored API key, token or download-client password is sent to the browser.
+const CREDENTIAL_SPECS = [
+  ['shoko', 'Shoko (optional)', [['api_key', 'API key']]],
+  ['jellyfin', 'Jellyfin', [['api_key', 'API key']]],
+  ['sonarr', 'Sonarr', [['api_key', 'API key']]],
+  ['tvdb', 'TVDB', [['api_key', 'API key']]],
+  ['qbittorrent', 'qBittorrent', [['username', 'Username'], ['password', 'Password']]],
+  ['access', 'Autobrr webhook', [['webhook_token', 'Webhook token']]],
+];
+function settingChanged(input) { return input.value !== input.dataset.original; }
+function credentialChanged(input) { return input.dataset.loaded === 'true' && input.value !== input._original; }
+function refreshDirty() {
+  const forms = [...$('settings-fields').querySelectorAll('form.integration')];
+  state.dirty = forms.some(form => [...form.querySelectorAll('[data-kind]')].some(settingChanged) ||
+    [...form.querySelectorAll('[data-secret]')].some(credentialChanged));
+  for (const form of forms) {
+    if (form._saveButton && !form._saving) {
+      form._saveButton.disabled = ![...form.querySelectorAll('[data-kind]')].some(settingChanged) &&
+        ![...form.querySelectorAll('[data-secret]')].some(credentialChanged);
+    }
+  }
+}
+function credentialEye(button, visible) {
+  button.replaceChildren();
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '20');
+  svg.setAttribute('height', '20');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  const oval = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  oval.setAttribute('d', 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z');
+  const pupil = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  pupil.setAttribute('cx', '12'); pupil.setAttribute('cy', '12'); pupil.setAttribute('r', '3');
+  svg.appendChild(oval); svg.appendChild(pupil);
+  if (visible) {
+    const strike = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    strike.setAttribute('d', 'M3 3l18 18');
+    svg.appendChild(strike);
+  }
+  button.appendChild(svg);
+  button.setAttribute('aria-label', visible ? 'Hide value' : 'Show value');
+  button.setAttribute('title', visible ? 'Hide value' : 'Show value');
+  button.setAttribute('aria-pressed', String(visible));
+}
+function wireSectionForm(form, section) {
+  if (form._saveButton) return;
+  const save = node('button', 'Save changes');
+  save.type = 'submit'; save.disabled = true; form._saveButton = save;
+  const result = node('p', '', 'form-status');
+  result.setAttribute('role', 'status');
+  form.appendChild(save); form.appendChild(result);
+  form.addEventListener('input', () => { result.textContent = ''; refreshDirty(); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (form._saving || save.disabled) return;
+    const settingsInputs = [...form.querySelectorAll('[data-kind]')];
+    const secretInputs = [...form.querySelectorAll('[data-secret]')];
+    const changedSettings = settingsInputs.filter(settingChanged);
+    const changedSecrets = secretInputs.filter(credentialChanged);
+    if (!changedSettings.length && !changedSecrets.length) return;
+    form._saving = true;
+    save.disabled = true;
+    result.textContent = '';
+    for (const input of [...settingsInputs, ...secretInputs]) input.disabled = true;
+    let settingsSaved = false;
+    try {
+      if (changedSettings.length) {
+        const values = {};
+        for (const input of changedSettings) {
+          let value;
+          try {
+            value = input.dataset.kind === 'levels' ? JSON.parse(input.value) :
+              input.dataset.kind === 'integer' ? Number(input.value) : input.value;
+          } catch { throw new Error(COPY['dashboard.invalid_value']); }
+          values[input.name.split('.')[1]] = value;
+        }
+        const saved = await request(API + '/settings', {method: 'PATCH',
+          body: {expected_revision: state.settings.desired.revision, settings: {[section]: values}}});
+        state.settings.desired = saved.configuration;
+        for (const input of changedSettings) input.dataset.original = input.value;
+        settingsSaved = true;
+        result.textContent = !saved.durability_confirmed ? COPY['dashboard.saved_unconfirmed'] :
+          saved.restart_fields.length ? COPY['dashboard.restart'] : COPY['dashboard.settings_saved'];
+      }
+      if (changedSecrets.length) {
+        if (!secretInputs.every(input => input.dataset.loaded === 'true'))
+          throw new Error('Wait for saved credentials to load.');
+        const payload = {expected_revision: state.credentials.revision};
+        for (const input of secretInputs) payload[input.name] = input.value;
+        const saved = await request(API + '/credentials/' + section, {method: 'PATCH', body: payload});
+        state.credentials = saved.status;
+        for (const input of secretInputs) input._original = input.value;
+        result.textContent = saved.durability_confirmed ? COPY['dashboard.settings_saved'] :
+          COPY['dashboard.saved_unconfirmed'];
+      }
+    } catch (error) {
+      result.textContent = (settingsSaved ? 'Settings saved, but credentials were not saved: ' : '') + error.message;
+    } finally {
+      form._saving = false;
+      for (const input of settingsInputs) input.disabled = false;
+      for (const input of secretInputs) input.disabled = input.dataset.loaded !== 'true';
+      refreshDirty();
+    }
+  });
+}
 async function loadSettings() {
+  const view = ++state.settingsVersion;
   try {
-    const [settings, credentials] = await Promise.all([request(`${API}/settings`), request(`${API}/credentials`)]);
-    if (!state.csrf) return;
+    const [settings, credentials] = await Promise.all([request(API + '/settings'), request(API + '/credentials')]);
+    if (!state.csrf || view !== state.settingsVersion) return;
     state.settings = settings; state.credentials = credentials; state.dirty = false;
     $('restart-notice').textContent = settings.pending_restart_fields.length ? COPY['dashboard.restart'] : '';
-    const panels = $('settings-fields'); panels.replaceChildren();
+    const container = $('settings-fields'); container.replaceChildren();
     for (const section of Object.keys(settings.desired.settings)) {
       const panel = node('details', null, 'panel'); panel.dataset.section = section;
       panel.appendChild(node('summary', section === 'trial' ? 'Intake selection' : section));
-      const form = node('form', null, 'integration');
+      const form = node('form', null, 'integration'); form.autocomplete = 'off';
       for (const [path, definition] of Object.entries(settings.fields)) {
         if (!path.startsWith(section + '.')) continue;
         form.appendChild(settingInput(path, definition, settings.desired.settings[section][path.split('.')[1]]));
       }
-      const save = node('button', 'Save settings'); save.type = 'submit'; form.appendChild(save);
-      const result = node('p', '', 'form-status'); result.setAttribute('role', 'status'); form.appendChild(result);
-      form.addEventListener('input', () => { state.dirty = true; });
-      form.addEventListener('submit', async event => {
-        event.preventDefault(); save.disabled = true; result.textContent = '';
-        const inputs = [...form.querySelectorAll('[data-kind]')];
-        for (const input of inputs) input.disabled = true;
-        try {
-          const fields = {};
-          for (const input of form.querySelectorAll('[data-kind]')) {
-            if (input.value === input.dataset.original) continue;
-            let value;
-            try { value = input.dataset.kind === 'levels' ? JSON.parse(input.value) : input.dataset.kind === 'integer' ? Number(input.value) : input.value; }
-            catch { throw new Error(COPY['dashboard.invalid_value']); }
-            fields[input.name.split('.')[1]] = value;
-          }
-          if (!Object.keys(fields).length) return;
-          const saved = await request(`${API}/settings`, {method: 'PATCH', body: {expected_revision: state.settings.desired.revision, settings: {[section]: fields}}});
-          state.settings.desired = saved.configuration;
-          for (const input of form.querySelectorAll('[data-kind]')) input.dataset.original = input.value;
-          result.textContent = !saved.durability_confirmed ? COPY['dashboard.saved_unconfirmed'] : saved.restart_fields.length ? COPY['dashboard.restart'] : COPY['dashboard.settings_saved'];
-          state.dirty = [...document.querySelectorAll('[data-kind]')].some(input => input.value !== input.dataset.original);
-        } catch (error) { result.textContent = error.message; }
-        finally { save.disabled = false; for (const input of inputs) input.disabled = false; }
-      });
-      panel.appendChild(form); panels.appendChild(panel);
+      panel.appendChild(form); container.appendChild(panel);
     }
-    renderCredentials();
+    renderCredentials(view);
+    refreshDirty();
   } catch (error) { displayError(error); }
 }
-function renderCredentials() {
+function renderCredentials(view = state.settingsVersion) {
   const container = $('settings-fields');
   const panels = new Map([...container.children].map(panel => [panel.dataset.section, panel]));
-  const specs = [
-    ['shoko', 'Shoko (optional)', 'shoko_configured', [['api_key', 'API key']]],
-    ['jellyfin', 'Jellyfin', 'jellyfin_configured', [['api_key', 'API key']]],
-    ['sonarr', 'Sonarr', 'sonarr_configured', [['api_key', 'API key']]],
-    ['tvdb', 'TVDB', 'tvdb_api_key_configured', [['api_key', 'API key']]],
-    ['qbittorrent', 'qBittorrent', 'qbittorrent_configured', [['username', 'Username'], ['password', 'Password']]],
-    ['access', 'Autobrr webhook', 'webhook_configured', [['webhook_token', 'Webhook token']]],
-  ];
-  for (const [service, title, presence, fields] of specs) {
+  for (const [service, title, fields] of CREDENTIAL_SPECS) {
     let panel = panels.get(service);
     if (!panel) {
       panel = node('details', null, 'panel'); panel.dataset.section = service;
       panel.appendChild(node('summary', title)); container.appendChild(panel);
       panels.set(service, panel);
     }
-    const form = node('form', null, 'integration'); form.autocomplete = 'off';
-    form.appendChild(node('h3', `${title} credentials`));
-    const status = node('p', state.credentials[presence] ? 'Credentials saved' : 'Not configured', 'muted'); form.appendChild(status);
-    for (const [name, label] of fields) {
-      const wrapper = node('label', null, 'setting-field'); wrapper.appendChild(node('span', label));
-      const input = node('input'); input.name = name; input.type = name === 'username' ? 'text' : 'password';
-      input.autocomplete = 'new-password'; input.required = true; input.maxLength = 4096;
-      wrapper.appendChild(input); form.appendChild(wrapper);
+    let form = [...panel.children].find(child => child.tagName?.toLowerCase() === 'form');
+    if (!form) {
+      form = node('form', null, 'integration'); form.autocomplete = 'off'; panel.appendChild(form);
     }
-    // Reveal is explicit; never prefill editable fields or expose values on page load.
-    const reveal = node('button', 'Show saved credentials', 'secondary');
-    reveal.type = 'button';
-    const savedValues = node('div', null, 'credential-reveal'); savedValues.hidden = true;
-    reveal.addEventListener('click', async () => {
-      if (!savedValues.hidden) {
-        savedValues.replaceChildren(); savedValues.hidden = true;
-        reveal.textContent = 'Show saved credentials'; return;
+    const secretInputs = [];
+    const toggles = [];
+    for (const [name, label] of fields) {
+      const wrapper = node('div', null, 'setting-field');
+      const caption = node('label', label);
+      const id = 'credential-' + service + '-' + name;
+      caption.htmlFor = id; wrapper.appendChild(caption);
+      const control = node('div', null, 'credential-input');
+      const input = node('input');
+      input.id = id; input.name = name; input.dataset.secret = name;
+      input.type = name === 'username' ? 'text' : 'password';
+      input.autocomplete = 'off'; input.maxLength = 4096;
+      input.disabled = true; input.dataset.loaded = 'false'; input._original = '';
+      control.appendChild(input); secretInputs.push(input);
+      if (name !== 'username') {
+        const toggle = node('button', null, 'credential-eye secondary');
+        toggle.type = 'button'; credentialEye(toggle, false);
+        toggle.addEventListener('click', () => {
+          const showing = input.type === 'password';
+          input.type = showing ? 'text' : 'password';
+          credentialEye(toggle, showing);
+        });
+        control.appendChild(toggle); toggles.push([input, toggle]);
       }
-      reveal.disabled = true;
-      try {
-        const values = await request(`${API}/credentials/${service}/reveal`, {method: 'POST', body: {}});
-        savedValues.replaceChildren();
-        for (const [name, value] of Object.entries(values)) {
-          const line = node('label', null, 'setting-field');
-          line.appendChild(node('span', name.replaceAll('_', ' ')));
-          const field = node('input'); field.type = 'text'; field.readOnly = true;
-          field.value = value; field.autocomplete = 'off';
-          line.appendChild(field); savedValues.appendChild(line);
-        }
-        savedValues.hidden = false; reveal.textContent = 'Hide saved credentials';
-      } catch (error) { displayError(error); }
-      finally { reveal.disabled = false; }
+      wrapper.appendChild(control); form.appendChild(wrapper);
+    }
+    let loaded = false, loading = null;
+    const loadCredentials = async () => {
+      if (loaded || loading || !state.csrf) return loading;
+      loading = (async () => {
+        try {
+          const values = await request(API + '/credentials/' + service + '/reveal', {method: 'POST', body: {}});
+          if (view !== state.settingsVersion || !state.csrf) return;
+          for (const input of secretInputs) {
+            const value = values[input.name];
+            if (typeof value !== 'string') throw new Error('Invalid saved credentials response.');
+          }
+          for (const input of secretInputs) {
+            input.value = values[input.name]; input._original = input.value;
+            input.disabled = false; input.dataset.loaded = 'true';
+          }
+          loaded = true;
+          refreshDirty();
+        } catch (error) {
+          if (view === state.settingsVersion) displayError(error);
+        } finally { loading = null; }
+      })();
+      return loading;
+    };
+    panel.addEventListener('toggle', () => {
+      if (panel.open) void loadCredentials();
+      else for (const [input, toggle] of toggles) {
+        input.type = 'password'; credentialEye(toggle, false);
+      }
     });
-    form.appendChild(reveal); form.appendChild(savedValues);
-    const save = node('button', 'Replace credentials'); save.type = 'submit'; form.appendChild(save);
-    const result = node('p', '', 'form-status'); result.setAttribute('role', 'status'); form.appendChild(result);
-    form.addEventListener('input', () => { state.dirty = true; });
-    form.addEventListener('submit', async event => {
-      event.preventDefault(); save.disabled = true;
-      const inputs = [...form.querySelectorAll('input')];
-      for (const input of inputs) input.disabled = true;
-      try {
-        const payload = {expected_revision: state.credentials.revision};
-        for (const [name] of fields) payload[name] = form.elements.namedItem(name).value;
-        const saved = await request(`${API}/credentials/${service}`, {method: 'PATCH', body: payload});
-        state.credentials = saved.status; form.reset();
-        savedValues.replaceChildren(); savedValues.hidden = true;
-        reveal.textContent = 'Show saved credentials';
-        status.textContent = saved.status[presence] ? 'Credentials saved' : 'Not configured';
-        result.textContent = saved.durability_confirmed ? COPY['dashboard.credentials_saved'] : COPY['dashboard.saved_unconfirmed'];
-        state.dirty = [...document.querySelectorAll('[data-kind]')].some(input => input.value !== input.dataset.original) ||
-          [...container.querySelectorAll('input')].some(input => input.value);
-      } catch (error) { result.textContent = error.message; }
-      finally { save.disabled = false; for (const input of inputs) input.disabled = false; }
-    });
-    panel.appendChild(form);
+    if (panel.open) void loadCredentials();
+  }
+  for (const panel of container.children) {
+    const form = [...panel.children].find(child => child.tagName?.toLowerCase() === 'form');
+    if (form) wireSectionForm(form, panel.dataset.section);
   }
 }
 async function loadRecognized() {
