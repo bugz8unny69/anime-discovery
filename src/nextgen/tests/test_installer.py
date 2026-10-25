@@ -151,6 +151,22 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertEqual(options['database'],str(self.database))
         self.assertTrue(args.upgrade)
 
+    def test_upgrade_refuses_changes_to_saved_installation(self):
+        self.config.joinpath('settings.json').write_text(json.dumps({
+            'schema_version':10,'settings':{'storage':{'database_path':str(self.database)}}}))
+        saved={'root':str(self.root/'app'),'config_dir':str(self.config),'origin':'https://anime.example.test'}
+        for flags in (['--public-origin','https://other.example.test'],
+                      ['--config-dir',str(self.root/'other')],
+                      ['--admin-password-file',str(self.root/'password')]):
+            with self.subTest(flags=flags),patch.object(installer,'saved_defaults',return_value=saved):
+                with self.assertRaises(ValueError):
+                    installer.resolve(installer.parser().parse_args(['--upgrade',*flags]))
+
+    def test_upgrade_without_installation_metadata_fails_closed(self):
+        with patch.object(installer,'saved_defaults',return_value={}):
+            with self.assertRaisesRegex(ValueError,'installer metadata'):
+                installer.resolve(installer.parser().parse_args(['--upgrade']))
+
     def test_upgrade_without_existing_native_config_fails_closed(self):
         with patch.object(installer,'saved_defaults',return_value={'config_dir':str(self.config)}), \
              patch.object(installer,'apply',side_effect=AssertionError('must not install')), \
@@ -209,7 +225,8 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertTrue(result['installed']);self.assertEqual(result['started_services'],[])
         self.assertTrue((self.root/'current').is_symlink());self.assertTrue(self.command.is_file())
         self.assertEqual(self.command.stat().st_mode&0o777,0o755)
-        self.assertTrue(Path(str(self.command)+'.json').is_file())
+        self.assertTrue((self.root/'installer.json').is_file())
+        self.assertFalse(Path(str(self.command)+'.json').exists())
         adm=self.command.parent/'adm'
         self.assertEqual(adm.stat().st_mode&0o777,0o755)
         self.assertIn(str(self.root/'current/bin/adm'),adm.read_text())
