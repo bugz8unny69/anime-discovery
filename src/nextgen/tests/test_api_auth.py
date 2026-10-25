@@ -1,6 +1,6 @@
 """Offline credential separation, browser session/CSRF and rotation; unexecuted."""
 import unittest
-from src.nextgen.api.auth import ApiError, COOKIE, Sessions, webhook_key, public_origin, check_origin
+from src.nextgen.api.auth import ApiError, COOKIE, Sessions, webhook_key, public_origin, check_origin, valid_host
 
 WEB='w'*43
 ADMIN='m'*43
@@ -42,3 +42,6 @@ class ApiAuthenticationTests(unittest.TestCase):
             with self.assertRaises(ApiError):public_origin(origin)
         with self.assertRaises(ApiError):check_origin({'origin':'https://evil.example','x-forwarded-host':'anime.example'},'https://anime.example')
         with self.assertRaises(ApiError):check_origin({},'https://anime.example',required=True)
+        self.assertTrue(valid_host('anime.proxy.example'))
+        check_origin({'host':'anime.proxy.example','origin':'https://anime.proxy.example'},'http://127.0.0.1:8765',required=True)
+        with self.assertRaises(ApiError):check_origin({'host':'anime.proxy.example','origin':'https://evil.example'},'http://127.0.0.1:8765',required=True)
