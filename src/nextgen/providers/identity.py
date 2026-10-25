@@ -7,7 +7,8 @@ from src.nextgen.storage.recognition import recognized_for_release
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
 
 from src.nextgen.providers.http import Clients, Credentials, Options, json_object
-from src.nextgen.providers.errors import ProviderInvalidResponse
+from src.nextgen.providers.errors import (ProviderInvalidResponse, ProviderDeferred,
+    ProviderUnavailable, ProviderAuthenticationFailed)
 from src.nextgen.providers.parsing import norm, release_title
 from src.nextgen.storage.sqlite import IdentityConflict, IdentityNotReady
 from src.nextgen.worker import blocking
