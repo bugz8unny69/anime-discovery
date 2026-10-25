@@ -136,12 +136,19 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             else:
                 check(stage, "skipped")
 
-            # An unfamiliar sequel must not be assigned the first AniDB work.
-            # Later season-aware evidence can add trusted discovery here.
+            # S02+ is not itself a rejection. Prefer a separately named
+            # sequel work over the generic season-one title for lookup.
             stage = "season_scope"
             if any(int(value) > 1 for value in seasons):
-                incomplete("unverified_sequel")
-            check(stage, "passed" if seasons else "skipped")
+                sequel = explicit_sequel_alias(title, aliases)
+                if sequel is None:
+                    incomplete("unverified_sequel")
+                aliases = [sequel]
+                if matching is not None:
+                    matching.queries(aliases, episode, int(seasons[0]))
+                check(stage, "passed", "sequel_alias_selected")
+            else:
+                check(stage, "passed" if seasons else "skipped")
 
             stage = "anidb_candidates"
             client = pool.get(database, actual_options)
