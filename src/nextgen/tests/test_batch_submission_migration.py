@@ -21,7 +21,7 @@ class BatchSubmissionMigrationTests(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(30,))
         self.assertEqual(migrations._structure(db),
                          migrations._reference(30,migrations._scripts()))
-        for number in (31,32,33):
+        for number in (31,32,33,34,35,36):
             name=migrations.SCRIPTS[number-1]
             db.executescript((migrations.SQL_DIR/name).read_text())
         self.assertEqual(migrations._structure(db),migrations._structure(fresh))
