@@ -82,10 +82,9 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_episode_one_requires_review_without_reservation(self):
         # An otherwise provider-confirmed pack cannot guess the trial anchor.
-        self.inventory=BatchInventory('a'*40,'b'*64,tuple(self.inventory.files[1:]))
-        # A new inventory must have contiguous indices.
+        # Reindex a pack whose first regular episode is E02.
         self.inventory=BatchInventory('a'*40,'b'*64,tuple(
-            TorrentFile(i,raw.path,raw.size) for i,raw in enumerate(self.inventory.files)))
+            TorrentFile(i,raw.path,raw.size) for i,raw in enumerate(self.inventory.files[1:])))
         self.verified=verify_batch_files(
             self.inventory,client=FakeProvider(),credentials=Credentials('secret'),
             anidb_id=123,tvdb_series_id=456,season=1)
