@@ -21,8 +21,8 @@ def _persist(db,claim,value):
         "WHERE job_id=? AND decision='REJECT'",(claim.job_id,)).fetchone()
     if state!=('COMPLETE',):
         raise CompletionRejected(Outcome('review','REJECT_CLEANUP_REVIEW'))
-    # Batch source files/torrent are NOT a single-episode acquisition.
-    # Do not enqueue the single-file download cleanup handler here.
+    from src.nextgen.jobs.cleanup_batch_download_job import enqueue
+    enqueue(db,claim)
 
 
 def registration():
