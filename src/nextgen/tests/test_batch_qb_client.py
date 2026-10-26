@@ -3,7 +3,11 @@ import unittest
 
 from src.nextgen.acquisition.metadata import parse_batch_metainfo
 from src.nextgen.acquisition.settings import DownloadOptions
-from src.nextgen.acquisition.submission import ClientInvalid
+from src.nextgen.acquisition.submission import ClientInvalid, Observation
+from src.nextgen.acquisition.transfers import TransferSnapshot, TransferPermit, TransferConflict, PieceOverlap
+from src.nextgen.batch.probe_transfer import (
+    selection_fingerprint, verify_probe_snapshot, exact_probe_selection,
+)
 from src.nextgen.batch.qb_client import BatchClient
 from src.nextgen.storage.batch_acquisition_candidate import BatchAcquisitionCandidate
 from src.nextgen.storage.batch_submission_journal import (
@@ -54,6 +58,55 @@ class BatchQbClientTests(unittest.TestCase):
             self.client.add_batch_stopped(self.raw+b'junk',self.intent,permit)
         self.assertEqual(self.calls,[])
         self.client.add_batch_stopped(self.raw,self.intent,permit)
+        self.assertEqual(len(self.calls),1)
+
+
+    def snapshot(self,*,priorities=(1,1,1),ranges=((0,0),(1,1),(2,2)),
+                 state='stoppedDL',tags=None):
+        observed=Observation(self.intent.inventory.info_hash,state,
+            self.options.download_root,self.options.category,
+            ('ad-'+self.intent.marker,) if tags is None else tags,
+            False,self.intent.inventory.files)
+        return TransferSnapshot(observed,tuple(priorities),(0.,0.,0.),
+                                100,tuple(ranges))
+
+    def test_probe_skip_wanted_start_each_single_use(self):
+        current=[self.snapshot()]
+        self.client.inspect_transfer=lambda _:current[0]
+        fingerprint=selection_fingerprint(self.intent,100)
+        permit=TransferPermit(fingerprint,('skip','wanted'))
+        self.client.apply_probe_selection(self.intent,fingerprint,permit,'skip')
+        self.client.apply_probe_selection(self.intent,fingerprint,permit,'wanted')
+        self.assertEqual([p for p,_ in self.calls],
+                         ['torrents/filePrio','torrents/filePrio'])
+        with self.assertRaises(TransferConflict):
+            self.client.apply_probe_selection(self.intent,fingerprint,permit,'skip')
+        current[0]=self.snapshot(priorities=(1,0,0))
+        self.assertTrue(exact_probe_selection(self.intent,current[0]))
+        start=TransferPermit(fingerprint,('start',))
+        self.client.start_probe(self.intent,fingerprint,start)
+        self.assertEqual(self.calls[-1][0],'torrents/start')
+        with self.assertRaises(TransferConflict):
+            self.client.start_probe(self.intent,fingerprint,start)
+
+    def test_overlap_and_wrong_owner_never_consume_probe_permission(self):
+        snap=self.snapshot(ranges=((0,1),(1,1),(2,2)))
+        with self.assertRaises(PieceOverlap):
+            verify_probe_snapshot(self.intent,snap,require_stopped=True)
+        current=[snap]
+        self.client.inspect_transfer=lambda _:current[0]
+        fingerprint=selection_fingerprint(self.intent,100)
+        permit=TransferPermit(fingerprint,('skip','wanted'))
+        with self.assertRaises(PieceOverlap):
+            self.client.apply_probe_selection(self.intent,fingerprint,permit,'skip')
+        self.assertEqual(self.calls,[])
+        current[0]=self.snapshot()
+        self.client.apply_probe_selection(self.intent,fingerprint,permit,'skip')
+        self.assertEqual(len(self.calls),1)
+        current[0]=self.snapshot(priorities=(1,0,0),tags=('another-owner',))
+        start=TransferPermit(fingerprint,('start',))
+        with self.assertRaises(TransferConflict):
+            self.client.start_probe(self.intent,fingerprint,start)
         self.assertEqual(len(self.calls),1)
 
 
