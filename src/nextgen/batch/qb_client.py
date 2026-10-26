@@ -56,3 +56,57 @@ class BatchClient(Client):
             body=b''.join(chunks),
             content_type='multipart/form-data; boundary='+boundary,
             limit=4096)
+
+    def apply_probe_selection(self,intent,fingerprint,permit,action):
+        """Mutate only E01 probe priorities; one permit per API command."""
+        from src.nextgen.acquisition.transfers import TransferPermit, TransferConflict
+        from src.nextgen.batch.probe_transfer import (
+            verify_probe_snapshot, selection_fingerprint,
+        )
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options
+                or action not in ('skip','wanted')):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_probe_snapshot(intent,snapshot,require_stopped=True)
+        if selection_fingerprint(intent,snapshot.piece_size)!=fingerprint:
+            raise TransferConflict()
+        probe=intent.candidate.probe_index
+        if action=='skip':
+            indices=[i for i in range(len(snapshot.priorities)) if i!=probe]
+            priority=0
+        else:
+            indices=[probe]
+            priority=1
+        permit.take(fingerprint,action)
+        if indices:
+            self._request('torrents/filePrio',form={
+                'hash':intent.inventory.info_hash,
+                'id':'|'.join(map(str,indices)),
+                'priority':priority,
+            },limit=4096)
+
+    def start_probe(self,intent,fingerprint,permit):
+        """Start only when E01 is the exact sole wanted file."""
+        from src.nextgen.acquisition.transfers import TransferPermit, TransferConflict
+        from src.nextgen.batch.probe_transfer import (
+            verify_probe_snapshot, exact_probe_selection, selection_fingerprint,
+        )
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_probe_snapshot(intent,snapshot,require_stopped=True)
+        if (selection_fingerprint(intent,snapshot.piece_size)!=fingerprint
+                or not exact_probe_selection(intent,snapshot)):
+            raise TransferConflict()
+        permit.take(fingerprint,'start')
+        self._request(
+            'torrents/start' if self.major==5 else 'torrents/resume',
+            form={'hashes':intent.inventory.info_hash},limit=4096)
