@@ -13,6 +13,7 @@ from src.nextgen.jobs.verify_batch_episode_job import DEFINITION as verify_batch
 from src.nextgen.jobs.stage_batch_episode_job import DEFINITION as stage_batch_episode
 from src.nextgen.jobs.keep_batch_job import DEFINITION as keep_batch
 from src.nextgen.jobs.reject_batch_job import DEFINITION as reject_batch
+from src.nextgen.jobs.cleanup_batch_download_job import DEFINITION as cleanup_batch_download
 from src.nextgen.jobs.reserve_episode_job import DEFINITION as reserve
 from src.nextgen.jobs.prepare_acquisition_job import DEFINITION as prepare
 from src.nextgen.jobs.submit_torrent_job import DEFINITION as submit
@@ -31,4 +32,4 @@ from src.nextgen.decision_download_cleanup import DEFINITION as cleanup_download
 
 from src.nextgen.jobs.enrich_shoko_job import DEFINITION as shoko
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,reject_batch,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download,shoko))
+HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,reject_batch,cleanup_batch_download,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download,shoko))
