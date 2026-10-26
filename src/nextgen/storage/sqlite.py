@@ -599,6 +599,20 @@ CREATE TABLE IF NOT EXISTS batch_staging_publications (
  CHECK((state='PLANNED' AND receipts_json IS NULL AND published_at_ms IS NULL) OR
        (state='PUBLISHED' AND receipts_json IS NOT NULL AND published_at_ms>=created_at_ms))
 );
+CREATE TABLE IF NOT EXISTS batch_probe_stops (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_transfers(plan_id),
+ stop_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ first_attempt INTEGER NOT NULL CHECK(first_attempt>0),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('STOP_UNCERTAIN','STOPPED','REVIEW')),
+ reason_code TEXT NOT NULL CHECK(
+   (phase='STOP_UNCERTAIN' AND reason_code='TORRENT_STOP_UNCERTAIN') OR
+   (phase='STOPPED' AND reason_code='TORRENT_STOPPED_CONFIRMED') OR
+   (phase='REVIEW' AND reason_code='TORRENT_TRANSFER_CONFLICT')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+
 CREATE INDEX IF NOT EXISTS idx_batch_staging_job ON batch_staging_publications(job_id,state);
 
 
@@ -644,13 +658,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v35; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v36; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
     before accessing v33 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 35:
+    if version == 36:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -660,7 +674,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=35;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=36;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
