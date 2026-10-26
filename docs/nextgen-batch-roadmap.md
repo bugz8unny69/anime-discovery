@@ -159,3 +159,46 @@ no GitHub CI was manually run or inspected per the user's request.
 Plan rows are **read-only intentions, not episode reservations or download
 authorization**. The presence of v28 schema and job registrations does not
 make batch packs downloadable. RETRY remains isolated in PR #150.
+
+
+## PR #152 checkpoint — additive v28/v29 batch trial and claim infrastructure
+
+New code on this draft branch (not merged or deployed):
+
+- [x] v28: durable E01-anchored trial plan, bounded backfill/following
+  window, per-episode and total size budgets, planned-vs-verified dashboard.
+- [x] v29: per-file batch reservations with partial active-claim indexes
+  and a composite FK to each plan's selected file.
+- [x] Atomic all-or-nothing batch claims; competing active *single* and
+  *batch* owners are checked in the same SQLite BEGIN IMMEDIATE transaction.
+- [x] Existing single-episode reservation writer reciprocally checks
+  the batch claim namespace to prevent simultaneous episode ownership.
+- [x] Cancellation cleanup can release canceled, drained batch claims.
+- [x] Optional RESERVE_BATCH worker registration (not enabled by default).
+- [x] Hash-bound, read-only acquisition candidate loader requires DONE
+  reservation ownership, ACTIVE operation, exact episode/file/size proof,
+  no same-hash competing active batch or single acquisition and
+  non-rejected anime. It cannot add/select/start a torrent.
+- [x] Regression test files for job handoff, missing E01, competing packs,
+  hash drift and fresh/upgrade v29 migration parity and rollback.
+
+IMPORTANT: Default worker registers EVALUATE_BATCH but does NOT yet
+create RESERVE_BATCH. This deliberate cutoff prevents newly verified
+season packs from holding episode slots while downloading is unavailable.
+
+Still pending before enabling real batch media acquisition:
+
+- [ ] Durable one-shot qB add / priority / start command journal with
+  uncertain-send and crash/restart reconciliation.
+- [ ] Re-fetched torrent metainfo binding and piece disjointness preflight
+  at the actual guarded send transaction.
+- [ ] Per-file JP+EN audio proof for probe; only unlock verified later files
+  after durable proof, with a separate auditable permission.
+- [ ] Per-episode download completion, staging, decisions, Jellyfin,
+  ownership-aware Keep/Reject cleanup, and cancellation reconciliation.
+- [ ] Full local migration/worker/transport tests and integration review.
+
+No GitHub CI was manually started or inspected. Seven isolated planning
+tests passed locally, plus v29 SQL constraint smoke tests. The new
+repository integration tests were committed but could not be run using
+a full local checkout. PR #150 (RETRY) is separate and unmerged.
