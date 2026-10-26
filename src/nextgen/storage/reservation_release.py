@@ -4,13 +4,33 @@ from src.nextgen.history import job_attempt, append_job_history
 
 
 def active(db,operation_id):
-    return db.execute("SELECT 1 FROM episode_reservations r JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE' LIMIT 1",(operation_id,)).fetchone() is not None
+    single=db.execute(
+        "SELECT 1 FROM episode_reservations r JOIN job_operation_members m "
+        "ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE' LIMIT 1",
+        (operation_id,)).fetchone()
+    batch=db.execute(
+        "SELECT 1 FROM batch_episode_reservations r JOIN job_operation_members m "
+        "ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE' LIMIT 1",
+        (operation_id,)).fetchone()
+    return single is not None or batch is not None
 
 
 def validate_releasable(db,operation_id):
     if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=? AND j.state='RUNNING' LIMIT 1",(operation_id,)).fetchone():raise CancellationError()
     for (evaluation,) in db.execute("SELECT r.evaluation_job_id FROM episode_reservations r JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)):
         if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id<>? AND j.kind IN ('RESERVE_EPISODE','PREPARE_ACQUISITION') AND json_extract(j.payload_json,'$.evaluation_job_id')=? LIMIT 1",(operation_id,evaluation)).fetchone():raise CancellationError()
+    for owner,evaluation in db.execute(
+            "SELECT r.owner_job_id,p.evaluation_job_id FROM batch_episode_reservations r "
+            "JOIN batch_trial_plans p ON p.plan_id=r.plan_id "
+            "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
+            "WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)):
+        if db.execute(
+                "SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) "
+                "WHERE m.operation_id<>? AND (j.created_by_job_id=? "
+                "OR (j.kind IN ('RESERVE_BATCH','PREPARE_BATCH') "
+                "AND json_extract(j.payload_json,'$.evaluation_job_id')=?)) LIMIT 1",
+                (operation_id,owner,evaluation)).fetchone():
+            raise CancellationError()
 
 
 def release_cancelled(db,operation_id,job_id,now,*,component):
@@ -33,6 +53,22 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
             if submission and db.execute('SELECT phase FROM cancellation_cleanup WHERE plan_id=?',(plan,)).fetchone()!=('COMPLETE',):raise CancellationError()
             db.execute("UPDATE acquisition_plans SET state='RELEASED' WHERE plan_id=? AND state='PREPARED'",(plan,))
         db.execute("UPDATE episode_reservations SET state='RELEASED',ended_at_ms=?,ended_by_job_id=? WHERE reservation_id=? AND state='ACTIVE'",(now,job_id,reservation))
-    if not rows:return ()
+    # There are no batch torrent submissions yet. A future batch send journal
+    # must add its drained-proof check BEFORE batch reservations can be freed.
+    batch_rows=db.execute(
+        "SELECT r.reservation_id,r.owner_job_id FROM batch_episode_reservations r "
+        "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
+        "WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)).fetchall()
+    for reservation,owner in batch_rows:
+        if db.execute(
+                "SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) "
+                "WHERE m.operation_id<>? AND j.created_by_job_id=? LIMIT 1",
+                (operation_id,owner)).fetchone():
+            raise CancellationError()
+        db.execute(
+            "UPDATE batch_episode_reservations SET state='RELEASED',"
+            "ended_at_ms=?,ended_by_job_id=? WHERE reservation_id=? AND state='ACTIVE'",
+            (now,job_id,reservation))
+    if not rows and not batch_rows:return ()
     return (append_job_history(db,job_id=job_id,event_code='EPISODE_RESERVATIONS_RELEASED',
         reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}),)
