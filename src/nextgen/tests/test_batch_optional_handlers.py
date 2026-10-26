@@ -7,7 +7,6 @@ from src.nextgen.jobs.submit_batch_job import registration as submit_batch
 from src.nextgen.jobs.transfer_batch_job import registration as transfer_batch
 from src.nextgen.jobs.verify_batch_probe_job import registration as verify_probe
 from src.nextgen.jobs.unlock_batch_job import registration as unlock_batch
-from src.nextgen.providers.configuration import build_worker
 
 
 async def dummy_metainfo(*args):
