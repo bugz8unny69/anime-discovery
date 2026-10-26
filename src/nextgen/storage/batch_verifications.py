@@ -47,8 +47,11 @@ def persist_batch_verification(db, claim, source, inventory, verified, *, now_ms
         incoming_hash=declaration.get('torrent_infohash')
     except (ValueError,TypeError,AttributeError,UnicodeDecodeError):
         raise ReleaseConflict() from None
-    if infohash(incoming_hash)!=inventory.info_hash:
-        raise ReleaseConflict()
+    try:
+        if infohash(incoming_hash)!=inventory.info_hash:
+            raise ReleaseConflict()
+    except ValueError:
+        raise ReleaseConflict() from None
     if db.execute("SELECT 1 FROM release_verifications WHERE job_id=?",(claim.job_id,)).fetchone():
         raise ReleaseConflict()
     if db.execute("SELECT 1 FROM batch_verifications WHERE job_id=?",(claim.job_id,)).fetchone():
