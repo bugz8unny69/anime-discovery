@@ -573,6 +573,17 @@ CREATE TABLE IF NOT EXISTS batch_torrent_unlocks (
        (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
        (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
 );
+CREATE TABLE IF NOT EXISTS batch_verified_media_files (
+ plan_id INTEGER NOT NULL REFERENCES batch_torrent_unlocks(plan_id),
+ file_index INTEGER NOT NULL,
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND length(CAST(evidence_json AS BLOB))<=65536),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
+ PRIMARY KEY(plan_id,file_index),
+ UNIQUE(plan_id,tvdb_episode),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_trial_files(plan_id,file_index)
+);
+
 
 
 
@@ -615,13 +626,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v33; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v34; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
     before accessing v33 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 33:
+    if version == 34:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -631,7 +642,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=33;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=34;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
