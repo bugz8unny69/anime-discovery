@@ -1,4 +1,4 @@
-"""Construction tests: opt-in batch stages remain outside default composition."""
+"""Construction and routing tests for the default-enabled batch worker chain."""
 import unittest
 
 from src.nextgen.dashboard.presentation import HANDLERS
