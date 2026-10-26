@@ -8,6 +8,8 @@ from src.nextgen.post_keep_cleanup import registration as cleanup_kept
 from src.nextgen.jobs.enrich_shoko_job import registration as shoko
 from src.nextgen.decision_download_cleanup import registration as cleanup_download
 from src.nextgen.jobs.reject_media_job import registration as reject
+from src.nextgen.jobs.keep_batch_job import registration as keep_batch
+from src.nextgen.jobs.reject_batch_job import registration as reject_batch
 
 def registrations(secrets):
-    return (cleanup(secrets),keep(secrets),reject(),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets),shoko(secrets))
+    return (cleanup(secrets),keep(secrets),reject(),keep_batch(secrets),reject_batch(),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets),shoko(secrets))
