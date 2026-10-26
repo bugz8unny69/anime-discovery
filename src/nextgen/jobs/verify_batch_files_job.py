@@ -14,7 +14,7 @@ from src.nextgen.acquisition.metainfo_source import (
 from src.nextgen.batch.verified_files import verify_selected_batch_episode
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.batch_files_source import BatchFilesSource
 from src.nextgen.storage.batch_verified_files import persist_batch_file_proof
 from src.nextgen.worker import blocking
@@ -25,10 +25,11 @@ DEFINITION=HandlerDefinition(KIND,'Verify each selected batch video and its audi
 
 
 def _persist(db,claim,value):
-    if (type(value) is not dict or set(value)!={'unlock_job_id','files'}
+    if (type(value) is not dict or set(value)!={'unlock_job_id','files','verification_job_id'}
             or type(value['files']) is not tuple):
         raise CompletionRejected(Outcome('review','MEDIA_VERIFICATION_INVALID'))
     try:
+        if value['verification_job_id']!=claim.job_id:raise MediaInvalid()
         unlock=integer(value['unlock_job_id'],positive=True)
         row=db.execute(
             "SELECT u.plan_id,s.reservation_job_id,j.event_id,j.state "
@@ -59,7 +60,9 @@ def _persist(db,claim,value):
 
 
 def registration(read_batch_metainfo,*,source_factory=BatchFilesSource,
-                 verifier=verify_selected_batch_episode):
+                 verifier=verify_selected_batch_episode,staging_kind=None):
+    if staging_kind is not None and (type(staging_kind) is not str or not staging_kind.strip() or len(staging_kind)>64):
+        raise ValueError('invalid batch staging successor')
     if not inspect.iscoroutinefunction(read_batch_metainfo):
         raise ValueError('Trusted hash-only asynchronous metadata reader required')
 
@@ -89,7 +92,8 @@ def registration(read_batch_metainfo,*,source_factory=BatchFilesSource,
                 media=await blocking(verifier,intent,index,unlock,fingerprint,
                                      context.cancelled,protected_roots=protected)
                 facts.append((index,episode,media))
-            return Outcome(value={'unlock_job_id':unlock,'files':tuple(facts)})
+            return Outcome(value={'unlock_job_id':unlock,'files':tuple(facts),
+                                  'verification_job_id':context.claim.job_id})
         except MetadataSourceWaiting as exc:
             return Outcome('defer',exc.reason_code,delay_ms=exc.delay_ms)
         except MetadataSourceUnavailable as exc:
@@ -100,4 +104,8 @@ def registration(read_batch_metainfo,*,source_factory=BatchFilesSource,
             return Outcome('retry','MEDIA_VERIFICATION_UNAVAILABLE')
         except (MediaInvalid,AcquisitionConflict,MetadataInvalid) as exc:
             return Outcome('review',exc.reason_code)
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if staging_kind is None else (
+            Successor.create(staging_kind,{'media_job_id':value['verification_job_id']}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if staging_kind is None else (staging_kind,))
