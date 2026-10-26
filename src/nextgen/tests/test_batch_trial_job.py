@@ -10,6 +10,7 @@ from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.job_contracts import Registry, Policy
 from src.nextgen.jobs.verify_release_job import registration as release_registration
 from src.nextgen.jobs.evaluate_batch_job import registration as batch_registration
+from src.nextgen.jobs.reserve_batch_job import registration as reserve_batch_registration
 from src.nextgen.providers.http import Credentials
 from src.nextgen.storage.sqlite import connect, initialize, accept_event_and_job, save_identity
 from src.nextgen.worker import Worker
@@ -53,12 +54,13 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
         try:return db.execute(sql).fetchall()
         finally:db.close()
 
-    def worker(self):
+    def worker(self, *, reserve=False):
         async def verify(source,*args):
             return BatchVerificationCompletion(source,self.inventory,self.verified)
         worker=Worker(self.store,self.startup,Registry((
             release_registration(verify,batch_kind='EVALUATE_BATCH'),
-            batch_registration())),policy=Policy(lease_ms=30000))
+            batch_registration(reservation_kind='RESERVE_BATCH' if reserve else None),
+            *( (reserve_batch_registration(),) if reserve else () ))),policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
         return worker
 
@@ -78,6 +80,23 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
                       'torrent_transfers','staging_publications'):
             self.assertEqual(self.rows('SELECT count(*) FROM '+table),[(0,)])
         self.assertEqual(self.rows('SELECT count(*) FROM batch_verified_files'),[(12,)])
+        self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
+
+    async def test_opt_in_reserves_regular_episodes_atomically_without_torrent(self):
+        worker=self.worker(reserve=True)
+        for _ in range(3):
+            await worker.attempt()
+        self.assertEqual(self.rows('SELECT kind,state FROM jobs ORDER BY job_id'),[
+            ('VERIFY_RELEASE','DONE'),('EVALUATE_BATCH','DONE'),
+            ('RESERVE_BATCH','DONE')])
+        self.assertEqual(self.rows('SELECT tvdb_episode,file_index FROM '
+                                   'batch_episode_reservations ORDER BY tvdb_episode'),
+                         [(i,i-1) for i in range(1,7)])
+        self.assertEqual(self.rows("SELECT state FROM batch_episode_reservations"),[
+            ('ACTIVE',)]*6)
+        for table in ('episode_reservations','acquisition_plans','torrent_submissions',
+                      'torrent_transfers','staging_publications'):
+            self.assertEqual(self.rows('SELECT count(*) FROM '+table),[(0,)])
         self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
 
     async def test_missing_episode_one_requires_review_without_reservation(self):
