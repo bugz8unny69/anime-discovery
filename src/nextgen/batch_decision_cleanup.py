@@ -159,7 +159,7 @@ class BatchDecisionCleanup(OwnedCleanup):
             op,plan,reservation,digest,sha=self.facts(db)
             if (inventory.info_hash,inventory.info_sha256)!=(digest,sha):
                 raise CancellationError()
-            candidate=_candidate(db,reservation,inventory)
+            candidate=_candidate(db,reservation,inventory,cleanup=True)
             if candidate.plan_id!=plan:raise CancellationError()
             source=_intent(db,candidate,inventory)
             if source is None or source.state!='OWNED_STOPPED':
