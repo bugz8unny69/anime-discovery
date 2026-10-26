@@ -110,3 +110,54 @@ class BatchClient(Client):
         self._request(
             'torrents/start' if self.major==5 else 'torrents/resume',
             form={'hashes':intent.inventory.info_hash},limit=4096)
+
+    def apply_audio_verified_unlock(self,intent,media,unlock,permit):
+        """Enable only other provider-approved trial files after real E01 proof."""
+        from src.nextgen.acquisition.media import VerifiedMedia
+        from src.nextgen.acquisition.transfers import TransferPermit, TransferConflict
+        from src.nextgen.batch.unlock import (
+            BatchUnlockIntent, plan_verified_unlock, validate_unlock_snapshot,
+        )
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(media) is not VerifiedMedia
+                or type(unlock) is not BatchUnlockIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        required=plan_verified_unlock(
+            intent,snapshot,media,unlock.verification_job_id)
+        if required!=unlock:raise TransferConflict()
+        wanted=[i for i,p in enumerate(unlock.priorities)
+                if p==1 and i!=intent.candidate.probe_index]
+        if not wanted:raise TransferConflict()
+        permit.take(unlock.fingerprint,'unlock')
+        self._request('torrents/filePrio',form={
+            'hash':intent.inventory.info_hash,
+            'id':'|'.join(map(str,wanted)),
+            'priority':1,
+        },limit=4096)
+
+    def start_audio_verified_batch(self,intent,unlock,permit):
+        """Start a proven exact expanded selection, never an unverified pack."""
+        from src.nextgen.acquisition.transfers import TransferPermit, TransferConflict
+        from src.nextgen.batch.unlock import (
+            BatchUnlockIntent, validate_unlock_snapshot, exact_unlock_selection,
+        )
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(unlock) is not BatchUnlockIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options
+                or unlock.plan_id!=intent.candidate.plan_id):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        validate_unlock_snapshot(intent,snapshot,stopped=True)
+        if not exact_unlock_selection(unlock,snapshot):raise TransferConflict()
+        permit.take(unlock.fingerprint,'start')
+        self._request(
+            'torrents/start' if self.major==5 else 'torrents/resume',
+            form={'hashes':intent.inventory.info_hash},limit=4096)
