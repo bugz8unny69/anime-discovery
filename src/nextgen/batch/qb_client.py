@@ -161,3 +161,27 @@ class BatchClient(Client):
         self._request(
             'torrents/start' if self.major==5 else 'torrents/resume',
             form={'hashes':intent.inventory.info_hash},limit=4096)
+
+    def stop_completed_probe(self,intent,stop_fingerprint,permit):
+        """Stop the exact owned E01-only torrent once, never an arbitrary hash."""
+        from src.nextgen.acquisition.transfers import TransferPermit, TransferConflict, ACTIVE
+        from src.nextgen.batch.probe_transfer import (
+            verify_probe_snapshot, exact_probe_selection,
+        )
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options
+                or type(stop_fingerprint) is not str or len(stop_fingerprint)!=64):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_probe_snapshot(intent,snapshot)
+        if (snapshot.observation.state not in ACTIVE
+                or not exact_probe_selection(intent,snapshot)
+                or snapshot.progress[intent.candidate.probe_index]!=1):
+            raise TransferConflict()
+        permit.take(stop_fingerprint,'stop')
+        self._request(
+            'torrents/stop' if self.major==5 else 'torrents/pause',
+            form={'hashes':intent.inventory.info_hash},limit=4096)
