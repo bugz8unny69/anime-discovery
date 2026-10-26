@@ -64,8 +64,15 @@ def receipt(db,job_id,*,reused=False):
         data['optional_shoko']=shoko_status(db,job_id)
         data['execution_available']=True
         data['availability_reason']=None
-        data['completion']=(CATALOG.reason('KEEP_COMPLETE') if db.execute(
-            "SELECT 1 FROM keep_imports WHERE job_id=? AND phase='COMPLETE'",(job_id,)).fetchone() else None)
+        single_complete=db.execute(
+            "SELECT 1 FROM keep_imports WHERE job_id=? AND phase='COMPLETE'",
+            (job_id,)).fetchone() is not None
+        batch_rows=db.execute(
+            'SELECT phase FROM batch_keep_imports WHERE job_id=?',
+            (job_id,)).fetchall()
+        batch_complete=bool(batch_rows) and all(r[0]=='COMPLETE' for r in batch_rows)
+        data['completion']=CATALOG.reason('KEEP_COMPLETE') if (
+            single_complete or batch_complete) else None
     from src.nextgen.decision_download_cleanup import status as download_status
     data['download_cleanup']=download_status(db,job_id)
     return data
