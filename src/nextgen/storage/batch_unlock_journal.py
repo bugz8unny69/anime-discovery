@@ -113,6 +113,8 @@ class BatchUnlockJournal:
                 or media.languages!=('eng','jpn')):
             raise TransferConflict()
         receipt=_record(db,intent,media)
+        if receipt is not None and receipt.intent.verification_job_id!=source[0]:
+            raise TransferConflict()
         return intent,media,receipt
 
     def source_hash(self,claim,verification_job_id):
