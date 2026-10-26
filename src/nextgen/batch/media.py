@@ -1,0 +1,75 @@
+"""Read-only E01 media/audio evidence for a completed, owned batch probe.
+
+This does NOT stage a file or allow subsequent files to download. It uses
+fd-relative, no-follow traversal and the same bounded ffprobe parser as the
+single-episode verifier, without pretending a pack is a single Manifest.
+"""
+import os
+import hashlib
+from pathlib import PurePosixPath
+
+from src.nextgen.acquisition.cleanup import directory, parent
+from src.nextgen.acquisition.media import (
+    MediaInvalid, MediaUnavailable, VerifiedMedia, cancelled,
+    signature, probe, parse_probe,
+)
+from src.nextgen.batch.probe_transfer import selection_fingerprint
+from src.nextgen.storage.batch_submission_journal import BatchSubmissionIntent
+from src.nextgen.storage.batch_transfer_journal import BatchTransferRecord
+
+
+def verify_batch_probe_file(intent,record,transfer_job_id,flag,*,
+                            read_probe=probe,protected_roots=()):
+    """Return the immutable content+JP/EN proof, never a user-supplied verdict."""
+    if (type(intent) is not BatchSubmissionIntent
+            or type(record) is not BatchTransferRecord
+            or record.phase!='COMPLETE' or record.progress!=1
+            or record.fingerprint!=selection_fingerprint(intent,record.piece_size)
+            or record.selected_index!=intent.candidate.probe_index
+            or record.transfer_job_id!=transfer_job_id):
+        raise MediaInvalid()
+    selected=intent.inventory.files[intent.candidate.probe_index]
+    if PurePosixPath(selected.path).suffix.lower() not in ('.mkv','.mp4'):
+        raise MediaInvalid()
+    root=intent.options.download_root
+    from src.nextgen.staging import disjoint, StagingConfiguration
+    try:disjoint(root,protected_roots)
+    except StagingConfiguration:raise MediaInvalid() from None
+    try:
+        cancelled(flag)
+        with directory(root) as directory_fd:
+            st=os.fstat(directory_fd)
+            root_sig=(st.st_dev,st.st_ino)
+            with parent(directory_fd,selected.path) as (folder,name):
+                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=folder)
+                try:
+                    before=signature(os.fstat(fd))
+                    if before[2]!=selected.size:raise MediaInvalid()
+                    digest=hashlib.sha256()
+                    remaining=selected.size
+                    while remaining:
+                        cancelled(flag)
+                        chunk=os.read(fd,min(1024*1024,remaining))
+                        if not chunk:raise MediaInvalid()
+                        digest.update(chunk)
+                        remaining-=len(chunk)
+                    if os.read(fd,1):raise MediaInvalid()
+                    os.lseek(fd,0,os.SEEK_SET)
+                    duration,languages=parse_probe(
+                        read_probe(fd,flag),PurePosixPath(selected.path).suffix.lower())
+                    cancelled(flag)
+                    if signature(os.fstat(fd))!=before:raise MediaInvalid()
+                    with directory(root) as current:
+                        if (os.fstat(current).st_dev,os.fstat(current).st_ino)!=root_sig:
+                            raise MediaInvalid()
+                        with parent(current,selected.path) as (latest,leaf):
+                            if signature(os.stat(leaf,dir_fd=latest,follow_symlinks=False))!=before:
+                                raise MediaInvalid()
+                    return VerifiedMedia(
+                        intent.candidate.reservation_job_id,transfer_job_id,
+                        intent.candidate.plan_id,intent.fingerprint,record.fingerprint,
+                        selected.path,root_sig,before,digest.hexdigest(),duration,languages)
+                finally:
+                    os.close(fd)
+    except OSError:
+        raise MediaUnavailable() from None
