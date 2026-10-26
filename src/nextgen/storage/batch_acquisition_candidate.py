@@ -33,6 +33,7 @@ def _candidate(db,reservation_job_id,inventory):
         "JOIN batch_verifications b USING(batch_id) "
         "JOIN batch_verified_files f ON f.batch_id=b.batch_id AND f.file_index=r.file_index "
         "JOIN batch_trial_files t ON t.plan_id=p.plan_id AND t.file_index=r.file_index "
+        "AND t.tvdb_episode=r.tvdb_episode AND t.selected_size_bytes=f.file_size_bytes "
         "JOIN jobs j ON j.job_id=r.owner_job_id "
         "JOIN job_operation_members m ON m.job_id=j.job_id "
         "JOIN job_operations o USING(operation_id) "
@@ -52,6 +53,19 @@ def _candidate(db,reservation_job_id,inventory):
         "SELECT 1 FROM acquisition_plans WHERE info_hash=? AND state='PREPARED' LIMIT 1",
         (info_hash,)).fetchone():
         raise AcquisitionConflict()
+    if db.execute(
+        "SELECT 1 FROM batch_episode_reservations r "
+        "JOIN batch_trial_plans p USING(plan_id) JOIN batch_verifications b USING(batch_id) "
+        "WHERE r.state='ACTIVE' AND b.info_hash=? AND r.plan_id<>? LIMIT 1",
+        (info_hash,plan)).fetchone():
+        raise AcquisitionConflict()
+    from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
+    aid=db.execute("SELECT b.anidb_id FROM batch_trial_plans p "
+                   "JOIN batch_verifications b USING(batch_id) WHERE p.plan_id=?",
+                   (plan,)).fetchone()
+    if aid is None:raise AcquisitionConflict()
+    try:require_allowed(db,aid[0])
+    except AnimeRejected:raise AcquisitionConflict() from None
     selected,indices,probe,budget=[],set(),None,0
     for current_plan,index,episode,current_hash,current_sha,current_anchor,current_total,path,size in rows:
         if ((current_plan,current_hash,current_sha,current_anchor,current_total)!=(plan,info_hash,sha,anchor,total)
