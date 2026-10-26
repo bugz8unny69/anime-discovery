@@ -634,6 +634,14 @@ CREATE TABLE IF NOT EXISTS batch_download_cleanup (
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
 );
+CREATE TABLE IF NOT EXISTS batch_keep_cleanup (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(job_id),
+ decision_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ phase TEXT NOT NULL CHECK(phase IN ('PENDING','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+
 
 
 
@@ -680,13 +688,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v38; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v39; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v38 storage.
+    before accessing v39 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 38:
+    if version == 39:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -696,7 +704,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=38;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=39;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
