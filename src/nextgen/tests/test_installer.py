@@ -271,7 +271,15 @@ class InstallerOrchestrationTests(unittest.TestCase):
     @contextlib.contextmanager
     def patches(self,service=None):
         account=self.namespace(pw_uid=1001,pw_gid=1001)
-        with patch.object(installer.os,'geteuid',return_value=0),patch.object(installer.os,'chown'), \
+        real_stat=Path.stat
+        def root_stat(path,*args,**kwargs):
+            result=real_stat(path,*args,**kwargs)
+            if path.is_relative_to(self.folder):
+                values=list(result);values[4]=0
+                return os.stat_result(values)
+            return result
+        with patch.object(installer.Path,'stat',autospec=True,side_effect=root_stat), \
+             patch.object(installer.os,'geteuid',return_value=0),patch.object(installer.os,'chown'), \
              patch.object(installer.pwd,'getpwnam',return_value=account), \
              patch.object(installer.grp,'getgrnam',return_value=self.namespace(gr_gid=1001)), \
              patch.object(installer.shutil,'which',return_value='/tool'), \
@@ -329,7 +337,7 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertFalse((self.root/'installation.json').exists())
         self.assertTrue((self.state/'installer/installation.json').exists())
         self.assertEqual((self.state/'installer').stat().st_mode&0o777,0o700)
-        with patch.object(installer,'DEFAULTS',{**installer.DEFAULTS,'destination':str(self.command)}):
+        with self.patches(),patch.object(installer,'DEFAULTS',{**installer.DEFAULTS,'destination':str(self.command)}):
             self.assertEqual(installer.saved_defaults(),saved)
 
     def test_upgrade_reports_failed_service_restart(self):

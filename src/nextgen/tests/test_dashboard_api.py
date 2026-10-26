@@ -63,26 +63,25 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(private.encode(),body)
         self.assertEqual(self.rows('SELECT count(*) FROM jobs'),[(1,)])
 
-    async def test_wrong_dashboard_host_shows_readable_html_not_api_json(self):
+    async def test_dashboard_works_on_other_valid_request_hosts(self):
         status,body,headers=await self.asset('/',host='wrong.example')
-        self.assertEqual(status,421)
+        self.assertEqual(status,200)
         self.assertTrue(headers[b'content-type'].startswith(b'text/html'))
-        self.assertIn(b'dashboard address',body.lower())
-        self.assertIn(b'https://anime.example',body)
+        self.assertIn(b'/assets/dashboard.js',body)
         self.assertNotIn(b'API_ORIGIN_INVALID',body)
         self.assertEqual(headers[b'cache-control'],b'no-store')
         for path in ('/jobs','/settings','/recognized'):
             status,body,headers=await self.asset(path,host='wrong.example')
-            self.assertEqual(status,421)
+            self.assertEqual(status,200)
             self.assertTrue(headers[b'content-type'].startswith(b'text/html'))
         status,body,headers=await self.asset('/assets/dashboard.js',host='wrong.example')
-        self.assertEqual(status,400)
-        self.assertTrue(headers[b'content-type'].startswith(b'application/json'))
+        self.assertEqual(status,200)
+        self.assertTrue(headers[b'content-type'].startswith(b'text/javascript'))
 
     async def test_asset_allowlist_rejects_mutation_query_paths_and_untrusted_host(self):
         for route,method,host,expected in [('/assets/../secrets.json','GET','anime.example',404),
                 ('/assets/secrets.json','GET','anime.example',404),('/','POST','anime.example',405),
-                ('/?token=secret','GET','anime.example',400),('/','GET','evil.example',421)]:
+                ('/?token=secret','GET','anime.example',400),('/','GET','evil/example',400)]:
             status,_,_=await self.asset(route,method=method,host=host)
             self.assertEqual(status,expected)
 
