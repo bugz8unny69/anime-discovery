@@ -35,6 +35,8 @@ def _persist(db,claim,value):
         'WHERE job_id=? ORDER BY file_index',(claim.job_id,)).fetchall()!=[
         (item[1],'COMPLETE') for item in staged]:
         raise CompletionRejected(Outcome('review','KEEP_IMPORT_REVIEW'))
+    from src.nextgen.jobs.cleanup_batch_download_job import enqueue as enqueue_download_cleanup
+    enqueue_download_cleanup(db,claim)
     if value['refresh']:
         from src.nextgen.jobs.refresh_jellyfin_job import enqueue
         enqueue(db,claim)
