@@ -115,6 +115,31 @@ class BatchUnlockJournal:
         receipt=_record(db,intent,media)
         return intent,media,receipt
 
+    def source_hash(self,claim,verification_job_id):
+        integer(verification_job_id,positive=True)
+        with self.queue.connection() as db,transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            if claim.kind!='UNLOCK_BATCH':raise AcquisitionConflict()
+            row=db.execute(
+                "SELECT s.reservation_job_id,s.info_hash,u.event_id,"
+                "proof_job.state,op.state "
+                "FROM jobs u "
+                "JOIN jobs proof_job ON proof_job.job_id=u.created_by_job_id "
+                "JOIN batch_probe_media m ON m.verification_job_id=proof_job.job_id "
+                "JOIN batch_torrent_submissions s ON s.plan_id=m.plan_id "
+                "JOIN job_operation_members um ON um.job_id=u.job_id "
+                "JOIN job_operation_members pm ON pm.job_id=proof_job.job_id "
+                "AND pm.operation_id=um.operation_id "
+                "JOIN job_operation_members rm ON rm.job_id=s.reservation_job_id "
+                "AND rm.operation_id=um.operation_id "
+                "JOIN job_operations op ON op.operation_id=um.operation_id "
+                "WHERE u.job_id=? AND proof_job.job_id=? AND s.state='OWNED_STOPPED'",
+                (claim.job_id,verification_job_id)).fetchone()
+            if row is None or row[2:]!=(claim.event_id,'DONE','ACTIVE'):
+                raise AcquisitionConflict()
+            self.queue._owns(db,claim,self.queue.now())
+            return row[0],row[1]
+
     def load(self,claim,reservation_job_id,inventory):
         integer(reservation_job_id,positive=True)
         with self.queue.connection() as db,transaction(db):
