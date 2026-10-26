@@ -5,7 +5,7 @@ from src.nextgen.acquisition.settings import SizeLimitExceeded, SizeEvidenceMiss
 from src.nextgen.batch.durable_trial import BatchTrialProposal, propose_batch_trial
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.batch_trials import load_batch_trial_source, persist_batch_trial
 from src.nextgen.trial_policy import Window, TrialConflict
 from src.nextgen.worker import blocking
@@ -33,7 +33,11 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration():
+def registration(*, reservation_kind=None):
+    if reservation_kind is not None and (type(reservation_kind) is not str
+            or not reservation_kind.strip() or len(reservation_kind)>64
+            or reservation_kind==KIND):
+        raise ValueError('invalid batch reservation successor')
     async def execute(context):
         payload=context.data()
         try:
@@ -52,4 +56,8 @@ def registration():
         except (TrialConflict,SizeLimitExceeded,SizeEvidenceMissing) as exc:
             return Outcome('review',exc.reason_code)
         return Outcome(value=BatchEvaluationCompletion(proposal,context.claim.job_id))
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if reservation_kind is None else (
+            Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if reservation_kind is None else (reservation_kind,))
