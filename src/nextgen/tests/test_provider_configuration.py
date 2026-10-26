@@ -249,7 +249,9 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             ('SUBMIT_BATCH','TRANSFER_BATCH'),
             ('TRANSFER_BATCH','VERIFY_BATCH_PROBE'),
             ('VERIFY_BATCH_PROBE','UNLOCK_BATCH'),
-            ('UNLOCK_BATCH',None),
+            ('UNLOCK_BATCH','VERIFY_BATCH_FILES'),
+            ('VERIFY_BATCH_FILES','STAGE_BATCH_FILES'),
+            ('STAGE_BATCH_FILES',None),
         )
         for job,next_job in stages:
             with self.subTest(job=job):
@@ -258,7 +260,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
                                  () if next_job is None else (next_job,))
         # Batch staging and Keep/Reject are not implemented: do not route
         # the last step into the unrelated single-episode staging pipeline.
-        self.assertEqual(enabled.registry.entries['UNLOCK_BATCH'].successor_kinds,())
+        self.assertEqual(enabled.registry.entries['STAGE_BATCH_FILES'].successor_kinds,())
     async def test_metadata_preparation_is_installed_by_default_with_trusted_override(self):
         self.secrets.initialize('private-key')
         worker=await build_identity_worker(self.root)
