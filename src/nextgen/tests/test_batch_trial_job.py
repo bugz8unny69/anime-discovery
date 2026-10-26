@@ -18,6 +18,8 @@ from src.nextgen.storage.sqlite import (connect, initialize, accept_event_and_jo
     save_identity, transaction, enqueue_job)
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.batch_submission_journal import BatchSubmissionJournal
+from src.nextgen.storage.reservation_release import validate_releasable
+from src.nextgen.cancellation import CancellationError
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.worker import Worker
@@ -160,6 +162,17 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows(
             "SELECT state FROM batch_torrent_submissions"),[('REVIEW',)])
         self.assertEqual(self.rows("SELECT count(*) FROM torrent_submissions"),[(0,)])
+        db=connect(self.database)
+        try:
+            operation=db.execute(
+                "SELECT operation_id FROM job_operation_members WHERE job_id=?",
+                (reservation,)).fetchone()[0]
+            with self.assertRaises(CancellationError):
+                validate_releasable(db,operation)
+        finally:
+            db.close()
+        self.assertEqual(self.rows(
+            "SELECT count(*) FROM batch_episode_reservations WHERE state='ACTIVE'"),[(6,)])
 
     async def test_submission_uncertain_can_confirm_exact_stopped_inventory(self):
         worker=self.worker(reserve=True)
