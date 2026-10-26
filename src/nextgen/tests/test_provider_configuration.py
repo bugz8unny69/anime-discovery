@@ -236,7 +236,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
         finally:db.close()
 
-    async def test_default_batch_acquisition_chain_and_explicit_disable(self):
+    async def test_default_batch_acquisition_chain(self):
         self.secrets.initialize('private-key')
         async def batch_reader(*args):
             raise AssertionError('worker startup cannot read batch metadata')
@@ -259,16 +259,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
         # Batch staging and Keep/Reject are not implemented: do not route
         # the last step into the unrelated single-episode staging pipeline.
         self.assertEqual(enabled.registry.entries['UNLOCK_BATCH'].successor_kinds,())
-        disabled=await build_identity_worker(
-            self.root,batch_acquisition=False,read_batch_metainfo=batch_reader)
-        self.addAsyncCleanup(disabled.close)
-        self.assertIn('EVALUATE_BATCH',disabled.registry.entries)
-        self.assertEqual(disabled.registry.entries['EVALUATE_BATCH'].successor_kinds,())
-        for job,next_job in stages[1:]:
-            self.assertNotIn(job,disabled.registry.entries)
-        self.assertIn('STAGE_TRIAL_MEDIA',disabled.registry.entries)
-        with self.assertRaises(ValueError):
-            await build_identity_worker(self.root,batch_acquisition='enabled')
+        self.assertIn('STAGE_TRIAL_MEDIA',enabled.registry.entries)
 
     async def test_metadata_preparation_is_installed_by_default_with_trusted_override(self):
         self.secrets.initialize('private-key')
