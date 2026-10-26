@@ -96,9 +96,6 @@ def parser():
             command.add_argument('--database',required=True,help='New SQLite file on local storage.')
             command.add_argument('--settings-file',help='JSON settings object without credentials.')
         if name=='check':command.add_argument('--worker',action='store_true')
-        if name=='worker':
-            command.add_argument('--no-batch-acquisition',action='store_true',
-                                 help='Disable automatic batch reservation and downloading; retain batch verification and planning.')
         if name=='config-upgrade':command.add_argument('--fingerprint',required=True)
         if name=='database-upgrade':command.add_argument('--plan-token',required=True)
         if name in ('config-upgrade','database-upgrade'):
@@ -128,8 +125,7 @@ def main(argv=None):
         else:
             check_local(args.config_dir,worker=True)
             from src.nextgen.providers.configuration import run_identity_worker
-            asyncio.run(run_identity_worker(
-                args.config_dir,batch_acquisition=not args.no_batch_acquisition))
+            asyncio.run(run_identity_worker(args.config_dir))
             return 0
         print(json.dumps(output,sort_keys=True))
         return 0
