@@ -82,8 +82,9 @@ class ProviderBatchTests(unittest.TestCase):
     def test_missing_tvdb_and_non_unique_anidb_mapping_block(self):
         client=FakeClient()
         client.records=()
-        with self.assertRaisesRegex(ReleaseNotReady,'RELEASE_TVDB_EPISODE_MISSING'):
+        with self.assertRaises(ReleaseNotReady) as caught:
             self.check(inventory('Show/Show S01E01.mkv'),client)
+        self.assertEqual(caught.exception.reason_code,'RELEASE_TVDB_EPISODE_MISSING')
         client=FakeClient()
         client.catalog[13]=1013
         client.records += ((2013,1,13),)
