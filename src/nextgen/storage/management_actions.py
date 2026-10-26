@@ -57,8 +57,15 @@ def receipt(db,job_id,*,reused=False):
         data['optional_shoko']=shoko_status(db,job_id)
         data['execution_available']=True
         data['availability_reason']=None
-        data['completion']=(CATALOG.reason('KEEP_COMPLETE') if db.execute(
-            "SELECT 1 FROM keep_imports WHERE job_id=? AND phase='COMPLETE'",(job_id,)).fetchone() else None)
+        kept_single=db.execute(
+            "SELECT 1 FROM keep_imports WHERE job_id=? AND phase='COMPLETE'",
+            (job_id,)).fetchone() is not None
+        kept_batch=db.execute(
+            "SELECT count(*),sum(CASE WHEN phase='COMPLETE' THEN 1 ELSE 0 END) "
+            "FROM batch_keep_imports WHERE job_id=?",(job_id,)).fetchone()
+        data['completion']=(CATALOG.reason('KEEP_COMPLETE') if (
+            kept_single or (kept_batch[0]>0 and kept_batch[0]==kept_batch[1]))
+            else None)
     from src.nextgen.decision_download_cleanup import status as download_status
     data['download_cleanup']=download_status(db,job_id)
     return data
@@ -127,12 +134,17 @@ class ManagementActions:
                 from src.nextgen.storage.review_decisions import staged
                 from src.nextgen.staging import StagingReview
                 if action=='reject':
-                    try:anime=staged(db,op[0])[0]
-                    except StagingReview:raise ActionUnavailable() from None
+                    try:
+                        anime=staged(db,op[0])[0]
+                    except StagingReview:
+                        from src.nextgen.storage.batch_decisions import batch_staged
+                        try:anime=batch_staged(db,op[0])[0][0]
+                        except StagingReview:raise ActionUnavailable() from None
                     if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone():raise ActionUnavailable()
                     if db.execute('SELECT 1 FROM anime_review_decisions WHERE anidb_id=?',(anime,)).fetchone():raise ActionUnavailable()
                 else:
                     if db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
+                    if db.execute('SELECT 1 FROM anime_review_decisions d JOIN batch_episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
             else:
                 if action=='cancel':
                     try:_,audits=self.cancellations.request_in_transaction(db,job_id)
@@ -190,7 +202,8 @@ class ManagementActions:
                         "ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,j.job_id LIMIT 1",
                         (op[0],)).fetchone()
         result={}
-        rejected=db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None
+        rejected=(db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None or
+                  db.execute('SELECT 1 FROM anime_review_decisions d JOIN batch_episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None)
         keep_exists=db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone() is not None
         from src.nextgen.storage.reservation_release import active
         release_pending=op[1]=='CANCELED' and op[2]=='COMPLETE' and active(db,op[0])
