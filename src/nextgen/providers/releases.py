@@ -18,7 +18,7 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
     def verify(source,configuration,cancelled):
         if cancelled.is_set(): raise ReleaseNotReady()
         try: title=delivery_title(source)
-        except ValueError: raise ReleaseNotReady() from None
+        except ValueError: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR") from None
         origin,season,number=declared_episode(title)
         # Exact previously verified episode placement is reusable. There is no
         # release approval here: the normal trial, reservation, and acquisition
@@ -40,11 +40,13 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
         catalog=client.episodes(source.anidb_id)
         mappings=forward_mappings(client.mapping_xml(),source.anidb_id,source.tvdb_series_id,catalog)
         if origin=="anidb":
-            if number not in catalog or number not in mappings: raise ReleaseNotReady()
+            if number not in catalog: raise ReleaseNotReady("RELEASE_ANIDB_EPISODE_MISSING")
+            if number not in mappings: raise ReleaseNotReady("RELEASE_EPISODE_MAPPING_MISSING")
             target=mappings[number]
         else:
             candidates=[n for n,target in mappings.items() if target==(season,number)]
-            if len(candidates)!=1: raise ReleaseNotReady()
+            if not candidates: raise ReleaseNotReady("RELEASE_EPISODE_MAPPING_MISSING")
+            if len(candidates)!=1: raise ReleaseNotReady("RELEASE_EPISODE_MAPPING_AMBIGUOUS")
             number=candidates[0]
             target=mappings[number]
         # Detect merged mappings even in the forward case. A single declared
@@ -64,7 +66,7 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
                 if (record_season,record_number)==target: matches.append(eid)
             if not has_next: break
         else: raise ProviderInvalidResponse()
-        if not matches: raise ReleaseNotReady()
+        if not matches: raise ReleaseNotReady("RELEASE_TVDB_EPISODE_MISSING")
         if len(matches)!=1: raise ReleaseConflict()
         if cancelled.is_set(): raise ReleaseNotReady()
         return VerifiedRelease(source,number,catalog[number],target[0],target[1],matches[0])

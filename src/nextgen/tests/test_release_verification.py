@@ -23,6 +23,10 @@ MAPPING=b'<anime-list><anime anidbid="123" tvdbid="456" defaulttvdbseason="2" ep
 
 
 class ReleaseMappingTests(unittest.TestCase):
+    def test_reported_psyren_title_is_a_clear_single_episode(self):
+        title='[ToonsHub] PSYREN S01E02 1080p CR WEB-DL DUAL AAC2.0 H.264 (PSYЯEN, Dual-Audio, Multi-Subs)'
+        self.assertEqual(declared_episode(title),('tvdb',1,2))
+
     def test_single_declarations_do_not_apply_legacy_trial_window_or_season_one_rule(self):
         self.assertEqual(declared_episode('[Group] Test - 12 [1080p]'),('anidb',None,12))
         self.assertEqual(declared_episode('Test S02E13'),('tvdb',2,13))
@@ -43,6 +47,25 @@ class ReleaseMappingTests(unittest.TestCase):
 
 
 class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
+    async def test_specific_episode_blockers_are_preserved(self):
+        cases=(
+            ('RELEASE_ANIDB_EPISODE_MISSING',b'{"release_name":"Test - 99"}',MAPPING,((100,2,13),)),
+            ('RELEASE_EPISODE_MAPPING_MISSING',self.source.raw_body,MAPPING.replace(b' episodeoffset="12"',b''),((100,2,13),)),
+            ('RELEASE_MAPPING_MISSING',self.source.raw_body,b'<anime-list/>',((100,2,13),)),
+            ('RELEASE_TVDB_EPISODE_MISSING',self.source.raw_body,MAPPING,((100,2,14),)),
+            ('RELEASE_TYPE_UNSUPPORTED',b'{"release_name":"Test Batch"}',MAPPING,((100,2,13),)),
+            ('RELEASE_TITLE_UNCLEAR',b'{"release_name":"Test"}',MAPPING,((100,2,13),)),
+            ('RELEASE_MAPPING_UNSUPPORTED',self.source.raw_body,b'<anime-list><anime anidbid="123" tvdbid="456"><mapping-list><mapping anidbseason="1" tvdbseason="a"/></mapping-list></anime></anime-list>',((100,2,13),)),
+            ('RELEASE_EPISODE_MAPPING_AMBIGUOUS',self.source.raw_body,b'<anime-list><anime anidbid="123" tvdbid="456"><mapping-list><mapping anidbseason="1" tvdbseason="2">1-13;2-13;</mapping></mapping-list></anime></anime-list>',((100,2,13),)),
+        )
+        for code,body,mapping,records in cases:
+            with self.subTest(code=code):
+                self.client.mapping_xml=lambda:mapping
+                self.client.episode_page=lambda *args:(records,False)
+                with self.assertRaises(ReleaseNotReady) as caught:
+                    await self.verify(replace(self.source,raw_body=body),self.configuration,self.cancelled)
+                self.assertEqual(caught.exception.reason_code,code)
+
     async def asyncSetUp(self):
         self.source=ReleaseInput(1,1,123,456,b'{"release_name":"Test S02E13"}')
         self.cancelled=threading.Event()
@@ -163,6 +186,13 @@ class ReleaseJobTests(unittest.IsolatedAsyncioTestCase):
         async def verify(*args):raise ReleaseNotReady()
         await self.worker(verify).attempt()
         self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs'),[('NEEDS_REVIEW','RELEASE_UNRESOLVED')])
+
+    async def test_specific_episode_reason_reaches_job_and_history_without_acquisition(self):
+        async def verify(*args):raise ReleaseNotReady('RELEASE_EPISODE_MAPPING_MISSING')
+        await self.worker(verify).attempt()
+        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs'),[('NEEDS_REVIEW','RELEASE_EPISODE_MAPPING_MISSING')])
+        self.assertTrue(self.rows("SELECT 1 FROM job_history WHERE reason_code='RELEASE_EPISODE_MAPPING_MISSING'"))
+        self.assertEqual(self.rows('SELECT count(*) FROM release_verifications'),[(0,)])
 
 
     async def test_provider_wait_defers_without_persisting_release_or_spending_retry_budget(self):

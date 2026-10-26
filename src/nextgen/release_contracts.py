@@ -7,8 +7,13 @@ from src.nextgen.history import integer
 
 class ReleaseNotReady(ValueError):
     reason_code = "RELEASE_UNRESOLVED"
-    def __init__(self):
-        super().__init__("The release's episode coverage needs review.")
+    def __init__(self, reason_code="RELEASE_UNRESOLVED"):
+        from src.nextgen.reasons import get_reason
+        reason=get_reason(reason_code)
+        if reason is None or not reason_code.startswith('RELEASE_'):
+            raise ValueError('registered release reason required')
+        self.reason_code=reason_code
+        super().__init__(reason.message)
 
 
 class ReleaseConflict(ValueError):

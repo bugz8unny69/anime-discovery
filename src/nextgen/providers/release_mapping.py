@@ -10,29 +10,29 @@ from src.nextgen.release_contracts import ReleaseNotReady, ReleaseConflict
 
 
 def declared_episode(title):
-    if type(title) is not str or not 1<=len(title)<=2048: raise ReleaseNotReady()
+    if type(title) is not str or not 1<=len(title)<=2048: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     if re.search(r"\b(?:batch|complete|pack|ova|oav|ona|specials?|ncop|nced|pv|trailer|movie|recap|extras?)\b",title,re.I):
-        raise ReleaseNotReady()
+        raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
     if re.search(r"\d\s*(?:-|~|&|\+|,)\s*(?:E(?:P)?\s*)?\d",title,re.I):
-        raise ReleaseNotReady()
+        raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
     boundary=r"(?=$|[\s\[\]()_.-]|v[0-9]+\b)"
     explicit_pattern=r"(?<![A-Za-z0-9])S(\d{1,2})[ ._-]*E(\d{1,4})"+boundary
     explicit=list(re.finditer(explicit_pattern,title,re.I))
     rest=re.sub(explicit_pattern," ",title,flags=re.I)
     ordinary=list(re.finditer(r"(?<![A-Za-z0-9])(?:Episode\s*|EP\.?\s*|E\s*|-\s*)(\d{1,4})"+boundary,rest,re.I))
     if re.search(r"(?:\b(?:EP(?:ISODE)?|E)\s*-|--|-[ \t]+-)\s*[0-9]",title,re.I):
-        raise ReleaseNotReady()
+        raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     if re.search(r"(?:EP(?:ISODE)?|E)\s*[0-9]{1,4}(?:EP(?:ISODE)?|E)\s*[0-9]",title,re.I) or re.search(r"(?:Episode\s*|EP\.?\s*|E\s*|-\s*)[0-9]+\.[0-9]",title,re.I):
-        raise ReleaseNotReady()
-    if len(explicit)+len(ordinary)!=1: raise ReleaseNotReady()
+        raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
+    if len(explicit)+len(ordinary)!=1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     if explicit:
         season,number = map(int,explicit[0].groups())
-        if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady()
-        if number<1: raise ReleaseNotReady()
+        if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
+        if number<1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
         return "tvdb",season,number
-    if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady()
+    if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     number=int(ordinary[0].group(1))
-    if number<1: raise ReleaseNotReady()
+    if number<1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     return "anidb",None,number
 
 
@@ -44,20 +44,20 @@ def forward_mappings(payload, aid, tid, catalog):
     """
     root=xml(payload,"anime-list",limit=16777216)
     rows=[node for node in root.findall("anime") if node.get("anidbid")==str(aid)]
-    if len(rows)!=1: raise ReleaseNotReady()
+    if len(rows)!=1: raise ReleaseNotReady("RELEASE_MAPPING_MISSING")
     node=rows[0]
     if node.get("tvdbid")!=str(tid): raise ReleaseConflict()
     rules=[]
     for item in node.findall("mapping-list/mapping"):
         if item.get("anidbseason")!="1": continue
         season=item.get("tvdbseason","")
-        if not re.fullmatch(r"[0-9]{1,3}",season): raise ReleaseNotReady()
+        if not re.fullmatch(r"[0-9]{1,3}",season): raise ReleaseNotReady("RELEASE_MAPPING_UNSUPPORTED")
         target_season=int(season)
         text=(item.text or "").strip()
         for token in text.strip(";").split(";") if text else ():
             if not token: continue
             match=re.fullmatch(r"([1-9][0-9]{0,3})-([1-9][0-9]{0,3})",token.strip())
-            if not match: raise ReleaseNotReady()
+            if not match: raise ReleaseNotReady("RELEASE_MAPPING_UNSUPPORTED")
             source,target=map(int,match.groups())
             rules.append((2,source,source,target_season,target-source))
         start,end=item.get("start"),item.get("end")
@@ -65,7 +65,7 @@ def forward_mappings(payload, aid, tid, catalog):
             offset=item.get("offset")
             if (not re.fullmatch(r"[1-9][0-9]{0,3}",start or "") or not re.fullmatch(r"[1-9][0-9]{0,3}",end or "")
                     or not re.fullmatch(r"-?[0-9]{1,5}",offset or "") or int(start)>int(end)):
-                raise ReleaseNotReady()
+                raise ReleaseNotReady("RELEASE_MAPPING_UNSUPPORTED")
             rules.append((1,int(start),int(end),target_season,int(offset)))
     default_season,default_offset=node.get("defaulttvdbseason"),node.get("episodeoffset")
     default=None

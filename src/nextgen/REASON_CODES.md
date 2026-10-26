@@ -197,8 +197,19 @@ shared translation-ready catalog. Credential publication results expose only
 presence/revision and durability; secret values never become diagnostic details.
 
 
-RELEASE_UNRESOLVED says "The release's episode coverage needs review." and asks
-for the declared episode and exact release-file evidence to be reviewed.
+RELEASE_UNRESOLVED is retained for older history and unclassified failures. Its
+plain-language message explains that episode verification stopped and the saved
+reason does not identify the failed check. Rerunning verification records the
+specific current blocker; old history cannot reconstruct a discarded cause.
+
+New episode checks distinguish RELEASE_TITLE_UNCLEAR, RELEASE_TYPE_UNSUPPORTED,
+RELEASE_MAPPING_MISSING, RELEASE_MAPPING_UNSUPPORTED,
+RELEASE_ANIDB_EPISODE_MISSING, RELEASE_EPISODE_MAPPING_MISSING,
+RELEASE_EPISODE_MAPPING_AMBIGUOUS and RELEASE_TVDB_EPISODE_MISSING. Their messages
+identify the failing source and their actions explain what to check before
+retrying. These remain review outcomes: anime identity alone does not authorize
+an episode download. Exact cached episode proofs and successful mappings retain
+their existing behavior.
 RELEASE_CONFLICT says "Release episode information conflicts." and asks for the
 identifiers/mapping evidence to be checked. Both have static messages/actions and
 translation keys through the shared catalog. Neither a provider title nor raw
