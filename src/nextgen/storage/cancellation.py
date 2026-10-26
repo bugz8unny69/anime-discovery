@@ -33,9 +33,12 @@ def can_cancel_operation(db,op):
                        'WHERE m.operation_id=? AND j.state IN ('+','.join('?' for _ in states)+') LIMIT 1',
                        (op[0],*states)).fetchone()
     if waiting or unfinished_resources(db,op[0]):return True
-    return db.execute('SELECT 1 FROM episode_reservations r JOIN job_operation_members m '
+    return (db.execute('SELECT 1 FROM episode_reservations r JOIN job_operation_members m '
                       'ON m.job_id=r.owner_job_id WHERE m.operation_id=? LIMIT 1',
-                      (op[0],)).fetchone() is not None
+                      (op[0],)).fetchone() is not None or
+            db.execute('SELECT 1 FROM batch_episode_reservations r JOIN job_operation_members m '
+                       'ON m.job_id=r.owner_job_id WHERE m.operation_id=? LIMIT 1',
+                       (op[0],)).fetchone() is not None)
 
 
 def cancel_job(db,job_id,now,component='worker'):
@@ -53,13 +56,24 @@ def mark_staged(db,claim):
     Call only after verified durable publication; not a public management action.
     Partial staging/refresh failures must not call this. No file proof is invented.
     """
-    if not db.in_transaction or claim.kind!='STAGE_TRIAL_MEDIA':raise CancellationError()
+    if not db.in_transaction or claim.kind not in ('STAGE_TRIAL_MEDIA','STAGE_BATCH_EPISODE'):raise CancellationError()
     row=db.execute('SELECT state,lease_token,attempt_count,lease_expires_at_ms FROM jobs WHERE job_id=?',(claim.job_id,)).fetchone()
     import time
     now=time.time_ns()//1000000
     if row is None or row[:3]!=('RUNNING',claim.token,claim.attempt) or row[3]<=now:raise CancellationError()
     op=operation(db,claim.job_id)
     if op[1]!='ACTIVE':raise CancellationError()
+    if claim.kind=='STAGE_BATCH_EPISODE':
+        plan=db.execute(
+            'SELECT plan_id FROM batch_staging_publications WHERE job_id=?',
+            (claim.job_id,)).fetchone()
+        if plan is None:raise CancellationError()
+        selected=db.execute(
+            'SELECT count(*) FROM batch_trial_files WHERE plan_id=?',plan).fetchone()[0]
+        published=db.execute(
+            "SELECT count(*) FROM batch_staging_publications "
+            "WHERE plan_id=? AND state='PUBLISHED'",plan).fetchone()[0]
+        if selected<1 or selected!=published:raise CancellationError()
     phases=db.execute('SELECT phase FROM staging_cleanup_artifacts WHERE operation_id=?',(op[0],)).fetchall()
     if not phases or any(p[0]!='PUBLISHED' for p in phases):raise CancellationError()
     if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=? AND j.job_id<>? AND j.state<>'DONE' LIMIT 1",
