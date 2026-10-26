@@ -218,6 +218,13 @@ class BatchSubmissionJournal:
                  inventory.info_hash,inventory.info_sha256,marker,target.base_url,
                  target.download_root,target.category,target.timeout_seconds,api_major,
                  fingerprint,revision,state,reason,now,now))
+            raw_inventory=inventory.json()
+            if len(raw_inventory.encode('utf-8'))>1048576:
+                raise AcquisitionConflict()
+            db.execute(
+                'INSERT INTO batch_submission_inventories(plan_id,inventory_json,created_at_ms) '
+                'VALUES(?,?,?)',
+                (candidate.plan_id,raw_inventory,now))
             receipt=append_job_history(
                 db,job_id=claim.job_id,event_code='TORRENT_INTENT_RECORDED',
                 reason_code=reason,component='worker',occurred_at_ms=now,
