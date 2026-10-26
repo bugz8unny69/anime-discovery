@@ -35,7 +35,7 @@ DEFINITION=HandlerDefinition(KIND,'Unlock JP+EN-approved trial episodes')
 
 def _persist(db,claim,value):
     try:
-        if (type(value) is not dict or set(value)!={'verification_job_id','unlock_job_id'}
+        if (type(value) is not dict or set(value)!={'verification_job_id','unlock_job_id','file_indices'}
                 or value['unlock_job_id']!=claim.job_id):
             raise TransferConflict()
         verification=integer(value['verification_job_id'],positive=True)
@@ -44,6 +44,14 @@ def _persist(db,claim,value):
             "JOIN batch_probe_media m USING(plan_id) "
             "WHERE m.verification_job_id=?",(verification,)).fetchone()
         if row!=('COMPLETE',claim.job_id):raise TransferConflict()
+        rows=db.execute(
+            'SELECT t.file_index FROM batch_torrent_unlocks u '
+            'JOIN batch_trial_files t USING(plan_id) '
+            'JOIN batch_probe_media m USING(plan_id) '
+            'WHERE m.verification_job_id=? ORDER BY t.file_index',
+            (verification,)).fetchall()
+        if not 1<=len(rows)<=32 or value['file_indices']!=tuple(r[0] for r in rows):
+            raise TransferConflict()
     except (ValueError,TypeError,TransferConflict):
         raise CompletionRejected(Outcome('review','TORRENT_TRANSFER_CONFLICT')) from None
 
@@ -155,7 +163,8 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             log(receipts)
             if record.phase=='COMPLETE':
                 return Outcome(value={'verification_job_id':verification,
-                                      'unlock_job_id':context.claim.job_id})
+                                      'unlock_job_id':context.claim.job_id,
+                                      'file_indices':tuple(sorted(i for _,i in intent.candidate.planned_episodes))})
             if record.phase=='REVIEW':
                 return Outcome('review',record.reason_code)
             return wait('TORRENT_DOWNLOAD_IN_PROGRESS' if record.phase=='ACTIVE'
@@ -177,7 +186,9 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             return Outcome('review',exc.reason_code)
 
     def route(value):
-        return () if next_kind is None else (
-            Successor.create(next_kind,{'unlock_job_id':value['unlock_job_id']}),)
+        return () if next_kind is None else tuple(
+            Successor.create(next_kind,{
+                'unlock_job_id':value['unlock_job_id'],'file_index':index})
+            for index in value['file_indices'])
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
                         successor_kinds=() if next_kind is None else (next_kind,))
