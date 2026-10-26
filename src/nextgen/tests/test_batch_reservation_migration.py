@@ -25,7 +25,11 @@ class BatchReservationMigrationTests(unittest.TestCase):
         fresh.execute('PRAGMA foreign_keys=ON')
         fresh.executescript(SCHEMA)
         self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone(),(29,))
-        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(29,))
+        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(30,))
+        self.assertEqual(migrations._structure(upgraded),
+                         migrations._reference(29,migrations._scripts()))
+        upgraded.executescript(
+            (migrations.SQL_DIR/'030_batch_torrent_submissions.sql').read_text())
         self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))
         self.assertEqual(upgraded.execute('PRAGMA foreign_key_check').fetchall(),[])
 
