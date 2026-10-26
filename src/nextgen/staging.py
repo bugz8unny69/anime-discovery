@@ -245,7 +245,7 @@ class Publisher:
                     continue
                 if artifact is not None and artifact['phase'] not in ('TEMP','PUBLISH_UNCERTAIN'):raise StagingReview()
                 moved=False
-                if entry['role']=='media' and artifact is None:
+                if entry['role']=='media' and artifact is None and plan.get('transfer','MOVE')=='MOVE':
                     stack,source=self._source(plan)
                     with stack:
                         source_info=signature(os.fstat(source))
@@ -262,7 +262,8 @@ class Publisher:
                     except BaseException:os.close(fd);raise
                 else:
                     if artifact['root']!=folder_sig:raise StagingReview()
-                    same_source=entry['role']=='media' and artifact['file']==plan['source']['file'][:2]
+                    same_source=(plan.get('transfer','MOVE')=='MOVE' and entry['role']=='media'
+                                 and artifact['file']==plan['source']['file'][:2])
                     try:fd=open_regular(folder,entry['temporary'],os.O_RDONLY if same_source else os.O_RDWR)
                     except FileNotFoundError:
                         if not same_source or artifact['phase']!='TEMP':raise StagingReview()
@@ -308,5 +309,8 @@ class Publisher:
                         digest,info=self._check(entry,fd)
                         if digest!=receipt['sha256'] or list(info)!=receipt['file']:raise StagingReview()
                     finally:os.close(fd)
-        self._remove_source(plan)
+        if plan.get('transfer','MOVE')=='MOVE':
+            self._remove_source(plan)
+        elif plan.get('transfer')!='COPY':
+            raise StagingReview()
         return receipts
