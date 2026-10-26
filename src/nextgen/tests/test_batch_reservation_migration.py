@@ -30,8 +30,9 @@ class BatchReservationMigrationTests(unittest.TestCase):
                          migrations._reference(29,migrations._scripts()))
         upgraded.executescript(
             (migrations.SQL_DIR/'030_batch_torrent_submissions.sql').read_text())
-        upgraded.executescript(
-            (migrations.SQL_DIR/'031_batch_torrent_transfers.sql').read_text())
+        for number in (31,32,33):
+            name=migrations.SCRIPTS[number-1]
+            upgraded.executescript((migrations.SQL_DIR/name).read_text())
         self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))
         self.assertEqual(upgraded.execute('PRAGMA foreign_key_check').fetchall(),[])
 
