@@ -3,7 +3,7 @@ import sqlite3
 import unittest
 
 from src.nextgen.storage import migrations
-from src.nextgen.storage.sqlite import SCHEMA
+from src.nextgen.storage.sqlite import initialize
 
 
 class BatchReservationMigrationTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class BatchReservationMigrationTests(unittest.TestCase):
         fresh=sqlite3.connect(':memory:')
         self.addCleanup(fresh.close)
         fresh.execute('PRAGMA foreign_keys=ON')
-        fresh.executescript(SCHEMA)
+        initialize(fresh)
         self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone(),(29,))
         self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(33,))
         self.assertEqual(migrations._structure(upgraded),
