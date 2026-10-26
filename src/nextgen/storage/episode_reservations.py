@@ -67,6 +67,14 @@ def persist_reservation(db,claim,value):
         return append_job_history(db,job_id=claim.job_id,event_code='EPISODE_RESERVATION_SKIPPED',
             reason_code='TRIAL_OUTSIDE_WINDOW',component='worker',occurred_at_ms=now,details={'attempt':claim.attempt})
     key=(value.tvdb_series_id,value.tvdb_season,value.tvdb_episode)
+    # Check the batch namespace in this same fenced SQLite transaction,
+    # before the existing single-episode reservation is inserted.
+    if db.execute(
+        "SELECT 1 FROM batch_episode_reservations WHERE state='ACTIVE' AND "
+        "(anidb_episode_id=? OR tvdb_episode_id=? OR "
+        "(tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=?)) LIMIT 1",
+        (value.anidb_episode_id,value.tvdb_episode_id,*key)).fetchone():
+        raise EpisodeReserved()
     rows=db.execute("SELECT owner_job_id,evaluation_job_id,anidb_id,anidb_episode_id,"
                     "tvdb_series_id,tvdb_season,tvdb_episode,tvdb_episode_id FROM episode_reservations "
                     "WHERE state='ACTIVE' AND ((tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=? AND tvdb_order='official') "
