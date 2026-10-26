@@ -19,6 +19,9 @@ class BatchSubmissionMigrationTests(unittest.TestCase):
         self.addCleanup(fresh.close)
         fresh.executescript(SCHEMA)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(30,))
+        self.assertEqual(migrations._structure(db),
+                         migrations._reference(30,migrations._scripts()))
+        db.executescript((migrations.SQL_DIR/'031_batch_torrent_transfers.sql').read_text())
         self.assertEqual(migrations._structure(db),migrations._structure(fresh))
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         self.assertEqual(db.execute('PRAGMA integrity_check').fetchall(),[('ok',)])
