@@ -1,5 +1,6 @@
 """Offline additive v27 batch-proof persistence and fenced ownership tests."""
 from pathlib import Path
+import time
 import tempfile
 import unittest
 
@@ -41,7 +42,8 @@ class BatchPersistenceTests(unittest.TestCase):
             def episode_page(self,tid,page,cred): return ((2001,1,1),(2002,1,2)),False
         self.verified=verify_batch_files(self.inventory,client=Client(),
             credentials=Credentials('secret'),anidb_id=123,tvdb_series_id=456,season=1)
-        self.queue=JobQueue(self.database,clock=lambda:1000)
+        self.now=int(time.time()*1000)+1000
+        self.queue=JobQueue(self.database,clock=lambda:self.now)
 
     def count(self,table):
         db=connect(self.database)
@@ -52,7 +54,7 @@ class BatchPersistenceTests(unittest.TestCase):
         claim,_=self.queue.claim()
         source=load_release(self.database,self.event,123)
         with self.queue.connection() as db,transaction(db):
-            batch=persist_batch_verification(db,claim,source,self.inventory,self.verified,now_ms=1001)
+            batch=persist_batch_verification(db,claim,source,self.inventory,self.verified,now_ms=self.now+1)
             self.assertGreater(batch,0)
         self.assertEqual(self.count('batch_verifications'),1)
         self.assertEqual(self.count('batch_verified_files'),2)
@@ -68,10 +70,10 @@ class BatchPersistenceTests(unittest.TestCase):
         source=load_release(self.database,self.event,123)
         with self.queue.connection() as db,transaction(db):
             with self.assertRaises(ReleaseConflict):
-                persist_batch_verification(db,claim,source,self.inventory,self.verified,now_ms=999999)
+                persist_batch_verification(db,claim,source,self.inventory,self.verified,now_ms=self.now+999999)
         self.assertEqual(self.count('batch_verifications'),0)
         changed=replace(self.verified,info_sha256='c'*64)
         with self.queue.connection() as db,transaction(db):
             with self.assertRaises(ReleaseConflict):
-                persist_batch_verification(db,claim,source,self.inventory,changed,now_ms=1001)
+                persist_batch_verification(db,claim,source,self.inventory,changed,now_ms=self.now+1)
         self.assertEqual(self.count('batch_verifications'),0)
