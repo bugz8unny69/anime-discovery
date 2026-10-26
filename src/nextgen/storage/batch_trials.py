@@ -89,4 +89,5 @@ def persist_batch_trial(db,claim,proposal):
                    (plan,item.file_index,item.tvdb_episode,item.size_bytes))
     return append_job_history(
         db,job_id=claim.job_id,event_code='TRIAL_EVALUATED',
-        component='worker',occurred_at_ms=now,details={'attempt':claim.attempt})
+        reason_code='TRIAL_SELECTED',component='worker',
+        occurred_at_ms=now,details={'attempt':claim.attempt})
