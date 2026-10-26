@@ -39,12 +39,12 @@ class BatchOptionalHandlersTests(unittest.TestCase):
         self.assertEqual(routed[0].kind,'SUBMIT_BATCH')
         self.assertEqual(routed[0].payload,'{"reservation_job_id": 789}')
 
-    def test_batch_default_and_explicit_worker_disable_option(self):
+    def test_worker_has_no_temporary_batch_switch(self):
         arguments=parser().parse_args(['worker','--config-dir','/tmp/ad-test'])
-        self.assertFalse(arguments.no_batch_acquisition)
-        arguments=parser().parse_args([
-            'worker','--config-dir','/tmp/ad-test','--no-batch-acquisition'])
-        self.assertTrue(arguments.no_batch_acquisition)
+        self.assertFalse(hasattr(arguments,'no_batch_acquisition'))
+        with self.assertRaises(SystemExit):
+            parser().parse_args([
+                'worker','--config-dir','/tmp/ad-test','--no-batch-acquisition'])
 
     def test_untrusted_sync_metadata_reader_is_rejected(self):
         for build in (
