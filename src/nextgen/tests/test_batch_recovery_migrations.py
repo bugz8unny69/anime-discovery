@@ -16,10 +16,10 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
         return db
 
     def test_upgrades_to_33_have_fresh_schema_parity(self):
-        self.assertEqual(migrations.LATEST_VERSION,33)
+        self.assertEqual(migrations.LATEST_VERSION,36)
         upgraded=self.prefix(30)
         self.addCleanup(upgraded.close)
-        for version in (31,32,33):
+        for version in (31,32,33,34,35,36):
             upgraded.executescript(
                 (migrations.SQL_DIR/migrations.SCRIPTS[version-1]).read_text())
             self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone()[0],version)
@@ -30,7 +30,7 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
         self.addCleanup(fresh.close)
         fresh.execute('PRAGMA foreign_keys=ON')
         initialize(fresh)
-        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(33,))
+        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(36,))
         self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))
 
     def test_each_new_migration_rolls_back_all_new_tables_on_error(self):
