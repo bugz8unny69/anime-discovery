@@ -98,8 +98,9 @@ season packs to the batch verification path.
 
 The VERIFY_RELEASE handler accepts typed batch completion, persists fenced
 v27 per-file facts, and intentionally does not dispatch single-episode
-EVALUATE_TRIAL for a multi-file pack. **Installed worker composition is not
-yet configured to inject the batch verifier.** Tests remain unexecuted here.
+EVALUATE_TRIAL for a multi-file pack. **Default worker composition now injects the batch verifier** while retaining
+the single-episode path. Batch results do not yet trigger downloads.
+Integration tests are committed but not executed here.
 
 plan_stopped_batch_probe is a read-only preflight of owned, stopped qB state:
 exact ordered files, marker, destination, category, policy budgets, and
@@ -113,7 +114,7 @@ matching and staging; response is bounded to the first 100 verified files.
 
 ### Outstanding milestones for end-to-end batch acquisition
 
-- [ ] Install trusted batch reader and verifier into actual worker composition.
+- [x] Install trusted batch reader and verifier into actual worker composition (not yet merged).
 - [ ] Add durable batch trial evaluation and episode reservations/deduplication.
 - [ ] Journal qB stopped submission, selection, start and uncertain sends.
 - [ ] Verify real first-file JP+EN audio before unlocking other files.
