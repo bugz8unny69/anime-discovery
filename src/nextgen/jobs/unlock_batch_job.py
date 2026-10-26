@@ -93,29 +93,34 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             await blocking(client.login)
             snapshot=await blocking(client.inspect_transfer,digest)
             if snapshot is None:return wait('TORRENT_DOWNLOAD_WAITING')
-            # The completed E01 probe is generally still active; stop it
-            # once and reconcile the stopped state before unlocking E02+.
-            phase,stop_permit,stop_fingerprint,receipts=await blocking(
-                journal.stop_probe,context.claim,intent,snapshot,reservation)
-            log(receipts)
-            if stop_permit is not None:
-                if context.cancelled.is_set():
-                    return wait('TORRENT_PROBE_STOP_UNCERTAIN')
-                await blocking(journal.guard_probe_stop,context.claim,intent,
-                               reservation,stop_fingerprint)
-                try:
-                    await blocking(client.stop_completed_probe,intent,
-                                   stop_fingerprint,stop_permit)
-                except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
-                    return wait('TORRENT_PROBE_STOP_UNCERTAIN')
-                snapshot=await blocking(client.inspect_transfer,digest)
-                if snapshot is None:return wait('TORRENT_PROBE_STOP_UNCERTAIN')
-                phase,_,_,receipts=await blocking(
+            # E01-only stopping is necessary only before the first
+            # expanded-selection intent. Once that intent exists, even an
+            # uncertain one, never re-enter the probe-only stop path:
+            # authoritative priorities may already include E02+.
+            if record is None:
+                phase,stop_permit,stop_fingerprint,receipts=await blocking(
                     journal.stop_probe,context.claim,intent,snapshot,reservation)
                 log(receipts)
-            if phase!='STOPPED':
-                return wait('TORRENT_PROBE_STOP_UNCERTAIN')
-            validate_unlock_snapshot(intent,snapshot,stopped=True)
+                if stop_permit is not None:
+                    if context.cancelled.is_set():
+                        return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    await blocking(journal.guard_probe_stop,context.claim,intent,
+                                   reservation,stop_fingerprint)
+                    try:
+                        await blocking(client.stop_completed_probe,intent,
+                                       stop_fingerprint,stop_permit)
+                    except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
+                        return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    snapshot=await blocking(client.inspect_transfer,digest)
+                    if snapshot is None:return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    phase,_,_,receipts=await blocking(
+                        journal.stop_probe,context.claim,intent,snapshot,reservation)
+                    log(receipts)
+                if phase!='STOPPED':
+                    return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                validate_unlock_snapshot(intent,snapshot,stopped=True)
+            else:
+                validate_unlock_snapshot(intent,snapshot)
             if record is None:
                 record,permit,receipts=await blocking(
                     journal.authorize,context.claim,intent,media,snapshot,reservation)
