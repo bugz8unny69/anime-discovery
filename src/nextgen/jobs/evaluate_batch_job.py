@@ -23,8 +23,12 @@ class BatchEvaluationCompletion:
 def _persist(db,claim,value):
     if type(value) is not BatchEvaluationCompletion or value.evaluation_job_id!=claim.job_id:
         raise ValueError('Batch trial completion does not match its job')
+    from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
     try:
+        require_allowed(db,value.proposal.source.anidb_id)
         return (persist_batch_trial(db,claim,value.proposal),)
+    except AnimeRejected as exc:
+        raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except (TrialConflict,SizeLimitExceeded,SizeEvidenceMissing) as exc:
         raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
