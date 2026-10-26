@@ -243,7 +243,7 @@ class Publisher:
                             if artifact['phase']=='PUBLISH_UNCERTAIN':self.journal.confirm(self.claim,artifact['id'])
                         os.fsync(final);os.fsync(folder)
                         receipts.append({'role':entry['role'],'path':entry['path'],'root':folder_sig,
-                            'file':list(info),'sha256':digest,'hash_checked':entry['role']!='media','artifact':None if artifact is None else artifact['id']})
+                            'file':list(info),'sha256':digest,'hash_checked':entry['role']!='media' or self._copy_mode,'artifact':None if artifact is None else artifact['id']})
                     finally:os.close(final)
                     continue
                 if artifact is not None and artifact['phase'] not in ('TEMP','PUBLISH_UNCERTAIN'):raise StagingReview()
@@ -295,7 +295,7 @@ class Publisher:
                     if after[:3]!=before[:3] or after[3]!=before[3]:raise StagingReview()
                     self.journal.confirm(self.claim,artifact['id'])
                     receipts.append({'role':entry['role'],'path':entry['path'],'root':folder_sig,
-                        'file':list(after),'sha256':digest,'hash_checked':entry['role']!='media','artifact':artifact['id']})
+                        'file':list(after),'sha256':digest,'hash_checked':entry['role']!='media' or self._copy_mode,'artifact':artifact['id']})
                 finally:os.close(fd)
         # Revalidate all published files, including those recovered from an old
         # attempt. No source deletion or broad cleanup is part of staging.
