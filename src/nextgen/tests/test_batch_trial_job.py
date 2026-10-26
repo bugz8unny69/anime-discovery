@@ -14,7 +14,12 @@ from src.nextgen.jobs.verify_release_job import registration as release_registra
 from src.nextgen.jobs.evaluate_batch_job import registration as batch_registration
 from src.nextgen.jobs.reserve_batch_job import registration as reserve_batch_registration
 from src.nextgen.providers.http import Credentials
-from src.nextgen.storage.sqlite import connect, initialize, accept_event_and_job, save_identity
+from src.nextgen.storage.sqlite import (connect, initialize, accept_event_and_job,
+    save_identity, transaction, enqueue_job)
+from src.nextgen.storage.job_queue import JobQueue
+from src.nextgen.storage.batch_submission_journal import BatchSubmissionJournal
+from src.nextgen.acquisition.settings import DownloadOptions
+from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.worker import Worker
 
 
@@ -108,6 +113,85 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AcquisitionConflict):
             load_batch_acquisition_candidate(self.database,reserve_job,
                 replace(self.inventory,info_sha256='c'*64))
+
+    async def test_stopped_submission_is_single_use_and_restart_only_reconciles(self):
+        worker=self.worker(reserve=True)
+        for _ in range(3):
+            await worker.attempt()
+        reservation=self.rows("SELECT job_id FROM jobs WHERE kind='RESERVE_BATCH'")[0][0]
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                submission=enqueue_job(
+                    db,kind='SUBMIT_BATCH',payload={'reservation_job_id':reservation},
+                    component='worker',event_id=self.event,created_by_job_id=reservation)
+        finally:
+            db.close()
+        claim,_=JobQueue(self.database).claim()
+        self.assertEqual(claim.job_id,submission)
+        journal=BatchSubmissionJournal(self.database)
+        candidate,previous=journal.load(claim,reservation,self.inventory)
+        self.assertIsNone(previous)
+        options=DownloadOptions('http://localhost:8080','/tmp/nextgen','trial',10)
+        intent,permit,_=journal.authorize(
+            claim,candidate,self.inventory,options,5,False,1)
+        self.assertIsNotNone(permit)
+        self.assertEqual(intent.state,'UNCERTAIN')
+        self.assertEqual(journal.load(claim,reservation,self.inventory)[1],intent)
+        old,again,_=journal.authorize(
+            claim,candidate,self.inventory,options,5,False,1)
+        self.assertEqual(old,intent)
+        self.assertIsNone(again)
+        journal.guard_send(claim,intent)
+        permit.take(intent)
+        with self.assertRaises(ClientInvalid):
+            permit.take(intent)
+        # A restart has only the durable intent, never another send permit.
+        reopened=BatchSubmissionJournal(self.database)
+        observed,after,_=reopened.authorize(
+            claim,candidate,self.inventory,options,5,False,1)
+        self.assertEqual(observed,intent)
+        self.assertIsNone(after)
+        bad=Observation(intent.inventory.info_hash,'stoppedDL',
+                        intent.options.download_root,intent.options.category,
+                        ('ad-'+('f'*32),),False,intent.inventory.files)
+        state,reason,_=reopened.observe(claim,intent,bad)
+        self.assertEqual((state,reason),('REVIEW','TORRENT_PROVENANCE_CONFLICT'))
+        self.assertEqual(self.rows(
+            "SELECT state FROM batch_torrent_submissions"),[('REVIEW',)])
+        self.assertEqual(self.rows("SELECT count(*) FROM torrent_submissions"),[(0,)])
+
+    async def test_submission_uncertain_can_confirm_exact_stopped_inventory(self):
+        worker=self.worker(reserve=True)
+        for _ in range(3):
+            await worker.attempt()
+        reservation=self.rows("SELECT job_id FROM jobs WHERE kind='RESERVE_BATCH'")[0][0]
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                enqueue_job(db,kind='SUBMIT_BATCH',
+                    payload={'reservation_job_id':reservation},
+                    component='worker',event_id=self.event,created_by_job_id=reservation)
+        finally:
+            db.close()
+        claim,_=JobQueue(self.database).claim()
+        journal=BatchSubmissionJournal(self.database)
+        candidate,_=journal.load(claim,reservation,self.inventory)
+        options=DownloadOptions('http://localhost:8080','/tmp/nextgen','trial',10)
+        intent,permit,_=journal.authorize(claim,candidate,self.inventory,
+                                           options,5,False,1)
+        self.assertIsNotNone(permit)
+        exact=Observation(intent.inventory.info_hash,'stoppedDL',
+                         intent.options.download_root,intent.options.category,
+                         ('ad-'+intent.marker,),False,intent.inventory.files)
+        state,reason,_=journal.observe(claim,intent,exact)
+        self.assertEqual((state,reason),('OWNED_STOPPED','TORRENT_STOPPED_CONFIRMED'))
+        self.assertEqual(self.rows(
+            "SELECT state FROM batch_torrent_submissions"),[('OWNED_STOPPED',)])
+        prior,never,_=journal.authorize(claim,candidate,self.inventory,
+                                        options,5,False,1)
+        self.assertEqual(prior.state,'OWNED_STOPPED')
+        self.assertIsNone(never)
 
     async def test_two_competing_packs_cannot_claim_same_episodes(self):
         db=connect(self.database)
