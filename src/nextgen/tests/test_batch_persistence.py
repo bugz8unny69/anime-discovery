@@ -28,7 +28,7 @@ class BatchPersistenceTests(unittest.TestCase):
             TorrentFile(2,'Shiki/OVA/Shiki OVA 01.mkv',50)))
         db=connect(self.database)
         initialize(db)
-        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(29,))
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(30,))
         self.event,self.job=accept_event_and_job(
             db,'test',('{"release_name":"Shiki S01 + OVA","torrent_infohash":"%s"}' %
                        self.info_hash).encode(),kind='VERIFY_RELEASE',payload={'anidb_id':123})
