@@ -89,6 +89,11 @@ def _episode(path, season):
     return number
 
 
+def file_episode_number(path, season):
+    """Expose the strict filename parser for independent provider validation."""
+    return _episode(path, season)
+
+
 def plan_verified_batch(inventory, *, season, episode_map, start_episode=1):
     """Prepare a no-side-effect, E01-first plan from an authoritative episode map.
 
