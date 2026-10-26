@@ -44,11 +44,15 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome("review",getattr(exc,'reason_code','RELEASE_CONFLICT'))) from None
 
 
-def registration(verify, *, trial_kind=None):
+def registration(verify, *, trial_kind=None, batch_kind=None):
     if not inspect.iscoroutinefunction(verify): raise ValueError("async release verifier required")
     if trial_kind is not None and (type(trial_kind) is not str or not trial_kind.strip()
                                    or len(trial_kind)>64 or trial_kind==KIND):
         raise ValueError("invalid trial evaluation successor")
+
+    if batch_kind is not None and (type(batch_kind) is not str or not batch_kind.strip()
+                                   or len(batch_kind)>64 or batch_kind in (KIND,trial_kind)):
+        raise ValueError('invalid batch trial successor')
 
     async def execute(context):
         payload=context.data()
@@ -74,12 +78,13 @@ def registration(verify, *, trial_kind=None):
 
     def route(value):
         if type(value) is not ReleaseCompletion:raise ValueError("typed release completion required")
-        # Batch verification is evidence only until the multi-episode trial
-        # and reservation handlers are installed. Do not dispatch the legacy
-        # single-episode EVALUATE_TRIAL with multi-video facts.
-        return () if trial_kind is None or type(value.verified) is BatchVerificationCompletion else (
-            Successor.create(trial_kind,{'verification_job_id':value.verification_job_id}),)
+        if type(value.verified) is BatchVerificationCompletion:
+            return () if batch_kind is None else (Successor.create(batch_kind,
+                {'verification_job_id':value.verification_job_id}),)
+        return () if trial_kind is None else (Successor.create(trial_kind,
+            {'verification_job_id':value.verification_job_id}),)
 
-    # Acquisition remains gated separately; only trial evaluation can follow.
+    # Batch trial is a read-only plan; no acquisition job succeeds it.
+    successor_kinds=tuple(k for k in (trial_kind,batch_kind) if k is not None)
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
-                        successor_kinds=() if trial_kind is None else (trial_kind,))
+                        successor_kinds=successor_kinds)

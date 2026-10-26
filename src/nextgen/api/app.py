@@ -334,17 +334,28 @@ class Application:
                     proof=db.execute("SELECT batch_id,tvdb_season,info_hash FROM batch_verifications "
                                      "WHERE job_id=?",(job,)).fetchone()
                     if proof is not None:
+                        plan=db.execute('SELECT plan_id,planned_size_bytes FROM batch_trial_plans '
+                                        'WHERE batch_id=?',(proof[0],)).fetchone()
+                        planned_count=0 if plan is None else db.execute(
+                            'SELECT count(*) FROM batch_trial_files WHERE plan_id=?',
+                            (plan[0],)).fetchone()[0]
                         total=db.execute("SELECT count(*) FROM batch_verified_files WHERE batch_id=?",
                                          (proof[0],)).fetchone()[0]
-                        rows=db.execute("SELECT file_index,file_path,anidb_episode_number,"
-                                        "tvdb_episode,file_size_bytes FROM batch_verified_files "
-                                        "WHERE batch_id=? ORDER BY tvdb_episode,file_index LIMIT 100",
-                                        (proof[0],)).fetchall()
+                        rows=db.execute("SELECT f.file_index,f.file_path,f.anidb_episode_number,"
+                                        "f.tvdb_episode,f.file_size_bytes,"
+                                        "CASE WHEN p.file_index IS NOT NULL THEN 1 ELSE 0 END "
+                                        "FROM batch_verified_files f LEFT JOIN batch_trial_files p "
+                                        "ON p.plan_id=? AND p.file_index=f.file_index "
+                                        "WHERE f.batch_id=? ORDER BY f.tvdb_episode,f.file_index LIMIT 100",
+                                        (None if plan is None else plan[0],proof[0])).fetchall()
                         evidence={'kind':'batch','tvdb_season':proof[1],'episode_count':total,
+                                  'trial_plan_ready':plan is not None,
+                                  'planned_episode_count':planned_count,
+                                  'planned_size_bytes':None if plan is None else plan[1],
                                   'truncated':total>len(rows),'episodes':[
                             {'file_index':item[0],'path':item[1],
                              'anidb_episode':item[2],'tvdb_episode':item[3],
-                             'size_bytes':item[4]} for item in rows]}
+                             'size_bytes':item[4],'planned':bool(item[5])} for item in rows]}
                     else:
                         single=db.execute("SELECT tvdb_season,tvdb_episode,anidb_episode_number "
                                           "FROM release_verifications WHERE job_id=?",(job,)).fetchone()

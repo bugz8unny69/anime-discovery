@@ -126,3 +126,194 @@ matching and staging; response is bounded to the first 100 verified files.
 **Testing note:** The seven locally available pre-existing batch-planner
 unit tests passed. New integration tests are committed but not run, and
 no GitHub CI was manually run or inspected per the user's request.
+
+
+## Follow-up PR #152 — durable batch trial selection (unmerged)
+
+- [x] Add the EVALUATE_BATCH job for completed provider-backed season packs.
+- [x] Reject packs with no independently verified TVDB E01 anchor.
+- [x] Apply the installed backfill/following window and per-file/total budgets.
+- [x] Add v28 additive tables recording immutable planned file indices,
+      canonical episodes and sizes, under a fenced worker transaction.
+- [x] Make a verified batch dispatch EVALUATE_BATCH instead of the single
+      episode EVALUATE_TRIAL, and add the handler to default worker composition.
+- [x] Extend Episode coverage with a separate planned/not-planned state.
+- [x] Add focused v28 worker tests: complete Shiki pack, missing E01, and
+      explicit absence of torrent or staging side effects.
+
+### Still BLOCKING a functional batch download
+
+- [ ] Harmonize multi-episode claims with all existing single-episode
+      reservations, active/held duplicates, staged results and cancellations.
+- [ ] Create a durable, one-shot stopped qB add and file-priority journal
+      with reconciliation after ambiguous network failures and process crash.
+- [ ] Authorize a probe file through the same operation ownership, size
+      and piece-overlap checks; never enable unknown or OVA files.
+- [ ] Persist real JP+EN audio verification for the downloaded probe and
+      only then allow additional provider-confirmed files to download.
+- [ ] Per-episode staging publications and Keep/Reject/cleanup, including
+      Jellyfin integration and safe source ownership release.
+- [ ] Full offline SQLite migration and fake-client worker crash tests,
+      then full local regression suite before production deployment.
+
+Plan rows are **read-only intentions, not episode reservations or download
+authorization**. The presence of v28 schema and job registrations does not
+make batch packs downloadable. RETRY remains isolated in PR #150.
+
+
+## PR #152 checkpoint — additive v28/v29 batch trial and claim infrastructure
+
+New code on this draft branch (not merged or deployed):
+
+- [x] v28: durable E01-anchored trial plan, bounded backfill/following
+  window, per-episode and total size budgets, planned-vs-verified dashboard.
+- [x] v29: per-file batch reservations with partial active-claim indexes
+  and a composite FK to each plan's selected file.
+- [x] Atomic all-or-nothing batch claims; competing active *single* and
+  *batch* owners are checked in the same SQLite BEGIN IMMEDIATE transaction.
+- [x] Existing single-episode reservation writer reciprocally checks
+  the batch claim namespace to prevent simultaneous episode ownership.
+- [x] Cancellation cleanup can release canceled, drained batch claims.
+- [x] Optional RESERVE_BATCH worker registration (not enabled by default).
+- [x] Hash-bound, read-only acquisition candidate loader requires DONE
+  reservation ownership, ACTIVE operation, exact episode/file/size proof,
+  no same-hash competing active batch or single acquisition and
+  non-rejected anime. It cannot add/select/start a torrent.
+- [x] Regression test files for job handoff, missing E01, competing packs,
+  hash drift and fresh/upgrade v29 migration parity and rollback.
+
+IMPORTANT: Default worker registers EVALUATE_BATCH but does NOT yet
+create RESERVE_BATCH. This deliberate cutoff prevents newly verified
+season packs from holding episode slots while downloading is unavailable.
+
+Still pending before enabling real batch media acquisition:
+
+- [ ] Durable one-shot qB add / priority / start command journal with
+  uncertain-send and crash/restart reconciliation.
+- [ ] Re-fetched torrent metainfo binding and piece disjointness preflight
+  at the actual guarded send transaction.
+- [ ] Per-file JP+EN audio proof for probe; only unlock verified later files
+  after durable proof, with a separate auditable permission.
+- [ ] Per-episode download completion, staging, decisions, Jellyfin,
+  ownership-aware Keep/Reject cleanup, and cancellation reconciliation.
+- [ ] Full local migration/worker/transport tests and integration review.
+
+No GitHub CI was manually started or inspected. Seven isolated planning
+tests passed locally, plus v29 SQL constraint smoke tests. The new
+repository integration tests were committed but could not be run using
+a full local checkout. PR #150 (RETRY) is separate and unmerged.
+
+
+## PR #152 continued — v30 stopped-only submission journal
+
+- [x] Added v30 additive batch_torrent_submissions journal with one
+  durable row per plan and globally unique infohash/ownership marker.
+- [x] BatchSubmissionJournal verifies a RUNNING SUBMIT_BATCH lease, direct
+  parent RESERVE_BATCH job and shared ACTIVE operation; rechecks
+  hash-bound, provider-selected files and active reservations in the
+  same SQLite transaction before authorizing a stopped add.
+- [x] The first insert commits UNCERTAIN before returning a process-local
+  BatchSendPermit. Repeated requests and worker restarts can only obtain
+  the prior intent and must reconcile it; they receive no replacement
+  permit, even if the torrent is absent or the network request timed out.
+- [x] Read-only observation confirms exact stopped state, path, category,
+  owner tag, autoTMM disabled and full ordered torrent file inventory.
+  Unknown/changed provenance transitions to REVIEW rather than retrying.
+- [x] Separate BatchClient.add_batch_stopped validates original hash-bound
+  BEP3 bytes, consumes the one-use permit and sends ONLY stopped/paused
+  torrent add, with no filePrio or start endpoint.
+- [x] Existing cancellation release now refuses to free batch reservations
+  if any batch_torrent_submissions row exists for the operation. A future
+  stop/remove reconciler must safely drain that external resource first.
+- [x] Committed offline tests for permit non-rearm, changed tags, exact
+  stopped observation, metadata mutation, and v30 migration parity/rollback.
+
+**Important:** SUBMIT_BATCH is intentionally not installed or routed from
+the default worker. No batch add, priority change, restart/start, audio
+verification or staging can occur in production. The journal and client
+are building blocks, not a complete acquisition pipeline.
+
+### Remaining gates before a runnable batch acquisition
+
+- [ ] Implement an explicit SUBMIT_BATCH handler with typed, owned
+  handoff and no retry of UNCERTAIN sends; test crash before/after add.
+- [ ] Add a second durable one-use file-priority selection journal, piece
+  overlap confirmation, and no-start-before-selected guarantee.
+- [ ] Persist probe JP+EN audio evidence; only then journal an optional
+  E02-E06 unlock with verified per-file selection.
+- [ ] Add per-file download completion, staging publications, Jellyfin
+  handling, Keep/Reject decisions, and bounded cleanup reconciliation.
+- [ ] Validate all migrations and integrated worker/transfer tests
+  locally before merging or deploying. GitHub CI remains disabled
+  by user request. RETRY remains separate in unmerged PR #150.
+
+
+## Latest checkpoint: v31–v33 probe, JP+EN audio proof and gated unlock
+
+**Draft PR #152 only; NOT merged or deployed.** Earlier v28–v30 work
+remains on this branch. Separate review-retry PR #150 is untouched.
+
+### Implemented (new, opt-in infrastructure)
+
+- [x] **v31** batch_torrent_transfers: durable one-shot E01-only
+  file-priority selection, confirmed stopped snapshot, one-use torrent start,
+  and read-only download progress reconciliation. An interrupted or unknown
+  send never creates a replacement permit.
+- [x] BatchClient.apply_probe_selection() and start_probe():
+  validate exact hash-bound inventory, owned destination/category/tag,
+  canonical piece boundaries and sole E01 priority before mutation.
+- [x] **v32** batch_probe_media: typed immutable E01 file SHA-256,
+  inode signature and ffprobe evidence requiring non-commentary Japanese
+  and English audio. Fenced to a completed, owned transfer job.
+- [x] Optional VERIFY_BATCH_PROBE reads the real file through
+  O_NOFOLLOW descriptor-relative traversal, checks before/after stat,
+  verifies full content hash and uses the bounded existing ffprobe parser.
+- [x] **v33** batch_torrent_unlocks: second one-shot authorization
+  journal. No later episode can become wanted until the actual E01 proof
+  is present and matches the torrent/operation. Reconcile uncertain
+  priority updates after restart; do not reissue them.
+- [x] BatchClient.apply_audio_verified_unlock() and
+  start_audio_verified_batch() only select provider-verified trial
+  files, leaving OVAs and out-of-window episodes at zero priority.
+  Reject wanted/unwanted shared pieces and wrong ownership before sending.
+- [x] Optional SUBMIT_BATCH, TRANSFER_BATCH, VERIFY_BATCH_PROBE
+  and UNLOCK_BATCH handlers with explicit job lineage, hash-only metainfo
+  and separately guarded transfer/verification phases.
+- [x] Handler display metadata and focused offline test code for one-use
+  permits, wrong tags, shared pieces, altered metadata, excluded OVAs,
+  schema parity and migration rollback.
+
+### Deliberately NOT enabled
+
+The **default NextGen worker registers only EVALUATE_BATCH** from the
+batch pipeline. It does NOT dispatch RESERVE_BATCH, SUBMIT_BATCH,
+TRANSFER_BATCH, VERIFY_BATCH_PROBE or UNLOCK_BATCH. Thus #152 cannot
+start season-pack downloads, change qB priorities or move media in
+production in its current configuration.
+
+### Remaining essential integration
+
+1. [ ] Durable per-file media-proof ledger for **every** planned
+   episode after expanded download. Each later file must independently
+   pass actual JP+EN ffprobe, content hash and inode checks.
+2. [ ] One crash-safe staging publication per canonical episode,
+   reusing existing Publisher and artifact receipts without weakening
+   no-follow, ownership, atomic rename or exact destination episode IDs.
+3. [ ] Extend Keep/Reject, duplicate staging protection, Jellyfin
+   refresh, cancellation/cleanup and reservation release to those
+   batch publication records. No broad directory deletion.
+4. [ ] One-shot, crash-safe stopped-state transition after E01 completes.
+   Unlock currently requires an already stopped torrent; it does not
+   send an unjournaled stop command.
+5. [ ] Full fake-provider/fake-qB, SQLite restart, filesystem/inode,
+   staging/Keep/Reject and migration test execution in a full checkout.
+6. [ ] Validate a Shiki S01 + OVA torrent in a controlled environment,
+   proving no OVA, unknown or out-of-window video is acquired.
+
+### Test policy and release status
+
+No GitHub CI was started or inspected and no production deployment occurred.
+New regression tests are committed, but the full repository suite was not
+executed here. Do not merge #152 or enable new batch acquisition handlers
+until per-file staging, cleanup and full integration tests pass.
+Review-retry remains isolated in draft PR #150.

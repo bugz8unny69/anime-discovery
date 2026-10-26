@@ -445,6 +445,136 @@ CREATE TABLE IF NOT EXISTS batch_verified_files (
  UNIQUE(batch_id,tvdb_episode_id)
 );
 CREATE INDEX IF NOT EXISTS idx_batch_files_episode ON batch_verified_files(batch_id,tvdb_season,tvdb_episode);
+CREATE TABLE IF NOT EXISTS batch_trial_plans (
+ plan_id INTEGER PRIMARY KEY,
+ batch_id INTEGER NOT NULL UNIQUE REFERENCES batch_verifications(batch_id),
+ evaluation_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ anchor_episode INTEGER NOT NULL CHECK(anchor_episode>0),
+ backfill_count INTEGER NOT NULL CHECK(backfill_count BETWEEN 0 AND 1000),
+ following_count INTEGER NOT NULL CHECK(following_count BETWEEN 0 AND 1000),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ max_episode_bytes INTEGER NOT NULL CHECK(max_episode_bytes>0),
+ max_plan_bytes INTEGER NOT NULL CHECK(max_plan_bytes>0),
+ planned_size_bytes INTEGER NOT NULL CHECK(planned_size_bytes>0 AND planned_size_bytes<=max_plan_bytes),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ CHECK(backfill_count>0 OR following_count>0)
+);
+CREATE TABLE IF NOT EXISTS batch_trial_files (
+ plan_id INTEGER NOT NULL REFERENCES batch_trial_plans(plan_id),
+ file_index INTEGER NOT NULL CHECK(file_index>=0),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ selected_size_bytes INTEGER NOT NULL CHECK(selected_size_bytes>0),
+ PRIMARY KEY(plan_id,file_index),
+ UNIQUE(plan_id,tvdb_episode)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_trial_by_episode ON batch_trial_files(plan_id,tvdb_episode);
+CREATE TABLE IF NOT EXISTS batch_episode_reservations (
+ reservation_id INTEGER PRIMARY KEY,
+ plan_id INTEGER NOT NULL REFERENCES batch_trial_plans(plan_id),
+ owner_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ file_index INTEGER NOT NULL CHECK(file_index>=0),
+ anidb_id INTEGER NOT NULL REFERENCES identified_anime(anidb_id),
+ anidb_episode_id INTEGER NOT NULL CHECK(anidb_episode_id>0),
+ tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>0),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ tvdb_episode_id INTEGER NOT NULL CHECK(tvdb_episode_id>0),
+ state TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(state IN ('ACTIVE','RELEASED')),
+ reserved_at_ms INTEGER NOT NULL CHECK(reserved_at_ms>=0),
+ ended_at_ms INTEGER,
+ ended_by_job_id INTEGER REFERENCES jobs(job_id),
+ UNIQUE(plan_id,file_index),
+ UNIQUE(plan_id,tvdb_episode),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_trial_files(plan_id,file_index),
+ CHECK((state='ACTIVE' AND ended_at_ms IS NULL AND ended_by_job_id IS NULL) OR
+       (state='RELEASED' AND ended_at_ms>=reserved_at_ms AND ended_by_job_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_active_anidb ON batch_episode_reservations(anidb_episode_id) WHERE state='ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_active_tvdb ON batch_episode_reservations(tvdb_episode_id) WHERE state='ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_active_placement ON batch_episode_reservations(tvdb_series_id,tvdb_season,tvdb_episode) WHERE state='ACTIVE';
+CREATE INDEX IF NOT EXISTS idx_batch_owner ON batch_episode_reservations(owner_job_id,state);
+CREATE TABLE IF NOT EXISTS batch_torrent_submissions (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_trial_plans(plan_id),
+ reservation_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ first_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ first_attempt INTEGER NOT NULL CHECK(first_attempt>0),
+ info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ ownership_marker TEXT NOT NULL UNIQUE CHECK(length(ownership_marker)=32 AND ownership_marker NOT GLOB '*[^a-f0-9]*'),
+ base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
+ save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 2 AND 4096),
+ category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 64),
+ timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
+ api_major INTEGER NOT NULL CHECK(api_major IN (4,5)),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ configuration_revision INTEGER NOT NULL CHECK(configuration_revision>0),
+ state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED')),
+ reason_code TEXT NOT NULL CHECK(
+   (state='UNCERTAIN' AND reason_code='TORRENT_SUBMISSION_UNCERTAIN') OR
+   (state='EXTERNAL' AND reason_code='TORRENT_ALREADY_PRESENT') OR
+   (state='REVIEW' AND reason_code='TORRENT_PROVENANCE_CONFLICT') OR
+   (state='OWNED_STOPPED' AND reason_code='TORRENT_STOPPED_CONFIRMED')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_submission_job ON batch_torrent_submissions(reservation_job_id);
+CREATE TABLE IF NOT EXISTS batch_torrent_transfers (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_submissions(plan_id),
+ transfer_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ transfer_attempt INTEGER NOT NULL CHECK(transfer_attempt>0),
+ selected_index INTEGER NOT NULL CHECK(selected_index>=0),
+ piece_size INTEGER NOT NULL CHECK(piece_size BETWEEN 1 AND 67108864),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('SELECT_UNCERTAIN','SELECTED','START_UNCERTAIN','ACTIVE','COMPLETE','REVIEW')),
+ reason_code TEXT NOT NULL,
+ start_job_id INTEGER REFERENCES jobs(job_id),
+ start_attempt INTEGER CHECK(start_attempt IS NULL OR start_attempt>0),
+ selected_progress REAL NOT NULL DEFAULT 0 CHECK(selected_progress BETWEEN 0 AND 1),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((start_job_id IS NULL AND start_attempt IS NULL) OR (start_job_id IS NOT NULL AND start_attempt IS NOT NULL)),
+ CHECK(phase NOT IN ('START_UNCERTAIN','ACTIVE') OR start_job_id IS NOT NULL),
+ CHECK((phase='SELECT_UNCERTAIN' AND reason_code='TORRENT_SELECTION_UNCERTAIN') OR
+       (phase='SELECTED' AND reason_code='TORRENT_SELECTION_CONFIRMED') OR
+       (phase='START_UNCERTAIN' AND reason_code='TORRENT_START_UNCERTAIN') OR
+       (phase='ACTIVE' AND reason_code='TORRENT_DOWNLOAD_IN_PROGRESS') OR
+       (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
+       (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
+);
+CREATE TABLE IF NOT EXISTS batch_probe_media (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_transfers(plan_id),
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ transfer_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ submission_fingerprint TEXT NOT NULL CHECK(length(submission_fingerprint)=64 AND submission_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ transfer_fingerprint TEXT NOT NULL CHECK(length(transfer_fingerprint)=64 AND transfer_fingerprint NOT GLOB '*[^a-f0-9]*'),
+ evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND length(CAST(evidence_json AS BLOB))<=65536),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0)
+);
+CREATE TABLE IF NOT EXISTS batch_torrent_unlocks (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_probe_media(plan_id),
+ unlock_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ unlock_attempt INTEGER NOT NULL CHECK(unlock_attempt>0),
+ verification_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ priorities_json TEXT NOT NULL CHECK(json_valid(priorities_json) AND length(CAST(priorities_json AS BLOB))<=65536),
+ piece_size INTEGER NOT NULL CHECK(piece_size BETWEEN 1 AND 67108864),
+ phase TEXT NOT NULL CHECK(phase IN ('SELECT_UNCERTAIN','SELECTED','START_UNCERTAIN','ACTIVE','COMPLETE','REVIEW')),
+ reason_code TEXT NOT NULL,
+ start_job_id INTEGER REFERENCES jobs(job_id),
+ start_attempt INTEGER CHECK(start_attempt IS NULL OR start_attempt>0),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms),
+ CHECK((start_job_id IS NULL AND start_attempt IS NULL) OR (start_job_id IS NOT NULL AND start_attempt IS NOT NULL)),
+ CHECK(phase NOT IN ('START_UNCERTAIN','ACTIVE') OR start_job_id IS NOT NULL),
+ CHECK((phase='SELECT_UNCERTAIN' AND reason_code='TORRENT_SELECTION_UNCERTAIN') OR
+       (phase='SELECTED' AND reason_code='TORRENT_SELECTION_CONFIRMED') OR
+       (phase='START_UNCERTAIN' AND reason_code='TORRENT_START_UNCERTAIN') OR
+       (phase='ACTIVE' AND reason_code='TORRENT_DOWNLOAD_IN_PROGRESS') OR
+       (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
+       (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
+);
+
+
 
 """
 
@@ -485,13 +615,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v27; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v33; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v27 storage.
+    before accessing v33 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 27:
+    if version == 33:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -501,7 +631,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=27;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=33;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise
