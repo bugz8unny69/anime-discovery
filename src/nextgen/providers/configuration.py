@@ -8,6 +8,11 @@ from src.nextgen.jobs.identify_anime_job import registration
 from src.nextgen.jobs.verify_release_job import KIND as RELEASE_KIND, registration as release_registration
 from src.nextgen.jobs.evaluate_trial_job import KIND as TRIAL_KIND, registration as trial_registration
 from src.nextgen.jobs.evaluate_batch_job import KIND as BATCH_KIND, registration as batch_registration
+from src.nextgen.jobs.reserve_batch_job import KIND as BATCH_RESERVE_KIND, registration as batch_reserve_registration
+from src.nextgen.jobs.submit_batch_job import KIND as BATCH_SUBMIT_KIND, registration as batch_submit_registration
+from src.nextgen.jobs.transfer_batch_job import KIND as BATCH_TRANSFER_KIND, registration as batch_transfer_registration
+from src.nextgen.jobs.verify_batch_probe_job import KIND as BATCH_PROBE_KIND, registration as batch_probe_registration
+from src.nextgen.jobs.unlock_batch_job import KIND as BATCH_UNLOCK_KIND, registration as batch_unlock_registration
 from src.nextgen.jobs.reserve_episode_job import KIND as RESERVE_KIND, registration as reserve_registration
 from src.nextgen.jobs.prepare_acquisition_job import KIND as PREPARE_KIND, registration as prepare_registration
 from src.nextgen.jobs.submit_torrent_job import KIND as SUBMIT_KIND, registration as submit_registration
@@ -40,13 +45,16 @@ def validate_provider_configuration(configuration, *, secrets):
 
 
 async def build_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
-                                policy=Policy(), logger=None, read_metainfo=None, read_batch_metainfo=None):
+                                policy=Policy(), logger=None, read_metainfo=None, read_batch_metainfo=None,
+                                batch_acquisition=True):
     """Validate required local settings, then return an unstarted worker.
 
     Call close() if not serving it. Both providers are mandatory for this
     composition. Generic Worker still supports unrelated explicitly installed
     jobs without requiring identity-provider credentials.
     """
+    if type(batch_acquisition) is not bool:
+        raise ValueError('batch_acquisition must be a boolean')
     store = ConfigurationStore(config_directory)
     secrets = SecretStore(config_directory)
     startup = await blocking(store.read)
@@ -63,15 +71,33 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
+    # Default-enabled batch jobs share provider credentials and the same
+    # trusted hash-only metadata reader; no arbitrary torrent URLs in payloads.
+    # Rollback switch leaves EVALUATE_BATCH read-only (no reservations or qB).
+    batch_handlers = (
+        batch_reserve_registration(submission_kind=BATCH_SUBMIT_KIND),
+        batch_submit_registration(read_batch_metainfo,secrets,
+                                  transfer_kind=BATCH_TRANSFER_KIND),
+        batch_transfer_registration(read_batch_metainfo,secrets,
+                                    verification_kind=BATCH_PROBE_KIND),
+        batch_probe_registration(read_batch_metainfo,unlock_kind=BATCH_UNLOCK_KIND),
+        batch_unlock_registration(read_batch_metainfo,secrets),
+    ) if batch_acquisition else ()
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
-                         release_registration(verify,trial_kind=TRIAL_KIND,batch_kind=BATCH_KIND),batch_registration(),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=PREPARE_KIND),
-                         *preparation,*management_registrations(secrets),*additional_registrations))
+                         release_registration(verify,trial_kind=TRIAL_KIND,batch_kind=BATCH_KIND),
+                         batch_registration(reservation_kind=BATCH_RESERVE_KIND if batch_acquisition else None),
+                         trial_registration(reservation_kind=RESERVE_KIND),
+                         reserve_registration(preparation_kind=PREPARE_KIND),
+                         *batch_handlers,*preparation,
+                         *management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
 
 async def run_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
-                              policy=Policy(), read_metainfo=None, read_batch_metainfo=None):
+                              policy=Policy(), read_metainfo=None, read_batch_metainfo=None,
+                              batch_acquisition=True):
     worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
                                          release_kind=release_kind,policy=policy,read_metainfo=read_metainfo,
-                                         read_batch_metainfo=read_batch_metainfo)
+                                         read_batch_metainfo=read_batch_metainfo,
+                                         batch_acquisition=batch_acquisition)
     await serve_worker(worker)

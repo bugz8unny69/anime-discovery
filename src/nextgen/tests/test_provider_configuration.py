@@ -236,6 +236,40 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
         finally:db.close()
 
+    async def test_default_batch_acquisition_chain_and_explicit_disable(self):
+        self.secrets.initialize('private-key')
+        async def batch_reader(*args):
+            raise AssertionError('worker startup cannot read batch metadata')
+        enabled=await build_identity_worker(
+            self.root,read_batch_metainfo=batch_reader)
+        self.addAsyncCleanup(enabled.close)
+        stages=(
+            ('EVALUATE_BATCH','RESERVE_BATCH'),
+            ('RESERVE_BATCH','SUBMIT_BATCH'),
+            ('SUBMIT_BATCH','TRANSFER_BATCH'),
+            ('TRANSFER_BATCH','VERIFY_BATCH_PROBE'),
+            ('VERIFY_BATCH_PROBE','UNLOCK_BATCH'),
+            ('UNLOCK_BATCH',None),
+        )
+        for job,next_job in stages:
+            with self.subTest(job=job):
+                self.assertIn(job,enabled.registry.entries)
+                self.assertEqual(enabled.registry.entries[job].successor_kinds,
+                                 () if next_job is None else (next_job,))
+        # Batch staging and Keep/Reject are not implemented: do not route
+        # the last step into the unrelated single-episode staging pipeline.
+        self.assertEqual(enabled.registry.entries['UNLOCK_BATCH'].successor_kinds,())
+        disabled=await build_identity_worker(
+            self.root,batch_acquisition=False,read_batch_metainfo=batch_reader)
+        self.addAsyncCleanup(disabled.close)
+        self.assertIn('EVALUATE_BATCH',disabled.registry.entries)
+        self.assertEqual(disabled.registry.entries['EVALUATE_BATCH'].successor_kinds,())
+        for job,next_job in stages[1:]:
+            self.assertNotIn(job,disabled.registry.entries)
+        self.assertIn('STAGE_TRIAL_MEDIA',disabled.registry.entries)
+        with self.assertRaises(ValueError):
+            await build_identity_worker(self.root,batch_acquisition='enabled')
+
     async def test_metadata_preparation_is_installed_by_default_with_trusted_override(self):
         self.secrets.initialize('private-key')
         worker=await build_identity_worker(self.root)
