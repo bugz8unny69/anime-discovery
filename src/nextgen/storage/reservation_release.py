@@ -17,6 +17,16 @@ def active(db,operation_id):
 
 def validate_releasable(db,operation_id):
     if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=? AND j.state='RUNNING' LIMIT 1",(operation_id,)).fetchone():raise CancellationError()
+    # A batch stopped-add intent may have reached qB even after an API error.
+    # No safe batch stop/remove reconciler exists yet. Retain reservations
+    # until that journal and its exact external resource cleanup are finished.
+    if db.execute(
+        "SELECT 1 FROM batch_torrent_submissions s "
+        "JOIN batch_episode_reservations r USING(plan_id) "
+        "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
+        "WHERE m.operation_id=? AND r.state='ACTIVE' LIMIT 1",
+        (operation_id,)).fetchone():
+        raise CancellationError()
     for (evaluation,) in db.execute("SELECT r.evaluation_job_id FROM episode_reservations r JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)):
         if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id<>? AND j.kind IN ('RESERVE_EPISODE','PREPARE_ACQUISITION') AND json_extract(j.payload_json,'$.evaluation_job_id')=? LIMIT 1",(operation_id,evaluation)).fetchone():raise CancellationError()
     for owner,evaluation in db.execute(
