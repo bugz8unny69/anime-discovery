@@ -35,8 +35,9 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
 
     def test_each_new_migration_rolls_back_all_new_tables_on_error(self):
         new_tables=(
-            'batch_torrent_transfers','batch_probe_media','batch_torrent_unlocks')
-        for version,table in zip((31,32,33),new_tables):
+            'batch_torrent_transfers','batch_probe_media','batch_torrent_unlocks',
+            'batch_probe_stops','batch_episode_media','batch_staging_publications')
+        for version,table in zip((31,32,33,34,35,36),new_tables):
             with self.subTest(version=version):
                 db=self.prefix(version-1)
                 try:
