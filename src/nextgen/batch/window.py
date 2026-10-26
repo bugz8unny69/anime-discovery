@@ -6,8 +6,9 @@ download or staging; provider facts and hard budgets must be persisted first.
 from dataclasses import dataclass
 
 from src.nextgen.acquisition.metadata import BatchInventory
-from src.nextgen.batch.verification import VerifiedBatch, plan_provider_verified_batch
-from src.nextgen.batch.selection import BatchPlanningError
+from pathlib import PurePosixPath
+from src.nextgen.batch.verification import VerifiedBatch
+from src.nextgen.batch.selection import BatchPlanningError, VIDEO, file_episode_number
 from src.nextgen.trial_policy import Window
 from src.nextgen.history import integer
 
@@ -49,6 +50,11 @@ def plan_batch_trial_window(inventory, verified, *, window, anchor_episode):
             raise BatchPlanningError('Batch episode proof mismatch or duplicate')
         seen_indices.add(proof.index)
         seen_episodes.add(proof.tvdb_episode)
+    for file in inventory.files:
+        if PurePosixPath(file.path).suffix.lower() in VIDEO:
+            number=file_episode_number(file.path,verified.season)
+            if number is not None and file.index not in seen_indices:
+                raise BatchPlanningError('Regular video has no provider proof')
     if anchor_episode not in seen_episodes:
         raise BatchPlanningError('Verified trial anchor is not present in torrent')
     allowed=window.episodes(anchor_episode)
