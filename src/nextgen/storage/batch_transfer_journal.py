@@ -90,6 +90,13 @@ class BatchTransferJournal:
             raise TransferConflict()
         return intent,_record(db,intent)
 
+    def source_hash(self,claim,submission_job_id):
+        integer(submission_job_id,positive=True)
+        with self.queue.connection() as db,transaction(db):
+            reserved,row=self._fence(db,claim,submission_job_id)
+            self.queue._owns(db,claim,self.queue.now())
+            return row[1]
+
     def load(self,claim,submission_job_id,inventory):
         integer(submission_job_id,positive=True)
         with self.queue.connection() as db,transaction(db):
