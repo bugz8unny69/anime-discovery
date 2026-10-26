@@ -36,6 +36,9 @@ class BatchReservationMigrationTests(unittest.TestCase):
         faulty=faulty.replace('PRAGMA user_version=29;','SELECT * FROM no_such_table;\nPRAGMA user_version=29;')
         with self.assertRaises(sqlite3.Error):
             db.executescript(faulty)
+        # Mirror the migration runner's explicit rollback on SQL failures.
+        if db.in_transaction:
+            db.rollback()
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(28,))
         self.assertIsNone(db.execute(
             "SELECT name FROM sqlite_master WHERE name='batch_episode_reservations'").fetchone())
