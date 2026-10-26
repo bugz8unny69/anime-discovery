@@ -185,3 +185,26 @@ class BatchClient(Client):
         self._request(
             'torrents/stop' if self.major==5 else 'torrents/pause',
             form={'hashes':intent.inventory.info_hash},limit=4096)
+
+    def cleanup_owned_batch(self,intent,permit,action):
+        """One-use stop/remove for exactly owned batch; never deleteFiles=true."""
+        from src.nextgen.batch.owned_cleanup import (
+            BatchOwnedCleanupIntent, owned_batch_observation,
+        )
+        from src.nextgen.acquisition.cleanup import CleanupPermit
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchOwnedCleanupIntent
+                or type(permit) is not CleanupPermit
+                or self.options!=intent.options
+                or action not in ('stop','remove')):
+            raise ClientInvalid()
+        observed=self.inspect(intent.inventory.info_hash)
+        owned_batch_observation(intent,observed,stopped=action=='remove')
+        permit.take(intent.fingerprint,action)
+        if action=='stop':
+            self._request(
+                'torrents/stop' if self.major==5 else 'torrents/pause',
+                form={'hashes':intent.inventory.info_hash},limit=4096)
+        else:
+            self._request('torrents/delete',form={
+                'hashes':intent.inventory.info_hash,'deleteFiles':'false'},limit=4096)
