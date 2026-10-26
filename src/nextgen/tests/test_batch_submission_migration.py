@@ -3,7 +3,7 @@ import sqlite3
 import unittest
 
 from src.nextgen.storage import migrations
-from src.nextgen.storage.sqlite import SCHEMA
+from src.nextgen.storage.sqlite import initialize
 
 
 class BatchSubmissionMigrationTests(unittest.TestCase):
@@ -17,7 +17,7 @@ class BatchSubmissionMigrationTests(unittest.TestCase):
         db.executescript((migrations.SQL_DIR/'030_batch_torrent_submissions.sql').read_text())
         fresh=sqlite3.connect(':memory:')
         self.addCleanup(fresh.close)
-        fresh.executescript(SCHEMA)
+        initialize(fresh)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(30,))
         self.assertEqual(migrations._structure(db),
                          migrations._reference(30,migrations._scripts()))
