@@ -5,7 +5,7 @@ uncertain record. A fresh process can *observe* but never reconstruct sends.
 """
 from dataclasses import dataclass
 
-from src.nextgen.acquisition.metadata import AcquisitionConflict
+from src.nextgen.acquisition.metadata import AcquisitionConflict, BatchInventory
 from src.nextgen.acquisition.transfers import (
     TransferPermit, TransferConflict, STOPPED,
 )
@@ -79,8 +79,7 @@ class BatchTransferJournal:
         return reservation_job_id,candidate_row
 
     def _current(self,db,claim,submission_job_id,inventory):
-        if type(inventory) is not __import__('src.nextgen.acquisition.metadata',
-                                              fromlist=['BatchInventory']).BatchInventory:
+        if type(inventory) is not BatchInventory:
             raise TransferConflict()
         reserved,row=self._fence(db,claim,submission_job_id)
         candidate=_candidate(db,reserved,inventory)
