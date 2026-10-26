@@ -13,6 +13,10 @@ from src.nextgen.batch.provider_worker import BatchVerificationCompletion
 from src.nextgen.batch.selection import BatchPlanningError
 from src.nextgen.acquisition.metadata import MetadataInvalid, SourceMissing
 from src.nextgen.storage.batch_verifications import persist_batch_verification
+from src.nextgen.acquisition.metainfo_source import (
+    MetadataSourceWaiting, MetadataSourceUnavailable,
+    MetadataSourceConfigurationError, MetadataSourceDenied,
+)
 from src.nextgen.storage.releases import load_release, persist_release
 from src.nextgen.worker import blocking
 
@@ -56,6 +60,10 @@ def registration(verify, *, trial_kind=None):
         try:
             source=await blocking(load_release,context.configuration.value("storage.database_path"),context.claim.event_id,aid)
             result=await verify(source,context.configuration,context.cancelled)
+        except MetadataSourceWaiting as exc: return Outcome("defer",exc.reason_code,delay_ms=exc.delay_ms)
+        except MetadataSourceUnavailable as exc: return Outcome("retry",exc.reason_code)
+        except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:
+            return Outcome("review",exc.reason_code)
         except ProviderDeferred as exc: return Outcome("defer","JOB_WAITING",delay_ms=exc.delay_ms)
         except (ProviderUnavailable,ProviderInvalidResponse) as exc: return Outcome("retry",exc.reason_code)
         except ProviderAuthenticationFailed: return Outcome("review","PROVIDER_AUTH_FAILED")
