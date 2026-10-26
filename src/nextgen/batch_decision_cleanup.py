@@ -63,7 +63,16 @@ class BatchDecisionCleanup(OwnedCleanup):
         parent=db.execute(
             'SELECT created_by_job_id,event_id,kind FROM jobs WHERE job_id=?',
             (self.claim.job_id,)).fetchone()
-        if parent!=(self.decision,event,'CLEANUP_BATCH_DOWNLOAD') or event!=self.claim.event_id:
+        if event!=self.claim.event_id or parent[1:]!=(event,'CLEANUP_BATCH_DOWNLOAD'):
+            raise CancellationError()
+        if action=='KEEP':
+            prior=db.execute(
+                "SELECT b.phase,j.kind,j.state,b.decision_job_id "
+                "FROM batch_keep_cleanup b JOIN jobs j ON j.job_id=b.job_id "
+                "WHERE b.job_id=?",(parent[0],)).fetchone()
+            if prior!=('COMPLETE','CLEANUP_BATCH_KEPT_MEDIA','DONE',self.decision):
+                raise CancellationError()
+        elif parent[0]!=self.decision:
             raise CancellationError()
         if operation(db,target)[:2]!=(op,'STAGED'):
             raise CancellationError()
