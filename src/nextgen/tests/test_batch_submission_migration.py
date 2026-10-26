@@ -21,7 +21,9 @@ class BatchSubmissionMigrationTests(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(30,))
         self.assertEqual(migrations._structure(db),
                          migrations._reference(30,migrations._scripts()))
-        db.executescript((migrations.SQL_DIR/'031_batch_torrent_transfers.sql').read_text())
+        for number in (31,32,33):
+            name=migrations.SCRIPTS[number-1]
+            db.executescript((migrations.SQL_DIR/name).read_text())
         self.assertEqual(migrations._structure(db),migrations._structure(fresh))
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         self.assertEqual(db.execute('PRAGMA integrity_check').fetchall(),[('ok',)])
