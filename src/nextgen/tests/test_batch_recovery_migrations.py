@@ -1,0 +1,60 @@
+"""v31-v33 offline migration parity and failure rollback for batch acquisition."""
+import sqlite3
+import unittest
+
+from src.nextgen.storage import migrations
+from src.nextgen.storage.sqlite import initialize
+
+
+class BatchRecoveryMigrationsTests(unittest.TestCase):
+    def prefix(self,version):
+        db=sqlite3.connect(':memory:')
+        db.execute('PRAGMA foreign_keys=ON')
+        for path in migrations.SCRIPTS[:version]:
+            db.executescript((migrations.SQL_DIR/path).read_text())
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],version)
+        return db
+
+    def test_upgrades_to_33_have_fresh_schema_parity(self):
+        self.assertEqual(migrations.LATEST_VERSION,33)
+        upgraded=self.prefix(30)
+        self.addCleanup(upgraded.close)
+        for version in (31,32,33):
+            upgraded.executescript(
+                (migrations.SQL_DIR/migrations.SCRIPTS[version-1]).read_text())
+            self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone()[0],version)
+            self.assertEqual(migrations._structure(upgraded),
+                             migrations._reference(version,migrations._scripts()))
+            self.assertEqual(upgraded.execute('PRAGMA foreign_key_check').fetchall(),[])
+        fresh=sqlite3.connect(':memory:')
+        self.addCleanup(fresh.close)
+        fresh.execute('PRAGMA foreign_keys=ON')
+        initialize(fresh)
+        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(33,))
+        self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))
+
+    def test_each_new_migration_rolls_back_all_new_tables_on_error(self):
+        new_tables=(
+            'batch_torrent_transfers','batch_probe_media','batch_torrent_unlocks')
+        for version,table in zip((31,32,33),new_tables):
+            with self.subTest(version=version):
+                db=self.prefix(version-1)
+                try:
+                    script=(migrations.SQL_DIR/migrations.SCRIPTS[version-1]).read_text()
+                    script=script.replace(
+                        f'PRAGMA user_version={version};',
+                        f'SELECT * FROM no_such_table;\nPRAGMA user_version={version};')
+                    with self.assertRaises(sqlite3.Error):
+                        db.executescript(script)
+                    if db.in_transaction:db.rollback()
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone(),
+                                     (version-1,))
+                    self.assertIsNone(db.execute(
+                        "SELECT name FROM sqlite_master WHERE name=?",
+                        (table,)).fetchone())
+                finally:
+                    db.close()
+
+
+if __name__=='__main__':
+    unittest.main()
