@@ -202,3 +202,47 @@ No GitHub CI was manually started or inspected. Seven isolated planning
 tests passed locally, plus v29 SQL constraint smoke tests. The new
 repository integration tests were committed but could not be run using
 a full local checkout. PR #150 (RETRY) is separate and unmerged.
+
+
+## PR #152 continued — v30 stopped-only submission journal
+
+- [x] Added v30 additive batch_torrent_submissions journal with one
+  durable row per plan and globally unique infohash/ownership marker.
+- [x] BatchSubmissionJournal verifies a RUNNING SUBMIT_BATCH lease, direct
+  parent RESERVE_BATCH job and shared ACTIVE operation; rechecks
+  hash-bound, provider-selected files and active reservations in the
+  same SQLite transaction before authorizing a stopped add.
+- [x] The first insert commits UNCERTAIN before returning a process-local
+  BatchSendPermit. Repeated requests and worker restarts can only obtain
+  the prior intent and must reconcile it; they receive no replacement
+  permit, even if the torrent is absent or the network request timed out.
+- [x] Read-only observation confirms exact stopped state, path, category,
+  owner tag, autoTMM disabled and full ordered torrent file inventory.
+  Unknown/changed provenance transitions to REVIEW rather than retrying.
+- [x] Separate BatchClient.add_batch_stopped validates original hash-bound
+  BEP3 bytes, consumes the one-use permit and sends ONLY stopped/paused
+  torrent add, with no filePrio or start endpoint.
+- [x] Existing cancellation release now refuses to free batch reservations
+  if any batch_torrent_submissions row exists for the operation. A future
+  stop/remove reconciler must safely drain that external resource first.
+- [x] Committed offline tests for permit non-rearm, changed tags, exact
+  stopped observation, metadata mutation, and v30 migration parity/rollback.
+
+**Important:** SUBMIT_BATCH is intentionally not installed or routed from
+the default worker. No batch add, priority change, restart/start, audio
+verification or staging can occur in production. The journal and client
+are building blocks, not a complete acquisition pipeline.
+
+### Remaining gates before a runnable batch acquisition
+
+- [ ] Implement an explicit SUBMIT_BATCH handler with typed, owned
+  handoff and no retry of UNCERTAIN sends; test crash before/after add.
+- [ ] Add a second durable one-use file-priority selection journal, piece
+  overlap confirmation, and no-start-before-selected guarantee.
+- [ ] Persist probe JP+EN audio evidence; only then journal an optional
+  E02-E06 unlock with verified per-file selection.
+- [ ] Add per-file download completion, staging publications, Jellyfin
+  handling, Keep/Reject decisions, and bounded cleanup reconciliation.
+- [ ] Validate all migrations and integrated worker/transfer tests
+  locally before merging or deploying. GitHub CI remains disabled
+  by user request. RETRY remains separate in unmerged PR #150.
