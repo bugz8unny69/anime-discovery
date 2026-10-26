@@ -25,6 +25,7 @@ from src.nextgen.job_contracts import (
 from src.nextgen.storage.batch_transfer_journal import (
     BatchTransferJournal, _record,
 )
+from src.nextgen.storage.batch_probe_stop_journal import BatchStopJournal
 from src.nextgen.storage.batch_submission_journal import _intent
 from src.nextgen.storage.batch_acquisition_candidate import _candidate
 from src.nextgen.worker import blocking
@@ -50,14 +51,18 @@ def _persist(db,claim,value):
         phase=db.execute(
             'SELECT phase,transfer_job_id FROM batch_torrent_transfers '
             'WHERE plan_id=?',(row[0],)).fetchone()
-        if phase!=('COMPLETE',claim.job_id):
+        stopped=db.execute(
+            'SELECT phase,stop_job_id FROM batch_probe_stops WHERE plan_id=?',
+            (row[0],)).fetchone()
+        if phase!=('COMPLETE',claim.job_id) or stopped!=('STOPPED',claim.job_id):
             raise TransferConflict()
     except (ValueError,TypeError,TransferConflict):
         raise CompletionRejected(Outcome('review','TORRENT_TRANSFER_CONFLICT')) from None
 
 
 def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
-                 journal_factory=BatchTransferJournal,verification_kind=None):
+                 journal_factory=BatchTransferJournal,
+                 stop_journal_factory=BatchStopJournal,verification_kind=None):
     if not inspect.iscoroutinefunction(read_batch_metainfo):
         raise ValueError('Trusted async metadata reader required')
     if verification_kind is not None and (type(verification_kind) is not str
@@ -147,6 +152,39 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
                 expected_record=record)
             log(receipts)
             if record.phase=='COMPLETE':
+                # The torrent must be stopped before modifying priorities for
+                # later episodes. Journal the uncertain stop before one send;
+                # a deferred/restarted attempt can only observe, not repeat it.
+                stopping=stop_journal_factory(
+                    context.configuration.value('storage.database_path'))
+                stopped_intent,transfer,stop=await blocking(
+                    stopping.load,context.claim,context.claim.job_id,inventory)
+                if stopped_intent!=intent:raise TransferConflict()
+                if stop is None:
+                    snapshot=await blocking(client.inspect_transfer,digest)
+                    if snapshot is None:return wait('TORRENT_STOP_UNCERTAIN')
+                    stop,permit,receipts=await blocking(
+                        stopping.authorize,context.claim,context.claim.job_id,
+                        intent,snapshot)
+                    log(receipts)
+                    if permit is not None:
+                        if context.cancelled.is_set():
+                            return wait('TORRENT_STOP_UNCERTAIN')
+                        await blocking(stopping.guard_send,context.claim,
+                                       context.claim.job_id,intent,stop)
+                        try:
+                            await blocking(client.stop_completed_probe,
+                                           intent,stop.fingerprint,permit)
+                        except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
+                            return wait('TORRENT_STOP_UNCERTAIN')
+                if stop.phase!='STOPPED':
+                    snapshot=await blocking(client.inspect_transfer,digest)
+                    stop,receipts=await blocking(
+                        stopping.observe,context.claim,context.claim.job_id,
+                        intent,snapshot)
+                    log(receipts)
+                    if stop.phase!='STOPPED':
+                        return wait('TORRENT_STOP_UNCERTAIN')
                 return Outcome(value={'submission_job_id':submission,
                                       'transfer_job_id':context.claim.job_id})
             if record.phase=='REVIEW':
