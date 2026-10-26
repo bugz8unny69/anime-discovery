@@ -91,7 +91,13 @@ def saved_defaults():
             bootstrap=_saved_installation_file(locator)
             break
     root=Path(bootstrap.get('root',DEFAULTS['root']))
-    canonical=root/'installer.json'
+    state=Path(bootstrap.get('state_dir',DEFAULTS['state_dir']))
+    # Read the old application-folder metadata once to discover custom paths.
+    legacy=root/'installer.json'
+    if legacy.exists():
+        bootstrap=_saved_installation_file(legacy)
+        state=Path(bootstrap.get('state_dir',str(state)))
+    canonical=state/'installer'/'installer.json'
     if canonical.exists():
         return _saved_installation_file(canonical)
     if bootstrap:
@@ -205,7 +211,15 @@ def apply(options,args,execute=run):
     for path in (root,root/'releases'):
         os.chown(path,0,0);os.chmod(path,0o755)
     if (root/'current').exists() and not(root/'current').is_symlink():raise ValueError('The release pointer is occupied by an existing file/folder.')
-    lock=os.open(root/'.installer.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    if state.is_symlink():raise ValueError('State folder must not be a symlink.')
+    state_created=not state.exists()
+    state.mkdir(parents=True,exist_ok=True,mode=0o750)
+    metadata=state/'installer'
+    if metadata.is_symlink():raise ValueError('Installer state folder must not be a symlink.')
+    metadata.mkdir(exist_ok=True,mode=0o700)
+    info=metadata.stat()
+    if info.st_uid!=0 or info.st_mode&0o077:raise ValueError('Installer state folder must be private and root-owned.')
+    lock=os.open(metadata/'.installer.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
     setup_started=False
     previous_umask=os.umask(0o022)  # Source/venv readable by the non-root service account.
     try:
@@ -215,6 +229,7 @@ def apply(options,args,execute=run):
             execute(['useradd','--system','--user-group','--home-dir',str(state),'--shell','/usr/sbin/nologin',options['user']])
             account=pwd.getpwnam(options['user'])
         if account.pw_uid==0 or grp.getgrnam(options['user']).gr_gid!=account.pw_gid:raise ValueError('Use a dedicated non-root account with a matching primary group.')
+        if state_created:os.chown(state,account.pw_uid,account.pw_gid)
         for path,mode in [(state,0o750),(config.parent,0o750)]:
             if not path.exists():path.mkdir(parents=True,mode=mode);os.chown(path,account.pw_uid,account.pw_gid)
         release=root/'releases'/uuid.uuid4().hex;release.mkdir(mode=0o755)
@@ -235,7 +250,7 @@ def apply(options,args,execute=run):
         active=[name for name in SERVICES if execute(['systemctl','is-active','--quiet',name],check=False).returncode==0]
         previous=os.readlink(root/'current') if (root/'current').is_symlink() else None
         had_config=(config/'settings.json').exists()
-        atomic_file(root/'installation.pending.json',(json.dumps({'candidate':str(release),'previous_release':previous,'revision':revision},sort_keys=True)+'\n').encode(),0o600)
+        atomic_file(metadata/'installation.pending.json',(json.dumps({'candidate':str(release),'previous_release':previous,'revision':revision},sort_keys=True)+'\n').encode(),0o600)
         print('Stopping Anime Discovery services for local setup...',flush=True)
         installed=[name for name in ('anime-discovery.target',*SERVICES)
             if execute(['systemctl','show','--property=LoadState','--value',name],check=False).stdout.strip() not in ('','not-found')]
@@ -263,7 +278,7 @@ def apply(options,args,execute=run):
             else active if args.upgrade else active if previous or had_config or active else [SERVICES[0]])
         if SERVICES[1] in selected:service_call(release,options,'check-worker',{},execute)
         unit_dir=Path(options['unit_dir']);unit_dir.mkdir(parents=True,exist_ok=True)
-        backup=root/'unit-backups'/release.name;backup.mkdir(parents=True,mode=0o700)
+        backup=metadata/'unit-backups'/release.name;backup.mkdir(parents=True,mode=0o700)
         for name,body in units.items():
             old=unit_dir/name
             if old.exists():shutil.copyfile(old,backup/name)
@@ -295,19 +310,22 @@ def apply(options,args,execute=run):
         launcher='#!/bin/sh\nexec '+shlex.quote(str(root/'current/.venv/bin/python'))+' '+shlex.quote(str(root/'current/bin/adm'))+' "$@"\n'
         atomic_file(adm_command,launcher.encode(),0o755)
         saved={k:options[k] for k in (*DEFAULTS,'origin')}
-        atomic_file(root/'installer.json',(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
+        atomic_file(metadata/'installer.json',(json.dumps(saved,sort_keys=True)+'\n').encode(),0o600)
         # A nondefault installation needs a tiny root locator because the
         # standalone command itself lives outside that application directory.
         # Never store mutable installation settings in the launcher directory.
-        if root!=Path(DEFAULTS['root']):
-            atomic_file(Path(str(destination)+'.json'),(json.dumps({'root':str(root)},sort_keys=True)+'\n').encode(),0o600)
+        if root!=Path(DEFAULTS['root']) or state!=Path(DEFAULTS['state_dir']):
+            atomic_file(Path(str(destination)+'.json'),(json.dumps({'root':str(root),'state_dir':str(state)},sort_keys=True)+'\n').encode(),0o600)
         result={'installed':True,'revision':revision,'previous_release':previous,'release':str(release),
             'configuration_preserved':True,'started_services':selected,
             'previously_running_services':active,
             'remaining_stopped_services':[name for name in SERVICES if name not in selected],
             'credentials_file':str(config/'secrets.json'),'command':str(destination)}
-        atomic_file(root/'installation.json',(json.dumps(result,sort_keys=True)+'\n').encode(),0o600)
-        (root/'installation.pending.json').unlink()
+        atomic_file(metadata/'installation.json',(json.dumps(result,sort_keys=True)+'\n').encode(),0o600)
+        (metadata/'installation.pending.json').unlink()
+        # Remove obsolete JSON only after the new installation succeeds.
+        for name in ('installer.json','installation.json','installation.pending.json'):
+            (root/name).unlink(missing_ok=True)
         return result
     except BaseException:
         if setup_started:
@@ -353,7 +371,7 @@ def main(argv=None):
                 if SERVICES[0] not in started:
                     print('Start the API: systemctl start anime-discovery-api.service')
                 print('Set or reset the dashboard password:')
-                print('  '+shlex.join(['sudo',str(Path(options['destination']).parent/'adm'),'set-password']))
+                print('  '+shlex.join(['sudo',str(Path(options['root'])/'current/bin/adm'),'set-password']))
                 if options.get('origin'):print('Dashboard: '+options['origin'])
                 print('Future upgrades: '+shlex.join([options['destination'],'--upgrade']))
         return 0

@@ -4,12 +4,6 @@ Run the standalone `bin/anime-discovery-install` from a reviewed checkout. It us
 
 Default configuration files (`settings.json`, `secrets.json`, and the administrator password record) live in `/etc/anime-discovery`, owned by the service account with directory mode 0700. The database and runtime state live under `/var/lib/anime-discovery`; application releases live under `/opt/anime-discovery`. Existing installation paths and configured database filenames are preserved on upgrades.
 
-Preview without making changes:
-
-```sh
-python3 bin/anime-discovery-install --plan
-```
-
 Install interactively:
 
 ```sh
@@ -24,7 +18,9 @@ sudo python3 bin/anime-discovery-install --yes --source-dir /path/to/checkout --
 
 `--source-dir` installs committed tracked files at HEAD, not working-tree edits. Otherwise the installer fetches the private repository's configured branch using root's existing Git access. `--revision FULL_COMMIT_SHA` pins a release. It creates a virtual environment per release and retains the previous source.
 
-The installer writes `/usr/local/bin/anime-discovery-install` and a protected defaults file. Upgrade with:
+The installer writes `/usr/local/bin/anime-discovery-install`. Its root-owned private metadata directory is `/var/lib/anime-discovery/installer`: `installer.json` stores installation settings, `installation.json` records the last successful installation, and `installation.pending.json` records interrupted setup. The lock and new unit backups also live there. A successful upgrade migrates older JSON metadata from the application folder; failed upgrades retain it for recovery. Custom paths use a small locator beside the installed command. The working directory does not select the installation.
+
+Upgrade with:
 
 ```sh
 sudo anime-discovery-install --upgrade --yes
@@ -37,7 +33,7 @@ Fresh installations start only the API. The API and worker are separate Type=not
 Set the administrator password locally after API startup:
 
 ```sh
-sudo adm set-password
+sudo /opt/anime-discovery/current/bin/adm set-password
 ```
 
 The API itself serves the restricted `/run/anime-discovery/admin.sock`. ADM uses that socket; no management bearer token or separate admin daemon is created. For unattended first-time setup, supply a protected `--admin-password-file` with `--start api` or `--start all`. The installer passes it through stdin to ADM with `--if-unset`, so upgrades preserve an existing password. The separate optional `--webhook-key-file` seeds only an absent webhook key. Credentials are never printed or placed in command arguments.
@@ -55,6 +51,6 @@ If setup or activation fails, Anime Discovery remains stopped and `installation.
 
 No live installation has been performed by the implementation tests. Follow `src/nextgen/SERVICE_SETUP.md` for host validation: password setup/login, verified webhook intake appearing in Recognized Names, worker crash isolation, API recovery followed by worker restart, mount access, and provider connectivity.
 
-The installer prints a readable completion summary and service instructions by default. Use `--json --yes` for automation; progress messages go to stderr and the JSON result goes to stdout. `--plan --json` provides a machine-readable preview.
+The installer prints a readable completion summary and service instructions by default. Use `--json --yes` for automation; progress messages go to stderr and the JSON result goes to stdout. 
 
-The executable `bin/adm` is also usable directly from the checkout. The installer installs its launcher beside the installer command (by default `/usr/local/bin/adm`), pointing at the current release. Run it as root or the service account; the API must be running.
+From `/opt/anime-discovery`, run `sudo ./current/bin/adm set-password`; `current` follows the active release. The executable `bin/adm` is also usable directly from the checkout. The installer installs its launcher beside the installer command (by default `/usr/local/bin/adm`), pointing at the current release. Run it as root or the service account; the API must be running.

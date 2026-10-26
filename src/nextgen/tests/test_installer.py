@@ -220,10 +220,22 @@ class InstallerSupportTests(unittest.TestCase):
              contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(installer.main(['--upgrade']),1)
 
+    def test_new_metadata_wins_over_legacy_and_custom_state_is_discovered(self):
+        state=self.root/'custom-state'
+        root=self.root/'app';root.mkdir()
+        metadata=state/'installer';metadata.mkdir(parents=True)
+        old={'root':str(root),'state_dir':str(state),'ref':'old'}
+        new={**old,'ref':'NextGen'}
+        (root/'installer.json').write_text(json.dumps(old))
+        (metadata/'installer.json').write_text(json.dumps(new))
+        with patch.object(installer,'_saved_installation_file',side_effect=lambda path: json.loads(path.read_text())), \
+             patch.object(installer,'DEFAULTS',{**installer.DEFAULTS,'root':str(root),'state_dir':str(self.root/'unused'),'destination':str(self.root/'bin/install')}):
+            self.assertEqual(installer.saved_defaults(),new)
+
     def test_shell_metacharacters_and_invalid_revision_are_refused(self):
         for argv in [['--root','/opt/$(touch bad)'],['--revision','HEAD'],['--source','https://token@example.com/repo.git']]:
             with patch.object(installer,'saved_defaults',return_value={}):
-                with self.assertRaises(ValueError):installer.resolve(installer.parser().parse_args(argv))
+                with self.assertRaises(ValueError):installer.resolve(installer.parser().parse_args(['--yes',*argv]))
 
 
 class InstallerOrchestrationTests(unittest.TestCase):
@@ -271,8 +283,11 @@ class InstallerOrchestrationTests(unittest.TestCase):
         self.assertTrue(result['installed']);self.assertEqual(result['started_services'],[])
         self.assertTrue((self.root/'current').is_symlink());self.assertTrue(self.command.is_file())
         self.assertEqual(self.command.stat().st_mode&0o777,0o755)
-        self.assertTrue((self.root/'installer.json').is_file())
-        self.assertEqual(json.loads(Path(str(self.command)+'.json').read_text()),{'root':str(self.root)})
+        self.assertTrue((self.state/'installer/installer.json').is_file())
+        self.assertTrue((self.state/'installer/installation.json').is_file())
+        self.assertFalse((self.root/'installer.json').exists())
+        self.assertFalse((self.root/'installation.json').exists())
+        self.assertEqual(json.loads(Path(str(self.command)+'.json').read_text()),{'root':str(self.root),'state_dir':str(self.state)})
         adm=self.command.parent/'adm'
         self.assertEqual(adm.stat().st_mode&0o777,0o755)
         self.assertIn(str(self.root/'current/bin/adm'),adm.read_text())
@@ -283,6 +298,7 @@ class InstallerOrchestrationTests(unittest.TestCase):
 
     def test_upgrade_restarts_only_services_active_before_upgrade(self):
         self.args.upgrade=True
+        self.args.start='preserve'
         for initial in (['anime-discovery-api.service','anime-discovery-worker.service'],
                         ['anime-discovery-api.service'],[]):
             with self.subTest(initial=initial):
@@ -303,8 +319,22 @@ class InstallerOrchestrationTests(unittest.TestCase):
                 start=[event for event in self.events if event[:2]==['systemctl','start']]
                 self.assertEqual(start,[['systemctl','start',*initial]] if initial else [])
 
+    def test_success_moves_metadata_out_of_checkout_and_rerun_reads_it(self):
+        self.root.mkdir()
+        saved={k:self.options[k] for k in (*installer.DEFAULTS,'origin')}
+        for name in ('installer.json','installation.json'):
+            (self.root/name).write_text(json.dumps(saved));(self.root/name).chmod(0o600)
+        with self.patches():installer.apply(self.options,self.args,self.execute)
+        self.assertFalse((self.root/'installer.json').exists())
+        self.assertFalse((self.root/'installation.json').exists())
+        self.assertTrue((self.state/'installer/installation.json').exists())
+        self.assertEqual((self.state/'installer').stat().st_mode&0o777,0o700)
+        with patch.object(installer,'DEFAULTS',{**installer.DEFAULTS,'destination':str(self.command)}):
+            self.assertEqual(installer.saved_defaults(),saved)
+
     def test_upgrade_reports_failed_service_restart(self):
         self.args.upgrade=True
+        self.args.start='preserve'
         def execute(args,**kwargs):
             args=[str(x) for x in args]
             if args[:3]==['systemctl','is-active','--quiet']:
@@ -335,11 +365,14 @@ class InstallerOrchestrationTests(unittest.TestCase):
 
     def test_failed_native_setup_keeps_previous_release_and_units(self):
         old=self.root/'releases'/'old';old.mkdir(parents=True);(self.root/'current').symlink_to(old)
+        legacy=self.root/'installer.json';legacy.write_text('{"ref":"NextGen"}')
         self.unitdir.mkdir();unit=self.unitdir/'anime-discovery-api.service';unit.write_text('old unit')
         def failing(*args):raise RuntimeError('simulated setup failure')
         with self.patches(failing),self.assertRaises(RuntimeError):installer.apply(self.options,self.args,self.execute)
         self.assertEqual((self.root/'current').resolve(),old);self.assertEqual(unit.read_text(),'old unit')
         self.assertFalse(self.command.exists())
+        self.assertEqual(legacy.read_text(),'{"ref":"NextGen"}')
+        self.assertTrue((self.state/'installer/installation.pending.json').is_file())
         self.assertFalse(any(event[:2]==['systemctl','start'] for event in self.events))
 
     def test_malicious_archive_is_refused_without_extracting_outside_release(self):
