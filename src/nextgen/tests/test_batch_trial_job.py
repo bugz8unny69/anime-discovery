@@ -3,7 +3,9 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile
+from dataclasses import replace
+from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile, AcquisitionConflict
+from src.nextgen.storage.batch_acquisition_candidate import load_batch_acquisition_candidate
 from src.nextgen.batch.provider_worker import BatchVerificationCompletion
 from src.nextgen.batch.verification import verify_batch_files
 from src.nextgen.configuration import ConfigurationStore
@@ -98,6 +100,14 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
                       'torrent_transfers','staging_publications'):
             self.assertEqual(self.rows('SELECT count(*) FROM '+table),[(0,)])
         self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
+        reserve_job=self.rows("SELECT job_id FROM jobs WHERE kind='RESERVE_BATCH'")[0][0]
+        candidate=load_batch_acquisition_candidate(self.database,reserve_job,self.inventory)
+        self.assertEqual(candidate.probe_index,0)
+        self.assertEqual(candidate.planned_episodes,tuple((i,i-1) for i in range(1,7)))
+        self.assertEqual(candidate.skipped_indices,tuple(range(6,13)))
+        with self.assertRaises(AcquisitionConflict):
+            load_batch_acquisition_candidate(self.database,reserve_job,
+                replace(self.inventory,info_sha256='c'*64))
 
     async def test_two_competing_packs_cannot_claim_same_episodes(self):
         db=connect(self.database)
