@@ -26,6 +26,8 @@ class BatchAcquisitionCandidate:
 
 
 def _candidate(db,reservation_job_id,inventory,*,cleanup=False):
+    owner_state=("AND j.state='DONE' AND o.state IN ('ACTIVE','STAGED') "
+                 if cleanup else "AND j.state='DONE' AND o.state='ACTIVE' ")
     rows=db.execute(
         "SELECT r.plan_id,r.file_index,r.tvdb_episode,b.info_hash,b.info_sha256,"
         "p.anchor_episode,p.planned_size_bytes,f.file_path,f.file_size_bytes "
@@ -38,8 +40,7 @@ def _candidate(db,reservation_job_id,inventory,*,cleanup=False):
         "JOIN job_operation_members m ON m.job_id=j.job_id "
         "JOIN job_operations o USING(operation_id) "
         "WHERE r.owner_job_id=? AND r.state='ACTIVE' AND j.kind='RESERVE_BATCH' "
-        "AND j.state='DONE' AND o.state IN ('ACTIVE','STAGED') " if cleanup else
-        "AND j.state='DONE' AND o.state='ACTIVE' "
+        + owner_state +
         "ORDER BY r.tvdb_episode,r.file_index",
         (reservation_job_id,)).fetchall()
     if not rows:raise AcquisitionConflict()
