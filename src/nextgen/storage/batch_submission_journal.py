@@ -152,6 +152,24 @@ class BatchSubmissionJournal:
             (claim.job_id,reservation_job_id,reservation_job_id)).fetchone()
         if row is None:raise AcquisitionConflict()
 
+    def source_hash(self,claim,reservation_job_id):
+        """Hash-only DB lookup. Never accept an arbitrary URL or torrent ID."""
+        integer(reservation_job_id,positive=True)
+        with self.queue.connection() as db,transaction(db):
+            self._owns(db,claim,reservation_job_id)
+            rows=db.execute(
+                "SELECT DISTINCT b.info_hash FROM batch_episode_reservations r "
+                "JOIN batch_trial_plans p ON p.plan_id=r.plan_id "
+                "JOIN batch_verifications b USING(batch_id) "
+                "JOIN jobs j ON j.job_id=r.owner_job_id "
+                "WHERE r.owner_job_id=? AND r.state='ACTIVE' "
+                "AND j.kind='RESERVE_BATCH' AND j.state='DONE' "
+                "AND j.event_id=?",
+                (reservation_job_id,claim.event_id)).fetchall()
+            if len(rows)!=1:raise AcquisitionConflict()
+            self._owns(db,claim,reservation_job_id)
+            return rows[0][0]
+
     def load(self,claim,reservation_job_id,inventory):
         integer(reservation_job_id,positive=True)
         if type(inventory) is not BatchInventory:raise AcquisitionConflict()
