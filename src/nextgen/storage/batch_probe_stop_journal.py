@@ -84,9 +84,10 @@ class BatchStopJournal:
         candidate=_candidate(db,reservation,inventory)
         if candidate.plan_id!=plan:raise TransferConflict()
         intent=_intent(db,candidate,inventory)
+        if intent is None or intent.state!='OWNED_STOPPED':
+            raise TransferConflict()
         transfer=transfer_record(db,intent)
-        if (intent is None or intent.state!='OWNED_STOPPED'
-                or transfer is None or transfer.phase!='COMPLETE'
+        if (transfer is None or transfer.phase!='COMPLETE'
                 or transfer.progress!=1 or transfer.transfer_job_id!=transfer_job_id):
             raise TransferConflict()
         row=db.execute(
