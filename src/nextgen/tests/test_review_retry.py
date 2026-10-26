@@ -82,17 +82,18 @@ class ReviewRetryTests(unittest.TestCase):
     def test_canceled_operation_or_child_blocks_retry(self):
         db=connect(self.path)
         with transaction(db):
-            op=db.execute("INSERT INTO job_operations(created_at_ms,updated_at_ms) "
-                          "VALUES(1,1)").lastrowid
-            db.execute("INSERT INTO job_operation_members(job_id,operation_id) VALUES(?,?)",
-                       (self.job,op))
-            db.execute("UPDATE job_operations SET state='CANCELED' WHERE operation_id=?",(op,))
+            op=db.execute("SELECT operation_id FROM job_operation_members WHERE job_id=?",
+                          (self.job,)).fetchone()[0]
+            db.execute("UPDATE job_operations SET state='CANCELED',"
+                       "cleanup_state='COMPLETE',reason_code='CANCELLATION_COMPLETE' "
+                       "WHERE operation_id=?",(op,))
         db.close()
         with self.assertRaises(RetryNotAllowed):
             self.request()
         db=connect(self.path)
         with transaction(db):
-            db.execute("UPDATE job_operations SET state='ACTIVE' WHERE operation_id=?", (op,))
+            db.execute("UPDATE job_operations SET state='ACTIVE',cleanup_state='NONE',"
+                       "reason_code=NULL WHERE operation_id=?", (op,))
             db.execute("INSERT INTO jobs(event_id,created_by_job_id,kind,payload_json,state,"
                        "available_at_ms,created_at_ms,updated_at_ms) "
                        "VALUES(?,?,'EVALUATE_TRIAL','{}','DONE',1,1,1)",(self.event,self.job))
