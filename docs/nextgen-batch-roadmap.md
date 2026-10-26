@@ -126,3 +126,36 @@ matching and staging; response is bounded to the first 100 verified files.
 **Testing note:** The seven locally available pre-existing batch-planner
 unit tests passed. New integration tests are committed but not run, and
 no GitHub CI was manually run or inspected per the user's request.
+
+
+## Follow-up PR #152 — durable batch trial selection (unmerged)
+
+- [x] Add the EVALUATE_BATCH job for completed provider-backed season packs.
+- [x] Reject packs with no independently verified TVDB E01 anchor.
+- [x] Apply the installed backfill/following window and per-file/total budgets.
+- [x] Add v28 additive tables recording immutable planned file indices,
+      canonical episodes and sizes, under a fenced worker transaction.
+- [x] Make a verified batch dispatch EVALUATE_BATCH instead of the single
+      episode EVALUATE_TRIAL, and add the handler to default worker composition.
+- [x] Extend Episode coverage with a separate planned/not-planned state.
+- [x] Add focused v28 worker tests: complete Shiki pack, missing E01, and
+      explicit absence of torrent or staging side effects.
+
+### Still BLOCKING a functional batch download
+
+- [ ] Harmonize multi-episode claims with all existing single-episode
+      reservations, active/held duplicates, staged results and cancellations.
+- [ ] Create a durable, one-shot stopped qB add and file-priority journal
+      with reconciliation after ambiguous network failures and process crash.
+- [ ] Authorize a probe file through the same operation ownership, size
+      and piece-overlap checks; never enable unknown or OVA files.
+- [ ] Persist real JP+EN audio verification for the downloaded probe and
+      only then allow additional provider-confirmed files to download.
+- [ ] Per-episode staging publications and Keep/Reject/cleanup, including
+      Jellyfin integration and safe source ownership release.
+- [ ] Full offline SQLite migration and fake-client worker crash tests,
+      then full local regression suite before production deployment.
+
+Plan rows are **read-only intentions, not episode reservations or download
+authorization**. The presence of v28 schema and job registrations does not
+make batch packs downloadable. RETRY remains isolated in PR #150.
