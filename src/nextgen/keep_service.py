@@ -10,9 +10,10 @@ from src.nextgen.storage.staging import Journal as StageJournal
 
 
 class Service:
-    def __init__(self,configuration,secrets,*,client_factory=Client):
+    def __init__(self,configuration,secrets,*,client_factory=Client,
+                 journal_factory=Journal):
         self.configuration,self.secrets,self.client_factory=configuration,secrets,client_factory
-        self.journal=Journal(configuration.value('storage.database_path'))
+        self.journal=journal_factory(configuration.value('storage.database_path'))
 
     def run(self,claim,target,cancelled):
         # A stale attempt must finish its I/O before a recovered attempt may send.
