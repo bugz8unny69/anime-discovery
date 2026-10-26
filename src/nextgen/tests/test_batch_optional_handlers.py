@@ -2,6 +2,10 @@
 import unittest
 
 from src.nextgen.dashboard.presentation import HANDLERS
+from src.nextgen.__main__ import parser
+from src.nextgen.jobs.reserve_batch_job import (
+    registration as reserve_batch, BatchReservationCompletion,
+)
 from src.nextgen.job_contracts import Registry
 from src.nextgen.jobs.submit_batch_job import registration as submit_batch
 from src.nextgen.jobs.transfer_batch_job import registration as transfer_batch
@@ -26,6 +30,21 @@ class BatchOptionalHandlersTests(unittest.TestCase):
         for code in ('SUBMIT_BATCH','TRANSFER_BATCH','VERIFY_BATCH_PROBE',
                      'UNLOCK_BATCH'):
             HANDLERS.require(code)
+
+    def test_reservation_routes_its_own_job_id_not_trial_evaluation_id(self):
+        spec=reserve_batch(submission_kind='SUBMIT_BATCH')
+        receipt=BatchReservationCompletion(source=None,reservation_job_id=789)
+        routed=spec.route(receipt)
+        self.assertEqual(len(routed),1)
+        self.assertEqual(routed[0].kind,'SUBMIT_BATCH')
+        self.assertEqual(routed[0].payload,'{"reservation_job_id": 789}')
+
+    def test_batch_default_and_explicit_worker_disable_option(self):
+        arguments=parser().parse_args(['worker','--config-dir','/tmp/ad-test'])
+        self.assertFalse(arguments.no_batch_acquisition)
+        arguments=parser().parse_args([
+            'worker','--config-dir','/tmp/ad-test','--no-batch-acquisition'])
+        self.assertTrue(arguments.no_batch_acquisition)
 
     def test_untrusted_sync_metadata_reader_is_rejected(self):
         for build in (
