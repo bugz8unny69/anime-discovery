@@ -131,7 +131,7 @@ class JobQueue:
             details["matching"] = matching_from_json(outcome.matching)
         activity = outcome.activity_code
         reason = outcome.reason_code
-        if outcome.kind == "complete":
+        if outcome.kind in ("complete", "skip"):
             state, code, available = "DONE", "DONE", now
         elif outcome.kind in ("retry", "defer"):
             failures = db.execute("SELECT count(*) FROM job_history WHERE job_id=? AND event_code='RETRY_SCHEDULED'",

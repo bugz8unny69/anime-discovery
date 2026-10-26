@@ -535,7 +535,7 @@ class Application:
                 'label':CATALOG.handler(row[3]),'created_at_ms':context[0],'received_at_ms':context[1],
                 'release_name':release,'anime_title':titles[0][0] if len(titles)==1 else None,
                 'acquisition_status':CATALOG.state('acquisition',op[1]),
-                'status':CATALOG.job_status(row[4],row[5]),'attempt_count':row[6],
+                'status':CATALOG.job_status(row[4],row[5],kind=row[3]),'attempt_count':row[6],
                 'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
                                  'reason':None if op[3] is None else CATALOG.reason(op[3]),

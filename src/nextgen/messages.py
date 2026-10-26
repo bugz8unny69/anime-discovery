@@ -83,9 +83,14 @@ _LABELS = {"PENDING": "Queued", "RUNNING": "Running",
 STATES = MappingProxyType({
     "acquisition": MappingProxyType({"ACTIVE":"Not staged", "STAGED":"Staged",
                                      "CANCEL_REQUESTED":"Cancellation requested", "CANCELED":"Canceled"}),
-    "job": MappingProxyType({**_LABELS, "DONE": "Completed", "ON_HOLD": "On hold",
+    "job": MappingProxyType({**_LABELS, "DONE": "Step completed", "ON_HOLD": "On hold",
                              "BLOCKED": "Blocked", "CANCELED": "Canceled"}),
     "job_activity": JOB_ACTIVITIES,
+    "job_result": MappingProxyType({"IDENTIFY_ANIME":"Series identified", "VERIFY_RELEASE":"Episode verified",
+        "EVALUATE_TRIAL":"Episode selection checked", "RESERVE_EPISODE":"Episode reserved",
+        "PREPARE_ACQUISITION":"Download prepared", "SUBMIT_TORRENT":"Torrent submitted",
+        "DOWNLOAD_TORRENT":"Download finished", "VERIFY_MEDIA":"Video checked",
+        "STAGE_TRIAL_MEDIA":"Staged"}),
     "incoming_event": MappingProxyType({**_LABELS, "PENDING": "Received",
                                        "RUNNING": "Identifying", "IDENTIFIED": "Series identified"}),
 })
@@ -229,7 +234,7 @@ class MessageCatalog:
         return {"code": safe_code(code), "message_key": key,
                 "message": self.text(key, locale=locale)}
 
-    def job_status(self, state, activity_code=None, *, locale="en"):
+    def job_status(self, state, activity_code=None, *, locale="en", kind=None):
         """Shared read-only display selection; tolerate unknown historical data.
 
         Terminal/held/review states cannot be masked by a stale activity label.
@@ -240,6 +245,9 @@ class MessageCatalog:
             validate_job_activity(state, activity_code)
         except ValueError:
             return base
+        if state == 'DONE' and activity_code is None and kind in STATES['job_result']:
+            label=self.state('job_result',kind,locale=locale)
+            return {**label,'code':'DONE'}
         return (self.state("job_activity", activity_code, locale=locale)
                 if activity_code is not None else base)
 

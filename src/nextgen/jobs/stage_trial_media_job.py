@@ -22,10 +22,11 @@ def _persist(db,claim,value):
     try:
         value=dict(value)
         refresh=value.pop('refresh',False)
-        persist(db,claim,value)
+        records=persist(db,claim,value)
         if refresh:
             from src.nextgen.jobs.refresh_jellyfin_job import enqueue
             enqueue(db,claim)
+        return records
     except REVIEW as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 

@@ -2,7 +2,7 @@
 import sqlite3
 import time
 
-from src.nextgen.episode_reservations import ReservationInput, ReservationConflict, EpisodeReserved
+from src.nextgen.episode_reservations import ReservationInput, ReservationConflict, EpisodeReserved, EpisodeStaged
 from src.nextgen.history import integer, append_job_history
 from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
@@ -76,7 +76,9 @@ def persist_reservation(db,claim,value):
     if prior==('RELEASED',):raise ReservationConflict()
     if rows:
         if len(rows)!=1 or rows[0][2:]!=expected:raise ReservationConflict()
-        if rows[0][0]!=claim.job_id:raise EpisodeReserved()
+        if rows[0][0]!=claim.job_id:
+            if published(db,rows[0][0]):raise EpisodeStaged()
+            raise EpisodeReserved()
         if rows[0][1]!=value.evaluation_job_id:raise ReservationConflict()
     else:
         db.execute("INSERT INTO episode_reservations(owner_job_id,evaluation_job_id,verification_id,plan_id,"
@@ -85,3 +87,37 @@ def persist_reservation(db,claim,value):
             value.anidb_id,value.anidb_episode_id,*key,value.tvdb_episode_id,now))
     return append_job_history(db,job_id=claim.job_id,event_code='EPISODE_RESERVATION_CREATED',
         reason_code='EPISODE_RESERVATION_GRANTED',component='worker',occurred_at_ms=now,details={'attempt':claim.attempt})
+
+
+def published(db,owner_job_id):
+    return db.execute("SELECT 1 FROM episode_reservations r JOIN acquisition_plans p USING(reservation_id) "
+        "JOIN staging_publications s USING(plan_id) WHERE r.owner_job_id=? AND r.state='ACTIVE' "
+        "AND s.state='PUBLISHED'",(owner_job_id,)).fetchone() is not None
+
+
+def skip_staged_waiters(db,plan_id,now):
+    """Close only verified, held competitors in the staging completion transaction.
+
+    Running/queued contenders check publication again in persist_reservation.
+    Canceled operations and inconsistent identity facts are left untouched.
+    """
+    if not db.in_transaction:raise ValueError('staging transaction required')
+    row=db.execute("SELECT r.owner_job_id,r.anidb_id,r.anidb_episode_id,r.tvdb_series_id,"
+        "r.tvdb_season,r.tvdb_episode,r.tvdb_episode_id FROM episode_reservations r "
+        "JOIN acquisition_plans p USING(reservation_id) WHERE p.plan_id=? AND r.state='ACTIVE'",(plan_id,)).fetchone()
+    if row is None or not published(db,row[0]):raise ReservationConflict()
+    records=[]
+    waiters=db.execute("SELECT j.job_id,j.event_id,json_extract(j.payload_json,'$.evaluation_job_id'),j.attempt_count "
+        "FROM jobs j JOIN job_operation_members m USING(job_id) JOIN job_operations o USING(operation_id) "
+        "WHERE j.kind='RESERVE_EPISODE' AND j.state='ON_HOLD' AND j.last_reason_code='EPISODE_RESERVED' "
+        "AND o.state='ACTIVE'").fetchall()
+    for job,event,evaluation,attempt in waiters:
+        try:value=_facts(db,evaluation,event)
+        except ReservationConflict:continue
+        if not value.selected or (value.anidb_id,value.anidb_episode_id,value.tvdb_series_id,
+                value.tvdb_season,value.tvdb_episode,value.tvdb_episode_id)!=row[1:]:continue
+        db.execute("UPDATE jobs SET state='DONE',activity_code='SKIPPED_DUPLICATE',last_reason_code=NULL,"
+            "updated_at_ms=?,available_at_ms=? WHERE job_id=?",(now,now,job))
+        records.append(append_job_history(db,job_id=job,event_code='DONE',component='worker',
+            occurred_at_ms=now,details={'attempt':attempt}))
+    return tuple(records)
