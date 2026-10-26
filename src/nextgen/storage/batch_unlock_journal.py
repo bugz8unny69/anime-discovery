@@ -23,7 +23,8 @@ from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction
 
 
-def _decode_media(raw):
+def _decode_media(raw,reservation_job_id,transfer_job_id,plan_id,
+                  submission_fingerprint,transfer_fingerprint):
     if type(raw) is not str or len(raw.encode('utf-8'))>65536:
         raise TransferConflict()
     def unique(items):
@@ -34,9 +35,11 @@ def _decode_media(raw):
         return out
     try:
         value=json.loads(raw,object_pairs_hook=unique)
+        if type(value) is not dict or set(value)!={'path','root','file','sha256','duration_ms','languages'}:
+            raise TransferConflict()
         media=VerifiedMedia(
-            value['preparation_job_id'],value['download_job_id'],value['plan_id'],
-            value['submission_fingerprint'],value['transfer_fingerprint'],
+            reservation_job_id,transfer_job_id,plan_id,
+            submission_fingerprint,transfer_fingerprint,
             value['path'],tuple(value['root']),tuple(value['file']),value['sha256'],
             value['duration_ms'],tuple(value['languages']))
         if media.json()!=raw:raise TransferConflict()
@@ -84,7 +87,8 @@ class BatchUnlockJournal:
         intent=_intent(db,candidate,inventory)
         if intent is None or intent.state!='OWNED_STOPPED':raise TransferConflict()
         source=db.execute(
-            "SELECT m.verification_job_id,m.evidence_json,v.state,"
+            "SELECT m.verification_job_id,m.evidence_json,m.transfer_job_id,"
+            "m.submission_fingerprint,m.transfer_fingerprint,v.state,"
             "u.created_by_job_id,u.event_id,o.state "
             "FROM batch_probe_media m "
             "JOIN jobs v ON v.job_id=m.verification_job_id "
@@ -97,10 +101,11 @@ class BatchUnlockJournal:
             "JOIN job_operations o ON o.operation_id=vm.operation_id "
             "WHERE m.plan_id=?",
             (claim.job_id,reservation_job_id,candidate.plan_id)).fetchone()
-        if (source is None or source[2:]!=(
+        if (source is None or source[5:]!=(
                 'DONE',source[0],claim.event_id,'ACTIVE')):
             raise AcquisitionConflict()
-        media=_decode_media(source[1])
+        media=_decode_media(source[1],reservation_job_id,source[2],
+                            candidate.plan_id,source[3],source[4])
         if (media.plan_id!=candidate.plan_id
                 or media.preparation_job_id!=reservation_job_id
                 or media.submission_fingerprint!=intent.fingerprint
