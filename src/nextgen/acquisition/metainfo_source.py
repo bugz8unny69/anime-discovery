@@ -13,7 +13,7 @@ import urllib.parse
 import urllib.request
 
 from src.nextgen.async_io import blocking
-from src.nextgen.acquisition.metadata import MAX_METAINFO, MetadataInvalid, infohash, parse_metainfo
+from src.nextgen.acquisition.metadata import MAX_METAINFO, MetadataInvalid, infohash, parse_metainfo, parse_batch_metainfo
 from src.nextgen.acquisition.settings import endpoint
 
 
@@ -86,7 +86,8 @@ class Client:
         opener=urllib.request.build_opener(_NoRedirect(),urllib.request.ProxyHandler({}))
         self.transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
-    def fetch(self,expected_hash,cancelled):
+    def fetch(self,expected_hash,cancelled,*,batch=False):
+        if type(batch) is not bool:raise ValueError('invalid metadata inspection mode')
         digest=infohash(expected_hash)
         if cancelled.is_set():raise asyncio.CancelledError()
         # Only a normalized 40-character digest can influence the request path.
@@ -121,7 +122,7 @@ class Client:
         except (OSError,TimeoutError,urllib.error.URLError,http.client.HTTPException):
             raise MetadataSourceUnavailable() from None
         if cancelled.is_set():raise asyncio.CancelledError()
-        parse_metainfo(raw,digest)
+        (parse_batch_metainfo if batch else parse_metainfo)(raw,digest)
         return raw
 
 
@@ -134,3 +135,20 @@ def make_reader(*,client_factory=Client):
         client=client_factory(options)
         return await blocking(client.fetch,source.info_hash,cancelled)
     return read_metainfo
+
+
+def make_batch_reader(*,client_factory=Client):
+    """Trusted hash-only reader for VERIFY_RELEASE batch inspection.
+
+    Never used by the strict single-video preparation or submission paths.
+    The caller must supply a verified, normalized torrent infohash rather
+    than a URL from an incoming notification.
+    """
+    async def read_batch_metainfo(expected_hash,configuration,cancelled):
+        if cancelled.is_set():raise asyncio.CancelledError()
+        digest=infohash(expected_hash)
+        options=SourceOptions(configuration.value('torrent_metadata.base_url'),
+                              configuration.value('torrent_metadata.timeout_seconds'))
+        client=client_factory(options)
+        return await blocking(client.fetch,digest,cancelled,batch=True)
+    return read_batch_metainfo
