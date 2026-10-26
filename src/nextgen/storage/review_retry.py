@@ -4,6 +4,7 @@ Not an API route or a forced general requeue. External torrent/media/
 Keep/Reject/cleanup operations require handler-specific reconciliation first.
 """
 from dataclasses import dataclass
+import json
 
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.storage.job_queue import JobQueue
@@ -56,10 +57,12 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
             raise RetryStale("job attempt changed")
         if state == "PENDING":
             previous = db.execute(
-                "SELECT history_id FROM job_history WHERE job_id=? "
+                "SELECT history_id,details_json FROM job_history WHERE job_id=? "
                 "AND event_code='RETRY_REQUESTED' ORDER BY history_id DESC LIMIT 1",
                 (job_id,)).fetchone()
             if previous is not None and token is None and expires is None:
+                if json.loads(previous[1]).get("cause_reason_code") != expected_reason:
+                    raise RetryStale("review reason changed")
                 return RetryReceipt(job_id, attempt, "ALREADY_QUEUED", previous[0])
         if state != "NEEDS_REVIEW":
             raise RetryNotAllowed("only NEEDS_REVIEW jobs can be manually requeued")
@@ -85,5 +88,6 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
             raise RetryStale("job was updated concurrently")
         audit = append_job_history(
             db, job_id=job_id, event_code="RETRY_REQUESTED", component="api",
-            occurred_at_ms=now, details={"attempt": attempt})
+            occurred_at_ms=now,
+            details={"attempt": attempt, "cause_reason_code": reason})
         return RetryReceipt(job_id, attempt, "QUEUED", audit.history_id)
