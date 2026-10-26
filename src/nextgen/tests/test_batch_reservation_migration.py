@@ -15,7 +15,7 @@ class BatchReservationMigrationTests(unittest.TestCase):
         return db
 
     def test_upgrade_28_to_29_matches_fresh_schema(self):
-        self.assertEqual(migrations.LATEST_VERSION,31)
+        self.assertEqual(migrations.LATEST_VERSION,33)
         upgraded=self.migration_prefix(28)
         self.addCleanup(upgraded.close)
         self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone(),(28,))
