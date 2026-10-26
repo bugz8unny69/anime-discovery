@@ -23,10 +23,11 @@ KIND='CLEANUP_BATCH_DOWNLOAD'
 DEFINITION=HandlerDefinition(KIND,'Reconcile and remove owned completed batch torrent')
 
 
-def enqueue(db,claim):
+def enqueue(db,claim,*,decision=None):
+    decision=claim.job_id if decision is None else integer(decision,positive=True)
     return enqueue_job(
         db,kind=KIND,component='worker',
-        payload={'decision_job_id':claim.job_id},
+        payload={'decision_job_id':decision},
         event_id=claim.event_id,created_by_job_id=claim.job_id)
 
 
@@ -43,7 +44,17 @@ def _persist(db,claim,value):
         (claim.job_id,decision)).fetchone()
     if (row is None or row[0]!='COMPLETE' or row[1]!='DONE'
             or row[2] not in ('KEEP_BATCH','REJECT_BATCH')
-            or row[3]!=decision or row[4]!=claim.event_id):
+            or row[4]!=claim.event_id):
+        raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
+    if row[2]=='KEEP_BATCH':
+        valid=db.execute(
+            "SELECT 1 FROM batch_keep_cleanup b JOIN jobs j ON j.job_id=b.job_id "
+            "WHERE b.decision_job_id=? AND b.phase='COMPLETE' "
+            "AND b.job_id=? AND j.kind='CLEANUP_BATCH_KEPT_MEDIA' AND j.state='DONE'",
+            (decision,row[3])).fetchone()
+        if valid is None:
+            raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
+    elif row[3]!=decision:
         raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
 
 
