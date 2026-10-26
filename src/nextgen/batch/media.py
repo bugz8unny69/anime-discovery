@@ -73,3 +73,64 @@ def verify_batch_probe_file(intent,record,transfer_job_id,flag,*,
                     os.close(fd)
     except OSError:
         raise MediaUnavailable() from None
+
+
+def verify_batch_episode_file(intent,record,unlock_job_id,file_index,flag,*,
+                              read_probe=probe,protected_roots=()):
+    """Verify one provider-approved, fully downloaded regular episode."""
+    from src.nextgen.storage.batch_unlock_journal import BatchUnlockRecord
+    from src.nextgen.batch.unlock import planned_priorities
+    if (type(intent) is not BatchSubmissionIntent
+            or type(record) is not BatchUnlockRecord
+            or record.phase!='COMPLETE'
+            or record.first_job_id!=unlock_job_id
+            or record.intent.plan_id!=intent.candidate.plan_id
+            or record.intent.priorities!=planned_priorities(intent)
+            or type(file_index) is not int
+            or file_index not in {i for _,i in intent.candidate.planned_episodes}):
+        raise MediaInvalid()
+    selected=intent.inventory.files[file_index]
+    suffix=PurePosixPath(selected.path).suffix.lower()
+    if suffix not in ('.mkv','.mp4'):raise MediaInvalid()
+    from src.nextgen.staging import disjoint, StagingConfiguration
+    try:disjoint(intent.options.download_root,protected_roots)
+    except StagingConfiguration:raise MediaInvalid() from None
+    root=intent.options.download_root
+    try:
+        cancelled(flag)
+        with directory(root) as base:
+            st=os.fstat(base)
+            root_sig=(st.st_dev,st.st_ino)
+            with parent(base,selected.path) as (folder,name):
+                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|
+                           os.O_CLOEXEC,dir_fd=folder)
+                try:
+                    before=signature(os.fstat(fd))
+                    if before[2]!=selected.size:raise MediaInvalid()
+                    digest=hashlib.sha256()
+                    remaining=selected.size
+                    while remaining:
+                        cancelled(flag)
+                        chunk=os.read(fd,min(1048576,remaining))
+                        if not chunk:raise MediaInvalid()
+                        remaining-=len(chunk)
+                        digest.update(chunk)
+                    if os.read(fd,1):raise MediaInvalid()
+                    os.lseek(fd,0,os.SEEK_SET)
+                    duration,languages=parse_probe(read_probe(fd,flag),suffix)
+                    cancelled(flag)
+                    if signature(os.fstat(fd))!=before:raise MediaInvalid()
+                    with directory(root) as fresh:
+                        if (os.fstat(fresh).st_dev,os.fstat(fresh).st_ino)!=root_sig:
+                            raise MediaInvalid()
+                        with parent(fresh,selected.path) as (latest,leaf):
+                            if signature(os.stat(
+                                    leaf,dir_fd=latest,follow_symlinks=False))!=before:
+                                raise MediaInvalid()
+                    return VerifiedMedia(
+                        intent.candidate.reservation_job_id,unlock_job_id,
+                        intent.candidate.plan_id,intent.fingerprint,
+                        record.intent.fingerprint,selected.path,root_sig,before,
+                        digest.hexdigest(),duration,languages)
+                finally:os.close(fd)
+    except OSError:raise MediaUnavailable() from None
