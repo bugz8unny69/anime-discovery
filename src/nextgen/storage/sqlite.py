@@ -413,6 +413,39 @@ CREATE TABLE IF NOT EXISTS keep_imports (
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=0)
 );
 
+CREATE TABLE IF NOT EXISTS batch_verifications (
+ batch_id INTEGER PRIMARY KEY,
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ identity_result_id INTEGER NOT NULL,
+ anidb_id INTEGER NOT NULL CHECK(anidb_id>0),
+ tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>0),
+ release_sha256 TEXT NOT NULL CHECK(length(release_sha256)=64 AND release_sha256 NOT GLOB '*[^a-f0-9]*'),
+ info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
+ FOREIGN KEY(identity_result_id,anidb_id) REFERENCES identity_results(result_id,anidb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_verifications_identity ON batch_verifications(identity_result_id);
+CREATE TABLE IF NOT EXISTS batch_verified_files (
+ batch_id INTEGER NOT NULL REFERENCES batch_verifications(batch_id),
+ file_index INTEGER NOT NULL CHECK(file_index>=0),
+ file_path TEXT NOT NULL CHECK(length(file_path) BETWEEN 1 AND 2048),
+ file_size_bytes INTEGER NOT NULL CHECK(file_size_bytes>0),
+ release_episode INTEGER NOT NULL CHECK(release_episode>0),
+ anidb_episode_number INTEGER NOT NULL CHECK(anidb_episode_number>0),
+ anidb_episode_id INTEGER NOT NULL CHECK(anidb_episode_id>0),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season>0),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ tvdb_episode_id INTEGER NOT NULL CHECK(tvdb_episode_id>0),
+ PRIMARY KEY(batch_id,file_index),
+ UNIQUE(batch_id,release_episode),
+ UNIQUE(batch_id,anidb_episode_id),
+ UNIQUE(batch_id,tvdb_season,tvdb_episode),
+ UNIQUE(batch_id,tvdb_episode_id)
+);
+CREATE INDEX IF NOT EXISTS idx_batch_files_episode ON batch_verified_files(batch_id,tvdb_season,tvdb_episode);
+
 """
 
 def connect(path):
@@ -452,13 +485,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v26; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v27; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v26 storage.
+    before accessing v27 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 26:
+    if version == 27:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -468,7 +501,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=26;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=27;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

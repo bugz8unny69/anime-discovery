@@ -77,6 +77,38 @@ class Manifest:
                            'selected_index':self.selected_index},sort_keys=True,separators=(',',':'))
 
 
+@dataclass(frozen=True)
+class BatchInventory:
+    """Hash-bound file inventory, not a selected torrent or acquisition permit.
+
+    Unlike Manifest, this type can represent multiple videos. No downstream
+    single-video acquisition contract accepts it as a substitute for Manifest.
+    """
+    info_hash: str
+    info_sha256: str
+    files: tuple[TorrentFile,...] = field(repr=False)
+
+    def __post_init__(self):
+        if infohash(self.info_hash)!=self.info_hash:raise MetadataInvalid()
+        if type(self.info_sha256) is not str or not re.fullmatch('[a-f0-9]{64}',self.info_sha256):raise MetadataInvalid()
+        if type(self.files) is not tuple or not 1<=len(self.files)<=10000:raise MetadataInvalid()
+        if any(type(f) is not TorrentFile or f.index!=i for i,f in enumerate(self.files)):raise MetadataInvalid()
+        paths=[f.path.casefold() for f in self.files]
+        if len(set(paths))!=len(paths):raise MetadataInvalid()
+        names=set(paths)
+        if any('/'.join(p.split('/')[:n]) in names for p in paths for n in range(1,len(p.split('/')))):raise MetadataInvalid()
+        if sum(f.size for f in self.files)>MAX_INTEGER:raise MetadataInvalid()
+        videos=[f for f in self.files if PurePosixPath(f.path).suffix.lower() in ('.mkv','.mp4','.m4v','.avi')]
+        if not videos or any(f.size<=0 for f in videos):raise MetadataInvalid()
+        allowed={'.mkv','.mp4','.m4v','.avi','.nfo','.srt','.ass','.ssa','.txt'}
+        if any(PurePosixPath(f.path).suffix.lower() not in allowed for f in self.files):raise MetadataInvalid()
+        if len(self.json().encode('utf-8'))>1048576:raise MetadataInvalid()
+
+    def json(self):
+        return json.dumps({'files':[{'index':f.index,'path':f.path,'size':f.size} for f in self.files]},
+                          sort_keys=True,separators=(',',':'))
+
+
 class _Decoder:
     def __init__(self,raw):self.raw,self.pos,self.nodes,self.info_span=raw,0,0,None
     def string(self):
@@ -122,7 +154,7 @@ class _Decoder:
         return result
 
 
-def parse_metainfo(raw,expected_hash):
+def _parse_metainfo(raw,expected_hash,*,batch):
     """Metadata only: no file-content, audio, readiness or ownership assertion."""
     expected_hash=infohash(expected_hash)
     if type(raw) is not bytes or not 1<=len(raw)<=MAX_METAINFO:raise MetadataInvalid()
@@ -163,9 +195,23 @@ def parse_metainfo(raw,expected_hash):
             files=tuple(files)
         total=sum(f.size for f in files)
         if total<=0 or len(pieces)!=20*((total+piece-1)//piece):raise MetadataInvalid()
+        if batch:
+            # A separate, non-authorizing inspection path for mixed packs.
+            return BatchInventory(expected_hash,hashlib.sha256(encoded).hexdigest(),files)
         videos=[f.index for f in files if PurePosixPath(f.path).suffix.lower() in ('.mkv','.mp4')]
         if len(videos)!=1:raise MetadataInvalid()
-        # Reject unsupported extra payloads instead of silently selecting around them.
+        # Keep the production single-video contract unchanged until batch
+        # verification, reservations and torrent selection are integrated.
         if any(PurePosixPath(f.path).suffix.lower() not in ('.mkv','.mp4','.nfo','.srt','.ass','.ssa','.txt') for f in files):raise MetadataInvalid()
         return Manifest(expected_hash,hashlib.sha256(encoded).hexdigest(),files,videos[0])
     except (KeyError,UnicodeError,AttributeError,IndexError,TypeError,ValueError):raise MetadataInvalid() from None
+
+
+def parse_metainfo(raw,expected_hash):
+    """Strict single-video acquisition path, preserved for existing jobs."""
+    return _parse_metainfo(raw,expected_hash,batch=False)
+
+
+def parse_batch_metainfo(raw,expected_hash):
+    """Read-only, hash-verified multi-video inventory; selects no files."""
+    return _parse_metainfo(raw,expected_hash,batch=True)
