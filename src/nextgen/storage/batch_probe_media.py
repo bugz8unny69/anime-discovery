@@ -14,7 +14,7 @@ def _proof_source(db,claim,verified):
     row=db.execute(
         "SELECT download.event_id,download.kind,download.state,"
         "download.created_by_job_id,p.batch_id,b.reservation_job_id,b.state,"
-        "m.operation_id "
+        "m.operation_id,b.plan_id "
         "FROM jobs download "
         "JOIN batch_torrent_submissions b ON b.first_job_id=download.created_by_job_id "
         "JOIN batch_trial_plans p ON p.plan_id=b.plan_id "
@@ -24,15 +24,15 @@ def _proof_source(db,claim,verified):
         (claim.job_id,verified.download_job_id)).fetchone()
     if (row is None or row[:3]!=(claim.event_id,'TRANSFER_BATCH','DONE')
             or row[5]!=verified.preparation_job_id or row[6]!='OWNED_STOPPED'
-            or verified.plan_id<=0):
+            or row[8]!=verified.plan_id or verified.plan_id<=0):
         raise MediaInvalid()
     op=db.execute('SELECT state FROM job_operations WHERE operation_id=?',
                   (row[7],)).fetchone()
     if op!=('ACTIVE',):raise MediaInvalid()
-    inventory_rows=db.execute(
-        'SELECT f.file_index,f.file_path,f.file_size_bytes FROM batch_verified_files f '
-        'JOIN batch_verifications b ON b.batch_id=f.batch_id '
-        'WHERE b.batch_id=? ORDER BY f.file_index',(row[4],)).fetchall()
+    if db.execute(
+        'SELECT operation_id FROM job_operation_members WHERE job_id=?',
+        (row[5],)).fetchone()!=(row[7],):
+        raise MediaInvalid()
     candidate_file=db.execute(
         'SELECT f.file_index,f.file_path,f.file_size_bytes '
         'FROM batch_verified_files f '
