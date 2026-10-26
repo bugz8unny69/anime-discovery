@@ -1,12 +1,12 @@
-"""Opt-in RESERVE_BATCH gate; never submits, selects or starts a torrent.
+"""Reserve verified batch episodes and route owned jobs to stopped submission.
 
-Do not register this in the default worker until the crash-safe batch
-acquisition journal and cancellation reconciler are installed.
+The successor only receives the reservation job ID; all file selections and
+metadata are reloaded from the authenticated database before any qB mutation.
 """
 from src.nextgen.episode_reservations import ReservationConflict, EpisodeReserved
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
-from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
+from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.batch_reservations import (
     load_batch_reservation, persist_batch_reservations,
 )
@@ -29,7 +29,11 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration():
+def registration(*, submission_kind=None):
+    if submission_kind is not None and (type(submission_kind) is not str
+            or not submission_kind.strip() or len(submission_kind)>64
+            or submission_kind==KIND):
+        raise ValueError('invalid batch submission successor')
     async def execute(context):
         payload=context.data()
         try:
@@ -46,4 +50,8 @@ def registration():
         except ReservationConflict:
             return Outcome('review','EPISODE_RESERVATION_CONFLICT')
         return Outcome(value=result)
-    return Registration(KIND,DEFINITION,execute,persist=_persist)
+    def route(value):
+        return () if submission_kind is None else (
+            Successor.create(submission_kind,{'reservation_job_id':value.evaluation_job_id}),)
+    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+                        successor_kinds=() if submission_kind is None else (submission_kind,))
