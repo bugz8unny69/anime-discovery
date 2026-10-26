@@ -34,7 +34,7 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.startup=self.store.initialize({'storage':{'database_path':str(self.database)}}).snapshot
         db=connect(self.database)
         initialize(db)
-        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(28,))
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(29,))
         self.event,self.verification_job=accept_event_and_job(
             db,'test',b'{"release_name":"Shiki (S01 + OVA)","torrent_infohash":"'+b'a'*40+b'"}',
             kind='VERIFY_RELEASE',payload={'anidb_id':123})
