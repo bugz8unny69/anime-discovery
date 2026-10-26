@@ -330,11 +330,9 @@ Feature branch: `feature/enable-nextgen-batch-acquisition-20261026`.
   reservation job ID**, never the upstream trial evaluation job ID.
 - [x] Make enabled acquisition the default in `build_identity_worker`
   and `run_identity_worker`.
-- [x] Add explicit rollback: `python -m src.nextgen worker --config-dir
-  /path/to/config --no-batch-acquisition`. This keeps batch
-  identification, verification and EVALUATE_BATCH planning available
-  without creating new reservation or download jobs.
-- [x] Add default/disabled registry and CLI argument tests.
+- [x] Complete the single default batch handler chain with no
+  enable/disable option. (Earlier rollout-switch instructions are superseded.)
+- [x] Add default-composition and successor-chain regression tests.
 
 ### Deployment and behavior WARNING
 
@@ -365,3 +363,60 @@ queued jobs; existing work needs explicit reconciliation.
 The user asked not to trigger GitHub CI. New tests have been committed
 but not executed against a complete repository checkout. No deployment
 has been performed by the assistant. RETRY PR #150 remains unmerged.
+
+
+## Current lifecycle branch — single default pipeline, v34–v36
+
+Branch: feature/nextgen-batch-complete-lifecycle-20261026.
+This is **not merged or deployed**.
+
+- [x] Remove all temporary batch enable/disable parameters from the
+  worker composition and remove the --no-batch-acquisition CLI option.
+  The project must have one integrated batch path.
+- [x] v34 batch_probe_stops: one-use E01 stop authorization and
+  state reconciliation before changing file priorities. A restart
+  cannot recreate a stop permit. After an expanded selection exists
+  the worker never re-enters the E01-only stopped-probe path.
+- [x] v35 batch_episode_media: independently verify JP+EN audio,
+  full-file SHA-256, exact selected file, no-follow path and inode
+  stability for each approved regular episode (not only E01).
+- [x] v36 batch_staging_publications: per-episode pinned manifest,
+  immutable no-replace artifact receipts, exact canonical AniDB/TVDB
+  placement and duplicate-published-episode rejection.
+- [x] Extend the existing staging publisher with COPY-only batch media,
+  digest each copied destination file, preserve qB source files, and
+  serialize sibling stage operations. The last published episode
+  may mark the whole operation staged only once all selected
+  episodes are published and preceding workers are complete.
+- [x] Route UNLOCK_BATCH into individually fenced
+  VERIFY_BATCH_EPISODE and STAGE_BATCH_EPISODE successors.
+- [x] Make completed batch episode staging eligible to request a
+  Jellyfin refresh without changing its separate worker scope.
+- [x] Add filesystem copy/idempotency, stop-permit and v34–v36
+  migration regression test source. Full tests are NOT yet run.
+
+### Blocking completion before merge/deployment
+
+- [ ] Integrate **batch Keep**: the current KEEP_MEDIA action and Sonarr
+  keep-import journal operate on exactly one staged episode. A batch
+  must reconcile Sonarr imports for *every* selected canonical episode
+  with separate persisted per-file request/result phases.
+- [ ] Integrate **batch Reject** with a bounded list of the operation's
+  staged media and episode NFOs, respecting ownership and preserving
+  shared series metadata. Avoid using the single-publication cleanup
+  entry point for a multi-episode pack.
+- [ ] Implement one-shot, crash-safe **batch qB cleanup** and exact
+  recorded-file deletion only after confirmed removal and Keep/Reject,
+  including canceled batches and reservation release. Never broadly
+  delete torrent roots or free active reservations.
+- [ ] Make dashboard/management action capabilities and completion
+  status reflect all per-episode Keep/Reject/cleanup results.
+- [ ] Run the whole Python 3.11–3.13 and browser suites, actual v33->v36
+  migration/upgraded SQLite recovery, and simulated qB crash/restart
+  transitions, including a real Shiki S01 + OVA acceptance pack.
+  The user requested no GitHub CI runs; do not trigger CI.
+
+**Important:** Batch acquisition is already default-enabled in merged
+PR #153; this branch is a corrective implementation, not an optional
+feature toggle. It must not be merged or deployed as a complete system
+until Keep/Reject, cleanup, and full testing are solved.
