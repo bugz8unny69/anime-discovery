@@ -74,16 +74,23 @@ def plan_verified_unlock(intent,snapshot,media,verification_job_id):
         raise TransferConflict()
     if not any(p==1 and i!=probe for i,p in enumerate(priorities)):
         raise TransferConflict()
-    fingerprint=hashlib.sha256(json.dumps({
+    fingerprint=unlock_fingerprint(intent,media,snapshot.piece_size)
+    return BatchUnlockIntent(intent.candidate.plan_id,fingerprint,priorities,
+                             snapshot.piece_size,verification_job_id)
+
+
+def unlock_fingerprint(intent,media,piece_size):
+    if (type(intent) is not BatchSubmissionIntent or type(media) is not VerifiedMedia
+            or type(piece_size) is not int or not 1<=piece_size<=67108864):
+        raise TransferConflict()
+    return hashlib.sha256(json.dumps({
         'submission':intent.fingerprint,
         'media_sha256':media.sha256,
         'media_proof':hashlib.sha256(media.json().encode('utf-8')).hexdigest(),
-        'priorities':priorities,
-        'piece_size':snapshot.piece_size,
+        'priorities':planned_priorities(intent),
+        'piece_size':piece_size,
         'overlap_bytes':0,
     },sort_keys=True,separators=(',',':')).encode()).hexdigest()
-    return BatchUnlockIntent(intent.candidate.plan_id,fingerprint,priorities,
-                             snapshot.piece_size,verification_job_id)
 
 
 def exact_unlock_selection(plan,snapshot):
