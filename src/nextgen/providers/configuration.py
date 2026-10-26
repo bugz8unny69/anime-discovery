@@ -13,6 +13,8 @@ from src.nextgen.jobs.submit_batch_job import KIND as BATCH_SUBMIT_KIND, registr
 from src.nextgen.jobs.transfer_batch_job import KIND as BATCH_TRANSFER_KIND, registration as batch_transfer_registration
 from src.nextgen.jobs.verify_batch_probe_job import KIND as BATCH_PROBE_KIND, registration as batch_probe_registration
 from src.nextgen.jobs.unlock_batch_job import KIND as BATCH_UNLOCK_KIND, registration as batch_unlock_registration
+from src.nextgen.jobs.verify_batch_files_job import KIND as BATCH_ALL_MEDIA_KIND, registration as batch_all_media_registration
+from src.nextgen.jobs.stage_batch_files_job import KIND as BATCH_STAGE_KIND, registration as batch_stage_registration
 from src.nextgen.jobs.reserve_episode_job import KIND as RESERVE_KIND, registration as reserve_registration
 from src.nextgen.jobs.prepare_acquisition_job import KIND as PREPARE_KIND, registration as prepare_registration
 from src.nextgen.jobs.submit_torrent_job import KIND as SUBMIT_KIND, registration as submit_registration
@@ -76,7 +78,9 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
         batch_transfer_registration(read_batch_metainfo,secrets,
                                     verification_kind=BATCH_PROBE_KIND),
         batch_probe_registration(read_batch_metainfo,unlock_kind=BATCH_UNLOCK_KIND),
-        batch_unlock_registration(read_batch_metainfo,secrets),
+        batch_unlock_registration(read_batch_metainfo,secrets,next_kind=BATCH_ALL_MEDIA_KIND),
+        batch_all_media_registration(read_batch_metainfo,staging_kind=BATCH_STAGE_KIND),
+        batch_stage_registration(),
     )
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
                          release_registration(verify,trial_kind=TRIAL_KIND,batch_kind=BATCH_KIND),
