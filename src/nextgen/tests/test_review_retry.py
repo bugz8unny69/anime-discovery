@@ -52,7 +52,7 @@ class ReviewRetryTests(unittest.TestCase):
             (self.job,)), [(1,)])
         self.assertEqual(self.rows(
             "SELECT component,details_json FROM job_history WHERE history_id=?",
-            (receipt.history_id,)), [("api", '{"attempt":1}')])
+            (receipt.history_id,)), [("api", '{"attempt":1,"cause_reason_code":"RELEASE_EPISODE_MAPPING_MISSING"}')])
 
     def test_stale_attempt_and_changed_reason_preserve_review(self):
         for attempt, reason in ((2, "RELEASE_EPISODE_MAPPING_MISSING"),
