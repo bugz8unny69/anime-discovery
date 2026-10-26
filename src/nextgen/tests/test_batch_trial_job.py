@@ -99,6 +99,30 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.rows('SELECT count(*) FROM '+table),[(0,)])
         self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
 
+    async def test_two_competing_packs_cannot_claim_same_episodes(self):
+        db=connect(self.database)
+        try:
+            event,job=accept_event_and_job(
+                db,'second-delivery',
+                b'{"release_name":"Shiki S01 + OVA","torrent_infohash":"'+b'a'*40+b'"}',
+                kind='VERIFY_RELEASE',payload={'anidb_id':123})
+            save_identity(db,event,{'schema_version':2,'anime':{
+                'anidb_id':123,'tvdb_series_id':456,'title':'Shiki'}})
+        finally:db.close()
+        worker=self.worker(reserve=True)
+        for _ in range(6):
+            await worker.attempt()
+        self.assertEqual(self.rows(
+            "SELECT state FROM jobs WHERE kind='RESERVE_BATCH' ORDER BY job_id"),
+            [('DONE',),('ON_HOLD',)])
+        self.assertEqual(self.rows(
+            "SELECT count(*) FROM batch_episode_reservations WHERE state='ACTIVE'"),[(6,)])
+        self.assertEqual(self.rows(
+            "SELECT distinct owner_job_id FROM batch_episode_reservations"),[
+                (self.rows("SELECT job_id FROM jobs WHERE kind='RESERVE_BATCH' "
+                           "ORDER BY job_id LIMIT 1")[0][0],)])
+        self.assertEqual(self.rows('PRAGMA foreign_key_check'),[])
+
     async def test_missing_episode_one_requires_review_without_reservation(self):
         # An otherwise provider-confirmed pack cannot guess the trial anchor.
         # Reindex a pack whose first regular episode is E02.
