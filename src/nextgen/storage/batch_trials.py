@@ -72,7 +72,9 @@ def persist_batch_trial(db,claim,proposal):
         raise TrialConflict()
     total=sum(x.size_bytes for x in proposal.selected)
     limits=proposal.limits
-    limits.admit(total)
+    if total>limits.plan_bytes:
+        from src.nextgen.acquisition.settings import SizeLimitExceeded
+        raise SizeLimitExceeded()
     plan=db.execute(
         'INSERT INTO batch_trial_plans(batch_id,evaluation_job_id,anchor_episode,'
         'backfill_count,following_count,configuration_revision,max_episode_bytes,'
