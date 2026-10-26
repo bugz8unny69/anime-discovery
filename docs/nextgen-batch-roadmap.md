@@ -317,3 +317,51 @@ New regression tests are committed, but the full repository suite was not
 executed here. Do not merge #152 or enable new batch acquisition handlers
 until per-file staging, cleanup and full integration tests pass.
 Review-retry remains isolated in draft PR #150.
+
+
+## Batch worker enablement follow-up — 2026-10-26
+
+Feature branch: `feature/enable-nextgen-batch-acquisition-20261026`.
+
+- [x] Register `RESERVE_BATCH`, `SUBMIT_BATCH`, `TRANSFER_BATCH`,
+  `VERIFY_BATCH_PROBE` and `UNLOCK_BATCH` in the default provider
+  worker, with a full successor chain from `EVALUATE_BATCH`.
+- [x] Fix the `RESERVE_BATCH` completion and successor to send its **own
+  reservation job ID**, never the upstream trial evaluation job ID.
+- [x] Make enabled acquisition the default in `build_identity_worker`
+  and `run_identity_worker`.
+- [x] Add explicit rollback: `python -m src.nextgen worker --config-dir
+  /path/to/config --no-batch-acquisition`. This keeps batch
+  identification, verification and EVALUATE_BATCH planning available
+  without creating new reservation or download jobs.
+- [x] Add default/disabled registry and CLI argument tests.
+
+### Deployment and behavior WARNING
+
+Enabling these handlers can now **reserve real episodes and submit or start
+real qBittorrent downloads** after the verified batch trial. It is
+NOT a complete, production-accepted batch media workflow.
+
+The chain currently ends after `UNLOCK_BATCH` finishes. No per-episode
+staging publication, Sonarr Keep/Reject, automatic source cleanup, or
+Jellyfin refresh is wired for batch episodes. The E01->expanded-selection
+transition also requires the torrent to be stopped, but a journaled
+automatic stop step has **not** been added; it may remain waiting after
+the E01 probe finishes unless safely stopped externally.
+
+Any batch with an external submission journal intentionally retains its
+active episode reservations during cancellation until resource cleanup
+is explicitly reconciled. Do NOT manually clear reservations or delete
+the batch database rows; that would break source ownership protection.
+
+For a controlled rollout: back up the local SQLite database; ensure
+v33 migrations succeeded; use a disposable test pack and isolated qB
+download root; monitor the queued jobs, selected file priorities and
+disk consumption. Return to the disable switch before processing new
+packs if a state becomes uncertain. The disable switch does NOT stop
+an already-owned, externally running qB torrent or clear previously
+queued jobs; existing work needs explicit reconciliation.
+
+The user asked not to trigger GitHub CI. New tests have been committed
+but not executed against a complete repository checkout. No deployment
+has been performed by the assistant. RETRY PR #150 remains unmerged.
