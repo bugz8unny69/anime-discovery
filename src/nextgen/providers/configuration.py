@@ -7,6 +7,7 @@ from src.nextgen.job_contracts import Policy, Registry
 from src.nextgen.jobs.identify_anime_job import registration
 from src.nextgen.jobs.verify_release_job import KIND as RELEASE_KIND, registration as release_registration
 from src.nextgen.jobs.evaluate_trial_job import KIND as TRIAL_KIND, registration as trial_registration
+from src.nextgen.jobs.evaluate_batch_job import KIND as BATCH_KIND, registration as batch_registration
 from src.nextgen.jobs.reserve_episode_job import KIND as RESERVE_KIND, registration as reserve_registration
 from src.nextgen.jobs.prepare_acquisition_job import KIND as PREPARE_KIND, registration as prepare_registration
 from src.nextgen.jobs.submit_torrent_job import KIND as SUBMIT_KIND, registration as submit_registration
@@ -63,7 +64,7 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
-                         release_registration(verify,trial_kind=TRIAL_KIND),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=PREPARE_KIND),
+                         release_registration(verify,trial_kind=TRIAL_KIND,batch_kind=BATCH_KIND),batch_registration(),trial_registration(reservation_kind=RESERVE_KIND),reserve_registration(preparation_kind=PREPARE_KIND),
                          *preparation,*management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
