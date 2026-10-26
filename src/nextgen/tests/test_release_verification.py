@@ -35,12 +35,35 @@ class ReleaseMappingTests(unittest.TestCase):
                       'Test - 01 & 02','Test EP01EP02','Test EP01.5','Test E01.5','Test E00','Test S02','Test Movie - 01','Test E01 E02','Test EP01a','Test S01E01a','Test - -01'):
             with self.subTest(title=title),self.assertRaises(ReleaseNotReady): declared_episode(title)
 
+    def test_optional_range_offset_is_zero_and_explicit_offsets_take_precedence(self):
+        base=(b'<anime-list><anime anidbid="123" tvdbid="456">'
+              b'<mapping-list><mapping anidbseason="1" tvdbseason="2" '
+              b'start="1" end="2"/></mapping-list></anime></anime-list>')
+        blank=base.replace(b'end="2"',b'end="2" offset=""')
+        for payload in (base,blank):
+            self.assertEqual(forward_mappings(payload,123,456,{1:987,2:988}),
+                             {1:(2,1),2:(2,2)})
+        shifted=base.replace(b'end="2"',b'end="2" offset="5"')
+        self.assertEqual(forward_mappings(shifted,123,456,{1:987,2:988}),
+                         {1:(2,6),2:(2,7)})
+        invalid=base.replace(b'end="2"',b'end="2" offset="oops"')
+        with self.assertRaises(ReleaseNotReady):
+            forward_mappings(invalid,123,456,{1:987})
+        # A missing default season is still not proof of mapping.
+        no_season=b'<anime-list><anime anidbid="123" tvdbid="456"/></anime-list>'
+        self.assertEqual(forward_mappings(no_season,123,456,{1:987}),{})
+
     def test_explicit_offset_remap_and_season_zero_supported_without_guessing(self):
         self.assertEqual(forward_mappings(MAPPING,123,456,{1:987,2:988}),{1:(2,13),2:(2,14)})
         custom=MAPPING.replace(b'/></anime-list>',b'><mapping-list><mapping anidbseason="1" tvdbseason="0">1-5;</mapping></mapping-list></anime></anime-list>')
         self.assertEqual(forward_mappings(custom,123,456,{1:987})[1],(0,5))
         missing=MAPPING.replace(b' episodeoffset="12"',b'')
-        self.assertEqual(forward_mappings(missing,123,456,{1:987}),{})
+        blank=MAPPING.replace(b'episodeoffset="12"',b'episodeoffset=""')
+        # Anime-Lists explicitly defines absent/empty episodeoffset as zero.
+        for payload in (missing,blank):
+            with self.subTest(payload=payload):
+                self.assertEqual(forward_mappings(payload,123,456,{1:987,2:988}),
+                                 {1:(2,1),2:(2,2)})
         with self.assertRaises(ReleaseConflict): forward_mappings(MAPPING,123,999,{1:987})
         split=custom.replace(b'1-5;',b'1-5+6;')
         with self.assertRaises(ReleaseNotReady): forward_mappings(split,123,456,{1:987})
@@ -50,7 +73,7 @@ class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_specific_episode_blockers_are_preserved(self):
         cases=(
             ('RELEASE_ANIDB_EPISODE_MISSING',b'{"release_name":"Test - 99"}',MAPPING,((100,2,13),)),
-            ('RELEASE_EPISODE_MAPPING_MISSING',self.source.raw_body,MAPPING.replace(b' episodeoffset="12"',b''),((100,2,13),)),
+            ('RELEASE_EPISODE_MAPPING_MISSING',self.source.raw_body,MAPPING.replace(b' defaulttvdbseason="2"',b''),((100,2,13),)),
             ('RELEASE_MAPPING_MISSING',self.source.raw_body,b'<anime-list/>',((100,2,13),)),
             ('RELEASE_TVDB_EPISODE_MISSING',self.source.raw_body,MAPPING,((100,2,14),)),
             ('RELEASE_TYPE_UNSUPPORTED',b'{"release_name":"Test Batch"}',MAPPING,((100,2,13),)),
@@ -87,6 +110,22 @@ class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
         self.pages=[]
         self.verify=make_verifier(Options('registeredclient',1),lambda:Credentials('private-key'),
                                   client_factory=lambda *args:self.client)
+
+    async def test_no_episodeoffset_verifies_only_with_matching_tvdb_episode(self):
+        release=replace(self.source,raw_body=b'{"release_name":"Test S02E01"}')
+        for mapping in (MAPPING.replace(b' episodeoffset="12"',b''),
+                        MAPPING.replace(b'episodeoffset="12"',b'episodeoffset=""')):
+            with self.subTest(mapping=mapping):
+                self.client.mapping_xml=lambda value=mapping:value
+                self.client.episode_page=lambda *args:(((100,2,1),),False)
+                result=await self.verify(release,self.configuration,self.cancelled)
+                self.assertEqual((result.anidb_episode_number,result.anidb_episode_id,
+                                  result.tvdb_season,result.tvdb_episode,result.tvdb_episode_id),
+                                 (1,987,2,1,100))
+                # Zero offset never bypasses actual TVDB episode confirmation.
+                self.client.episode_page=lambda *args:(((100,2,13),),False)
+                with self.assertRaises(ReleaseNotReady):
+                    await self.verify(release,self.configuration,self.cancelled)
 
     async def test_reverse_offset_uses_exact_anidb_id_and_tvdb_record(self):
         value=await self.verify(self.source,self.configuration,self.cancelled)
