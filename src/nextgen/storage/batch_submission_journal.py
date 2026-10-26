@@ -102,6 +102,15 @@ def _intent(db,candidate,inventory):
     return BatchSubmissionIntent(candidate,inventory,options,marker,state,fingerprint,major)
 
 
+def _reason(state):
+    return {
+        'UNCERTAIN':'TORRENT_SUBMISSION_UNCERTAIN',
+        'EXTERNAL':'TORRENT_ALREADY_PRESENT',
+        'REVIEW':'TORRENT_PROVENANCE_CONFLICT',
+        'OWNED_STOPPED':'TORRENT_STOPPED_CONFIRMED',
+    }[state]
+
+
 def _classify(intent,observation):
     if observation is None:return 'UNCERTAIN','TORRENT_SUBMISSION_UNCERTAIN'
     if type(observation) is not Observation:raise ClientInvalid()
@@ -124,18 +133,33 @@ class BatchSubmissionJournal:
     def __init__(self,database,*,clock=None):
         self.queue=JobQueue(database,clock=clock)
 
-    def _owns(self,db,claim):
+    def _owns(self,db,claim,reservation_job_id):
         if claim.kind!='SUBMIT_BATCH':raise AcquisitionConflict()
         self.queue._owns(db,claim,self.queue.now())
+        # The submit worker must be the direct successor of the reservation,
+        # belong to the same event and active cancellation operation, and
+        # never act using another operation's reservation permit.
+        row=db.execute(
+            "SELECT 1 FROM jobs submit "
+            "JOIN job_operation_members sm ON sm.job_id=submit.job_id "
+            "JOIN job_operation_members rm ON rm.operation_id=sm.operation_id "
+            "JOIN jobs reserved ON reserved.job_id=rm.job_id "
+            "JOIN job_operations op ON op.operation_id=sm.operation_id "
+            "WHERE submit.job_id=? AND submit.kind='SUBMIT_BATCH' "
+            "AND submit.created_by_job_id=? AND reserved.job_id=? "
+            "AND submit.event_id=reserved.event_id AND op.state='ACTIVE' "
+            "LIMIT 1",
+            (claim.job_id,reservation_job_id,reservation_job_id)).fetchone()
+        if row is None:raise AcquisitionConflict()
 
     def load(self,claim,reservation_job_id,inventory):
         integer(reservation_job_id,positive=True)
         if type(inventory) is not BatchInventory:raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
-            self._owns(db,claim)
+            self._owns(db,claim,reservation_job_id)
             candidate=_candidate(db,reservation_job_id,inventory)
             intent=_intent(db,candidate,inventory)
-            self._owns(db,claim)
+            self._owns(db,claim,reservation_job_id)
             return candidate,intent
 
     def authorize(self,claim,candidate,inventory,options,api_major,present,revision):
@@ -147,7 +171,7 @@ class BatchSubmissionJournal:
             raise ValueError('Trusted batch source, qB client and observation required')
         integer(revision,positive=True)
         with self.queue.connection() as db,transaction(db):
-            self._owns(db,claim)
+            self._owns(db,claim,candidate.reservation_job_id)
             now=self.queue.now()
             if _candidate(db,candidate.reservation_job_id,inventory)!=candidate:
                 raise AcquisitionConflict()
@@ -180,14 +204,14 @@ class BatchSubmissionJournal:
                 db,job_id=claim.job_id,event_code='TORRENT_INTENT_RECORDED',
                 reason_code=reason,component='worker',occurred_at_ms=now,
                 details={'attempt':claim.attempt})
-            self._owns(db,claim)
+            self._owns(db,claim,candidate.reservation_job_id)
             intent=BatchSubmissionIntent(candidate,inventory,target,marker,state,fingerprint,api_major)
             return intent,(None if present else BatchSendPermit(fingerprint)),(receipt,)
 
     def guard_send(self,claim,intent):
         if type(intent) is not BatchSubmissionIntent:raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
-            self._owns(db,claim)
+            self._owns(db,claim,intent.candidate.reservation_job_id)
             candidate=_candidate(db,intent.candidate.reservation_job_id,intent.inventory)
             current=_intent(db,candidate,intent.inventory)
             if (current!=intent or current.state!='UNCERTAIN'
@@ -195,21 +219,21 @@ class BatchSubmissionJournal:
                                   'WHERE plan_id=?',(candidate.plan_id,)).fetchone()
                     !=(claim.job_id,claim.attempt)):
                 raise AcquisitionConflict()
-            self._owns(db,claim)
+            self._owns(db,claim,intent.candidate.reservation_job_id)
 
     def observe(self,claim,intent,observation):
         if type(intent) is not BatchSubmissionIntent:raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
-            self._owns(db,claim)
+            self._owns(db,claim,intent.candidate.reservation_job_id)
             now=self.queue.now()
             candidate=_candidate(db,intent.candidate.reservation_job_id,intent.inventory)
             current=_intent(db,candidate,intent.inventory)
             if current is None or current.fingerprint!=intent.fingerprint:
                 raise AcquisitionConflict()
             if current.state in ('EXTERNAL','REVIEW','OWNED_STOPPED'):
-                return current.state,(),()
+                return current.state,_reason(current.state),()
             if current.state!=intent.state:
-                return current.state,(),()
+                return current.state,_reason(current.state),()
             state,reason=_classify(current,observation)
             receipt=()
             if state!=current.state:
@@ -220,5 +244,5 @@ class BatchSubmissionJournal:
                     db,job_id=claim.job_id,event_code='TORRENT_RECONCILED',
                     reason_code=reason,component='worker',occurred_at_ms=now,
                     details={'attempt':claim.attempt}),)
-            self._owns(db,claim)
+            self._owns(db,claim,intent.candidate.reservation_job_id)
             return state,reason,receipt
