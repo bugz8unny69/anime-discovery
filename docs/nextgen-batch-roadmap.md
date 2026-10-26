@@ -86,3 +86,43 @@ New focused regression tests were committed. GitHub CI was not started or
 checked, and full repository tests were not run, per user request.
 The assistant's current runtime cannot access the private repository
 checkout to execute tests locally. Do not treat this as a tested/merge-ready PR.
+
+## Follow-up draft PR #151 (2026-10-26): worker handoff and diagnostics
+
+**Added but not merged:** A trusted make_batch_reader reads the pinned
+40-character metainfo hash through the configured source in batch mode;
+the existing single-episode metadata reader still rejects multi-video packs.
+make_batch_verifier combines exact inventory with AniDB/Anime-Lists/TVDB
+evidence, and make_verifier(..., batch_verifier=...) opt-in routes recognized
+season packs to the batch verification path.
+
+The VERIFY_RELEASE handler accepts typed batch completion, persists fenced
+v27 per-file facts, and intentionally does not dispatch single-episode
+EVALUATE_TRIAL for a multi-file pack. **Default worker composition now injects the batch verifier** while retaining
+the single-episode path. Batch results do not yet trigger downloads.
+Integration tests are committed but not executed here.
+
+plan_stopped_batch_probe is a read-only preflight of owned, stopped qB state:
+exact ordered files, marker, destination, category, policy budgets, and
+piece-disjoint probe video. It produces intended priorities but does not
+submit torrents, change priorities, or start downloads. A durable single-use
+external-send authorization/reconciliation journal is still required.
+
+The authenticated GET /api/v1/jobs/{id}/coverage and Episode coverage
+dashboard action distinguish persisted provider episode facts from identity
+matching and staging; response is bounded to the first 100 verified files.
+
+### Outstanding milestones for end-to-end batch acquisition
+
+- [x] Install trusted batch reader and verifier into actual worker composition (not yet merged).
+- [ ] Add durable batch trial evaluation and episode reservations/deduplication.
+- [ ] Journal qB stopped submission, selection, start and uncertain sends.
+- [ ] Verify real first-file JP+EN audio before unlocking other files.
+- [ ] Per-file verification, staging, Jellyfin and Keep/Reject safety.
+- [ ] Durable detailed mapping/excluded-file diagnostics.
+- [ ] Run local/full migration, Python and browser tests before next merge.
+- [ ] Preserve separate RETRY PR #150 for the other chat (unmerged).
+
+**Testing note:** The seven locally available pre-existing batch-planner
+unit tests passed. New integration tests are committed but not run, and
+no GitHub CI was manually run or inspected per the user's request.

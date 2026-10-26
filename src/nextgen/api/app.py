@@ -320,6 +320,43 @@ class Application:
                     for record in records:log_history(self.logger,record)
                     return status,data,([] if 'status_url' not in data else [(b'location',data['status_url'].encode())])
                 raise ApiError(405,'API_METHOD_INVALID')
+            coverage=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/coverage',path)
+            if coverage:
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                job=int(coverage[1])
+                if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    row=db.execute("SELECT state,attempt_count,last_reason_code FROM jobs "
+                                   "WHERE job_id=? AND kind='VERIFY_RELEASE'",(job,)).fetchone()
+                    if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    proof=db.execute("SELECT batch_id,tvdb_season,info_hash FROM batch_verifications "
+                                     "WHERE job_id=?",(job,)).fetchone()
+                    if proof is not None:
+                        total=db.execute("SELECT count(*) FROM batch_verified_files WHERE batch_id=?",
+                                         (proof[0],)).fetchone()[0]
+                        rows=db.execute("SELECT file_index,file_path,anidb_episode_number,"
+                                        "tvdb_episode,file_size_bytes FROM batch_verified_files "
+                                        "WHERE batch_id=? ORDER BY tvdb_episode,file_index LIMIT 100",
+                                        (proof[0],)).fetchall()
+                        evidence={'kind':'batch','tvdb_season':proof[1],'episode_count':total,
+                                  'truncated':total>len(rows),'episodes':[
+                            {'file_index':item[0],'path':item[1],
+                             'anidb_episode':item[2],'tvdb_episode':item[3],
+                             'size_bytes':item[4]} for item in rows]}
+                    else:
+                        single=db.execute("SELECT tvdb_season,tvdb_episode,anidb_episode_number "
+                                          "FROM release_verifications WHERE job_id=?",(job,)).fetchone()
+                        evidence=None if single is None else {
+                            'kind':'single','tvdb_season':single[0],'episode_count':1,
+                            'truncated':False,'episodes':[{'file_index':None,'path':None,
+                                'anidb_episode':single[2],'tvdb_episode':single[1],
+                                'size_bytes':None}]}
+                    return 200,{'job_id':job,'available':evidence is not None,
+                                'state':row[0],'attempts':row[1],
+                                'reason':None if row[2] is None else CATALOG.reason(row[2]),
+                                'evidence':evidence},[]
             matching=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/matching',path)
             if matching:
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')

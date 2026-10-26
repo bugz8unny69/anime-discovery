@@ -14,7 +14,8 @@ from src.nextgen.jobs.download_torrent_job import KIND as DOWNLOAD_KIND, registr
 from src.nextgen.jobs.verify_media_job import KIND as MEDIA_KIND, registration as media_registration
 from src.nextgen.jobs.stage_trial_media_job import KIND as STAGE_KIND, registration as stage_registration
 from src.nextgen.jobs.management import registrations as management_registrations
-from src.nextgen.acquisition.metainfo_source import make_reader
+from src.nextgen.acquisition.metainfo_source import make_reader, make_batch_reader
+from src.nextgen.batch.provider_worker import make_batch_verifier
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
 from src.nextgen.providers.identity import ClientPool, make_resolver
@@ -38,7 +39,7 @@ def validate_provider_configuration(configuration, *, secrets):
 
 
 async def build_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
-                                policy=Policy(), logger=None, read_metainfo=None):
+                                policy=Policy(), logger=None, read_metainfo=None, read_batch_metainfo=None):
     """Validate required local settings, then return an unstarted worker.
 
     Call close() if not serving it. Both providers are mandatory for this
@@ -52,7 +53,11 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     await blocking(prepare,startup)  # Missing configuration fails before claims.
     pool=ClientPool()
     resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
-    verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
+    read_batch_metainfo=make_batch_reader() if read_batch_metainfo is None else read_batch_metainfo
+    verify_batch=make_batch_verifier(options_from_configuration,secrets.tvdb_credentials,
+                                     read_batch_metainfo,client_pool=pool)
+    verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool,
+                           batch_verifier=verify_batch)
     read_metainfo=make_reader() if read_metainfo is None else read_metainfo
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
@@ -64,7 +69,8 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
 
 
 async def run_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
-                              policy=Policy(), read_metainfo=None):
+                              policy=Policy(), read_metainfo=None, read_batch_metainfo=None):
     worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
-                                         release_kind=release_kind,policy=policy,read_metainfo=read_metainfo)
+                                         release_kind=release_kind,policy=policy,read_metainfo=read_metainfo,
+                                         read_batch_metainfo=read_batch_metainfo)
     await serve_worker(worker)

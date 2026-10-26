@@ -200,6 +200,12 @@ function renderJobs() {
       matching.addEventListener('click', () => openMatching(job.job_id));
       actions.appendChild(matching);
     }
+    if (job.kind === 'VERIFY_RELEASE') {
+      const coverage = node('button', 'Episode coverage', 'secondary');
+      coverage.type = 'button';
+      coverage.addEventListener('click', () => openCoverage(job.job_id));
+      actions.appendChild(coverage);
+    }
     const history = node('button', 'History', 'secondary');
     history.addEventListener('click', () => openHistory(job.job_id)); actions.appendChild(history);
     tbody.appendChild(tr);
@@ -302,6 +308,44 @@ function matchingCard(root, label, value) {
   card.appendChild(node('span', label, 'trace-label'));
   card.appendChild(node('strong', value ?? 'Not recorded'));
   root.appendChild(card);
+}
+async function openCoverage(jobId) {
+  const version = ++state.matchingVersion;
+  state.matchingJob = jobId;
+  $('matching-title').textContent = `Job #${jobId} · Episode coverage`;
+  const summary = $('matching-summary'), body = $('matching-body');
+  body.replaceChildren(); summary.textContent = 'Loading saved episode verification…';
+  if (!$('matching-dialog').open) $('matching-dialog').showModal();
+  try {
+    const result = await request(`${API}/jobs/${jobId}/coverage`);
+    if (version !== state.matchingVersion || state.matchingJob !== jobId || !state.csrf) return;
+    summary.textContent = `Attempt ${result.attempts} · ${result.state.replaceAll('_', ' ').toLowerCase()}`;
+    if (result.reason?.message) summary.textContent += ` · ${result.reason.message}`;
+    if (!result.available || !result.evidence) {
+      body.appendChild(node('p', 'No verified episode coverage was saved for this job.', 'muted'));
+      return;
+    }
+    const ev = result.evidence;
+    const heading = matchingSection(body, ev.kind === 'batch' ? 'Verified regular episodes (batch)' : 'Verified episode');
+    heading.appendChild(node('p', `${ev.episode_count} episode(s) verified in TVDB season ${ev.tvdb_season}. This does not mean media was downloaded or staged.`, 'muted'));
+    const grid = node('div', null, 'trace-grid'); heading.appendChild(grid);
+    for (const ep of ev.episodes || []) {
+      const label = `TVDB S${String(ev.tvdb_season).padStart(2, '0')}E${String(ep.tvdb_episode).padStart(2, '0')}`;
+      const detail = `AniDB episode ${ep.anidb_episode}${ep.file_index == null ? '' : ' · File #' + ep.file_index}`;
+      matchingCard(grid, label, detail);
+      if (ep.path) grid.appendChild(node('small', ep.path, 'muted'));
+    }
+    if (ev.truncated) body.appendChild(node('p', 'Showing the first 100 verified files.', 'muted'));
+    if (ev.kind === 'batch') body.appendChild(node('p',
+      'Extra files and actual download selection are not proved by this record. See the acquisition job for transfer status.',
+      'muted'));
+  } catch (error) {
+    if (version === state.matchingVersion && state.matchingJob === jobId) {
+      body.replaceChildren();
+      summary.textContent = 'Episode coverage could not be loaded.';
+      body.appendChild(node('p', error.message || 'Request failed.', 'muted'));
+    }
+  }
 }
 async function openMatching(jobId) {
   const version = ++state.matchingVersion;

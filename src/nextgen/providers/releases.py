@@ -3,6 +3,7 @@ from src.nextgen.providers.errors import ProviderInvalidResponse, ProviderAuthen
 from src.nextgen.providers.http import Clients, Credentials, Options
 from src.nextgen.providers.identity import ClientPool, delivery_title
 from src.nextgen.providers.release_mapping import declared_episode, forward_mappings
+from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.release_contracts import VerifiedRelease, ReleaseNotReady, ReleaseConflict
 from src.nextgen.worker import blocking
 from contextlib import closing
@@ -10,9 +11,11 @@ from src.nextgen.storage.recognition import recognized_episode
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
 
 
-def make_verifier(options, credentials, *, client_pool=None, client_factory=Clients):
+def make_verifier(options, credentials, *, client_pool=None, client_factory=Clients, batch_verifier=None):
     if (type(options) is not Options and not callable(options)) or not callable(credentials):
         raise ValueError("release provider composition is incomplete")
+    if batch_verifier is not None and not callable(batch_verifier):
+        raise ValueError('async batch verifier required')
     pool=client_pool or ClientPool(client_factory)
 
     def verify(source,configuration,cancelled):
@@ -72,5 +75,10 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
         return VerifiedRelease(source,number,catalog[number],target[0],target[1],matches[0])
 
     async def call(source,configuration,cancelled):
+        if batch_verifier is not None:
+            try:title=delivery_title(source)
+            except ValueError:raise ReleaseNotReady('RELEASE_TITLE_UNCLEAR') from None
+            if release_scope_hint(title).kind in ('season_pack','mixed_pack'):
+                return await batch_verifier(source,configuration,cancelled)
         return await blocking(verify,source,configuration,cancelled)
     return call
