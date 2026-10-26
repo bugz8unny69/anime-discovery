@@ -485,6 +485,7 @@ CREATE TABLE IF NOT EXISTS batch_episode_reservations (
  ended_by_job_id INTEGER REFERENCES jobs(job_id),
  UNIQUE(plan_id,file_index),
  UNIQUE(plan_id,tvdb_episode),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_trial_files(plan_id,file_index),
  CHECK((state='ACTIVE' AND ended_at_ms IS NULL AND ended_by_job_id IS NULL) OR
        (state='RELEASED' AND ended_at_ms>=reserved_at_ms AND ended_by_job_id IS NOT NULL))
 );
