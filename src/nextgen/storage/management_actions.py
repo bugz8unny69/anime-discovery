@@ -24,6 +24,13 @@ class ActionNotFound(ActionUnavailable):
     reason_code='API_ROUTE_NOT_FOUND'
 
 
+def is_batch_operation(db,operation_id):
+    return db.execute(
+        "SELECT 1 FROM batch_staging_publications p "
+        "JOIN job_operation_members m ON m.job_id=p.job_id "
+        "WHERE m.operation_id=? LIMIT 1",(operation_id,)).fetchone() is not None
+
+
 def target(db,job_id):
     integer(job_id,positive=True)
     if not db.execute('SELECT 1 FROM jobs WHERE job_id=?',(job_id,)).fetchone():raise ActionNotFound()
@@ -127,12 +134,21 @@ class ManagementActions:
                 from src.nextgen.storage.review_decisions import staged
                 from src.nextgen.staging import StagingReview
                 if action=='reject':
-                    try:anime=staged(db,op[0])[0]
-                    except StagingReview:raise ActionUnavailable() from None
+                    try:
+                        if is_batch_operation(db,op[0]):
+                            from src.nextgen.storage.batch_keep_imports import batch_publications
+                            rows=batch_publications(db,op[0])
+                            anime=rows[0][4]
+                            if any(row[4]!=anime for row in rows):raise ActionUnavailable()
+                        else:
+                            anime=staged(db,op[0])[0]
+                    except (StagingReview,ValueError):
+                        raise ActionUnavailable() from None
                     if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone():raise ActionUnavailable()
                     if db.execute('SELECT 1 FROM anime_review_decisions WHERE anidb_id=?',(anime,)).fetchone():raise ActionUnavailable()
                 else:
                     if db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
+                    if db.execute('SELECT 1 FROM anime_review_decisions d JOIN batch_episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone():raise ActionUnavailable()
             else:
                 if action=='cancel':
                     try:_,audits=self.cancellations.request_in_transaction(db,job_id)
@@ -166,7 +182,10 @@ class ManagementActions:
                     return 200,{'completed':True,'disable_action':True,
                                 'notification':CATALOG.reason('CANCELLATION_COMPLETE')},tuple(records)
             event=db.execute('SELECT event_id FROM jobs WHERE job_id=?',(job_id,)).fetchone()[0]
-            control,audit=enqueue_job_with_receipt(db,component='api',kind=KINDS[selected],event_id=event,
+            kind=KINDS[selected]
+            if selected in ('KEEP','REJECT') and is_batch_operation(db,op[0]):
+                kind='KEEP_BATCH' if selected=='KEEP' else 'REJECT_BATCH'
+            control,audit=enqueue_job_with_receipt(db,component='api',kind=kind,event_id=event,
                 payload={'target_job_id':job_id},available_at_ms=now)
             db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',(op[0],selected,job_id,control,now))
             if action=='reject':
@@ -190,7 +209,8 @@ class ManagementActions:
                         "ORDER BY CASE j.state WHEN 'RUNNING' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END,j.job_id LIMIT 1",
                         (op[0],)).fetchone()
         result={}
-        rejected=db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None
+        rejected=(db.execute('SELECT 1 FROM anime_review_decisions d JOIN episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None or
+                  db.execute('SELECT 1 FROM anime_review_decisions d JOIN batch_episode_reservations r ON r.anidb_id=d.anidb_id JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=?',(op[0],)).fetchone() is not None)
         keep_exists=db.execute("SELECT 1 FROM management_actions WHERE operation_id=? AND action='KEEP'",(op[0],)).fetchone() is not None
         from src.nextgen.storage.reservation_release import active
         release_pending=op[1]=='CANCELED' and op[2]=='COMPLETE' and active(db,op[0])
@@ -238,7 +258,11 @@ class ManagementActions:
             integer(data['target_job_id'],positive=True)
             row=db.execute('SELECT target_job_id,operation_id FROM management_actions WHERE job_id=? AND action=?',
                            (claim.job_id,action)).fetchone()
-            if row is None or row[0]!=data['target_job_id'] or claim.kind!=KINDS[action]:raise ActionUnavailable()
+            if row is None or row[0]!=data['target_job_id']:raise ActionUnavailable()
+            expected=KINDS[action]
+            if action in ('KEEP','REJECT') and is_batch_operation(db,row[1]):
+                expected='KEEP_BATCH' if action=='KEEP' else 'REJECT_BATCH'
+            if claim.kind!=expected:raise ActionUnavailable()
             if operation(db,claim.job_id)[0]==row[1]:raise ActionUnavailable()
             op=operation(db,row[0])
             if op[0]!=row[1] or (op[1]!='STAGED' if action in ('KEEP','REJECT') else op[1] not in ('CANCEL_REQUESTED','CANCELED')):
