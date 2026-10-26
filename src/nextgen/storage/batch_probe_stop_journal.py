@@ -38,7 +38,7 @@ def _fingerprint(intent,transfer):
         'transfer':transfer.fingerprint,
         'probe_index':intent.candidate.probe_index,
         'piece_size':transfer.piece_size,
-        'job_kind':'STOP_BATCH_PROBE',
+        'job_kind':'TRANSFER_BATCH_PROBE_STOP',
     },sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
@@ -48,19 +48,24 @@ class BatchStopJournal:
 
     def _source(self,db,claim,transfer_job_id):
         self.queue._owns(db,claim,self.queue.now())
-        if claim.kind!='STOP_BATCH_PROBE':raise AcquisitionConflict()
+        # Remain inside TRANSFER_BATCH while it is RUNNING. Do not
+        # complete the E01 job or enqueue audio verification before
+        # its stopped observation is durable.
+        if claim.kind!='TRANSFER_BATCH' or claim.job_id!=transfer_job_id:
+            raise AcquisitionConflict()
         row=db.execute(
-            "SELECT transfer.created_by_job_id,transfer.event_id,transfer.state,"
-            "transfer.kind,o.state "
-            "FROM jobs stopping "
-            "JOIN jobs transfer ON transfer.job_id=stopping.created_by_job_id "
-            "JOIN job_operation_members sm ON sm.job_id=stopping.job_id "
+            "SELECT transfer.created_by_job_id,transfer.event_id,transfer.kind,"
+            "parent.kind,parent.state,o.state "
+            "FROM jobs transfer "
+            "JOIN jobs parent ON parent.job_id=transfer.created_by_job_id "
             "JOIN job_operation_members tm ON tm.job_id=transfer.job_id "
-            "AND tm.operation_id=sm.operation_id "
-            "JOIN job_operations o ON o.operation_id=sm.operation_id "
-            "WHERE stopping.job_id=? AND transfer.job_id=?",
-            (claim.job_id,transfer_job_id)).fetchone()
-        if row is None or row[1:]!=(claim.event_id,'DONE','TRANSFER_BATCH','ACTIVE'):
+            "JOIN job_operation_members pm ON pm.job_id=parent.job_id "
+            "AND pm.operation_id=tm.operation_id "
+            "JOIN job_operations o ON o.operation_id=tm.operation_id "
+            "WHERE transfer.job_id=?",
+            (transfer_job_id,)).fetchone()
+        if row is None or row[1:]!=(claim.event_id,'TRANSFER_BATCH',
+                                      'SUBMIT_BATCH','DONE','ACTIVE'):
             raise AcquisitionConflict()
         submission_id=row[0]
         source=db.execute(
