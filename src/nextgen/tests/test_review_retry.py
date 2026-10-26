@@ -67,7 +67,10 @@ class ReviewRetryTests(unittest.TestCase):
         for state in ("DONE", "RUNNING", "CANCELED", "ON_HOLD", "RETRY_WAIT"):
             db=connect(self.path)
             with transaction(db):
-                db.execute("UPDATE jobs SET state=? WHERE job_id=?", (state,self.job))
+                db.execute("UPDATE jobs SET state=?,lease_token=?,lease_expires_at_ms=? "
+                           "WHERE job_id=?",
+                           (state,'f'*32 if state=='RUNNING' else None,
+                            100000 if state=='RUNNING' else None,self.job))
             db.close()
             with self.subTest(state=state), self.assertRaises(RetryNotAllowed):
                 self.request()
