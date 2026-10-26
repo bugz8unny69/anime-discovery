@@ -50,11 +50,15 @@ def plan_batch_trial_window(inventory, verified, *, window, anchor_episode):
             raise BatchPlanningError('Batch episode proof mismatch or duplicate')
         seen_indices.add(proof.index)
         seen_episodes.add(proof.tvdb_episode)
+    proofs={proof.index:proof for proof in verified.files}
     for file in inventory.files:
         if PurePosixPath(file.path).suffix.lower() in VIDEO:
             number=file_episode_number(file.path,verified.season)
-            if number is not None and file.index not in seen_indices:
-                raise BatchPlanningError('Regular video has no provider proof')
+            proof=proofs.get(file.index)
+            if number is not None and (proof is None or proof.release_episode!=number):
+                raise BatchPlanningError('Regular video has no exact provider proof')
+            if number is None and proof is not None:
+                raise BatchPlanningError('Special video cannot carry regular episode proof')
     if anchor_episode not in seen_episodes:
         raise BatchPlanningError('Verified trial anchor is not present in torrent')
     allowed=window.episodes(anchor_episode)
