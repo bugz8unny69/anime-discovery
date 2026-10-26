@@ -246,3 +246,74 @@ are building blocks, not a complete acquisition pipeline.
 - [ ] Validate all migrations and integrated worker/transfer tests
   locally before merging or deploying. GitHub CI remains disabled
   by user request. RETRY remains separate in unmerged PR #150.
+
+
+## Latest checkpoint: v31–v33 probe, JP+EN audio proof and gated unlock
+
+**Draft PR #152 only; NOT merged or deployed.** Earlier v28–v30 work
+remains on this branch. Separate review-retry PR #150 is untouched.
+
+### Implemented (new, opt-in infrastructure)
+
+- [x] **v31** batch_torrent_transfers: durable one-shot E01-only
+  file-priority selection, confirmed stopped snapshot, one-use torrent start,
+  and read-only download progress reconciliation. An interrupted or unknown
+  send never creates a replacement permit.
+- [x] BatchClient.apply_probe_selection() and start_probe():
+  validate exact hash-bound inventory, owned destination/category/tag,
+  canonical piece boundaries and sole E01 priority before mutation.
+- [x] **v32** batch_probe_media: typed immutable E01 file SHA-256,
+  inode signature and ffprobe evidence requiring non-commentary Japanese
+  and English audio. Fenced to a completed, owned transfer job.
+- [x] Optional VERIFY_BATCH_PROBE reads the real file through
+  O_NOFOLLOW descriptor-relative traversal, checks before/after stat,
+  verifies full content hash and uses the bounded existing ffprobe parser.
+- [x] **v33** batch_torrent_unlocks: second one-shot authorization
+  journal. No later episode can become wanted until the actual E01 proof
+  is present and matches the torrent/operation. Reconcile uncertain
+  priority updates after restart; do not reissue them.
+- [x] BatchClient.apply_audio_verified_unlock() and
+  start_audio_verified_batch() only select provider-verified trial
+  files, leaving OVAs and out-of-window episodes at zero priority.
+  Reject wanted/unwanted shared pieces and wrong ownership before sending.
+- [x] Optional SUBMIT_BATCH, TRANSFER_BATCH, VERIFY_BATCH_PROBE
+  and UNLOCK_BATCH handlers with explicit job lineage, hash-only metainfo
+  and separately guarded transfer/verification phases.
+- [x] Handler display metadata and focused offline test code for one-use
+  permits, wrong tags, shared pieces, altered metadata, excluded OVAs,
+  schema parity and migration rollback.
+
+### Deliberately NOT enabled
+
+The **default NextGen worker registers only EVALUATE_BATCH** from the
+batch pipeline. It does NOT dispatch RESERVE_BATCH, SUBMIT_BATCH,
+TRANSFER_BATCH, VERIFY_BATCH_PROBE or UNLOCK_BATCH. Thus #152 cannot
+start season-pack downloads, change qB priorities or move media in
+production in its current configuration.
+
+### Remaining essential integration
+
+1. [ ] Durable per-file media-proof ledger for **every** planned
+   episode after expanded download. Each later file must independently
+   pass actual JP+EN ffprobe, content hash and inode checks.
+2. [ ] One crash-safe staging publication per canonical episode,
+   reusing existing Publisher and artifact receipts without weakening
+   no-follow, ownership, atomic rename or exact destination episode IDs.
+3. [ ] Extend Keep/Reject, duplicate staging protection, Jellyfin
+   refresh, cancellation/cleanup and reservation release to those
+   batch publication records. No broad directory deletion.
+4. [ ] One-shot, crash-safe stopped-state transition after E01 completes.
+   Unlock currently requires an already stopped torrent; it does not
+   send an unjournaled stop command.
+5. [ ] Full fake-provider/fake-qB, SQLite restart, filesystem/inode,
+   staging/Keep/Reject and migration test execution in a full checkout.
+6. [ ] Validate a Shiki S01 + OVA torrent in a controlled environment,
+   proving no OVA, unknown or out-of-window video is acquired.
+
+### Test policy and release status
+
+No GitHub CI was started or inspected and no production deployment occurred.
+New regression tests are committed, but the full repository suite was not
+executed here. Do not merge #152 or enable new batch acquisition handlers
+until per-file staging, cleanup and full integration tests pass.
+Review-retry remains isolated in draft PR #150.
