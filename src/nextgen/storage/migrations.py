@@ -18,12 +18,12 @@ from src.nextgen.diagnostics import event
 from src.nextgen.maintenance import MaintenanceLease, MaintenanceError
 from src.nextgen.storage.sqlite import SCHEMA
 
-LATEST_VERSION = 31
+LATEST_VERSION = 32
 SQL_DIR = Path(__file__).with_name("sql")
 SCRIPTS = (
     "001_foundation.sql", "002_independent_jobs.sql", "003_incoming_events.sql",
     "004_diagnostic_components.sql", "005_job_statuses.sql", "006_api_diagnostics.sql",
-    "007_worker_component.sql", "008_handler_history.sql", "009_provider_cache.sql", "010_release_verification.sql", "011_trial_windows.sql", "012_episode_reservations.sql", "013_acquisition_plans.sql", "014_acquisition_budgets.sql", "015_torrent_submissions.sql", "016_torrent_transfers.sql", "017_cancellation.sql", "018_management_actions.sql", "019_media_verifications.sql", "020_staging_publications.sql", "021_reject_decisions.sql", "022_keep_imports.sql", "023_reservation_release.sql", "024_recognized_seasons.sql", "025_recognized_episodes.sql", "026_recognized_work_aliases.sql", "027_verified_batches.sql", "028_batch_trial_plans.sql", "029_batch_episode_reservations.sql", "030_batch_torrent_submissions.sql", "031_batch_torrent_transfers.sql",
+    "007_worker_component.sql", "008_handler_history.sql", "009_provider_cache.sql", "010_release_verification.sql", "011_trial_windows.sql", "012_episode_reservations.sql", "013_acquisition_plans.sql", "014_acquisition_budgets.sql", "015_torrent_submissions.sql", "016_torrent_transfers.sql", "017_cancellation.sql", "018_management_actions.sql", "019_media_verifications.sql", "020_staging_publications.sql", "021_reject_decisions.sql", "022_keep_imports.sql", "023_reservation_release.sql", "024_recognized_seasons.sql", "025_recognized_episodes.sql", "026_recognized_work_aliases.sql", "027_verified_batches.sql", "028_batch_trial_plans.sql", "029_batch_episode_reservations.sql", "030_batch_torrent_submissions.sql", "031_batch_torrent_transfers.sql", "032_batch_probe_media.sql",
 )
 
 
