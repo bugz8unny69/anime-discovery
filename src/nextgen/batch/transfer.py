@@ -80,9 +80,13 @@ def plan_stopped_batch_probe(inventory, verified, window, snapshot, *,
         if f.size and pair!=expected:
             raise TransferConflict()
         offset+=f.size
-    wanted_pieces=set(range(snapshot.piece_ranges[index][0],snapshot.piece_ranges[index][1]+1))
-    for i,part in enumerate(snapshot.piece_ranges):
-        if i!=index and part[0]>=0 and wanted_pieces.intersection(range(part[0],part[1]+1)):
+    # Compare inclusive intervals directly: do not materialize a set of
+    # potentially millions of pieces supplied by an untrusted client.
+    wanted_start,wanted_end=snapshot.piece_ranges[index]
+    if wanted_start<0 or wanted_end<wanted_start:
+        raise TransferConflict()
+    for i,(start,end) in enumerate(snapshot.piece_ranges):
+        if i!=index and start>=0 and not (end<wanted_start or start>wanted_end):
             raise PieceOverlap()
     priorities=tuple(1 if i==index else 0 for i in range(len(inventory.files)))
     receipt=hashlib.sha256(json.dumps({
