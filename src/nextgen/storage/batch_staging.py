@@ -4,6 +4,10 @@ Separate publication rows share the existing inode-pinned artifact journal.
 Media is COPY-only; no source video is removed from the qBittorrent root.
 """
 import json
+import os
+import fcntl
+import stat
+from contextlib import contextmanager
 from pathlib import PurePosixPath
 from types import SimpleNamespace
 
@@ -45,9 +49,11 @@ def facts(db,claim,verification_job_id):
     op=operation(db,claim.job_id)
     if op[1]!='ACTIVE':raise StagingReview()
     try:
-        source=_decode_media(row[5],row[12] if False else
-             db.execute('SELECT reservation_job_id FROM batch_torrent_submissions WHERE plan_id=?',
-                        (row[0],)).fetchone()[0],row[2],row[0],row[3],row[4])
+        owner=db.execute(
+            'SELECT reservation_job_id FROM batch_torrent_submissions WHERE plan_id=?',
+            (row[0],)).fetchone()
+        if owner is None:raise StagingReview()
+        source=_decode_media(row[5],owner[0],row[2],row[0],row[3],row[4])
         if source.relative_path!=json.loads(row[5])['path']:
             raise StagingReview()
         evidence=json.loads(source.json())
@@ -73,12 +79,43 @@ def facts(db,claim,verification_job_id):
         "AND r.tvdb_season=? AND r.tvdb_episode=? LIMIT 1",
         (row[14],row[15],row[16])).fetchone():
         raise StagingReview()
+    if db.execute(
+        "SELECT 1 FROM batch_staging_publications p "
+        "JOIN batch_episode_reservations r ON r.plan_id=p.plan_id AND r.file_index=p.file_index "
+        "WHERE p.state='PUBLISHED' AND r.tvdb_series_id=? "
+        "AND r.tvdb_season=? AND r.tvdb_episode=? "
+        "AND (p.plan_id<>? OR p.file_index<>?) LIMIT 1",
+        (row[14],row[15],row[16],row[0],row[1])).fetchone():
+        raise StagingReview()
     identity=tuple(row[12:19])
     intent=SimpleNamespace(options=SimpleNamespace(download_root=row[10]))
     return row[0],row[1],intent,evidence,identity
 
 
 class BatchStagingJournal(Journal):
+    @contextmanager
+    def lock(self,claim):
+        # One operation-scoped lock serializes sibling episode publications.
+        # The last completing job can therefore safely mark the whole
+        # operation STAGED after all siblings have completed.
+        with self.queue.connection() as db,transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            opid=operation(db,claim.job_id)[0]
+        from src.nextgen.maintenance import MaintenanceGate
+        from src.nextgen.staging import StagingBusy
+        with MaintenanceGate(self.queue.database)._directory() as directory_fd:
+            fd=os.open('.nextgen-batch-stage-'+str(opid)+'.lock',
+                       os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,
+                       0o600,dir_fd=directory_fd)
+            try:
+                info=os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1:
+                    raise StagingReview()
+                try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:raise StagingBusy() from None
+                yield
+            finally:os.close(fd)
+
     def prepare(self,claim,verification_job_id,configuration):
         with self.queue.connection() as db,transaction(db):
             self.queue._owns(db,claim,self.queue.now())
