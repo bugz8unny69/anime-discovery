@@ -3,12 +3,13 @@
 The successor only receives the reservation job ID; all file selections and
 metadata are reloaded from the authenticated database before any qB mutation.
 """
+from dataclasses import dataclass
 from src.nextgen.episode_reservations import ReservationConflict, EpisodeReserved
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.batch_reservations import (
-    load_batch_reservation, persist_batch_reservations,
+    BatchReservationInput, load_batch_reservation, persist_batch_reservations,
 )
 from src.nextgen.worker import blocking
 
@@ -16,11 +17,20 @@ KIND='RESERVE_BATCH'
 DEFINITION=HandlerDefinition(KIND,'Reserve verified batch episodes')
 
 
+@dataclass(frozen=True)
+class BatchReservationCompletion:
+    source: BatchReservationInput
+    reservation_job_id: int
+
+
 def _persist(db,claim,value):
+    if (type(value) is not BatchReservationCompletion
+            or value.reservation_job_id!=claim.job_id):
+        raise ValueError('Batch reservation completion does not match the claiming job')
     from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
     try:
-        require_allowed(db,value.anidb_id)
-        return (persist_batch_reservations(db,claim,value),)
+        require_allowed(db,value.source.anidb_id)
+        return (persist_batch_reservations(db,claim,value.source),)
     except AnimeRejected as exc:
         raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except EpisodeReserved as exc:
@@ -49,9 +59,9 @@ def registration(*, submission_kind=None):
                 job,context.claim.event_id)
         except ReservationConflict:
             return Outcome('review','EPISODE_RESERVATION_CONFLICT')
-        return Outcome(value=result)
+        return Outcome(value=BatchReservationCompletion(result,context.claim.job_id))
     def route(value):
         return () if submission_kind is None else (
-            Successor.create(submission_kind,{'reservation_job_id':value.evaluation_job_id}),)
+            Successor.create(submission_kind,{'reservation_job_id':value.reservation_job_id}),)
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
                         successor_kinds=() if submission_kind is None else (submission_kind,))
