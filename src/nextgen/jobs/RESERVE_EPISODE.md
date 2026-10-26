@@ -82,3 +82,11 @@ When a trusted metadata-reading library is supplied at composition, selected
 reservations now enqueue PREPARE_ACQUISITION atomically. Outside-window skips do
 not. Without that dependency, reservation still ends the installed pipeline.
 See PREPARE_ACQUISITION.md for the PREPARED-only durable inventory boundary.
+
+## Successful staging closes duplicate candidates
+
+A matching active reservation keeps competitors ON_HOLD until its acquisition has a PUBLISHED staging receipt. Staging completion atomically marks exact verified held competitors DONE with SKIPPED_DUPLICATE and appends their history receipts. No acquisition successors are created. Canceled operations, inconsistent identities and other episodes remain unchanged.
+
+Late or concurrently running reservation jobs recheck the published receipt in their fenced completion transaction. A duplicate produces a skip outcome, which finishes without publishing facts or routing acquisition successors. Copy attempts, partial files, completed identification and completed reservation jobs alone never establish successful staging. Keep remains a separate user decision.
+
+The jobs API labels completed steps by their actual result, including Series identified, Episode verified and Staged. Unknown completed job kinds use Step completed. Skipped duplicate takes precedence over step labels.

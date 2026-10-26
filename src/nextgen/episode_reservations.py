@@ -9,6 +9,10 @@ class ReservationConflict(ValueError):
         super().__init__('Episode reservation details need review.')
 
 
+class EpisodeStaged(ValueError):
+    """Exact verified episode has already been published into staging."""
+
+
 class EpisodeReserved(ValueError):
     reason_code = 'EPISODE_RESERVED'
     def __init__(self):

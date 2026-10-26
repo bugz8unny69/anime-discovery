@@ -69,7 +69,7 @@ class Successor:
         parse_payload(self.payload)
 
 
-_STATES = {"complete":"DONE", "retry":"RETRY_WAIT", "defer":"RETRY_WAIT",
+_STATES = {"complete":"DONE", "skip":"DONE", "retry":"RETRY_WAIT", "defer":"RETRY_WAIT",
            "hold":"ON_HOLD", "review":"NEEDS_REVIEW", "blocked":"BLOCKED"}
 
 
@@ -85,11 +85,13 @@ class Outcome:
     def __post_init__(self):
         if type(self.kind) is not str or self.kind not in _STATES:
             raise ValueError("invalid handler outcome")
-        if self.kind == "complete":
+        if self.kind in ("complete", "skip"):
             if self.reason_code is not None:
                 raise ValueError("completed outcome cannot carry a reason")
         elif get_reason(self.reason_code) is None:
             raise ValueError("registered outcome reason required")
+        if self.kind == "skip" and self.activity_code != "SKIPPED_DUPLICATE":
+            raise ValueError("skip requires duplicate activity")
         if self.delay_ms is not None and (self.kind not in ("retry", "defer")
                 or type(self.delay_ms) is not int or not 1 <= self.delay_ms <= 86400000):
             raise ValueError("invalid outcome delay")
@@ -105,7 +107,7 @@ class Outcome:
 class CompletionRejected(ValueError):
     """Expected domain rejection; worker rolls back facts then records outcome."""
     def __init__(self, outcome):
-        if type(outcome) is not Outcome or outcome.kind not in ("review", "hold", "blocked"):
+        if type(outcome) is not Outcome or outcome.kind not in ("review", "hold", "blocked", "skip"):
             raise ValueError("invalid completion rejection")
         self.outcome = outcome
         self.reason_code = outcome.reason_code

@@ -1,5 +1,5 @@
 """Reserve one selected, verified episode. External acquisition follows later."""
-from src.nextgen.episode_reservations import ReservationConflict, EpisodeReserved
+from src.nextgen.episode_reservations import ReservationConflict, EpisodeReserved, EpisodeStaged
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
@@ -16,6 +16,7 @@ def _persist(db,claim,value):
         require_allowed(db,value.anidb_id)
         return (persist_reservation(db,claim,value),)
     except AnimeRejected as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
+    except EpisodeStaged:raise CompletionRejected(Outcome('skip',activity_code='SKIPPED_DUPLICATE')) from None
     except EpisodeReserved as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except ReservationConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 

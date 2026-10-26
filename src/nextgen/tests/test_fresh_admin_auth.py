@@ -28,7 +28,7 @@ class FreshAdministrationTests(unittest.TestCase):
         self.app.logger = logging.getLogger("test.nextgen.password.auth")
 
     def request(self, method, path, headers=None, body=None):
-        return self.app._route(method, PREFIX + path, headers or {},
+        return self.app._route(method, PREFIX + path, {'host':'anime.example.test',**(headers or {})},
                                {}, body or {}, "127.0.0.1")
 
     def test_fresh_schema_has_no_management_token(self):
