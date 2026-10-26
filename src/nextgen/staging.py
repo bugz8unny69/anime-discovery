@@ -171,8 +171,9 @@ class Publisher:
         if entry['role']!='media':return digest_fd(fd,entry['size'],self.flag)
         info=signature(os.fstat(fd))
         if info[2]!=entry['size']:raise StagingReview()
-        # This digest identifies previously verified source evidence. Staging
-        # deliberately does not hash/compare the destination video again.
+        if getattr(self,'_copy_mode',False):
+            return digest_fd(fd,entry['size'],self.flag)
+        # Legacy MOVE uses the previously verified digest and inode.
         return entry['sha256'],info
 
     def _remove_source(self,plan):
@@ -215,6 +216,8 @@ class Publisher:
         os.fchmod(fd,plan['file_mode']);os.fsync(fd)
 
     def publish(self,plan):
+        if plan.get('transfer') not in ('MOVE','COPY'):raise StagingReview()
+        self._copy_mode=plan['transfer']=='COPY'
         receipts=[]
         for entry in plan['entries']:
             self.guard()
@@ -245,7 +248,7 @@ class Publisher:
                     continue
                 if artifact is not None and artifact['phase'] not in ('TEMP','PUBLISH_UNCERTAIN'):raise StagingReview()
                 moved=False
-                if entry['role']=='media' and artifact is None:
+                if entry['role']=='media' and artifact is None and not self._copy_mode:
                     stack,source=self._source(plan)
                     with stack:
                         source_info=signature(os.fstat(source))
@@ -308,5 +311,7 @@ class Publisher:
                         digest,info=self._check(entry,fd)
                         if digest!=receipt['sha256'] or list(info)!=receipt['file']:raise StagingReview()
                     finally:os.close(fd)
-        self._remove_source(plan)
+        # Batch qBittorrent files are shared torrent-owned sources; staging
+        # publishes an independently hashed COPY and never unlinks/renames them.
+        if not self._copy_mode:self._remove_source(plan)
         return receipts
