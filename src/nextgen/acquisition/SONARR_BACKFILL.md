@@ -1,6 +1,6 @@
 # Batch 2 — opt-in Sonarr backfill discovery
 
-Batch 1 supplies a read-only Sonarr ranked-release client. Batch 2 schedules
+Batch 1 supplies a read-only Sonarr interactive release-discovery client. Batch 2 schedules
 bounded search observations for the **first X episodes** of a **frozen**
 `trial_plans` window. Neither batch submits torrents or authorizes acquisition.
 
@@ -14,10 +14,41 @@ database; restart with compatible worker code before reopening admission.
 The default provider worker retains prior behavior. To opt into backfill
 observation, a trusted caller supplies `sonarr_backfill=True` to
 `build_identity_worker(...)`. The existing Sonarr URL, API key and timeout
-are used. The feature introduces no Prowlarr account or quality scoring.
+are used. Interactive release requests allow 180 seconds while other Sonarr API
+requests retain the configured timeout. The feature introduces no Prowlarr account.
 
 **This branch is not deployed and the v42 migration has not been applied.
 Automated offline validation is tracked by draft PR #159.**
+
+
+## Local candidate selection (discovery only)
+
+Sonarr quality profiles are **not** imported. Three managed settings control
+Anime Discovery's candidate preference for subsequent searches:
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `sonarr.discovery_max_resolution` | `1080` | Upper bound: 720p remains eligible when set to 1080p; supported values 720, 1080, 2160 |
+| `sonarr.discovery_min_seeders` | `5` | Missing counts and counts below this value are ineligible |
+| `sonarr.discovery_rank_by` | `resolution` | `resolution` first then seeders, or `seeders` first then resolution |
+
+Original Sonarr results remain observable, but locally acceptable single-episode
+torrent candidates rank first. Sonarr-approved/rejected and custom-format
+decisions are retained for diagnostics and do not authorize or prohibit local
+discovery. Backfill `exact` counts locally acceptable candidates, while
+`approved` remains a separate Sonarr verdict count.
+
+Sonarr v4/Prowlarr sometimes puts a complete `magnet:?` link in `guid` while
+leaving `magnetUrl` empty. Such GUIDs are accepted **only after validating
+their BitTorrent v1 hash** and rejecting a conflict with `infoHash` or the
+other supplied magnet. HTTP GUIDs, `downloadUrl` and indexer passkeys are
+**not followed, rewritten or submitted** here. Magnets and hashes are
+transient response data, not stored in backfill receipts or logs.
+
+All sources still require exact independently anchored Sonarr episode mapping;
+unknown-series results, season packs and cross-season mismatches cannot become
+automatic single-episode handoffs. No direct torrent submission is wired to
+this read-only observation job; actual acquisition remains a separate step.
 
 ## Frozen window
 
@@ -52,7 +83,7 @@ For E10 with backfill 6 and following 2:
 | `job_id` | Worker provenance |
 | `sonarr_episode_id`, `tvdb_episode_id` | IDs **as reported by Sonarr**, not independent verification |
 | `status` | `IN_PROGRESS`, `NOT_LISTED`, `IDENTITY_UNKNOWN`, `IDENTITY_CONFLICT`, `HAS_FILE`, `CANDIDATES` or `NO_RESULTS` |
-| `candidates`, `approved`, `exact` | Counts derived from Sonarr's prioritized search and discovery-only eligibility checks |
+| `candidates`, `approved`, `exact` | Total results, Sonarr-approved exact matches (diagnostic only), and locally acceptable exact torrent candidates |
 | `observed_at_ms` | Recorded wall-clock observation time |
 
 A read-only query to review progress after running an enabled worker:
