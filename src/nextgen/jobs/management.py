@@ -1,5 +1,6 @@
 """Trusted shared composition for workers serving dashboard/ADM action jobs."""
 from src.nextgen.jobs.cleanup_canceled_operation_job import registration as cleanup
+from src.nextgen.jobs.bulk_manage_jobs_job import registration as bulk
 from src.nextgen.jobs.keep_media_job import registration as keep
 from src.nextgen.jobs.refresh_jellyfin_job import registration as refresh
 from src.nextgen.post_keep_cleanup import registration as cleanup_kept
@@ -14,5 +15,5 @@ from src.nextgen.jobs.cleanup_batch_download_job import registration as cleanup_
 from src.nextgen.jobs.cleanup_batch_kept_media_job import registration as cleanup_batch_kept
 
 def registrations(secrets):
-    return (cleanup(secrets),keep(secrets),reject(),keep_batch(secrets),reject_batch(),
+    return (bulk(),cleanup(secrets),keep(secrets),reject(),keep_batch(secrets),reject_batch(),
             cleanup_batch(secrets),cleanup_batch_kept(secrets),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets),shoko(secrets))
