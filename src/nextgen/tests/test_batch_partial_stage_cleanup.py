@@ -207,3 +207,61 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         with self.assertRaises(BatchStageCleanupRetry):
             self.cleanup()
         self.assertTrue(video.exists())
+
+    def test_interrupted_atomic_rename_is_cleaned_using_pinned_inode(self):
+        from src.nextgen.staging_artifacts import reconcile_planned_batch
+        video,episode=self.publish(1)
+        self.db.execute(
+            "UPDATE batch_staging_publications SET state='PLANNED',"
+            "receipts_json=NULL")
+        self.db.execute(
+            "UPDATE staging_cleanup_artifacts SET phase='PUBLISH_UNCERTAIN'")
+        self.db.commit()
+        reconcile_planned_batch(self.queue,7,guard=self.guard,
+                                keep_root=str(self.keep))
+        self.cleanup()
+        self.assertFalse(video.exists())
+        self.assertFalse(episode.exists())
+        self.assertTrue((self.staging/'Show'/'tvshow.nfo').exists())
+        self.assertTrue(batch_copies_cleared(self.db,7))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM staging_cleanup_artifacts "
+            "WHERE phase='REMOVED'").fetchone(),(2,))
+
+    def test_recovery_refuses_an_inode_replaced_between_rename_and_cancel(self):
+        from src.nextgen.staging_artifacts import (
+            reconcile_planned_batch,BatchStageCleanupRetry,
+        )
+        video,_=self.publish(1)
+        self.db.execute(
+            "UPDATE batch_staging_publications SET state='PLANNED',"
+            "receipts_json=NULL")
+        self.db.execute(
+            "UPDATE staging_cleanup_artifacts SET phase='PUBLISH_UNCERTAIN'")
+        self.db.commit()
+        video.unlink()
+        video.write_bytes(b'an unrelated replacement')
+        with self.assertRaises(BatchStageCleanupRetry):
+            reconcile_planned_batch(self.queue,7,guard=self.guard,
+                                    keep_root=str(self.keep))
+        self.assertEqual(video.read_bytes(),b'an unrelated replacement')
+
+    def test_uncertain_temp_is_cleaned_without_recursive_deletion(self):
+        from src.nextgen.staging_artifacts import reconcile_planned_batch
+        video,episode=self.publish(1)
+        self.db.execute(
+            "UPDATE batch_staging_publications SET state='PLANNED',"
+            "receipts_json=NULL")
+        self.db.execute(
+            "UPDATE staging_cleanup_artifacts SET phase='PUBLISH_UNCERTAIN'")
+        self.db.commit()
+        plan=json.loads(self.db.execute(
+            "SELECT manifest_json FROM batch_staging_publications").fetchone()[0])
+        temp=self.staging/'Show'/'Season 01'/plan['entries'][0]['temporary']
+        video.rename(temp)
+        reconcile_planned_batch(self.queue,7,guard=self.guard,
+                                keep_root=str(self.keep))
+        self.cleanup()
+        self.assertFalse(temp.exists())
+        self.assertFalse(episode.exists())
+        self.assertTrue((self.staging/'Show'/'tvshow.nfo').exists())

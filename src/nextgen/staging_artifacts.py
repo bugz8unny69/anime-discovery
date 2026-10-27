@@ -83,6 +83,103 @@ def clean_temporaries(queue,operation_id,*,guard=None):
             if guard is not None:guard(db)
             db.execute("UPDATE staging_cleanup_artifacts SET phase='REMOVED' WHERE artifact_id=?",(aid,))
 
+
+def reconcile_planned_batch(queue,operation_id,*,guard,keep_root):
+    """Finish a canceled batch publisher's own interrupted atomic rename.
+
+    Only a durable operation-owned inode receipt authorizes removal. The
+    saved temporary and final names are the only candidates: no directory
+    scanning, globbing, or rebuilding paths from current configuration.
+    """
+    import json
+    from pathlib import PurePosixPath
+    from src.nextgen.staging import disjoint
+    from src.nextgen.acquisition.media import signature
+
+    with queue.connection() as db,transaction(db):
+        guard(db)
+        publications=db.execute(
+            "SELECT p.job_id,p.manifest_json FROM batch_staging_publications p "
+            "JOIN job_operation_members m ON m.job_id=p.job_id "
+            "WHERE m.operation_id=? AND p.state='PLANNED'",
+            (operation_id,)).fetchall()
+    if len(publications)>1000:raise BatchStageCleanupRetry()
+
+    for job,raw in publications:
+        with queue.connection() as db,transaction(db):
+            guard(db)
+            artifacts=db.execute(
+                "SELECT artifact_id,root_path,relative_path,root_device,"
+                "root_inode,file_device,file_inode,phase "
+                "FROM staging_cleanup_artifacts "
+                "WHERE operation_id=? AND job_id=? ORDER BY artifact_id",
+                (operation_id,job)).fetchall()
+        try:
+            plan=json.loads(raw)
+            if plan.get('transfer')!='COPY':raise BatchStageCleanupRetry()
+            disjoint(plan['root'],(keep_root,))
+            entries=plan['entries']
+            if (type(entries) is not list or len(entries)!=3
+                    or {entry['role'] for entry in entries}!=
+                       {'media','episode','series'}):
+                raise BatchStageCleanupRetry()
+            names={}
+            for entry in entries:
+                key=(plan['root']+'/'+str(PurePosixPath(entry['path']).parent),
+                     entry['temporary'])
+                if key in names:raise BatchStageCleanupRetry()
+                names[key]=entry
+            if len(artifacts)>len(entries):raise BatchStageCleanupRetry()
+            seen=set()
+            for aid,folder,tmp,rdev,rino,fdev,fino,phase in artifacts:
+                key=(folder,tmp)
+                if key in seen or key not in names:raise BatchStageCleanupRetry()
+                seen.add(key)
+                if phase not in ('PUBLISH_UNCERTAIN','PUBLISHED'):continue
+                entry=names[key]
+                with directory(plan['root']) as root:
+                    if [os.fstat(root).st_dev,os.fstat(root).st_ino]!=plan['root_identity']:
+                        raise BatchStageCleanupRetry()
+                    with parent(root,entry['path']) as (fd,name):
+                        if (os.fstat(fd).st_dev,os.fstat(fd).st_ino)!=(rdev,rino):
+                            raise BatchStageCleanupRetry()
+                        def observed(filename):
+                            try:return signature(os.stat(
+                                filename,dir_fd=fd,follow_symlinks=False))
+                            except FileNotFoundError:return None
+                        temporary=observed(tmp)
+                        final=observed(name)
+                        if temporary is not None and final is not None:
+                            raise BatchStageCleanupRetry()
+                        current=temporary or final
+                        if current is not None and current[:2]!=(fdev,fino):
+                            raise BatchStageCleanupRetry()
+                        # Shared series metadata may be needed by other staged
+                        # episodes; preserve a finished series NFO.
+                        leave_series=entry['role']=='series' and final is not None
+                        if current is not None and not leave_series:
+                            target=tmp if temporary is not None else name
+                            guard()
+                            if observed(target)!=current:raise BatchStageCleanupRetry()
+                            os.unlink(target,dir_fd=fd)
+                            os.fsync(fd)
+                        target_phase='PUBLISHED' if leave_series else 'REMOVED'
+                with queue.connection() as db,transaction(db):
+                    guard(db)
+                    state=db.execute(
+                        "SELECT state FROM batch_staging_publications "
+                        "WHERE job_id=?",(job,)).fetchone()
+                    if state!=('PLANNED',):raise BatchStageCleanupRetry()
+                    updated=db.execute(
+                        "UPDATE staging_cleanup_artifacts SET phase=? "
+                        "WHERE artifact_id=? AND operation_id=? AND job_id=? "
+                        "AND phase=?",(target_phase,aid,operation_id,job,phase)
+                    ).rowcount
+                    if updated!=1:raise BatchStageCleanupRetry()
+        except (ValueError,KeyError,TypeError,IndexError,OSError):
+            raise BatchStageCleanupRetry() from None
+
+
 def batch_copies(db, operation_id):
     """Validate every published batch file against its existing staging journal.
 
@@ -100,16 +197,28 @@ def batch_copies(db, operation_id):
     if len(rows)>1000:raise CancellationError()
     published=[]
     referenced=set()
+    planned_series=set()
     for job,manifest,receipts,state in rows:
         if state=='PLANNED':
-            # The publisher may have renamed a file before its final commit.
-            # Without the full publication receipt, do not guess what to delete.
-            if db.execute(
-                "SELECT 1 FROM staging_cleanup_artifacts "
-                "WHERE operation_id=? AND job_id=? "
-                "AND phase IN ('PUBLISH_UNCERTAIN','PUBLISHED') LIMIT 1",
-                (operation_id,job)).fetchone():
-                raise CancellationError()
+            # After inode-fenced reconciliation, a saved series NFO may
+            # legitimately remain for other completed episode publications.
+            try:
+                plan=json.loads(manifest)
+                series=next(e for e in plan['entries'] if e['role']=='series')
+                expected=(plan['root']+'/'+str(PurePosixPath(series['path']).parent),
+                          series['temporary'])
+                leftovers=db.execute(
+                    "SELECT artifact_id,root_path,relative_path,phase "
+                    "FROM staging_cleanup_artifacts "
+                    "WHERE operation_id=? AND job_id=? "
+                    "AND phase IN ('PUBLISH_UNCERTAIN','PUBLISHED')",
+                    (operation_id,job)).fetchall()
+                for aid,folder,name,phase in leftovers:
+                    if (folder,name,phase)!=(expected[0],expected[1],'PUBLISHED'):
+                        raise CancellationError()
+                    planned_series.add(aid)
+            except (ValueError,KeyError,TypeError,IndexError,StopIteration):
+                raise CancellationError() from None
             continue
         if state!='PUBLISHED':raise CancellationError()
         try:
@@ -165,7 +274,8 @@ def batch_copies(db, operation_id):
         "WHERE m.operation_id=? AND a.phase='PUBLISHED' "
         "AND a.job_id IN (SELECT job_id FROM batch_staging_publications)",
         (operation_id,)).fetchall()
-    if any((artifact not in referenced) for (artifact,) in stranded):
+    if any(artifact not in referenced and artifact not in planned_series
+           for (artifact,) in stranded):
         raise CancellationError()
     return tuple(published)
 
