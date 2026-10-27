@@ -282,7 +282,7 @@ class Client:
             raise SearchReview()
         status = self._get('system/status')
         version = status.get('version')
-        if type(version) is not str or not re.fullmatch(r'4\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?', version):
+        if type(version) is not str or not re.fullmatch(r'4\.[0-9]+\.[0-9]+(?:\.[0-9]+)?', version):
             raise SearchUnsupported()
         series = [row for row in self._get('series', {'tvdbId': tvdb_series_id})
                   if row.get('tvdbId') == tvdb_series_id]
