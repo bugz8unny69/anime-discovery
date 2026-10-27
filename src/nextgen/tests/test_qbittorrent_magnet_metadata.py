@@ -25,8 +25,9 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual(self.client((2,11,9)).metadata_strategy,'fetch')
         self.assertEqual(self.client((2,8,15),4).metadata_strategy,'guarded_bootstrap')
         self.assertEqual(self.client((2,10,0),5).metadata_strategy,'guarded_bootstrap')
+        self.assertEqual(self.client((2,5,1),4).metadata_strategy,'legacy_poll')
         with self.assertRaises(ClientUnsupported):
-            self.client((2,8,14),4).metadata_strategy
+            self.client((2,2,9),4).metadata_strategy
 
     def test_protocol_names_cover_submission_start_stop(self):
         old=_Protocol(4,(2,8,15))
@@ -35,6 +36,36 @@ class MagnetMetadataTests(unittest.TestCase):
                          ('paused','torrents/resume','torrents/pause'))
         self.assertEqual((new.stopped_parameter,new.start_endpoint,new.stop_endpoint),
                          ('stopped','torrents/start','torrents/stop'))
+
+    def test_42_protocol_omits_unsupported_add_fields(self):
+        old=_Protocol(4,(2,5,1))
+        self.assertFalse(old.inline_tags)
+        self.assertFalse(old.indexed_files)
+        self.assertEqual(old.file_index({'name':'first.mkv'},0),0)
+        self.assertEqual(old.add_fields(True),
+                         {'paused':'true','autoTMM':'false'})
+        self.assertEqual(old.start_endpoint,'torrents/resume')
+        self.assertEqual(old.stop_endpoint,'torrents/pause')
+
+    def test_42_submission_tags_after_one_permitted_add(self):
+        client=self.client((2,5,1),4)
+        intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
+        intent.plan.manifest.info_hash=HASH
+        intent.plan.marker='c'*32
+        permit=SendPermit('f'*64)
+        client.add_stopped(MAGNET,intent,permit)
+        self.assertEqual(client._request.call_count,2)
+        add,tag=client._request.call_args_list
+        self.assertEqual(add.args,('torrents/add',))
+        self.assertNotIn('tags',add.kwargs['form'])
+        self.assertNotIn('contentLayout',add.kwargs['form'])
+        self.assertNotIn('useDownloadPath',add.kwargs['form'])
+        self.assertEqual(tag.args,('torrents/addTags',))
+        self.assertEqual(tag.kwargs['form'],
+                         {'hashes':HASH,'tags':'ad-'+'c'*32})
+        with self.assertRaises(ClientInvalid):
+            client.add_stopped(MAGNET,intent,permit)
+        self.assertEqual(client._request.call_count,2)
 
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
