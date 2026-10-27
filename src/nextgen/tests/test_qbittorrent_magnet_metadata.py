@@ -48,24 +48,50 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual(old.stop_endpoint,'torrents/pause')
 
     def test_42_submission_tags_after_one_permitted_add(self):
+        import json
         client=self.client((2,5,1),4)
+        client.options.download_root='/media/downloads/ad-'+'c'*32
         intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
         intent.plan.manifest.info_hash=HASH
         intent.plan.marker='c'*32
+        observed={'hash':HASH,'save_path':client.options.download_root,
+                  'category':'anime','auto_tmm':False,'state':'pausedDL'}
+        client._request.side_effect=[
+            (b'Ok.',{}),(json.dumps([observed]).encode(),{}),(b'',{}),
+        ]
         permit=SendPermit('f'*64)
         client.add_stopped(MAGNET,intent,permit)
-        self.assertEqual(client._request.call_count,2)
-        add,tag=client._request.call_args_list
+        self.assertEqual(client._request.call_count,3)
+        add,check,tag=client._request.call_args_list
         self.assertEqual(add.args,('torrents/add',))
         self.assertNotIn('tags',add.kwargs['form'])
         self.assertNotIn('contentLayout',add.kwargs['form'])
         self.assertNotIn('useDownloadPath',add.kwargs['form'])
+        self.assertEqual(check.args,('torrents/info',))
         self.assertEqual(tag.args,('torrents/addTags',))
         self.assertEqual(tag.kwargs['form'],
                          {'hashes':HASH,'tags':'ad-'+'c'*32})
         with self.assertRaises(ClientInvalid):
             client.add_stopped(MAGNET,intent,permit)
-        self.assertEqual(client._request.call_count,2)
+        self.assertEqual(client._request.call_count,3)
+
+    def test_42_does_not_tag_preexisting_other_destination(self):
+        import json
+        client=self.client((2,5,1),4)
+        client.options.download_root='/media/downloads/ad-'+'c'*32
+        intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
+        intent.plan.manifest.info_hash=HASH
+        intent.plan.marker='c'*32
+        client._request.side_effect=[
+            (b'Ok.',{}),
+            (json.dumps([{'hash':HASH,'save_path':'/someone/else',
+                          'category':'anime','auto_tmm':False,
+                          'state':'pausedDL'}]).encode(),{}),
+        ]
+        with self.assertRaises(ClientInvalid):
+            client.add_stopped(MAGNET,intent,SendPermit('f'*64))
+        self.assertEqual([r.args[0] for r in client._request.call_args_list],
+                         ['torrents/add','torrents/info'])
 
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
