@@ -43,7 +43,7 @@ class _Protocol:
 
     @property
     def metadata_strategy(self):
-        if self.api_version >= (2,11,9):
+        if self.major == 5 and self.api_version >= (2,11,9):
             return 'fetch'
         if self.api_version >= (2,8,15):
             return 'stopped_magnet'
@@ -155,8 +155,10 @@ class Client:
         raw,_=self._request('torrents/fetchMetadata',form={'source':magnet},limit=MAX_METAINFO)
         data=_json(raw)
         if type(data) is not dict:raise ClientInvalid()
-        # An empty response means the daemon is still fetching metadata.
+        # An empty object means qBittorrent is still resolving the magnet.
         if not data:return None
+        if data.get('infohash_v1') != expected_hash:
+            raise ClientInvalid()
         raw,_=self._request('torrents/saveMetadata',form={'source':magnet},limit=MAX_METAINFO)
         return parse_metainfo(raw,expected_hash),raw
 
