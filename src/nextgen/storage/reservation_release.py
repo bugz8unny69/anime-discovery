@@ -53,13 +53,8 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
                   (operation_id,)).fetchone()!=('CANCELED','COMPLETE'):raise CancellationError()
     validate_releasable(db,operation_id)
     if db.execute("SELECT 1 FROM staging_publications s JOIN job_operation_members m ON m.job_id=s.job_id WHERE m.operation_id=? AND s.state='PUBLISHED' LIMIT 1",(operation_id,)).fetchone():raise CancellationError()
-    # A partially published batch is not disposable simply because its
-    # torrent was cleaned. Preserve staged media and require review instead.
-    if db.execute(
-        "SELECT 1 FROM batch_staging_publications s "
-        "JOIN job_operation_members m ON m.job_id=s.job_id "
-        "WHERE m.operation_id=? AND s.state='PUBLISHED' LIMIT 1",
-        (operation_id,)).fetchone():
+    from src.nextgen.staging_artifacts import batch_copies_cleared
+    if not batch_copies_cleared(db,operation_id):
         raise CancellationError()
     rows=db.execute("SELECT r.reservation_id,r.evaluation_job_id FROM episode_reservations r JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)).fetchall()
     for reservation,evaluation in rows:

@@ -135,8 +135,13 @@ class CancellationService(OwnedCleanup):
                             processed+=1
                             complete=batch_cleaner._clean_target(op,target) and complete
                     if complete:
-                        from src.nextgen.staging_artifacts import clean_temporaries
+                        from src.nextgen.staging_artifacts import (
+                            clean_temporaries, clean_published_batch,
+                        )
                         self._fence()
+                        clean_published_batch(
+                            self.store.queue,op,guard=self._fence,
+                            keep_root=self.configuration.value('storage.keep_root'))
                         clean_temporaries(self.store.queue,op,guard=self._fence)
                     self._state(job_id,'COMPLETE' if complete else 'PENDING',
                                 'CANCELLATION_COMPLETE' if complete else 'CANCELLATION_PENDING')
