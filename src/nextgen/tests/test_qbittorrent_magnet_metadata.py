@@ -150,6 +150,49 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual([file.path for file in observed.files],
                          ['anime.mkv','anime.srt'])
 
+    def test_42_pre_manifest_add_is_single_use_and_tagged_by_readback(self):
+        import json
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
+        client=self.client((2,5,1),4)
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        row={'hash':HASH,'save_path':options.download_root,
+             'category':'anime','auto_tmm':False,'tags':'','state':'metaDL'}
+        client._request.side_effect=[
+            (b'Ok.',{}),(json.dumps([row]).encode(),{}),(b'',{})]
+        permit=MagnetPermit('f'*64)
+        client.add_legacy_magnet(MAGNET,intent,permit)
+        self.assertEqual(
+            [call.args[0] for call in client._request.call_args_list],
+            ['torrents/add','torrents/info','torrents/addTags'])
+        self.assertEqual(client._request.call_args_list[0].kwargs['form']['paused'],
+                         'false')
+        with self.assertRaises(ClientInvalid):
+            client.add_legacy_magnet(MAGNET,intent,permit)
+        self.assertEqual(client._request.call_count,3)
+
+    def test_42_foreign_path_cannot_be_tagged_after_magnet_add(self):
+        import json
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
+        client=self.client((2,5,1),4)
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        row={'hash':HASH,'save_path':'/downloads/other',
+             'category':'anime','auto_tmm':False,'tags':'','state':'metaDL'}
+        client._request.side_effect=[
+            (b'Ok.',{}),(json.dumps([row]).encode(),{})]
+        with self.assertRaises(ClientInvalid):
+            client.add_legacy_magnet(MAGNET,intent,MagnetPermit('f'*64))
+        self.assertEqual(
+            [call.args[0] for call in client._request.call_args_list],
+            ['torrents/add','torrents/info'])
+
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{}',{})
