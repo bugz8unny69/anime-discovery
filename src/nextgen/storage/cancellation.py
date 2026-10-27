@@ -15,9 +15,12 @@ def operation(db,job_id):
 
 
 def unfinished_resources(db,operation_id):
-    return db.execute('SELECT 1 FROM acquisition_plans p JOIN job_operation_members m ON m.job_id=p.job_id '
-                      'WHERE m.operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None or db.execute(
-                      'SELECT 1 FROM staging_cleanup_artifacts WHERE operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
+    return (db.execute('SELECT 1 FROM acquisition_plans p JOIN job_operation_members m ON m.job_id=p.job_id '
+                       'WHERE m.operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
+            or db.execute('SELECT 1 FROM sonarr_magnet_intents i JOIN job_operation_members m '
+                          'ON m.job_id=i.job_id WHERE m.operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
+            or db.execute('SELECT 1 FROM staging_cleanup_artifacts '
+                          'WHERE operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None)
 
 
 def can_cancel_operation(db,op):
