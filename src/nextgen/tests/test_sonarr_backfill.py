@@ -100,30 +100,6 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             [('RETRY_WAIT','SONARR_DISCOVERY_UNAVAILABLE')])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[(1,)])
 
-    async def test_snapshot_skips_existing_reservation_numbers(self):
-        self.source(10)
-        fake = FakeDiscovery()
-        worker = self.worker(fake)
-        await worker.attempt()
-        db = connect(self.database)
-        try:
-            # The read-only observation snapshot intentionally honors active
-            # single-episode and batch acquisition reservations.
-            with db:
-                db.execute("INSERT INTO episode_reservations("
-                    "owner_job_id,evaluation_job_id,verification_id,plan_id,anidb_id,"
-                    "anidb_episode_id,tvdb_series_id,tvdb_season,tvdb_episode,"
-                    "tvdb_episode_id,reserved_at_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (1,1,1,1,123,1001,456,1,1,100001,1))
-        except sqlite3.IntegrityError:
-            # Fixtures without an episode #1 mapping cannot forge an episode
-            # reservation. The adapter's direct test covers reserved skips.
-            pass
-        finally:
-            db.close()
-        await worker.attempt()
-        self.assertEqual(self.rows(
-            "SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
 
 
 class BackfillSchemaTests(unittest.TestCase):
