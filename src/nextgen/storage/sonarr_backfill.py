@@ -172,10 +172,9 @@ def persist_observations(db, claim, value, *, dispatch=False):
                                 result=choice.result,policy=choice.policy)
                 inserted=select(db, plan_id=plan.plan_id, identity=choice.identity,
                        result=choice.result, release=choice.release, policy=choice.policy)
-                if inserted:
+                if inserted and dispatch:
                     activate_candidate(db,plan_id=plan.plan_id,episode=item.number,
                                        info_hash=choice.release.info_hash)
-                if inserted and dispatch:
                     from src.nextgen.storage.sonarr_dispatch import dispatch as dispatch_source
                     routed.extend(dispatch_source(db,claim,plan,choice))
             except (SelectionConflict,CandidateConflict):
