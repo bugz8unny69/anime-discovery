@@ -5,7 +5,7 @@ import unittest
 
 from src.nextgen.history import append_job_history
 from src.nextgen.job_contracts import Outcome, Policy
-from src.nextgen.storage.job_queue import JobQueue, Claim
+from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.review_retry import (
     RETRY_KINDS, RetryNotAllowed, RetryStale, capability, request_review_retry,
 )
@@ -84,7 +84,9 @@ class ReviewRetryTests(unittest.TestCase):
             with self.subTest(state=state):
                 db=connect(self.database)
                 with transaction(db):
-                    db.execute('UPDATE jobs SET state=? WHERE job_id=?',(state,self.job))
+                    db.execute('UPDATE jobs SET state=?,lease_token=?,lease_expires_at_ms=? WHERE job_id=?',
+                               (state,'a'*32 if state=='RUNNING' else None,
+                                999999 if state=='RUNNING' else None,self.job))
                 db.close()
                 with self.assertRaises(RetryNotAllowed):self.retry()
         self.assertEqual(self.rows(
