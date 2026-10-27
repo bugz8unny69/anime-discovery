@@ -23,7 +23,6 @@ const COPY = Object.freeze({
   'dashboard.staged': 'Staged for viewing. Choose Keep when it is available.',
   'dashboard.scope': 'Intake shows each acquisition separately. Several releases may belong to the same anime.',
   'dashboard.page_filter': 'The status filter applies to this page.',
-  'dashboard.bulk_confirm': 'Apply this action to the selected jobs? Existing safety checks still apply.',
   'dashboard.bulk_limit': 'Select at most 100 jobs at a time.',
   'dashboard.discard': 'Discard unsaved changes and refresh settings?',
 });
@@ -107,7 +106,7 @@ function statusBadge(job) {
 }
 function actionButton(job, action, label) {
   const capability = job.actions?.[action];
-  const submitting = state.pending.has(job.cancellation.operation_id);
+  const submitting = state.bulkSubmitting || state.pending.has(job.cancellation.operation_id);
   const enabled = Boolean(capability?.enabled && capability.execution_available !== false && !submitting);
   const explanation = submitting ? COPY['dashboard.submitting'] :
     capability?.disabled_reason?.message || capability?.availability_reason?.message;
