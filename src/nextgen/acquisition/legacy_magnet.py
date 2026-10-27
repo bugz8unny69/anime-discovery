@@ -36,7 +36,7 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             credentials=await blocking(secrets.qbittorrent_credentials)
             probe=client_factory(options,credentials)
             await blocking(probe.login)
-            if probe.metadata_strategy!='legacy_poll':
+            if probe.metadata_strategy not in ('legacy_poll','guarded_export'):
                 return None
             if context.cancelled.is_set():return PENDING
             journal=journal_factory(configuration.value('storage.database_path'))
