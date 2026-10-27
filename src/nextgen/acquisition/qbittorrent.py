@@ -328,12 +328,27 @@ class Client:
         # readback and a separately bounded resume.
         self._request('torrents/add',form=fields,limit=4096)
         if not self.protocol.inline_tags:
-            raw,_=self._request('torrents/info',
-                                query={'hashes':intent.info_hash,'limit':2})
-            rows=_json(raw)
-            if type(rows) is not list or len(rows)!=1 or type(rows[0]) is not dict:
-                raise ClientInvalid()
-            row=rows[0]
+            # Older qBittorrent may acknowledge add before exposing the hash.
+            # Poll read-only for a bounded interval; never issue another add.
+            import time
+            row=None
+            for attempt in range(10):
+                raw,_=self._request('torrents/info',
+                                    query={'hashes':intent.info_hash,'limit':2})
+                rows=_json(raw)
+                if type(rows) is not list or len(rows)>1:
+                    raise ClientInvalid()
+                if rows:
+                    if type(rows[0]) is not dict:raise ClientInvalid()
+                    if rows[0].get('save_path'):
+                        row=rows[0]
+                        break
+                    if rows[0].get('hash')!=intent.info_hash:
+                        raise ClientInvalid()
+                if attempt<9:time.sleep(0.2)
+            if row is None:
+                # The original send may have worked. Leave it UNCERTAIN.
+                raise ClientUnavailable()
             if (row.get('hash')!=intent.info_hash
                     or row.get('save_path','').rstrip('/')!=self.options.download_root
                     or row.get('category')!=self.options.category
