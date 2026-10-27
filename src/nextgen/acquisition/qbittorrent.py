@@ -1,4 +1,4 @@
-"""Bounded session-local qBittorrent 4.5/4.6 and 5.x transport. No automatic retries."""
+"""Bounded session-local qBittorrent 4.2+ and 5.x transport. No automatic retries."""
 from http.cookies import SimpleCookie
 import json
 import re
@@ -301,6 +301,71 @@ class Client:
         if confirmed!=snapshot:
             raise ClientInvalid()
         return snapshot
+
+    def add_legacy_magnet(self,magnet,intent,permit):
+        """One bounded pre-manifest admission for the 4.2.x protocol.
+
+        A durable Sonarr magnet journal must issue the permit before this
+        call. Never invoke add again on an uncertain or recovered intent.
+        """
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent, MagnetPermit
+        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        if (not self._sid or self.protocol is None):
+            raise ClientAuthenticationFailed()
+        if (type(intent) is not MagnetIntent or type(permit) is not MagnetPermit
+                or intent.options!=self.options or intent.api_major!=self.major
+                or intent.state!='UNCERTAIN'
+                or self.metadata_strategy!='legacy_poll'
+                or _magnet_hash(magnet)!=intent.info_hash
+                or not self.options.download_root.endswith('/ad-'+intent.marker)):
+            raise ClientInvalid()
+        fields={'urls':magnet,'savepath':self.options.download_root,
+                'category':self.options.category,
+                **self.protocol.label_fields(intent.marker),
+                **self.protocol.add_fields(False)}
+        permit.take(intent)
+        # The legacy discovery window starts active; the worker MUST stop it
+        # promptly at metadata arrival or a bounded deadline. No file selection.
+        self._request('torrents/add',form=fields,limit=4096)
+        if not self.protocol.inline_tags:
+            raw,_=self._request('torrents/info',
+                                query={'hashes':intent.info_hash,'limit':2})
+            rows=_json(raw)
+            if type(rows) is not list or len(rows)!=1 or type(rows[0]) is not dict:
+                raise ClientInvalid()
+            row=rows[0]
+            if (row.get('hash')!=intent.info_hash
+                    or row.get('save_path','').rstrip('/')!=self.options.download_root
+                    or row.get('category')!=self.options.category
+                    or row.get('auto_tmm') is not False
+                    or row.get('tags') not in ('',None)):
+                raise ClientInvalid()
+            self._request('torrents/addTags',form={
+                'hashes':intent.info_hash,'tags':'ad-'+intent.marker},limit=4096)
+
+    def stop_legacy_metadata(self,intent):
+        """Stop a journal-owned magnet before any file inventory is accepted."""
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        if (type(intent) is not MagnetIntent or intent.options!=self.options
+                or intent.api_major!=self.major or self.metadata_strategy!='legacy_poll'):
+            raise ClientInvalid()
+        before=self.inspect(intent.info_hash)
+        if (before is None or before.category!=intent.options.category
+                or before.save_path.rstrip('/')!=intent.options.download_root
+                or before.auto_tmm is not False or 'ad-'+intent.marker not in before.tags
+                or any(tag.startswith('ad-') and tag!='ad-'+intent.marker
+                       for tag in before.tags)):
+            raise ClientInvalid()
+        if before.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+            self._request(self.protocol.stop_endpoint,
+                          form={'hashes':intent.info_hash},limit=4096)
+        after=self.inspect(intent.info_hash)
+        if after is None or after.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+            return None
+        if not after.files:
+            return None
+        return self.inspect_legacy_metadata(intent.info_hash,intent.marker,
+                                            intent.options.download_root)
 
     def add_stopped(self,raw,intent,permit):
         """Single journaled submission for verified .torrent bytes or a magnet."""
