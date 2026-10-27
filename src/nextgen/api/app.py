@@ -530,10 +530,16 @@ class Application:
         return COOKIE+'='+token+'; Path=/; HttpOnly; SameSite=Strict; Max-Age='+('0' if clear else str(self.sessions.ttl))+('; Secure' if secure else '')
 
     def _jobs(self,configuration,path,query):
-        if set(query)-{'after_id','before_id','limit'} or 'after_id' in query and 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
+        if set(query)-{'after_id','before_id','limit','state','show_completed','show_canceled'} or 'after_id' in query and 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
         after=page_number(query,'after_id',0,0,(1<<63)-1);limit=page_number(query,'limit',50,1,100)
-        queue=JobQueue(configuration.value('storage.database_path'))
         history=path.endswith('/history')
+        if history and set(query)&{'state','show_completed','show_canceled'}:raise ApiError(400,'API_REQUEST_INVALID')
+        state_filter=query.get('state',[])
+        if len(state_filter)>1 or state_filter and state_filter[0] not in ('PENDING','RUNNING','RETRY_WAIT','ON_HOLD','NEEDS_REVIEW','BLOCKED','DONE','CANCELED'):
+            raise ApiError(400,'API_REQUEST_INVALID')
+        show_completed=page_number(query,'show_completed',1,0,1)
+        show_canceled=page_number(query,'show_canceled',1,0,1)
+        queue=JobQueue(configuration.value('storage.database_path'))
         with queue.connection() as db:
             db.execute('BEGIN')
             if history:
@@ -553,9 +559,19 @@ class Application:
             else:
                 newest='before_id' in query
                 cursor=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1) if newest else after
-                ordering='job_id<? ORDER BY job_id DESC' if newest else 'job_id>? ORDER BY job_id'
+                criteria=['job_id<?' if newest else 'job_id>?']
+                values=[cursor]
+                if state_filter:
+                    criteria.append('state=?')
+                    values.append(state_filter[0])
+                if not show_completed:criteria.append("state<>'DONE'")
+                if not show_canceled:
+                    criteria.append("state<>'CANCELED'")
+                    criteria.append("NOT EXISTS (SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) "
+                                    "WHERE m.job_id=jobs.job_id AND o.state='CANCELED')")
+                ordering=' ORDER BY job_id DESC' if newest else ' ORDER BY job_id'
                 rows=db.execute('SELECT job_id,event_id,created_by_job_id,kind,state,activity_code,attempt_count,last_reason_code '
-                                'FROM jobs WHERE '+ordering+' LIMIT ?',(cursor,limit+1)).fetchall()
+                                'FROM jobs WHERE '+' AND '.join(criteria)+ordering+' LIMIT ?',(*values,limit+1)).fetchall()
                 items=[self._job(queue,db,r) for r in rows[:limit]]
                 if newest:return {'items':items,'next_before_id':rows[limit-1][0] if len(rows)>limit else None}
         return {'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
