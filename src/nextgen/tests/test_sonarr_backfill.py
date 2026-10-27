@@ -150,6 +150,13 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT kind FROM jobs WHERE event_id IN "
                 "(SELECT event_id FROM incoming_events WHERE source='sonarr-discovery')"),
                 [('VERIFY_RELEASE',)])
+            # The discovery page may spawn several episodes; cancellation of
+            # one acquisition must not cancel its sibling or the backfill job.
+            self.assertEqual(self.rows(
+                "SELECT count(DISTINCT m.operation_id) FROM job_operation_members m "
+                "JOIN jobs j USING(job_id) WHERE j.kind IN "
+                "('DISCOVER_SONARR_BACKFILL','VERIFY_RELEASE')"),
+                [(2,)])
         else:
             self.assertEqual(events,[])
 
