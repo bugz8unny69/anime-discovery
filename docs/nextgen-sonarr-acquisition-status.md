@@ -5,6 +5,13 @@ open in scope; the complete acquisition/failover assignment is not finished.
 
 ## Implemented in this checkpoint
 
+- The installed `python -m src.nextgen worker` entry point now accepts
+  `--sonarr-acquire`. It enables the existing backfill, source selection,
+  and acquisition registrations together. This is opt-in; service units must
+  explicitly include the flag for Sonarr downloads to run.
+- The 4.2.5 adapter now permits up to 20 one-second metadata polls during
+  each owned resume/pause window instead of the former ~2-second window.
+  This improves slow metadata discovery but is not live-daemon validation.
 - Old-API tagging after a successful add uses one bounded readback routine for
   ordinary and pre-manifest admissions. It rejects another destination, category,
   automatic-management mode, active state, or existing tags.
@@ -38,7 +45,7 @@ new persistent table or worker service.
 4. Consolidate the pre-manifest journal with the submission journal, including
    recovery of existing v45 rows. It cannot simply be dropped: those rows may
    represent live torrents or uncertain submissions.
-5. Strengthen the pre-selection metadata window. qBittorrent 4.2.5 requires a
+5. Verify the pre-selection metadata window on a live daemon. qBittorrent 4.2.5 requires a
    resume to obtain magnet metadata; a bounded client-side poll/finally-pause
    does not guarantee zero unwanted payload, particularly on process death or
    a network outage. Do not describe it as a metadata-only server operation.
