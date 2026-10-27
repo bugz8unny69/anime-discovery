@@ -6,7 +6,7 @@ import sqlite3
 import unittest
 
 from src.nextgen.acquisition.contracts import AcquisitionInput
-from src.nextgen.acquisition.metadata import TorrentFile
+from src.nextgen.acquisition.metadata import TorrentFile, ObservedInventory, AcquisitionConflict
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.storage.job_queue import Claim
@@ -28,7 +28,7 @@ class MagnetJournalTests(unittest.TestCase):
                 event_id INTEGER PRIMARY KEY,job_id INTEGER,plan_id INTEGER,
                 tvdb_episode INTEGER,info_hash TEXT UNIQUE,marker TEXT,
                 api_major INTEGER,base_url TEXT,save_path TEXT,
-                category TEXT,timeout_seconds INTEGER,state TEXT,
+                category TEXT,timeout_seconds INTEGER,inventory_json TEXT,state TEXT,
                 created_at_ms INTEGER,updated_at_ms INTEGER
             );
         """)
@@ -94,6 +94,27 @@ class MagnetJournalTests(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT state FROM sonarr_magnet_intents").fetchone(),
             ('OWNED_STOPPED',))
+
+    def test_immutable_observed_inventory_is_not_a_fabricated_metainfo_hash(self):
+        intent,_,_=self.journal.authorize(
+            self.claim,self.source,self.options,4,False)
+        files=(TorrentFile(0,'Example S01E10.mkv',123),)
+        owned=Observation(HASH,'pausedDL',intent.options.download_root,
+                          'anime',('ad-'+intent.marker,),False,files)
+        self.assertEqual(self.journal.reconcile(self.claim,intent,owned),
+                         'OWNED_STOPPED')
+        inventory=ObservedInventory.from_observation(owned)
+        self.journal.capture(self.claim,intent,self.source,inventory)
+        self.journal.capture(self.claim,intent,self.source,inventory)
+        import json
+        data=json.loads(self.db.execute(
+            'SELECT inventory_json FROM sonarr_magnet_intents').fetchone()[0])
+        self.assertEqual(data['evidence'],'qbittorrent_stopped_inventory')
+        self.assertNotIn('info_sha256',data)
+        changed=ObservedInventory(HASH,
+            (TorrentFile(0,'Example S01E10.mkv',124),),0)
+        with self.assertRaises(AcquisitionConflict):
+            self.journal.capture(self.claim,intent,self.source,changed)
 
     def test_mismatched_owned_marker_needs_review(self):
         intent,_,_=self.journal.authorize(
