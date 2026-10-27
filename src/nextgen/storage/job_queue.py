@@ -134,8 +134,13 @@ class JobQueue:
         if outcome.kind in ("complete", "skip"):
             state, code, available = "DONE", "DONE", now
         elif outcome.kind in ("retry", "defer"):
-            failures = db.execute("SELECT count(*) FROM job_history WHERE job_id=? AND event_code='RETRY_SCHEDULED'",
-                                  (claim.job_id,)).fetchone()[0]
+            # A manual retry begins a new failure-budget window. Historical
+            # attempts and RETRY_SCHEDULED records remain immutable.
+            failures = db.execute(
+                "SELECT count(*) FROM job_history WHERE job_id=? AND event_code='RETRY_SCHEDULED' "
+                "AND history_id>COALESCE((SELECT max(history_id) FROM job_history "
+                "WHERE job_id=? AND event_code='RETRY_REQUESTED'),0)",
+                (claim.job_id, claim.job_id)).fetchone()[0]
             if outcome.kind == "retry" and failures >= self.policy.max_retries:
                 state, code, available, activity = "NEEDS_REVIEW", "NEEDS_REVIEW", now, None
                 details["cause_reason_code"], reason = reason, "JOB_RETRY_EXHAUSTED"
