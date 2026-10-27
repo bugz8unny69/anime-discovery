@@ -113,7 +113,6 @@ def registration(secrets,*,service_factory=Service):
         except KeepUnavailable:return Outcome('retry','POST_KEEP_CLEANUP_UNAVAILABLE')
         except (KeepReview,StagingReview,MediaInvalid,KeepSelectionInvalid,ValueError,KeyError,TypeError):
             return Outcome('review','POST_KEEP_CLEANUP_REVIEW')
-        except FileNotFoundError:return Outcome('review','POST_KEEP_CLEANUP_REVIEW')
         except OSError:return Outcome('retry','POST_KEEP_CLEANUP_UNAVAILABLE')
         return Outcome(value={'keep_job_id':keep})
     return Registration(KIND,DEFINITION,execute,persist=_persist)
