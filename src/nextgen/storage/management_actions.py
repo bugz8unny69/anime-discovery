@@ -10,6 +10,7 @@ from src.nextgen.messages import MessageCatalog
 from src.nextgen.storage.cancellation import CancellationStore, operation, unfinished_resources, can_cancel_operation
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt, transaction
+from src.nextgen.storage.decision_cleanup_status import kept_status as cleanup_status, download_status, STOPPED_JOBS
 
 KINDS={'KEEP':'KEEP_MEDIA','CLEANUP':'CLEANUP_CANCELED_OPERATION','REJECT':'REJECT_MEDIA'}
 CATALOG=MessageCatalog()
@@ -58,7 +59,6 @@ def receipt(db,job_id,*,reused=False):
             'reused':reused,'disable_action':True,
             'disabled_reason':disabled_reason(row[0],row[2])}
     if db.execute("SELECT 1 FROM management_actions WHERE job_id=? AND action='KEEP'",(job_id,)).fetchone():
-        from src.nextgen.post_keep_cleanup import status as cleanup_status
         data['post_keep_cleanup']=cleanup_status(db,job_id)
         from src.nextgen.jobs.enrich_shoko_job import status as shoko_status
         data['optional_shoko']=shoko_status(db,job_id)
@@ -73,7 +73,6 @@ def receipt(db,job_id,*,reused=False):
         batch_complete=bool(batch_rows) and all(r[0]=='COMPLETE' for r in batch_rows)
         data['completion']=CATALOG.reason('KEEP_COMPLETE') if (
             single_complete or batch_complete) else None
-    from src.nextgen.decision_download_cleanup import status as download_status
     data['download_cleanup']=download_status(db,job_id)
     return data
 
@@ -102,7 +101,6 @@ class ManagementActions:
                         data=receipt(db,prior[0]);data['resumed']=True
                         return 202,data,tuple(records)
                 if action in ('keep','reject') and state=='DONE':
-                    from src.nextgen.decision_download_cleanup import status as download_status, STOPPED_JOBS
                     download=download_status(db,prior[0])
                     if download and download['state'] in STOPPED_JOBS:
                         now=self.queue.now()
@@ -111,7 +109,6 @@ class ManagementActions:
                         data=receipt(db,prior[0],reused=True);data['download_cleanup_resumed']=True
                         return 202,data,tuple(records)
                 if action=='keep' and state=='DONE':
-                    from src.nextgen.post_keep_cleanup import status as cleanup_status
                     cleanup=cleanup_status(db,prior[0])
                     if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
                         now=self.queue.now()
@@ -229,12 +226,10 @@ class ManagementActions:
             if name=='cleanup' and release_pending and row is not None:
                 resumable=db.execute('SELECT state FROM jobs WHERE job_id=?',(row[0],)).fetchone()[0]=='DONE' or resumable
             if name=='keep' and row is not None:
-                from src.nextgen.post_keep_cleanup import status as cleanup_status
                 cleanup=cleanup_status(db,row[0])
                 if cleanup and cleanup['state'] in ('NEEDS_REVIEW','BLOCKED'):
                     resumable=True;enabled=True
             if name in ('keep','reject') and row is not None:
-                from src.nextgen.decision_download_cleanup import status as download_status, STOPPED_JOBS
                 download=download_status(db,row[0])
                 if download and download['state'] in STOPPED_JOBS:
                     resumable=True;enabled=True
