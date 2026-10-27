@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import Mock
 
 from src.nextgen.acquisition.qbittorrent import Client, _Protocol
-from src.nextgen.acquisition.settings import DownloadOptions, DownloadCredentials
 from src.nextgen.acquisition.submission import ClientInvalid, ClientUnsupported, SendPermit
 
 HASH='a'*40
@@ -62,23 +61,22 @@ class MagnetMetadataTests(unittest.TestCase):
         intent.plan.manifest.info_hash=HASH
         intent.plan.marker='c'*32
         permit=SendPermit('f'*64)
-        client.add_magnet_stopped(MAGNET,intent,permit)
+        client.add_stopped(MAGNET,intent,permit)
         self.assertEqual(client._request.call_args.args,('torrents/add',))
         self.assertEqual(client._request.call_args.kwargs['form']['stopped'],'true')
         self.assertEqual(client._request.call_args.kwargs['form']['urls'],MAGNET)
         with self.assertRaises(ClientInvalid):
-            client.add_magnet_stopped(MAGNET,intent,permit)
+            client.add_stopped(MAGNET,intent,permit)
         client._request.assert_called_once()
 
-    def test_legacy_add_uses_metadata_stop_condition(self):
+    def test_same_submission_interface_uses_legacy_paused_parameter(self):
         client=self.client((2,8,15),major=4)
-        client._request.return_value=(b'Ok.',{})
-        client.add_magnet_metadata(MAGNET,HASH,'c'*32)
+        intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
+        intent.plan.manifest.info_hash=HASH
+        intent.plan.marker='c'*32
+        client.add_stopped(MAGNET,intent,SendPermit('f'*64))
         args,kwargs=client._request.call_args
         self.assertEqual(args,('torrents/add',))
-        self.assertEqual(kwargs['form']['stopCondition'],'MetadataReceived')
-        self.assertEqual(kwargs['form']['paused'],'false')
-        self.assertEqual(kwargs['form']['tags'],'ad-'+'c'*32)
+        self.assertEqual(kwargs['form']['paused'],'true')
         self.assertEqual(kwargs['form']['urls'],MAGNET)
-        with self.assertRaises(ClientInvalid):
-            client.add_magnet_metadata(MAGNET,'b'*40,'c'*32)
+        self.assertNotIn('stopCondition',kwargs['form'])
