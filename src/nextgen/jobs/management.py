@@ -1,6 +1,6 @@
 """Trusted shared composition for workers serving dashboard/ADM action jobs."""
 from src.nextgen.jobs.cleanup_canceled_operation_job import registration as cleanup
-from src.nextgen.jobs.bulk_manage_jobs_job import registration as bulk
+from src.nextgen.jobs.management_bulk_job import registration as bulk
 from src.nextgen.jobs.keep_media_job import registration as keep
 from src.nextgen.jobs.refresh_jellyfin_job import registration as refresh
 from src.nextgen.post_keep_cleanup import registration as cleanup_kept
