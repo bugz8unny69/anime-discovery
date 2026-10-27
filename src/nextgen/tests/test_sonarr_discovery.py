@@ -233,7 +233,10 @@ class SonarrDiscoveryTests(unittest.TestCase):
         class Configuration:
             def value(self, field):
                 return {'sonarr.base_url': 'http://sonarr.invalid',
-                        'sonarr.timeout_seconds': 13}[field]
+                        'sonarr.timeout_seconds': 13,
+                        'sonarr.discovery_max_resolution': 1080,
+                        'sonarr.discovery_min_seeders': 5,
+                        'sonarr.discovery_rank_by': 'resolution'}[field]
         class Secrets:
             def sonarr_api_key(self):
                 return 'private-sonarr-key'
