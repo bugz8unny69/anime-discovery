@@ -37,7 +37,8 @@ def _text(value,limit):
 class _Protocol:
     """Small version-specific API contract; no transport or acquisition policy."""
     def __init__(self,major,api_version):
-        if major not in (4,5) or type(api_version) is not tuple:
+        if (major not in (4,5) or type(api_version) is not tuple
+                or not (2,3,0) <= api_version < (3,0,0)):
             raise ClientUnsupported()
         self.major,self.api_version=major,api_version
 
@@ -47,24 +48,46 @@ class _Protocol:
             return 'fetch'
         if self.api_version >= (2,8,15):
             return 'guarded_bootstrap'
-        raise ClientUnsupported()
+        return 'legacy_poll'
+
+    @property
+    def inline_tags(self):
+        return self.api_version >= (2,6,2)
+
+    @property
+    def indexed_files(self):
+        return self.api_version >= (2,8,2)
 
     @property
     def stopped_parameter(self):
-        return 'stopped' if self.major==5 else 'paused'
+        return 'stopped' if self.api_version >= (2,11,0) else 'paused'
 
     @property
     def start_endpoint(self):
-        return 'torrents/start' if self.major==5 else 'torrents/resume'
+        return 'torrents/start' if self.api_version >= (2,11,0) else 'torrents/resume'
 
     @property
     def stop_endpoint(self):
-        return 'torrents/stop' if self.major==5 else 'torrents/pause'
+        return 'torrents/stop' if self.api_version >= (2,11,0) else 'torrents/pause'
 
     def add_fields(self,stopped):
-        return {self.stopped_parameter:'true' if stopped else 'false',
-                'autoTMM':'false','useDownloadPath':'false',
-                'contentLayout':'Original'}
+        fields={self.stopped_parameter:'true' if stopped else 'false',
+                'autoTMM':'false'}
+        if self.api_version >= (2,7,0):
+            fields['contentLayout']='Original'
+        if self.api_version >= (2,8,4):
+            fields['useDownloadPath']='false'
+        return fields
+
+    def label_fields(self,marker):
+        return {'tags':'ad-'+marker} if self.inline_tags else {}
+
+    def file_index(self,row,position):
+        if self.indexed_files:
+            return row.get('index')
+        # Early Web API file lists have no index field; per-file priority
+        # uses their zero-based response positions. Readback verifies order.
+        return position
 
 
 class Client:
@@ -79,7 +102,7 @@ class Client:
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
     def _request(self,path,*,query=None,form=None,body=None,content_type=None,limit=3145728):
-        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete','torrents/fetchMetadata','torrents/saveMetadata','torrents/export'):raise ValueError('unsupported client operation')
+        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete','torrents/addTags','torrents/fetchMetadata','torrents/saveMetadata','torrents/export'):raise ValueError('unsupported client operation')
         url=self.options.base_url+'/api/v2/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'User-Agent':'AnimeDiscoveryNextGen/1','Referer':self.options.base_url+'/','Accept':'application/json'}
@@ -97,7 +120,7 @@ class Client:
                     raise ClientUnavailable()
                 if code==204 and path not in ('torrents/add','torrents/filePrio',
                         'torrents/start','torrents/resume','torrents/stop',
-                        'torrents/pause','torrents/delete'):
+                        'torrents/pause','torrents/delete','torrents/addTags'):
                     raise ClientInvalid()
                 raw=response.read(limit+1)
                 if type(raw) is not bytes or len(raw)>limit:raise ClientInvalid()
@@ -137,8 +160,8 @@ class Client:
         try:
             match=re.fullmatch(r'v?(4|5)\.([0-9]+)\.[0-9]+',version.decode().strip())
             api_match=re.fullmatch(r'2\.([0-9]+)(?:\.[0-9]+)?',api.decode().strip())
-            if not match or not api_match or int(api_match[1])<8:raise ClientUnsupported()
-            if match[1]=='4' and int(match[2]) not in (5,6):raise ClientUnsupported()
+            if not match or not api_match:raise ClientUnsupported()
+            if match[1]=='4' and int(match[2])<2:raise ClientUnsupported()
             self.major=int(match[1])
             api_parts=api.decode().strip().split('.')
             self.api_version=tuple(int(part) for part in api_parts[:3])
@@ -205,9 +228,9 @@ class Client:
         if type(files) is not list or len(files)>10000:raise ClientInvalid()
         result=[]
         try:
-            for item in files:
+            for position,item in enumerate(files):
                 if type(item) is not dict:raise ClientInvalid()
-                result.append(TorrentFile(item.get('index'),item.get('name'),item.get('size')))
+                result.append(TorrentFile(self.protocol.file_index(item,position),item.get('name'),item.get('size')))
             result.sort(key=lambda f:f.index)
             if [f.index for f in result]!=list(range(len(result))):raise ClientInvalid()
         except ValueError:raise ClientInvalid() from None
@@ -223,16 +246,20 @@ class Client:
             if _magnet_hash(raw)!=intent.plan.manifest.info_hash:
                 raise ClientInvalid()
             fields={'urls':raw,'savepath':self.options.download_root,
-                    'category':self.options.category,'tags':'ad-'+intent.plan.marker,
+                    'category':self.options.category,**self.protocol.label_fields(intent.plan.marker),
                     **self.protocol.add_fields(True),'skip_checking':'false'}
             permit.take(intent)
             self._request('torrents/add',form=fields,limit=4096)
+            if not self.protocol.inline_tags:
+                self._request('torrents/addTags',form={
+                    'hashes':intent.plan.manifest.info_hash,'tags':'ad-'+intent.plan.marker},limit=4096)
             return
         manifest=parse_metainfo(raw,intent.plan.manifest.info_hash)
         if manifest!=intent.plan.manifest:raise ClientInvalid()
         boundary='ad'+uuid.uuid4().hex
         while boundary.encode() in raw:boundary='ad'+uuid.uuid4().hex
-        fields={'savepath':self.options.download_root,'category':self.options.category,'tags':'ad-'+intent.plan.marker,
+        fields={'savepath':self.options.download_root,'category':self.options.category,
+                **self.protocol.label_fields(intent.plan.marker),
                 **self.protocol.add_fields(True),'skip_checking':'false'}
         chunks=[]
         for key,value in fields.items():
@@ -242,6 +269,12 @@ class Client:
         # Consume before the single transport call. Never retry, even on HTTP error.
         permit.take(intent)
         self._request('torrents/add',body=b''.join(chunks),content_type='multipart/form-data; boundary='+boundary,limit=4096)
+        if not self.protocol.inline_tags:
+            # qBittorrent 4.2.x requires a second API call to attach the
+            # marker. Never re-add after an ambiguous first call. If tagging
+            # fails, the existing journal keeps submission UNCERTAIN.
+            self._request('torrents/addTags',form={
+                'hashes':intent.plan.manifest.info_hash,'tags':'ad-'+intent.plan.marker},limit=4096)
 
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
@@ -252,9 +285,9 @@ class Client:
         if type(files) is not list or len(files)!=len(before.files):raise ClientInvalid()
         rows=[]
         try:
-            for row in files:
+            for position,row in enumerate(files):
                 if type(row) is not dict:raise ClientInvalid()
-                item=TorrentFile(row.get('index'),row.get('name'),row.get('size'))
+                item=TorrentFile(self.protocol.file_index(row,position),row.get('name'),row.get('size'))
                 ranges=row.get('piece_range')
                 if type(ranges) is not list or len(ranges)!=2:raise ClientInvalid()
                 rows.append((item,row.get('priority'),row.get('progress'),tuple(ranges)))
