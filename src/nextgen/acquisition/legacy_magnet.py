@@ -38,22 +38,27 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             if probe.metadata_strategy!='legacy_poll':
                 return None
             if context.cancelled.is_set():return PENDING
-            # The source is provider-verified; Sonarr must still confirm the
-            # exact same ranked candidate and magnet hash before any admission.
-            search=sonarr_factory(configuration,secrets)
-            result=await blocking(search.search,identity)
-            candidate=next((release for release in result.candidates
-                            if release.info_hash==source.info_hash
-                            and search.policy.accepts(release)
-                            and _magnet_hash(release.magnet_url)==source.info_hash),
-                           None)
-            if candidate is None:return PENDING
-            before=await blocking(probe.inspect,source.info_hash)
-            if context.cancelled.is_set():return PENDING
             journal=journal_factory(configuration.value('storage.database_path'))
-            intent,permit,_=await blocking(
-                journal.authorize,context.claim,source,options,probe.major,
-                before is not None)
+            intent=await blocking(journal.existing,context.claim,source,
+                                  options,probe.major)
+            permit=None
+            candidate=None
+            if intent is None:
+                # Only a NEW submission needs a fresh Sonarr search. Recovery
+                # works even when Sonarr no longer lists the release.
+                search=sonarr_factory(configuration,secrets)
+                result=await blocking(search.search,identity)
+                candidate=next((release for release in result.candidates
+                                if release.info_hash==source.info_hash
+                                and search.policy.accepts(release)
+                                and _magnet_hash(release.magnet_url)==source.info_hash),
+                               None)
+                if candidate is None:return PENDING
+                before=await blocking(probe.inspect,source.info_hash)
+                if context.cancelled.is_set():return PENDING
+                intent,permit,_=await blocking(
+                    journal.authorize,context.claim,source,options,probe.major,
+                    before is not None)
             if intent.state in ('REVIEW','EXTERNAL'):
                 return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
             owned=client_factory(intent.options,credentials)
