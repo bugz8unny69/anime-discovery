@@ -172,7 +172,8 @@ def schedule_after_cleanup(db,operation_id):
     pending=next_candidate(db,plan_id=plan_id,episode=episode)
     if pending is None:return ()
     from src.nextgen.storage.sqlite import enqueue_job_with_receipt
-    page_start=((episode-1)//4)*4+1
+    from src.nextgen.storage.sonarr_backfill import PAGE_SIZE
+    page_start=((episode-1)//PAGE_SIZE)*PAGE_SIZE+1
     _,receipt=enqueue_job_with_receipt(
         db,kind='DISCOVER_SONARR_BACKFILL',
         payload={'plan_id':plan_id,'start':page_start,
