@@ -82,3 +82,112 @@ class CandidateStateTests(unittest.TestCase):
                 succeed_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
             with self.assertRaises(CandidateConflict):
                 activate_candidate(self.db,plan_id=1,episode=2,info_hash=SECOND)
+
+
+class FallbackWiringTests(CandidateStateTests):
+    def test_cleanup_failure_schedules_existing_discovery_job_once(self):
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_candidates import schedule_after_cleanup
+        self.db.executescript("""
+            CREATE TABLE job_history(history_id INTEGER,job_id INTEGER,
+                event_code TEXT,reason_code TEXT);
+            CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
+                created_by_job_id INTEGER,payload_json TEXT);
+            CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
+            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
+                tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
+            CREATE TABLE episode_reservations(reservation_id INTEGER,
+                state TEXT);
+            CREATE TABLE acquisition_plans(reservation_id INTEGER,
+                info_hash TEXT);
+            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
+                NULL,'{"plan_id":1}');
+            INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
+            INSERT INTO job_operation_members VALUES(11,7);
+            INSERT INTO job_history VALUES(1,11,'NEEDS_REVIEW',
+                'ACQUISITION_METADATA_INVALID');
+        """)
+        self.db.execute(
+            "INSERT INTO incoming_events VALUES(25,'sonarr-discovery',?)",
+            ('{"torrent_infohash":"'+FIRST+'"}',))
+        self.db.execute("INSERT INTO sonarr_episode_selections VALUES(1,2,901,?)",
+                        (FIRST,))
+        self.db.commit()
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            activate_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
+        with patch('src.nextgen.storage.sqlite.enqueue_job_with_receipt',
+                   return_value=(99,'receipt')) as enqueue:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.assertEqual(schedule_after_cleanup(self.db,7),('receipt',))
+            enqueue.assert_called_once()
+            self.assertEqual(enqueue.call_args.kwargs['kind'],
+                             'DISCOVER_SONARR_BACKFILL')
+            self.assertEqual(enqueue.call_args.kwargs['payload'],
+                {'plan_id':1,'start':1,'fallback_episode':2})
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM sonarr_episode_candidates ORDER BY rank").fetchall(),
+            [('FAILED',),('READY',)])
+
+    def test_fallback_reselects_next_rank_and_uses_existing_dispatch(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_backfill import (
+            BackfillBatch,FallbackTarget,FallbackCompletion,persist_fallback,
+            BackfillConflict)
+        from src.nextgen.acquisition.sonarr_search import (
+            CandidateSelection,Release,SearchResult,DiscoveryPolicy)
+        from src.nextgen.sonarr_episode import VerifiedEpisode
+        self.db.executescript("""
+            CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
+                tvdb_episode INTEGER,tvdb_episode_id INTEGER,
+                info_hash TEXT,selected_at_ms INTEGER);
+            CREATE TABLE episode_reservations(state TEXT,
+                tvdb_series_id INTEGER,tvdb_season INTEGER,tvdb_episode INTEGER);
+            CREATE TABLE batch_episode_reservations(state TEXT,
+                tvdb_series_id INTEGER,tvdb_season INTEGER,tvdb_episode INTEGER);
+        """)
+        self.db.execute(
+            "INSERT INTO sonarr_episode_selections VALUES(1,2,901,?,1)",
+            (FIRST,))
+        self.db.commit()
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            activate_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
+            fail_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST,
+                           reason_code='ACQUISITION_METADATA_INVALID')
+        plan=BackfillBatch(1,123,456,1,4,1,(1,2,3,4),(),())
+        identity=VerifiedEpisode(456,901,1,2)
+        release=Release('Example S01E02','Nyaa','torrent','1080p',
+                        1080,0,9,0,123456789,False,(),(55,), 'exact',
+                        SECOND,'magnet:?xt=urn:btih:'+SECOND,True)
+        results=SearchResult(90,55,(release,))
+        choice=CandidateSelection(identity,results,release,DiscoveryPolicy())
+        value=FallbackCompletion(plan,2,FallbackTarget(identity,FIRST,SECOND),
+                                 choice)
+        claim=SimpleNamespace(kind='DISCOVER_SONARR_BACKFILL',event_id=9,
+                              job_id=30,attempt=1)
+        with patch('src.nextgen.storage.sonarr_backfill._plan',
+                   return_value=plan), patch(
+                   'src.nextgen.storage.sonarr_dispatch.dispatch',
+                   return_value=()) as dispatch, patch(
+                   'src.nextgen.storage.sonarr_backfill.append_job_history',
+                   return_value=None):
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                persist_fallback(self.db,claim,value)
+            dispatch.assert_called_once()
+            self.assertEqual(self.db.execute(
+                "SELECT info_hash FROM sonarr_episode_selections").fetchone(),
+                (SECOND,))
+            self.assertEqual(self.db.execute(
+                "SELECT state FROM sonarr_episode_candidates ORDER BY rank").fetchall(),
+                [('FAILED',),('ACTIVE',)])
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                with self.assertRaises(BackfillConflict):
+                    persist_fallback(self.db,claim,value)
