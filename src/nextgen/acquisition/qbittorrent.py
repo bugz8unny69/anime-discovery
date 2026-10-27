@@ -34,6 +34,39 @@ def _text(value,limit):
     return value
 
 
+class _Protocol:
+    """Small version-specific API contract; no transport or acquisition policy."""
+    def __init__(self,major,api_version):
+        if major not in (4,5) or type(api_version) is not tuple:
+            raise ClientUnsupported()
+        self.major,self.api_version=major,api_version
+
+    @property
+    def metadata_strategy(self):
+        if self.api_version >= (2,11,9):
+            return 'fetch'
+        if self.api_version >= (2,8,15):
+            return 'stopped_magnet'
+        raise ClientUnsupported()
+
+    @property
+    def stopped_parameter(self):
+        return 'stopped' if self.major==5 else 'paused'
+
+    @property
+    def start_endpoint(self):
+        return 'torrents/start' if self.major==5 else 'torrents/resume'
+
+    @property
+    def stop_endpoint(self):
+        return 'torrents/stop' if self.major==5 else 'torrents/pause'
+
+    def add_fields(self,stopped):
+        return {self.stopped_parameter:'true' if stopped else 'false',
+                'autoTMM':'false','useDownloadPath':'false',
+                'contentLayout':'Original'}
+
+
 class Client:
     def __init__(self,options,credentials,*,transport=None):
         if type(options) is not DownloadOptions or type(credentials) is not DownloadCredentials:raise ValueError('validated client context required')
@@ -41,6 +74,7 @@ class Client:
         self._sid=None
         self.major=None
         self.api_version=None
+        self.protocol=None
         opener=urllib.request.build_opener(_NoRedirect(),urllib.request.ProxyHandler({}))
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
@@ -73,6 +107,7 @@ class Client:
         self._sid=None
         self.major=None
         self.api_version=None
+        self.protocol=None
         raw,headers=self._request('auth/login',form={'username':self._credentials.username,'password':self._credentials.password},limit=4096)
         if raw.strip()!=b'Ok.':raise ClientAuthenticationFailed()
         cookies=headers.get_all('Set-Cookie',[])
@@ -96,18 +131,14 @@ class Client:
             api_parts=api.decode().strip().split('.')
             self.api_version=tuple(int(part) for part in api_parts[:3])
             self.api_version+=(0,)*(3-len(self.api_version))
+            self.protocol=_Protocol(self.major,self.api_version)
         except UnicodeError:raise ClientUnsupported() from None
 
     @property
     def metadata_strategy(self):
-        """Select one safe metadata strategy from the advertised Web API."""
-        if not self._sid or self.api_version is None:
+        if not self._sid or self.protocol is None:
             raise ClientAuthenticationFailed()
-        if self.api_version >= (2,11,9):
-            return 'fetch'
-        if self.api_version >= (2,8,15):
-            return 'stopped_magnet'
-        raise ClientUnsupported()
+        return self.protocol.metadata_strategy
 
     def fetch_metadata(self,magnet,expected_hash):
         """5.2+ metadata-only fetch; call again on a later worker attempt if pending."""
@@ -148,9 +179,7 @@ class Client:
             'urls':magnet,'savepath':self.options.download_root,
             'category':self.options.category,'tags':'ad-'+marker,
             'stopCondition':'MetadataReceived',
-            'stopped' if self.major==5 else 'paused':'false',
-            'autoTMM':'false','useDownloadPath':'false',
-            'contentLayout':'Original'},limit=4096)
+            **self.protocol.add_fields(False)},limit=4096)
 
     def inspect(self,expected_hash):
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
@@ -189,8 +218,7 @@ class Client:
         boundary='ad'+uuid.uuid4().hex
         while boundary.encode() in raw:boundary='ad'+uuid.uuid4().hex
         fields={'savepath':self.options.download_root,'category':self.options.category,'tags':'ad-'+intent.plan.marker,
-                'stopped' if self.major==5 else 'paused':'true','autoTMM':'false','useDownloadPath':'false',
-                'skip_checking':'false','contentLayout':'Original'}
+                **self.protocol.add_fields(True),'skip_checking':'false'}
         chunks=[]
         for key,value in fields.items():
             chunks.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+key+'"\r\n\r\n'+value+'\r\n').encode())
