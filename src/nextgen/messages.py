@@ -38,6 +38,7 @@ _EVENTS = (
                     True, "JOB_LEASE_EXPIRED"),
     EventDefinition("DEFERRED", "job", "Work is waiting for a later check.", True),
     EventDefinition("RETRY_SCHEDULED", "job", "Another processing attempt has been scheduled.", True),
+    EventDefinition("RETRY_REQUESTED", "job", "An administrator requested another attempt at this step."),
     EventDefinition("NEEDS_REVIEW", "job", "Processing has stopped for review.", True),
     EventDefinition("TORRENT_SELECTION_RECORDED", "job", "Video file selection recorded.", True),
     EventDefinition("TORRENT_SELECTION_CONFIRMED", "job", "Video file selection confirmed.", True),
