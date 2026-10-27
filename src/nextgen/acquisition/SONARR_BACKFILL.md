@@ -16,8 +16,8 @@ observation, a trusted caller supplies `sonarr_backfill=True` to
 `build_identity_worker(...)`. The existing Sonarr URL, API key and timeout
 are used. The feature introduces no Prowlarr account or quality scoring.
 
-**This branch is not deployed, the v42 migration has not been applied, and
-CI/offline tests have not been run.**
+**This branch is not deployed and the v42 migration has not been applied.
+Automated offline validation is tracked by draft PR #159.**
 
 ## Frozen window
 
@@ -87,7 +87,7 @@ running a normal worker does not automatically create these requests.
 Offline tests in `tests/test_sonarr_backfill.py` and
 `tests/test_sonarr_discovery.py` cover paginated work, deduplication,
 explicit opt-in, retry, version upgrade, and safe positional queries.
-They are authored but **not executed**.
+Their results must be checked in PR #159 before merge.
 
 Before activating: run these tests, validate migration and code against the
 running Sonarr v4 configuration, check recognized season mapping and indexer
