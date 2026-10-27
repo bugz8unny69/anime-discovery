@@ -23,8 +23,8 @@ class MagnetMetadataTests(unittest.TestCase):
 
     def test_version_selection_uses_web_api_not_app_major(self):
         self.assertEqual(self.client((2,11,9)).metadata_strategy,'fetch')
-        self.assertEqual(self.client((2,8,15),4).metadata_strategy,'stopped_magnet')
-        self.assertEqual(self.client((2,10,0),5).metadata_strategy,'stopped_magnet')
+        self.assertEqual(self.client((2,8,15),4).metadata_strategy,'guarded_bootstrap')
+        self.assertEqual(self.client((2,10,0),5).metadata_strategy,'guarded_bootstrap')
         with self.assertRaises(ClientUnsupported):
             self.client((2,8,14),4).metadata_strategy
 
