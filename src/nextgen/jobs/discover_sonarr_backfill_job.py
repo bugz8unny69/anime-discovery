@@ -10,7 +10,8 @@ from src.nextgen.job_contracts import (
 )
 from src.nextgen.storage.sonarr_backfill import (
     PAGE_SIZE, BackfillConflict, BackfillCompletion,
-    load_batch, persist_observations,
+    load_batch, persist_observations, FallbackCompletion, load_fallback,
+    persist_fallback,
 )
 from src.nextgen.worker import blocking
 
@@ -26,17 +27,39 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
     async def execute(context):
         payload = context.data()
         try:
-            if set(payload) != {'plan_id','start'} or context.claim.event_id is None:
+            if (set(payload) not in ({'plan_id','start'},
+                                    {'plan_id','start','fallback_episode'})
+                    or context.claim.event_id is None):
                 raise ValueError()
             plan_id = integer(payload['plan_id'], positive=True)
             start = integer(payload['start'], positive=True)
             if (start-1) % PAGE_SIZE: raise ValueError()
+            fallback_episode = (integer(payload['fallback_episode'],positive=True)
+                                if 'fallback_episode' in payload else None)
         except (ValueError, TypeError):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
         try:
             plan = await blocking(load_batch,
                 context.configuration.value('storage.database_path'),plan_id,start)
             client = client_factory(context.configuration,secrets)
+            if fallback_episode is not None:
+                if not acquire_candidates or fallback_episode not in plan.numbers:
+                    raise BackfillConflict()
+                target=await blocking(load_fallback,
+                    context.configuration.value('storage.database_path'),
+                    plan_id,fallback_episode)
+                result=await blocking(client.search,target.identity)
+                from src.nextgen.acquisition.sonarr_search import CandidateSelection, _magnet_hash
+                release=next((row for row in result.candidates
+                    if row.info_hash==target.next_hash
+                    and client.policy.accepts(row)
+                    and row.mapped_episode_ids==(result.episode_id,)
+                    and _magnet_hash(row.magnet_url)==target.next_hash),None)
+                if release is None:
+                    return Outcome('defer','SONARR_DISCOVERY_NO_RESULTS',delay_ms=60000)
+                return Outcome(value=FallbackCompletion(
+                    plan,fallback_episode,target,
+                    CandidateSelection(target.identity,result,release,client.policy)))
             observed = await blocking(
                 client.backfill,plan.tvdb_series_id,plan.season,plan.numbers,
                 reserved=plan.reserved,verified_ids=dict(plan.verified),
@@ -60,11 +83,15 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
             return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
 
     def persist(db,claim,value):
-        try: return persist_observations(db,claim,value,dispatch=acquire_candidates)
+        try:
+            if type(value) is FallbackCompletion:
+                return persist_fallback(db,claim,value)
+            return persist_observations(db,claim,value,dispatch=acquire_candidates)
         except BackfillConflict:
             raise CompletionRejected(Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')) from None
 
     def route(value):
+        if type(value) is FallbackCompletion: return ()
         if type(value) is not BackfillCompletion: raise ValueError('typed backfill result required')
         next_start=value.plan.start+len(value.plan.numbers)
         if next_start>value.plan.backfill_count: return ()
