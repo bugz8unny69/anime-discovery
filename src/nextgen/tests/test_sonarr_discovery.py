@@ -223,6 +223,27 @@ class SonarrDiscoveryTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ConfigurationError):
                 ConfigurationSnapshot(1, {'sonarr': {field: invalid}})
 
+
+    def test_saved_release_json_summary_is_read_only_and_masks_source_urls(self):
+        from src.nextgen.acquisition.validate_sonarr_json import summarize
+        magnet = 'magnet:?xt=urn:btih:' + HASH
+        rows = [
+            release(title='Profile rejected but candidate valid', guid=magnet,
+                    magnetUrl='', approved=False, rejected=True,
+                    rejections=['Quality profile restriction'], seeders=20),
+            release(title='No peers', guid=magnet, magnetUrl='', seeders=0),
+            release(title='Wrong episode', guid=magnet, magnetUrl='',
+                    mappedEpisodeInfo=[{'id': 99, 'seasonNumber': 1, 'episodeNumber': 9}]),
+        ]
+        summary = summarize(rows, ID, sonarr_series=11, sonarr_episode=22,
+                            policy=DiscoveryPolicy())
+        self.assertEqual(summary['total'], 3)
+        self.assertEqual(summary['magnet_sources'], 3)
+        self.assertEqual(summary['local_eligible'], 1)
+        self.assertEqual(summary['scope']['mismatched'], 1)
+        self.assertFalse(summary['top_eligible'][0]['sonarr_approved'])
+        self.assertNotIn('magnet:', repr(summary))
+
     def test_does_not_leak_secret_or_magnet_via_repr(self):
         c, _ = client()
         row = c.search(ID).candidates[0]
