@@ -172,7 +172,7 @@ NextGen's locally eligible count and Sonarr's approved count are independent.
 For example, `approved=0, exact=16, candidates=308` is valid.
 
 A small `sonarr_episode_selections` table records exactly one normalized
-torrent info hash for a recognized episode within a frozen Intake plan.
+torrent info hash for a provisional catalog episode within a frozen Intake plan.
 `storage.sonarr_selection.select` requires the call to run inside an
 already admitted SQLite write transaction. It uses existing
 `recognized_episodes`, `trial_plans`, and both active reservation
@@ -195,7 +195,7 @@ provides an additive upgrade and fixes the observational constraint.
 ## Opt-in worker source selection (no torrent submission)
 
 The regular Sonarr backfill worker can now optionally choose the first locally
-eligible torrent for a **recognized** episode in the same search that records
+eligible torrent for a selected episode in the same search that records
 the discovery counts. Set both `sonarr_backfill=True` and
 `sonarr_select=True` when composing `build_identity_worker` or
 `run_identity_worker`; default behavior is unchanged.
@@ -204,9 +204,9 @@ Selection is performed during the worker's existing fenced completion
 transaction, not in another asynchronous job or additional indexer query.
 The worker carries one temporary `CandidateSelection` (episode identity,
 Sonarr search result and local policy) and persists only the normalized info
-hash through the existing v43 selection helper. The candidate must have a
-matching independent `recognized_episodes` row, remain in the frozen selection
-window, and have no active single/batch episode reservation. On conflicting
+hash through the existing v43 selection helper. The candidate must have a consistent Sonarr catalog mapping, remain in the frozen
+selection window, and have no active single/batch episode reservation; it is
+then independently re-verified before reservation. On conflicting
 selection or changed identity, the operation requires review; no qBittorrent
 operation is performed.
 
@@ -253,6 +253,23 @@ Default worker behavior remains discovery-only; merely installing or
 migrating this branch never switches on acquisition. Test in a disposable
 environment first; do not enable this option on a production worker before
 final CI and an explicit database migration.
+
+## Catalog-only episode verification
+
+A missing backfill episode usually has no row in `recognized_episodes`.
+Sonarr's episode ID and exact release mapping therefore begin as **provisional
+discovery hints**, not independently verified episode identity. The worker may
+select and dispatch such a candidate, but the normal `VERIFY_RELEASE` handler
+must resolve its AniDB-to-TVDB episode placement using the existing provider
+verification and offset mapping. A guard in `persist_release` requires the
+provider-verified TVDB series, season, episode number **and episode ID** to
+match the Sonarr selection. Any discrepancy is reviewable; it cannot enter
+Intake reservation or acquisition.
+
+Recognized episodes still use their cached provider-verified placement, but
+conflicts between this placement and Sonarr's reported episode ID stop selection.
+All normal original-event, metadata, torrent ownership, and cancellation
+checks remain in force after verification.
 
 ## Remaining work
 
