@@ -174,6 +174,26 @@ class MagnetMetadataTests(unittest.TestCase):
             client.add_legacy_magnet(MAGNET,intent,permit)
         self.assertEqual(client._request.call_count,3)
 
+    def test_42_delayed_hash_readback_does_not_repeat_submission(self):
+        import json
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
+        client=self.client((2,5,1),4)
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        row={'hash':HASH,'save_path':options.download_root,
+             'category':'anime','auto_tmm':False,'tags':'','state':'pausedDL'}
+        client._request.side_effect=[
+            (b'Ok.',{}),(b'[]',{}),(json.dumps([row]).encode(),{}),(b'',{})]
+        with patch('time.sleep') as sleep:
+            client.add_legacy_magnet(MAGNET,intent,MagnetPermit('f'*64))
+        self.assertEqual(
+            [c.args[0] for c in client._request.call_args_list],
+            ['torrents/add','torrents/info','torrents/info','torrents/addTags'])
+        sleep.assert_called_once()
+
     def test_42_foreign_path_cannot_be_tagged_after_magnet_add(self):
         import json
         from src.nextgen.acquisition.settings import DownloadOptions
