@@ -32,10 +32,19 @@
             <option value="RETRY_WAIT">Waiting</option><option value="ON_HOLD">On hold</option>
             <option value="NEEDS_REVIEW">Needs review</option><option value="BLOCKED">Blocked</option>
             <option value="DONE">Completed jobs</option><option value="CANCELED">Canceled</option>
-          </select></label><button id="refresh" class="secondary">Refresh</button>
+          </select></label>
+          <label id="completed-toggle-label"><input type="checkbox" id="show-completed"> Show completed</label>
+          <label id="canceled-toggle-label"><input type="checkbox" id="show-canceled"> Show canceled</label>
+          <button id="refresh" class="secondary">Refresh</button>
         </div></div>
         <p id="page-note" class="muted"></p>
-        <table class="jobs-table"><thead><tr><th>Received</th><th>Release / Anime</th><th>Job</th><th>Status</th><th>Activity details</th><th>Actions</th></tr></thead><tbody id="job-rows"></tbody></table>
+        <div id="bulk-actions" class="inline" hidden>
+          <span id="selection-count" role="status">0 of 5 selected</span>
+          <label>Action <select id="bulk-action"><option value="retry">Retry</option><option value="cancel">Cancel</option><option value="cleanup">Cleanup</option></select></label>
+          <button id="bulk-submit" type="button" disabled>Apply to selected</button>
+          <button id="bulk-clear" type="button" class="secondary">Clear</button>
+        </div>
+        <table class="jobs-table"><thead><tr><th id="bulk-heading" hidden><input type="checkbox" id="select-page" aria-label="Select up to five jobs on this page" title="Select up to five jobs on this page"></th><th>Received</th><th>Release / Anime</th><th>Job</th><th>Status</th><th>Activity details</th><th>Actions</th></tr></thead><tbody id="job-rows"></tbody></table>
         <div id="no-jobs" class="empty" hidden>No items on this page.</div>
         <div class="page-controls"><button id="previous-page" class="secondary">Previous</button><button id="next-page" class="secondary">Next</button></div>
       </section>
