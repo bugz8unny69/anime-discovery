@@ -250,11 +250,16 @@ class Client:
             raise ClientInvalid()
         row=rows[0]
         if (row.get('hash')!=digest
-                or row.get('save_path','').rstrip('/')!=self.options.download_root
+                or type(row.get('save_path')) is not str
+                or row['save_path'].rstrip('/')!=self.options.download_root
                 or row.get('category')!=self.options.category
                 or row.get('auto_tmm') is not False
                 or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
                 or not self.options.download_root.endswith('/ad-'+intent.plan.marker)):
+            raise ClientInvalid()
+        tags=row.get('tags') or ''
+        if type(tags) is not str or any(
+                tag.strip().startswith('ad-') for tag in tags.split(',') if tag.strip()):
             raise ClientInvalid()
         self._request('torrents/addTags',form={
             'hashes':digest,'tags':'ad-'+intent.plan.marker},limit=4096)
