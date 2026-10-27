@@ -144,10 +144,14 @@ class SonarrDiscoveryTests(unittest.TestCase):
             release(title='Unmapped', mappedEpisodeInfo=[]),
             release(title='Other series', mappedSeriesId=12),
             release(title='Full season', fullSeason=True),
+            release(title='Wrong TVDB placement', mappedEpisodeInfo=[
+                {'id': 22, 'seasonNumber': 2, 'episodeNumber': 10}]),
+            release(title='Conflicting mapped number', mappedEpisodeNumbers=[12]),
         ]))
         rows = c.search(ID).candidates
         self.assertEqual([r.scope for r in rows],
-                         ['pack', 'mismatched', 'unmapped', 'mismatched', 'pack'])
+                         ['pack', 'mismatched', 'unmapped', 'mismatched', 'pack',
+                          'mismatched', 'mismatched'])
         self.assertFalse(any(r.eligible_for_handoff for r in rows))
 
     def test_no_magnet_no_hash_and_conflicting_hash_never_authorize_handoff(self):
