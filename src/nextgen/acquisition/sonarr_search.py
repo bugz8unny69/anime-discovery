@@ -190,14 +190,30 @@ def _release(row, series_id, episode_id, identity):
         scope = 'exact'
     raw_hash = row.get('infoHash')
     info_hash = raw_hash.lower() if type(raw_hash) is str and re.fullmatch('[a-fA-F0-9]{40}', raw_hash) else None
+    # A Sonarr/Prowlarr torrent GUID can itself be the usable magnet.
+    # Never treat an HTTP GUID as an acquisition URL or follow it here.
     raw_magnet = row.get('magnetUrl')
-    magnet = raw_magnet if type(raw_magnet) is str and _magnet_hash(raw_magnet) else None
-    magnet_hash = _magnet_hash(magnet)
-    if info_hash and magnet_hash and info_hash != magnet_hash:
-        magnet = None
-    if info_hash is None: info_hash = magnet_hash
-    handoff = (scope == 'exact' and approved and not rejected and not reasons
-               and protocol == 'torrent' and bool(info_hash) and bool(magnet))
+    guid = row.get('guid')
+    sources = (raw_magnet, guid)
+    magnet = None
+    for source in sources:
+        source_hash = _magnet_hash(source)
+        if source_hash is None:
+            continue
+        if info_hash is not None and source_hash != info_hash:
+            # Conflicting identities cannot be silently reconciled.
+            magnet = None
+            break
+        if magnet is not None and _magnet_hash(magnet) != source_hash:
+            magnet = None
+            break
+        magnet = source
+    if info_hash is None:
+        info_hash = _magnet_hash(magnet)
+    # This is discovery usability, not authorization to submit a torrent.
+    # Sonarr's custom formats, profile and file-cutoff decisions are diagnostics.
+    handoff = (scope == 'exact' and protocol == 'torrent'
+               and bool(info_hash) and bool(magnet))
     return Release(title, indexer, protocol, name, resolution, score,
                    _optional_count(row.get('seeders')), _optional_count(row.get('leechers')),
                    _nonnegative(row.get('size')), approved, reasons, ids, scope,
