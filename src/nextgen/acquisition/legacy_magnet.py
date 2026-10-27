@@ -5,7 +5,10 @@ Until the typed observed-inventory path is integrated, preparation defers.
 """
 from src.nextgen.async_io import blocking
 from src.nextgen.acquisition.qbittorrent import Client as QBClient
-from src.nextgen.acquisition.settings import download_options, DownloadConfigurationError
+from src.nextgen.acquisition.settings import (download_options, size_limits, DownloadConfigurationError,
+    SizeLimitExceeded, SizeEvidenceMissing)
+from src.nextgen.acquisition.metadata import (ObservedInventory, MetadataInvalid,
+    AcquisitionConflict)
 from src.nextgen.acquisition.submission import (
     ClientInvalid, ClientUnavailable, ClientAuthenticationFailed, ClientUnsupported,
 )
@@ -76,18 +79,24 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 if state=='REVIEW':
                     return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
                 return PENDING
-            if current.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+            if (current.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
+                    or intent.state=='OWNED_STOPPED'):
                 snapshot=await blocking(owned.stop_legacy_metadata,intent)
             else:
                 snapshot=await blocking(owned.poll_legacy_metadata,
                                         intent,context.cancelled)
-            final=snapshot if snapshot is not None else await blocking(
-                owned.inspect,source.info_hash)
-            state=await blocking(journal.reconcile,context.claim,intent,final)
+            # Only the double-checked stopped snapshot can transition to
+            # OWNED_STOPPED. A single opportunistic files read cannot.
+            state=await blocking(journal.reconcile,context.claim,intent,snapshot)
             if state in ('REVIEW','EXTERNAL'):
                 return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
-            # A stable, stopped qB file inventory is not a hash-verified
-            # .torrent. Never manufacture info_sha256 or enqueue submission.
+            if state=='OWNED_STOPPED' and snapshot is not None:
+                inventory=ObservedInventory.from_observation(snapshot)
+                size_limits(configuration).admit(
+                    inventory.files[inventory.selected_index].size)
+                await blocking(journal.capture,context.claim,intent,source,inventory)
+            # The typed qB observation is now durable, but is NOT hash-
+            # verified metainfo. Do not fabricate info_sha256 or enqueue send.
             return PENDING
         except SearchUnavailable:
             return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
@@ -95,6 +104,9 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             return Outcome('review','SONARR_DISCOVERY_REVIEW')
         except ClientUnavailable:
             return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
+        except (MetadataInvalid,AcquisitionConflict,SizeLimitExceeded,
+                SizeEvidenceMissing) as exc:
+            return Outcome('review',exc.reason_code)
         except (SelectionConflict,ClientInvalid,ClientAuthenticationFailed,
                 ClientUnsupported,DownloadConfigurationError):
             return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
