@@ -30,9 +30,8 @@ def _persist(db,claim,value):
         from src.nextgen.decision_download_cleanup import enqueue
         enqueue(db,claim,claim.job_id)
     else:
-        # A batch has its own owned-torrent journal; never authorize the
-        # single-file deletion helper against a multi-video source.
-        pass
+        from src.nextgen.batch.decision_cleanup import enqueue as enqueue_batch_cleanup
+        enqueue_batch_cleanup(db,claim,action='REJECT')
 
 
 def registration():
