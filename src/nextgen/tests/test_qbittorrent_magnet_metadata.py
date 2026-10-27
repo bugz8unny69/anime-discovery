@@ -93,6 +93,21 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual([r.args[0] for r in client._request.call_args_list],
                          ['torrents/add','torrents/info'])
 
+    def test_42_file_lists_without_index_use_stable_response_order(self):
+        import json
+        client=self.client((2,5,1),4)
+        client._request.side_effect=[
+            (json.dumps([{'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
+                          'save_path':'/media/downloads','category':'anime',
+                          'state':'pausedDL'}]).encode(),{}),
+            (json.dumps([{'name':'anime.mkv','size':100},
+                         {'name':'anime.srt','size':10}]).encode(),{}),
+        ]
+        observed=client.inspect(HASH)
+        self.assertEqual([file.index for file in observed.files],[0,1])
+        self.assertEqual([file.path for file in observed.files],
+                         ['anime.mkv','anime.srt'])
+
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{}',{})
