@@ -84,7 +84,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_episode_selections"),
                          [(0,)])
 
-    async def _run_recognized_candidate(self, acquire=False):
+    async def _run_recognized_candidate(self, acquire=False, recognized=True):
         from src.nextgen.acquisition.sonarr_search import CandidateSelection, Release, SearchResult, DiscoveryPolicy
         from src.nextgen.sonarr_episode import VerifiedEpisode
 
@@ -93,11 +93,12 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         db = connect(self.database)
         try:
             with db:
-                db.execute(
+                if recognized:
+                    db.execute(
                     "INSERT INTO recognized_seasons VALUES(456,1,123,'Test',?,1)",
                     (db.execute("SELECT verification_id FROM release_verifications "
                                 "WHERE job_id=?", (release_job,)).fetchone()[0],))
-                db.execute(
+                    db.execute(
                     "INSERT INTO recognized_episodes VALUES(456,1,123,1,11001,1,111001,?,1)",
                     (db.execute("SELECT verification_id FROM release_verifications "
                                 "WHERE job_id=?", (release_job,)).fetchone()[0],))
@@ -109,7 +110,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                 assert select_candidates is True
                 result = list(super().backfill(tvdb_series_id,season,numbers,
                                               reserved=reserved,verified_ids=verified_ids))
-                assert verified_ids.get(1) == 111001
+                assert verified_ids.get(1) == (111001 if recognized else None)
                 release = Release('Test S01E01', 'Nyaa', 'torrent', '1080p',
                                   1080, 0, 9, 0, 123456789, False,
                                   ('Sonarr quality rejected',), (901,), 'exact',
@@ -154,6 +155,9 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_opted_in_candidate_routes_to_existing_verification(self):
         await self._run_recognized_candidate(True)
+
+    async def test_unrecognized_backfill_candidate_still_routes_to_provider_verification(self):
+        await self._run_recognized_candidate(True, recognized=False)
 
     async def test_opt_in_off_means_no_new_discovery_jobs(self):
         self.source(10)
