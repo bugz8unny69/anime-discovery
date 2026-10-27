@@ -700,6 +700,7 @@ CREATE TABLE IF NOT EXISTS sonarr_magnet_intents (
  base_url TEXT NOT NULL,
  save_path TEXT NOT NULL,
  category TEXT NOT NULL,
+ timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
  state TEXT NOT NULL DEFAULT 'UNCERTAIN' CHECK(state IN ('UNCERTAIN','OWNED_STOPPED','REVIEW','EXTERNAL')),
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=0),
