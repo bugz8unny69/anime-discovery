@@ -335,8 +335,8 @@ class Client:
         if not self.protocol.inline_tags:
             self._tag_legacy_submission(intent.info_hash,intent.marker)
 
-    def poll_legacy_metadata(self,intent,cancelled,*,attempts=8,
-                             interval=0.25,sleep=None):
+    def poll_legacy_metadata(self,intent,cancelled,*,attempts=20,
+                             interval=1,sleep=None):
         """Bounded, exact-owned 4.2.x metadata window with unconditional stop.
 
         Never resumes when the file list already exists. A restart may run a
