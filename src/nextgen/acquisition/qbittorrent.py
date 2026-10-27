@@ -92,7 +92,12 @@ class Client:
         try:
             with self._transport(request,self.options.timeout_seconds) as response:
                 if response.getcode() in (401,403):raise ClientAuthenticationFailed()
-                if response.getcode()!=200:raise ClientUnavailable()
+                code=response.getcode()
+                if code not in (200,204):raise ClientUnavailable()
+                if code==204 and path not in ('torrents/add','torrents/filePrio',
+                        'torrents/start','torrents/resume','torrents/stop',
+                        'torrents/pause','torrents/delete'):
+                    raise ClientInvalid()
                 raw=response.read(limit+1)
                 if type(raw) is not bytes or len(raw)>limit:raise ClientInvalid()
                 return raw,response.headers
