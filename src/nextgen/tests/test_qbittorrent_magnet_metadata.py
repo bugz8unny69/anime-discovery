@@ -47,6 +47,13 @@ class MagnetMetadataTests(unittest.TestCase):
             client.fetch_metadata('magnet:?xt=urn:btih:'+'b'*40,HASH)
         client._request.assert_not_called()
 
+    def test_hash_only_response_is_pending_not_ready(self):
+        client=self.client((2,11,9))
+        client._request.return_value=(b'{"infohash_v1":"'+HASH.encode()+b'"}',{})
+        self.assertIsNone(client.fetch_metadata(HASH,HASH))
+        client._request.assert_called_once_with(
+            'torrents/fetchMetadata',form={'source':HASH},limit=4194304)
+
     def test_metadata_hash_mismatch_does_not_export_or_authorize(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{"infohash_v1":"'+b'b'*40+b'"}',{})
