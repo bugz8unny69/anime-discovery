@@ -5,15 +5,11 @@ and provider episode facts are revalidated only to identify what can be safely
 stopped and removed. No unstored path ever grants file deletion authority.
 """
 import json
-from types import SimpleNamespace
-from src.nextgen.acquisition.metadata import (
-    BatchInventory,TorrentFile,AcquisitionConflict,
-)
 from src.nextgen.acquisition.owned_cleanup import OwnedCleanup
 from src.nextgen.acquisition.cleanup import FileCleanup
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.storage.batch_acquisition_candidate import BatchAcquisitionCandidate
-from src.nextgen.storage.batch_submission_journal import _intent
+from src.nextgen.storage.batch_submission_journal import _intent, stored_inventory
 from src.nextgen.history import job_attempt,append_job_history
 
 
@@ -21,9 +17,8 @@ def load_cancelled_batch(db,operation_id,plan_id):
     """Only use inside exclusive cancellation gate and worker DB transaction."""
     source=db.execute(
         "SELECT s.reservation_job_id,s.info_hash,s.info_sha256,s.state,"
-        "i.inventory_json,s.plan_id "
+        "s.plan_id "
         "FROM batch_torrent_submissions s "
-        "JOIN batch_submission_inventories i USING(plan_id) "
         "JOIN batch_episode_reservations r ON r.plan_id=s.plan_id "
         "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
         "JOIN job_operations o ON o.operation_id=m.operation_id "
@@ -33,22 +28,10 @@ def load_cancelled_batch(db,operation_id,plan_id):
         (plan_id,operation_id)).fetchone()
     if source is None or source[3]!='OWNED_STOPPED':
         raise CancellationError()
-    reservation,digest,sha,_,raw,plan=source
-    try:
-        def unique(pairs):
-            value={}
-            for k,v in pairs:
-                if k in value:raise CancellationError()
-                value[k]=v
-            return value
-        data=json.loads(raw,object_pairs_hook=unique)
-        if type(data) is not dict or set(data)!={'files'} or type(data['files']) is not list:
-            raise CancellationError()
-        files=tuple(TorrentFile(**f) for f in data['files'])
-        inventory=BatchInventory(digest,sha,files)
-        if inventory.json()!=raw:raise CancellationError()
-    except (KeyError,TypeError,ValueError):
-        raise CancellationError() from None
+    reservation,digest,sha,_,plan=source
+    try:inventory=stored_inventory(db,plan,digest,sha)
+    except ValueError:raise CancellationError() from None
+    files=inventory.files
     rows=db.execute(
         "SELECT r.file_index,r.tvdb_episode,f.file_path,f.file_size_bytes "
         "FROM batch_episode_reservations r "

@@ -88,7 +88,7 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                          trial_registration(reservation_kind=RESERVE_KIND),
                          reserve_registration(preparation_kind=PREPARE_KIND),
                          *batch_handlers,*preparation,
-                         *management_registrations(secrets,read_batch_metainfo=read_batch_metainfo),*additional_registrations))
+                         *management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
 
 

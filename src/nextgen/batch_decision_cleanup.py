@@ -11,9 +11,9 @@ from src.nextgen.acquisition.cleanup import FileCleanup
 from src.nextgen.acquisition.owned_cleanup import OwnedCleanup
 from src.nextgen.acquisition.qbittorrent import Client
 from src.nextgen.cancellation import CancellationError, OperationGate
-from src.nextgen.history import append_job_history, job_attempt, integer
+from src.nextgen.history import append_job_history, job_attempt
 from src.nextgen.storage.batch_acquisition_candidate import _candidate
-from src.nextgen.storage.batch_submission_journal import _intent
+from src.nextgen.storage.batch_submission_journal import _intent, stored_inventory
 from src.nextgen.storage.batch_keep_imports import batch_publications
 from src.nextgen.storage.cancellation import operation
 from src.nextgen.storage.job_queue import JobQueue
@@ -124,12 +124,6 @@ class BatchDecisionCleanup(OwnedCleanup):
         with self.queue.connection() as connection,transaction(connection):
             return self.facts(connection)
 
-    def source_hash(self,claim,decision):
-        integer(decision,positive=True)
-        self.claim,self.decision,self.cancelled=claim,decision,None
-        with self.queue.connection() as db,transaction(db):
-            return self.facts(db)[3]
-
     def _journal(self,op,intent):
         with self.queue.connection() as db,transaction(db):
             self._fence(db)
@@ -173,13 +167,12 @@ class BatchDecisionCleanup(OwnedCleanup):
                 details={'attempt':job_attempt(db,self.claim.job_id)})
         self._log((audit,))
 
-    def run(self,claim,decision,inventory,cancelled):
+    def run(self,claim,decision,cancelled):
         self.claim,self.decision,self.cancelled=claim,decision,cancelled
         if cancelled.is_set():raise CancellationError()
         with self.queue.connection() as db,transaction(db):
             op,plan,reservation,digest,sha,protected=self.facts(db)
-            if (inventory.info_hash,inventory.info_sha256)!=(digest,sha):
-                raise CancellationError()
+            inventory=stored_inventory(db,plan,digest,sha)
             candidate=_candidate(db,reservation,inventory,cleanup=True)
             if candidate.plan_id!=plan:raise CancellationError()
             source=_intent(db,candidate,inventory)

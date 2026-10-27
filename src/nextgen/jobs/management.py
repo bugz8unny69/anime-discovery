@@ -12,9 +12,7 @@ from src.nextgen.jobs.keep_batch_job import registration as keep_batch
 from src.nextgen.jobs.reject_batch_job import registration as reject_batch
 from src.nextgen.jobs.cleanup_batch_download_job import registration as cleanup_batch
 from src.nextgen.jobs.cleanup_batch_kept_media_job import registration as cleanup_batch_kept
-from src.nextgen.acquisition.metainfo_source import make_batch_reader
 
-def registrations(secrets,*,read_batch_metainfo=None):
-    if read_batch_metainfo is None:read_batch_metainfo=make_batch_reader()
+def registrations(secrets):
     return (cleanup(secrets),keep(secrets),reject(),keep_batch(secrets),reject_batch(),
-            cleanup_batch(read_batch_metainfo,secrets),cleanup_batch_kept(secrets),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets),shoko(secrets))
+            cleanup_batch(secrets),cleanup_batch_kept(secrets),refresh(secrets),cleanup_kept(secrets),cleanup_download(secrets),shoko(secrets))

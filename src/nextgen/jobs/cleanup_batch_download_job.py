@@ -1,17 +1,9 @@
-"""Owned batch torrent deletion only after all Keep/Reject work is durable."""
-import inspect
-
-from src.nextgen.acquisition.metadata import (
-    parse_batch_metainfo, MetadataInvalid, AcquisitionConflict,
-)
+"""Owned batch torrent cleanup using the immutable submitted inventory."""
+from src.nextgen.async_io import blocking
+from src.nextgen.acquisition.metadata import MetadataInvalid, AcquisitionConflict
 from src.nextgen.acquisition.submission import (
     ClientUnavailable, ClientInvalid, ClientAuthenticationFailed, ClientUnsupported,
 )
-from src.nextgen.acquisition.metainfo_source import (
-    MetadataSourceWaiting, MetadataSourceUnavailable,
-    MetadataSourceConfigurationError, MetadataSourceDenied,
-)
-from src.nextgen.async_io import blocking
 from src.nextgen.batch_decision_cleanup import BatchDecisionCleanup
 from src.nextgen.cancellation import CancellationError, CleanupBusy
 from src.nextgen.handlers import HandlerDefinition
@@ -58,11 +50,7 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
 
 
-def registration(read_batch_metainfo,secrets,*,
-                 service_factory=BatchDecisionCleanup):
-    if not inspect.iscoroutinefunction(read_batch_metainfo):
-        raise ValueError('Trusted async hash-only batch metainfo reader required')
-
+def registration(secrets,*,service_factory=BatchDecisionCleanup):
     async def execute(context):
         payload=context.data()
         try:
@@ -71,27 +59,17 @@ def registration(read_batch_metainfo,secrets,*,
             decision=integer(payload['decision_job_id'],positive=True)
         except (ValueError,TypeError):
             return Outcome('review','JOB_PAYLOAD_INVALID')
-        service=service_factory(context.configuration,secrets)
         try:
-            digest=await blocking(service.source_hash,context.claim,decision)
-            raw=await read_batch_metainfo(
-                digest,context.configuration,context.cancelled)
-            inventory=await blocking(parse_batch_metainfo,raw,digest)
-            completed=await blocking(
-                service.run,context.claim,decision,inventory,context.cancelled)
-            return (Outcome(value={'decision_job_id':decision}) if completed
+            complete=await blocking(
+                service_factory(context.configuration,secrets).run,
+                context.claim,decision,context.cancelled)
+            return (Outcome(value={'decision_job_id':decision}) if complete
                     else Outcome('defer','DECISION_DOWNLOAD_CLEANUP_WAITING',
                                  delay_ms=30000))
-        except MetadataSourceWaiting as exc:
-            return Outcome('defer',exc.reason_code,delay_ms=exc.delay_ms)
-        except MetadataSourceUnavailable as exc:
-            return Outcome('retry',exc.reason_code)
-        except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:
-            return Outcome('review',exc.reason_code)
         except CleanupBusy:
             return Outcome('defer','DECISION_DOWNLOAD_CLEANUP_WAITING',
                            delay_ms=1000)
-        except (ClientUnavailable,):
+        except ClientUnavailable:
             return Outcome('retry','DECISION_DOWNLOAD_CLEANUP_UNAVAILABLE')
         except (CancellationError,ClientInvalid,ClientAuthenticationFailed,
                 ClientUnsupported,MetadataInvalid,AcquisitionConflict):
