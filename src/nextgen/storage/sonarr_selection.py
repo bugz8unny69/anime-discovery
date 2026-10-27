@@ -1,7 +1,8 @@
-"""One immutable Sonarr torrent choice per recognized episode, no torrent sends.
+"""Initial Sonarr source choice and current candidate pointer, no torrent sends.
 
-Invoke only from an admitted worker completion transaction. This is a source
-selection receipt, not an acquisition reservation or qBittorrent send permit.
+An initial choice is immutable while active. After proven cancellation cleanup,
+the existing discovery worker can advance the pointer to the next ranked
+candidate. Selection never grants a torrent submission permit.
 """
 import time
 
