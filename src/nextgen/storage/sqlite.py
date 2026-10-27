@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS acquisition_plans (
  job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
  reservation_id INTEGER NOT NULL UNIQUE REFERENCES episode_reservations(reservation_id),
  info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
- info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
  manifest_json TEXT NOT NULL CHECK(length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 1048576),
  submission_marker TEXT NOT NULL UNIQUE CHECK(length(submission_marker)=32 AND submission_marker NOT GLOB '*[^a-f0-9]*'),
  state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state IN ('PREPARED','RELEASED')),
@@ -747,13 +747,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v45; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v46; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v45 storage.
+    before accessing v46 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 45:
+    if version == 46:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -763,7 +763,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=45;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=46;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

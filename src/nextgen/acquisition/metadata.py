@@ -114,7 +114,8 @@ class ObservedInventory:
     """Stable, stopped qB file list; deliberately NOT BEP3 metainfo evidence.
 
     A verified source hash links the observed torrent, but no info SHA256 is
-    fabricated. The regular Manifest and SubmissionPlan cannot accept this type.
+    fabricated. Transfer plans accept this distinct type only after durable
+    ownership admission; it never authorizes a new torrent submission.
     """
     info_hash: str
     files: tuple[TorrentFile,...] = field(repr=False)
@@ -144,6 +145,11 @@ class ObservedInventory:
             raise MetadataInvalid()
         if self.files[self.selected_index].size<=0:raise MetadataInvalid()
         if len(self.json().encode('utf-8'))>1048576:raise MetadataInvalid()
+
+    @property
+    def info_sha256(self):
+        """No metainfo bytes were observed; no cryptographic claim is made."""
+        return None
 
     @classmethod
     def from_observation(cls,observation):

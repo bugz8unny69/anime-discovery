@@ -241,33 +241,37 @@ class Client:
         except ValueError:raise ClientInvalid() from None
         return Observation(expected_hash,state,save_path,category,tags,row['auto_tmm'],tuple(result))
 
-    def _tag_legacy_submission(self,intent):
-        """Tag only an exact, stopped, isolated admission on older Web APIs.
+    def _tag_legacy_submission(self,digest,marker):
+        """Label only an isolated stopped admission; never repeat the add.
 
-        A successful add HTTP response cannot establish torrent ownership.
-        Do not mutate an existing same-hash torrent with different provenance.
-        On ambiguity leave the journal UNCERTAIN for operator-safe recovery.
+        Old APIs may acknowledge add before exposing the torrent. Only the
+        fresh send's caller may poll and tag it; replay cannot adopt a torrent.
         """
-        digest=intent.plan.manifest.info_hash
-        raw,_=self._request('torrents/info',query={'hashes':digest,'limit':2})
-        rows=_json(raw)
-        if type(rows) is not list or len(rows)!=1 or type(rows[0]) is not dict:
+        import time
+        if not self.options.download_root.endswith('/ad-'+marker):
             raise ClientInvalid()
-        row=rows[0]
-        if (row.get('hash')!=digest
-                or type(row.get('save_path')) is not str
+        row=None
+        for attempt in range(10):
+            raw,_=self._request('torrents/info',query={'hashes':digest,'limit':2})
+            rows=_json(raw)
+            if type(rows) is not list or len(rows)>1:raise ClientInvalid()
+            if rows:
+                if type(rows[0]) is not dict or rows[0].get('hash')!=digest:
+                    raise ClientInvalid()
+                if rows[0].get('save_path'):
+                    row=rows[0]
+                    break
+            if attempt<9:time.sleep(0.2)
+        if row is None:raise ClientUnavailable()
+        if (type(row.get('save_path')) is not str
                 or row['save_path'].rstrip('/')!=self.options.download_root
                 or row.get('category')!=self.options.category
                 or row.get('auto_tmm') is not False
                 or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
-                or not self.options.download_root.endswith('/ad-'+intent.plan.marker)):
-            raise ClientInvalid()
-        tags=row.get('tags') or ''
-        if type(tags) is not str or any(
-                tag.strip().startswith('ad-') for tag in tags.split(',') if tag.strip()):
+                or row.get('tags') not in ('',None)):
             raise ClientInvalid()
         self._request('torrents/addTags',form={
-            'hashes':digest,'tags':'ad-'+intent.plan.marker},limit=4096)
+            'hashes':digest,'tags':'ad-'+marker},limit=4096)
 
     def inspect_legacy_metadata(self,expected_hash,marker,download_root):
         """Read-only pre-manifest observation for a journaled magnet intake.
@@ -281,7 +285,8 @@ class Client:
         if (not self._sid or self.protocol is None
                 or type(marker) is not str or not re.fullmatch('[a-f0-9]{32}',marker)
                 or type(download_root) is not str
-                or download_root!=self.options.download_root):
+                or download_root!=self.options.download_root
+                or not download_root.endswith('/ad-'+marker)):
             raise ClientInvalid()
         snapshot=self.inspect(expected_hash)
         if snapshot is None:
@@ -328,36 +333,7 @@ class Client:
         # readback and a separately bounded resume.
         self._request('torrents/add',form=fields,limit=4096)
         if not self.protocol.inline_tags:
-            # Older qBittorrent may acknowledge add before exposing the hash.
-            # Poll read-only for a bounded interval; never issue another add.
-            import time
-            row=None
-            for attempt in range(10):
-                raw,_=self._request('torrents/info',
-                                    query={'hashes':intent.info_hash,'limit':2})
-                rows=_json(raw)
-                if type(rows) is not list or len(rows)>1:
-                    raise ClientInvalid()
-                if rows:
-                    if type(rows[0]) is not dict:raise ClientInvalid()
-                    if rows[0].get('save_path'):
-                        row=rows[0]
-                        break
-                    if rows[0].get('hash')!=intent.info_hash:
-                        raise ClientInvalid()
-                if attempt<9:time.sleep(0.2)
-            if row is None:
-                # The original send may have worked. Leave it UNCERTAIN.
-                raise ClientUnavailable()
-            if (row.get('hash')!=intent.info_hash
-                    or row.get('save_path','').rstrip('/')!=self.options.download_root
-                    or row.get('category')!=self.options.category
-                    or row.get('auto_tmm') is not False
-                    or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
-                    or row.get('tags') not in ('',None)):
-                raise ClientInvalid()
-            self._request('torrents/addTags',form={
-                'hashes':intent.info_hash,'tags':'ad-'+intent.marker},limit=4096)
+            self._tag_legacy_submission(intent.info_hash,intent.marker)
 
     def poll_legacy_metadata(self,intent,cancelled,*,attempts=8,
                              interval=0.25,sleep=None):
@@ -440,6 +416,8 @@ class Client:
         """Single journaled submission for verified .torrent bytes or a magnet."""
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
         if type(permit) is not SendPermit or intent.options!=self.options or intent.api_major!=self.major:raise ClientInvalid()
+        from src.nextgen.acquisition.metadata import ObservedInventory
+        if type(intent.plan.manifest) is ObservedInventory:raise ClientInvalid()
         if type(raw) is str:
             # Exactly the same journal permit protects both source formats.
             from src.nextgen.acquisition.sonarr_search import _magnet_hash
@@ -451,7 +429,7 @@ class Client:
             permit.take(intent)
             self._request('torrents/add',form=fields,limit=4096)
             if not self.protocol.inline_tags:
-                self._tag_legacy_submission(intent)
+                self._tag_legacy_submission(intent.plan.manifest.info_hash,intent.plan.marker)
             return
         manifest=parse_metainfo(raw,intent.plan.manifest.info_hash)
         if manifest!=intent.plan.manifest:raise ClientInvalid()
@@ -472,7 +450,7 @@ class Client:
             # qBittorrent 4.2.x requires a second API call to attach the
             # marker. Never re-add after an ambiguous first call. If tagging
             # fails, the existing journal keeps submission UNCERTAIN.
-            self._tag_legacy_submission(intent)
+            self._tag_legacy_submission(intent.plan.manifest.info_hash,intent.plan.marker)
 
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
@@ -527,7 +505,7 @@ class Client:
         if selection_fingerprint(intent,snapshot.piece_size)!=fingerprint:raise TransferConflict()
         if snapshot.observation.state not in STOPPED or not exact_selection(intent,snapshot):raise TransferConflict()
         permit.take(fingerprint,'start')
-        self._request('torrents/start' if self.major==5 else 'torrents/resume',
+        self._request(self.protocol.start_endpoint,
                       form={'hashes':intent.plan.manifest.info_hash},limit=4096)
 
     def cleanup_control(self,intent,fingerprint,permit,action):
@@ -540,7 +518,7 @@ class Client:
         if action not in ('stop','remove'):raise ClientInvalid()
         permit.take(fingerprint,action)
         if action=='stop':
-            self._request('torrents/stop' if self.major==5 else 'torrents/pause',
+            self._request(self.protocol.stop_endpoint,
                           form={'hashes':intent.plan.manifest.info_hash},limit=4096)
         else:
             # Local files are deleted separately with a persisted exact manifest.

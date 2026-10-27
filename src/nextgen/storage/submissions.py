@@ -8,7 +8,7 @@ import json
 from pathlib import PurePosixPath
 import re
 
-from src.nextgen.acquisition.metadata import AcquisitionConflict
+from src.nextgen.acquisition.metadata import AcquisitionConflict, ObservedInventory
 from src.nextgen.acquisition.settings import DownloadOptions, SizeEvidenceMissing
 from src.nextgen.acquisition.submission import (SubmissionPlan, Intent, SendPermit, manifest_from_json, classify)
 from src.nextgen.history import append_job_history, integer
@@ -90,6 +90,9 @@ class SubmissionJournal:
             if prior is not None:
                 if prior.options!=options:raise AcquisitionConflict()
                 return prior,None,()
+            if type(plan.manifest) is ObservedInventory:
+                # Observations describe an existing admission, never a new send.
+                raise AcquisitionConflict()
             fingerprint=_fingerprint(plan,options,api_major)
             state,reason=('EXTERNAL','TORRENT_ALREADY_PRESENT') if present else ('UNCERTAIN','TORRENT_SUBMISSION_UNCERTAIN')
             db.execute('INSERT INTO torrent_submissions(plan_id,first_job_id,first_attempt,base_url,save_path,category,timeout_seconds,'

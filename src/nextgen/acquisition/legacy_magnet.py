@@ -1,9 +1,10 @@
 """Optional 4.2.x Sonarr magnet bootstrap in the existing PREPARE job.
 
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
-Until the typed observed-inventory path is integrated, preparation defers.
+Observed inventories enter the existing transfer pipeline without another add.
 """
 from src.nextgen.async_io import blocking
+from src.nextgen.acquisition.contracts import AcquisitionProposal
 from src.nextgen.acquisition.qbittorrent import Client as QBClient
 from src.nextgen.acquisition.settings import (download_options, size_limits, DownloadConfigurationError,
     SizeLimitExceeded, SizeEvidenceMissing)
@@ -100,8 +101,8 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 size_limits(configuration).admit(
                     inventory.files[inventory.selected_index].size)
                 await blocking(journal.capture,context.claim,intent,source,inventory)
-            # The typed qB observation is now durable, but is NOT hash-
-            # verified metainfo. Do not fabricate info_sha256 or enqueue send.
+                return Outcome(value=AcquisitionProposal(source,inventory,
+                    configuration.desired_revision,size_limits(configuration),context.claim.job_id))
             return PENDING
         except SearchUnavailable:
             return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')

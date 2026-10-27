@@ -9,13 +9,12 @@ from pathlib import PurePosixPath
 import hashlib
 import json
 import re
-import threading
 import uuid
 
 from src.nextgen.acquisition.contracts import AcquisitionInput
 from src.nextgen.acquisition.metadata import AcquisitionConflict, infohash
 from src.nextgen.acquisition.settings import DownloadOptions
-from src.nextgen.acquisition.submission import ClientInvalid, Observation
+from src.nextgen.acquisition.submission import Observation, SendPermit
 from src.nextgen.history import append_job_history
 from src.nextgen.storage.acquisition import _source
 from src.nextgen.storage.job_queue import JobQueue, Claim
@@ -49,19 +48,8 @@ class MagnetIntent:
             raise AcquisitionConflict()
 
 
-class MagnetPermit:
-    """The single process-local send right from a newly committed DB intent."""
-    def __init__(self,fingerprint):
-        self.fingerprint=fingerprint
-        self._used=False
-        self._lock=threading.Lock()
-
-    def take(self,intent):
-        with self._lock:
-            if (self._used or type(intent) is not MagnetIntent
-                    or intent.fingerprint!=self.fingerprint):
-                raise ClientInvalid()
-            self._used=True
+# Compatibility name for existing callers; all sends consume the shared permit.
+MagnetPermit = SendPermit
 
 
 def _fingerprint(event_id,hash_value,marker,options,api_major):
@@ -207,7 +195,7 @@ class MagnetJournal:
         """Persist only explicitly tagged, stopped metadata observations.
 
         This file inventory has no BEP3 info SHA. Later phases must opt in to
-        its separate evidence contract; it cannot become a SubmissionPlan.
+        its separate evidence contract when handing off the original admission.
         """
         from src.nextgen.acquisition.metadata import ObservedInventory
         from src.nextgen.storage.acquisition import validate_declaration

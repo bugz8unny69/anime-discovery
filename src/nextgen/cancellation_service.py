@@ -72,13 +72,16 @@ class CancellationService(OwnedCleanup):
             # Exclusive OperationGate proves participating handlers have drained.
             for (member,) in db.execute('SELECT job_id FROM job_operation_members WHERE operation_id=?',(op[0],)).fetchall():
                 receipts.extend(cancel_job(db,member,now,self.component))
-            # v45 pre-manifest torrents are not yet covered by the manifest-
-            # bounded deletion journal. Never release this operation's
-            # reservation while one could remain in qBittorrent or on disk.
+            # Unpromoted admissions lack an inventory for bounded cleanup.
+            # Promoted admissions use the existing exact-owned cleanup below;
+            # unresolved admissions must retain their reservation.
             pending=db.execute(
                 "SELECT 1 FROM sonarr_magnet_intents i "
                 "JOIN job_operation_members m ON m.job_id=i.job_id "
-                "WHERE m.operation_id=? LIMIT 1",(op[0],)).fetchone()
+                "WHERE m.operation_id=? AND NOT EXISTS "
+                "(SELECT 1 FROM acquisition_plans p JOIN torrent_submissions s USING(plan_id) "
+                "WHERE p.job_id=i.job_id AND p.submission_marker=i.marker "
+                "AND p.info_hash=i.info_hash AND s.state='OWNED_STOPPED') LIMIT 1",(op[0],)).fetchone()
             if pending:
                 raise CancellationError()
             rows=db.execute('SELECT p.job_id,j.event_id FROM acquisition_plans p JOIN jobs j ON j.job_id=p.job_id '

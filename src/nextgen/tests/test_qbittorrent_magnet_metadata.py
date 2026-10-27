@@ -281,6 +281,7 @@ class MagnetMetadataTests(unittest.TestCase):
         client=self.client((2,11,9))
         client.options.base_url='http://localhost:8080'
         client.options.timeout_seconds=5
+        del client._request  # Exercise the real HTTP adapter, not the helper mock.
         client._transport=lambda request,timeout:Response()
         self.assertIsNone(client.fetch_metadata(HASH,HASH))
 
@@ -304,6 +305,7 @@ class MagnetMetadataTests(unittest.TestCase):
             if request.full_url.endswith('saveMetadata'):
                 raise urllib.error.HTTPError(request.full_url,409,'pending',{},io.BytesIO())
             return Response(200,b'{"infohash_v1":"'+HASH.encode()+b'","info":{}}')
+        del client._request  # Exercise the real HTTP adapter, including HTTP 409.
         client._transport=transport
         self.assertIsNone(client.fetch_metadata(HASH,HASH))
         self.assertEqual(len(requests),2)

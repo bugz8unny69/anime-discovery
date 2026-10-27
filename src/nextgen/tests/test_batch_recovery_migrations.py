@@ -41,12 +41,13 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
             'batch_keep_imports','batch_download_cleanup','batch_keep_cleanup',
             'batch_submission_inventories','batch_cancellation_cleanup',
             'sonarr_backfill_results','sonarr_episode_selections',
-            'sonarr_episode_candidates','sonarr_magnet_intents')
+            'sonarr_episode_candidates','sonarr_magnet_intents','acquisition_plans_next')
         self.assertEqual(len(new_tables),migrations.LATEST_VERSION-30)
         for version,table in zip(range(31,migrations.LATEST_VERSION+1),new_tables):
             with self.subTest(version=version):
                 db=self.prefix(version-1)
                 try:
+                    before=migrations._structure(db)
                     script=(migrations.SQL_DIR/migrations.SCRIPTS[version-1]).read_text()
                     script=script.replace(
                         f'PRAGMA user_version={version};',
@@ -56,6 +57,7 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
                     if db.in_transaction:db.rollback()
                     self.assertEqual(db.execute('PRAGMA user_version').fetchone(),
                                      (version-1,))
+                    self.assertEqual(migrations._structure(db),before)
                     self.assertIsNone(db.execute(
                         "SELECT name FROM sqlite_master WHERE name=?",
                         (table,)).fetchone())

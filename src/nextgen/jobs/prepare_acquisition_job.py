@@ -41,17 +41,13 @@ def registration(read_metainfo,*,submission_kind=None,legacy_bootstrap=None):
         except (ValueError,TypeError):return Outcome('review','JOB_PAYLOAD_INVALID')
         try:
             source=await blocking(load_acquisition_input,context.configuration.value('storage.database_path'),job,context.claim.event_id)
-            try:
-                raw=await read_metainfo(source,context.configuration,context.cancelled)
-            except (MetadataSourceWaiting,MetadataSourceUnavailable,
-                    MetadataSourceConfigurationError):
-                if legacy_bootstrap is not None:
-                    outcome=await legacy_bootstrap(source,context)
-                    if outcome is not None:
-                        if type(outcome) is not Outcome or outcome.kind=='complete':
-                            raise ValueError('legacy metadata cannot publish a BEP3 manifest')
-                        return outcome
-                raise
+            # Reconcile any original magnet admission before a new metadata path.
+            if legacy_bootstrap is not None:
+                outcome=await legacy_bootstrap(source,context)
+                if outcome is not None:
+                    if type(outcome) is not Outcome:raise ValueError('invalid bootstrap result')
+                    return outcome
+            raw=await read_metainfo(source,context.configuration,context.cancelled)
             manifest=await blocking(parse_metainfo,raw,source.info_hash)
             validate_declaration(source,manifest)
         except MetadataSourceWaiting as exc:return Outcome('defer',exc.reason_code,delay_ms=exc.delay_ms)
