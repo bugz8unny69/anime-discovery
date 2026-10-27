@@ -1,4 +1,4 @@
-"""v31-v33 offline migration parity and failure rollback for batch acquisition."""
+"""Offline migration parity and rollback for the complete batch lifecycle."""
 import sqlite3
 import unittest
 
@@ -15,11 +15,11 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],version)
         return db
 
-    def test_upgrades_to_33_have_fresh_schema_parity(self):
-        self.assertEqual(migrations.LATEST_VERSION,36)
+    def test_all_batch_upgrades_have_fresh_schema_parity(self):
+        self.assertEqual(migrations.LATEST_VERSION,41)
         upgraded=self.prefix(30)
         self.addCleanup(upgraded.close)
-        for version in (31,32,33,34,35,36):
+        for version in range(31,migrations.LATEST_VERSION+1):
             upgraded.executescript(
                 (migrations.SQL_DIR/migrations.SCRIPTS[version-1]).read_text())
             self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone()[0],version)
@@ -30,14 +30,18 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
         self.addCleanup(fresh.close)
         fresh.execute('PRAGMA foreign_keys=ON')
         initialize(fresh)
-        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(36,))
+        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),
+                         (migrations.LATEST_VERSION,))
         self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))
 
     def test_each_new_migration_rolls_back_all_new_tables_on_error(self):
         new_tables=(
             'batch_torrent_transfers','batch_probe_media','batch_torrent_unlocks',
-            'batch_probe_stops','batch_episode_media','batch_staging_publications')
-        for version,table in zip((31,32,33,34,35,36),new_tables):
+            'batch_probe_stops','batch_episode_media','batch_staging_publications',
+            'batch_keep_imports','batch_download_cleanup','batch_keep_cleanup',
+            'batch_submission_inventories','batch_cancellation_cleanup')
+        self.assertEqual(len(new_tables),migrations.LATEST_VERSION-30)
+        for version,table in zip(range(31,migrations.LATEST_VERSION+1),new_tables):
             with self.subTest(version=version):
                 db=self.prefix(version-1)
                 try:

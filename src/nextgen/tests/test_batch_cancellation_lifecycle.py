@@ -108,7 +108,8 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
               patch('src.nextgen.batch_cancellation_cleanup.BatchCanceledCleanup')
               as cleaner,
               patch('src.nextgen.staging_artifacts.clean_temporaries'),
-              patch('src.nextgen.staging_artifacts.clean_published_batch')):
+              patch('src.nextgen.staging_artifacts.clean_published_batch'),
+              patch('src.nextgen.staging_artifacts.reconcile_planned_batch')):
             gate.return_value.hold.return_value.__enter__.return_value=None
             result=obj.cleanup(51)
             self.assertEqual(result['operation_id'],7)
