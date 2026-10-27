@@ -67,6 +67,46 @@ class Options:
 
 
 @dataclass(frozen=True)
+class DiscoveryPolicy:
+    """Local search preferences; never override identity/source validation."""
+    max_resolution: int = 1080
+    min_seeders: int = 5
+    rank_by: str = 'resolution'
+
+    def __post_init__(self):
+        if (type(self.max_resolution) is not int or self.max_resolution not in (720, 1080, 2160)
+                or type(self.min_seeders) is not int or not 0 <= self.min_seeders <= 1_000_000
+                or type(self.rank_by) is not str or self.rank_by not in ('resolution', 'seeders')):
+            raise SearchConfiguration()
+
+    @classmethod
+    def capture(cls, configuration):
+        return cls(configuration.value('sonarr.discovery_max_resolution'),
+                   configuration.value('sonarr.discovery_min_seeders'),
+                   configuration.value('sonarr.discovery_rank_by'))
+
+    def accepts(self, release):
+        return (release.eligible_for_handoff
+                and 0 < release.resolution <= self.max_resolution
+                and release.seeders is not None and release.seeders >= self.min_seeders)
+
+    def rank(self, releases):
+        """Accepted candidates first, then deterministic preference order.
+
+        Non-accepted rows are retained for diagnostics, never silently discarded.
+        Original Sonarr order resolves full ties.
+        """
+        rows = tuple(releases)
+        def key(item):
+            index, release = item
+            preference = ((release.resolution, release.seeders or 0)
+                          if self.rank_by == 'resolution'
+                          else (release.seeders or 0, release.resolution))
+            return (not self.accepts(release), -preference[0], -preference[1], index)
+        return tuple(release for _, release in sorted(enumerate(rows), key=key))
+
+
+@dataclass(frozen=True)
 class Release:
     """One original Sonarr-ranked result, not an acquisition authorization."""
     title: str
@@ -190,14 +230,30 @@ def _release(row, series_id, episode_id, identity):
         scope = 'exact'
     raw_hash = row.get('infoHash')
     info_hash = raw_hash.lower() if type(raw_hash) is str and re.fullmatch('[a-fA-F0-9]{40}', raw_hash) else None
+    # A Sonarr/Prowlarr torrent GUID can itself be the usable magnet.
+    # Never treat an HTTP GUID as an acquisition URL or follow it here.
     raw_magnet = row.get('magnetUrl')
-    magnet = raw_magnet if type(raw_magnet) is str and _magnet_hash(raw_magnet) else None
-    magnet_hash = _magnet_hash(magnet)
-    if info_hash and magnet_hash and info_hash != magnet_hash:
-        magnet = None
-    if info_hash is None: info_hash = magnet_hash
-    handoff = (scope == 'exact' and approved and not rejected and not reasons
-               and protocol == 'torrent' and bool(info_hash) and bool(magnet))
+    guid = row.get('guid')
+    sources = (raw_magnet, guid)
+    magnet = None
+    for source in sources:
+        source_hash = _magnet_hash(source)
+        if source_hash is None:
+            continue
+        if info_hash is not None and source_hash != info_hash:
+            # Conflicting identities cannot be silently reconciled.
+            magnet = None
+            break
+        if magnet is not None and _magnet_hash(magnet) != source_hash:
+            magnet = None
+            break
+        magnet = source
+    if info_hash is None:
+        info_hash = _magnet_hash(magnet)
+    # This is discovery usability, not authorization to submit a torrent.
+    # Sonarr's custom formats, profile and file-cutoff decisions are diagnostics.
+    handoff = (scope == 'exact' and protocol == 'torrent'
+               and bool(info_hash) and bool(magnet))
     return Release(title, indexer, protocol, name, resolution, score,
                    _optional_count(row.get('seeders')), _optional_count(row.get('leechers')),
                    _nonnegative(row.get('size')), approved, reasons, ids, scope,
@@ -206,11 +262,13 @@ def _release(row, series_id, episode_id, identity):
 
 class Client:
     """Strict GET-only transport with injected fake transport for offline tests."""
-    def __init__(self, options, api_key, *, transport=None):
+    def __init__(self, options, api_key, *, transport=None, policy=None):
         if (type(options) is not Options or type(api_key) is not str or not api_key
                 or len(api_key) > 1024 or any(ord(c) < 33 or ord(c) > 126 for c in api_key)):
             raise SearchConfiguration()
+        if policy is not None and type(policy) is not DiscoveryPolicy: raise SearchConfiguration()
         self.options, self._key = options, api_key
+        self.policy = policy or DiscoveryPolicy()
         opener = urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
         self._transport = transport or (lambda request, timeout: opener.open(request, timeout=timeout))
 
@@ -218,7 +276,8 @@ class Client:
     def from_context(cls, configuration, secrets, *, transport=None):
         try: key = secrets.sonarr_api_key()
         except ValueError: raise SearchConfiguration() from None
-        return cls(Options.capture(configuration), key, transport=transport)
+        return cls(Options.capture(configuration), key, transport=transport,
+                   policy=DiscoveryPolicy.capture(configuration))
 
     def _get(self, path, query=None):
         if path not in ('system/status', 'series', 'episode', 'release'):
@@ -323,7 +382,7 @@ class Client:
             results = tuple(_release(r, sid, eid, identity)
                             for r in self._get('release', {'episodeId': eid}))
             approved = sum(r.approved and not r.rejections and r.scope == 'exact' for r in results)
-            exact = sum(r.eligible_for_handoff for r in results)
+            exact = sum(self.policy.accepts(r) for r in results)
             output.append(BackfillObservation(number, eid, tid,
                           'CANDIDATES' if results else 'NO_RESULTS',
                           len(results), approved, exact))
@@ -345,4 +404,5 @@ class Client:
         try: _, eid = resolve_episode(identity, series[0], episodes)
         except SonarrEpisodeMismatch: raise SearchNotFound() from None
         rows = self._get('release', {'episodeId': eid})
-        return SearchResult(sid, eid, tuple(_release(row, sid, eid, identity) for row in rows))
+        return SearchResult(sid, eid, self.policy.rank(
+            _release(row, sid, eid, identity) for row in rows))
