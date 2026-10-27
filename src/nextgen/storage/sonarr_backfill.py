@@ -10,7 +10,7 @@ from src.nextgen.history import append_job_history, integer
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
 from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt
-from src.nextgen.acquisition.sonarr_search import BackfillObservation
+from src.nextgen.acquisition.sonarr_search import BackfillObservation, CandidateSelection
 
 PAGE_SIZE = 4
 
@@ -150,7 +150,24 @@ def persist_observations(db, claim, value):
         ).fetchone()
         if previous: raise BackfillConflict()
     now = integer(time.time_ns() // 1000000)
+    # Selection is an opt-in side effect of the same fenced worker completion.
+    # Keep source URLs out of SQLite and reject stale/unverified identity facts.
+    from src.nextgen.storage.sonarr_selection import select, SelectionConflict
     for item in value.observations:
+        choice = item.selection
+        if choice is not None:
+            if (type(choice) is not CandidateSelection or item.status != 'CANDIDATES'
+                    or item.tvdb_episode_id != choice.identity.tvdb_episode_id
+                    or item.number != choice.identity.tvdb_episode
+                    or plan.tvdb_series_id != choice.identity.tvdb_series_id
+                    or plan.season != choice.identity.tvdb_season
+                    or dict(plan.verified).get(item.number) != item.tvdb_episode_id):
+                raise BackfillConflict()
+            try:
+                select(db, plan_id=plan.plan_id, identity=choice.identity,
+                       result=choice.result, release=choice.release, policy=choice.policy)
+            except SelectionConflict:
+                raise BackfillConflict() from None
         db.execute(
             "INSERT INTO sonarr_backfill_results("
             "plan_id,tvdb_episode,job_id,sonarr_episode_id,tvdb_episode_id,status,"
