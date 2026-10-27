@@ -135,7 +135,9 @@ class MagnetJournal:
                 expected=DownloadOptions(options.base_url,prior.options.download_root,
                                          options.category,options.timeout_seconds)
                 if (prior.job_id!=claim.job_id or prior.info_hash!=source.info_hash
-                        or prior.api_major!=api_major or expected!=prior.options):
+                        or prior.api_major!=api_major or expected!=prior.options
+                        or prior.options.download_root!=str(
+                            PurePosixPath(options.download_root)/('ad-'+prior.marker))):
                     raise AcquisitionConflict()
                 return prior,None,()
             if db.execute(
