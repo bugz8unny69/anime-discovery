@@ -345,8 +345,8 @@ class Client:
         import time
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         if (type(intent) is not MagnetIntent or intent.state!='UNCERTAIN'
-                or intent.options!=self.options or intent.api_major!=self.major
-                or self.metadata_strategy not in ('legacy_poll','guarded_export')
+                or intent.options!=self.options
+                or self.protocol is None
                 or type(attempts) is not int or not 1<=attempts<=20
                 or type(interval) not in (int,float) or not 0<=interval<=2):
             raise ClientInvalid()
@@ -390,9 +390,8 @@ class Client:
         """Stop a journal-owned magnet before any file inventory is accepted."""
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         if (type(intent) is not MagnetIntent or intent.options!=self.options
-                or intent.api_major!=self.major
                 or intent.state not in ('UNCERTAIN','OWNED_STOPPED')
-                or self.metadata_strategy not in ('legacy_poll','guarded_export')):
+                or self.protocol is None):
             raise ClientInvalid()
         before=self.inspect(intent.info_hash)
         if (before is None or before.category!=intent.options.category
