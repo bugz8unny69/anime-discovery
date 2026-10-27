@@ -101,7 +101,8 @@ class ProviderBatchTests(unittest.TestCase):
         for names in (('Show/Show S02E01.mkv',),
                       ('Show/Show S01E01.mkv','Show/Show S01E01 alternate.mkv'),
                       ('Show/Unknown.mkv',)):
-            with self.subTest(names=names),self.assertRaises(BatchPlanningError):
+            expected=ReleaseConflict if len(names)>1 else BatchPlanningError
+            with self.subTest(names=names),self.assertRaises(expected):
                 self.check(inventory(*names),FakeClient())
 
     def test_custom_trial_window_intersects_existing_batch_proofs(self):

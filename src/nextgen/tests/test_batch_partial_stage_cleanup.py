@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from src.nextgen.acquisition.media import signature
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.staging_artifacts import (
-    batch_copies, batch_copies_cleared, clean_published_batch,
+    batch_copies, batch_copies_cleared, clean_published_batch, BatchStageCleanupRetry,
 )
 from src.nextgen.storage.review_decisions import remove_selected
 
@@ -133,7 +133,7 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
             remove_selected(manifest,receipts,guard,keep_root)
             calls.append(True)
             raise OSError('lost write acknowledgement after unlink')
-        with self.assertRaises(OSError):
+        with self.assertRaises(BatchStageCleanupRetry):
             self.cleanup(remove=interrupted)
         self.assertFalse(video.exists())
         self.assertFalse(episode.exists())
@@ -239,12 +239,14 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         self.db.execute(
             "UPDATE staging_cleanup_artifacts SET phase='PUBLISH_UNCERTAIN'")
         self.db.commit()
-        video.unlink()
+        original=video.with_suffix('.original')
+        video.rename(original)  # Keep the original inode allocated.
         video.write_bytes(b'an unrelated replacement')
         with self.assertRaises(BatchStageCleanupRetry):
             reconcile_planned_batch(self.queue,7,guard=self.guard,
                                     keep_root=str(self.keep))
         self.assertEqual(video.read_bytes(),b'an unrelated replacement')
+        self.assertTrue(original.exists())
 
     def test_uncertain_temp_is_cleaned_without_recursive_deletion(self):
         from src.nextgen.staging_artifacts import reconcile_planned_batch

@@ -15,7 +15,7 @@ class BatchReservationMigrationTests(unittest.TestCase):
         return db
 
     def test_upgrade_28_to_29_matches_fresh_schema(self):
-        self.assertEqual(migrations.LATEST_VERSION,36)
+        self.assertGreaterEqual(migrations.LATEST_VERSION,29)
         upgraded=self.migration_prefix(28)
         self.addCleanup(upgraded.close)
         self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone(),(28,))
@@ -25,12 +25,12 @@ class BatchReservationMigrationTests(unittest.TestCase):
         fresh.execute('PRAGMA foreign_keys=ON')
         initialize(fresh)
         self.assertEqual(upgraded.execute('PRAGMA user_version').fetchone(),(29,))
-        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(36,))
+        self.assertEqual(fresh.execute('PRAGMA user_version').fetchone(),(migrations.LATEST_VERSION,))
         self.assertEqual(migrations._structure(upgraded),
                          migrations._reference(29,migrations._scripts()))
         upgraded.executescript(
             (migrations.SQL_DIR/'030_batch_torrent_submissions.sql').read_text())
-        for number in (31,32,33,34,35,36):
+        for number in range(31,migrations.LATEST_VERSION+1):
             name=migrations.SCRIPTS[number-1]
             upgraded.executescript((migrations.SQL_DIR/name).read_text())
         self.assertEqual(migrations._structure(upgraded),migrations._structure(fresh))

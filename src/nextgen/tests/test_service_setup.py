@@ -12,6 +12,7 @@ from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.maintenance import MaintenanceGate, MaintenancePending
 from src.nextgen.secrets import SecretStore
 from src.nextgen.storage.migrations import MigrationPlan
+from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import connect
 
 
@@ -31,7 +32,7 @@ class ServiceSetupTests(unittest.TestCase):
         self.assertEqual(ConfigurationStore(self.root).read().value('storage.database_path'),str(self.database))
         self.assertEqual(self.database.stat().st_mode&0o777,0o600)
         db=connect(self.database)
-        try:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],26)
+        try:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],LATEST_VERSION)
         finally:db.close()
         # API readiness must not require either a webhook token or a password.
         self.assertFalse(check_local(self.root)['external_services_checked'])
@@ -52,7 +53,7 @@ class ServiceSetupTests(unittest.TestCase):
     def test_pending_maintenance_is_not_reported_ready_and_preview_does_not_resume(self):
         self.initialize();self.access();gate=MaintenanceGate(self.database);ticket=gate.request()
         with self.assertRaises(MaintenancePending):check_local(self.root)
-        with database_preview(self.root) as (_,plan):self.assertEqual(plan.from_version,26)
+        with database_preview(self.root) as (_,plan):self.assertEqual(plan.from_version,LATEST_VERSION)
         self.assertEqual(gate.status(),ticket)
 
     def test_plan_token_pins_scripts_and_source_version(self):

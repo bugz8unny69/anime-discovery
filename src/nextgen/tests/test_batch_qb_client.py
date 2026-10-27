@@ -62,13 +62,13 @@ class BatchQbClientTests(unittest.TestCase):
 
 
     def snapshot(self,*,priorities=(1,1,1),ranges=((0,0),(1,1),(2,2)),
-                 state='stoppedDL',tags=None):
+                 state='stoppedDL',tags=None,piece_size=100):
         observed=Observation(self.intent.inventory.info_hash,state,
             self.options.download_root,self.options.category,
             ('ad-'+self.intent.marker,) if tags is None else tags,
             False,self.intent.inventory.files)
         return TransferSnapshot(observed,tuple(priorities),(0.,0.,0.),
-                                100,tuple(ranges))
+                                piece_size,tuple(ranges))
 
     def test_probe_skip_wanted_start_each_single_use(self):
         current=[self.snapshot()]
@@ -90,7 +90,9 @@ class BatchQbClientTests(unittest.TestCase):
             self.client.start_probe(self.intent,fingerprint,start)
 
     def test_overlap_and_wrong_owner_never_consume_probe_permission(self):
-        snap=self.snapshot(ranges=((0,1),(1,1),(2,2)))
+        with self.assertRaises(TransferConflict):
+            verify_probe_snapshot(self.intent,self.snapshot(ranges=((0,1),(1,1),(2,2))),require_stopped=True)
+        snap=self.snapshot(piece_size=150,ranges=((0,0),(0,1),(1,1)))
         with self.assertRaises(PieceOverlap):
             verify_probe_snapshot(self.intent,snap,require_stopped=True)
         current=[snap]
