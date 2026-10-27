@@ -93,6 +93,18 @@ class SearchResult:
     candidates: tuple[Release, ...]
 
 
+@dataclass(frozen=True)
+class BackfillObservation:
+    """Search summary only: no torrent link, verification, or acquisition permit."""
+    number: int
+    sonarr_episode_id: int | None
+    tvdb_episode_id: int | None
+    status: str
+    candidates: int = 0
+    approved: int = 0
+    exact: int = 0
+
+
 def _positive(value):
     return type(value) is int and value > 0
 
@@ -249,6 +261,72 @@ class Client:
               or any(type(row) is not dict for row in payload)):
             raise SearchReview()
         return payload
+
+
+    def backfill(self, tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None):
+        """Read-only bounded positional lookup for a frozen backfill window.
+
+        Sonarr episode IDs are untrusted discovery hints unless independently
+        verified via verified_ids. Never passes an unverified episode to an
+        acquisition pipeline or turns interactive results into downloads.
+        """
+        if (not _positive(tvdb_series_id) or type(season) is not int or season < 0
+                or type(numbers) is not tuple or not 1 <= len(numbers) <= 4
+                or any(not _positive(n) for n in numbers) or len(set(numbers)) != len(numbers)
+                or type(reserved) not in (tuple, frozenset)
+                or any(not _positive(n) for n in reserved)
+                or type(verified_ids) not in (dict, type(None))):
+            raise SearchReview()
+        verified_ids = verified_ids or {}
+        if any(not _positive(n) or not _positive(v) for n, v in verified_ids.items()):
+            raise SearchReview()
+        status = self._get('system/status')
+        version = status.get('version')
+        if type(version) is not str or not re.fullmatch(r'4\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?', version):
+            raise SearchUnsupported()
+        series = [row for row in self._get('series', {'tvdbId': tvdb_series_id})
+                  if row.get('tvdbId') == tvdb_series_id]
+        if not series: raise SearchNotFound()
+        if len(series) != 1 or not _positive(series[0].get('id')): raise SearchReview()
+        sid = series[0]['id']
+        episodes = self._get('episode', {'seriesId': sid})
+        rows = {}
+        for row in episodes:
+            if row.get('seriesId') != sid: raise SearchReview()
+            if row.get('seasonNumber') == season and type(row.get('episodeNumber')) is int:
+                num = row['episodeNumber']
+                if num in rows: raise SearchReview()
+                rows[num] = row
+        output = []
+        for number in numbers:
+            if number in reserved:
+                output.append(BackfillObservation(number, None, verified_ids.get(number), 'IN_PROGRESS'))
+                continue
+            ep = rows.get(number)
+            if ep is None:
+                output.append(BackfillObservation(number, None, verified_ids.get(number), 'NOT_LISTED'))
+                continue
+            eid, tid = ep.get('id'), ep.get('tvdbId')
+            if not _positive(eid): raise SearchReview()
+            if not _positive(tid):
+                output.append(BackfillObservation(number, eid, None, 'IDENTITY_UNKNOWN'))
+                continue
+            if verified_ids.get(number) not in (None, tid):
+                output.append(BackfillObservation(number, eid, tid, 'IDENTITY_CONFLICT'))
+                continue
+            if type(ep.get('hasFile')) is not bool: raise SearchReview()
+            if ep['hasFile']:
+                output.append(BackfillObservation(number, eid, tid, 'HAS_FILE'))
+                continue
+            identity = VerifiedEpisode(tvdb_series_id, tid, season, number)
+            results = tuple(_release(r, sid, eid, identity)
+                            for r in self._get('release', {'episodeId': eid}))
+            approved = sum(r.approved and not r.rejections and r.scope == 'exact' for r in results)
+            exact = sum(r.eligible_for_handoff for r in results)
+            output.append(BackfillObservation(number, eid, tid,
+                          'CANDIDATES' if results else 'NO_RESULTS',
+                          len(results), approved, exact))
+        return tuple(output)
 
     def search(self, identity: VerifiedEpisode):
         """Ranked results for a previously verified TVDB episode; never POSTs."""
