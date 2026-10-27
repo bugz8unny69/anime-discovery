@@ -93,7 +93,8 @@ class Client:
             with self._transport(request,self.options.timeout_seconds) as response:
                 if response.getcode() in (401,403):raise ClientAuthenticationFailed()
                 code=response.getcode()
-                if code not in (200,204):raise ClientUnavailable()
+                if code not in (200,204) and not (path=='torrents/fetchMetadata' and code==202):
+                    raise ClientUnavailable()
                 if code==204 and path not in ('torrents/add','torrents/filePrio',
                         'torrents/start','torrents/resume','torrents/stop',
                         'torrents/pause','torrents/delete'):
