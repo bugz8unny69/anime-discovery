@@ -23,6 +23,8 @@ const COPY = Object.freeze({
   'dashboard.staged': 'Staged for viewing. Choose Keep when it is available.',
   'dashboard.scope': 'Intake shows each acquisition separately. Several releases may belong to the same anime.',
   'dashboard.page_filter': 'The status filter applies to this page.',
+  'dashboard.bulk_confirm': 'Apply this action to the selected jobs? Existing safety checks still apply.',
+  'dashboard.bulk_limit': 'Select at most 100 jobs at a time.',
   'dashboard.discard': 'Discard unsaved changes and refresh settings?',
 });
 const $ = id => document.getElementById(id);
@@ -34,6 +36,7 @@ const node = (tag, text, cls) => {
 };
 const state = {
   csrf: null, generation: 0, requests: new Set(), jobs: [], pending: new Set(),
+  selected: new Set(), bulkSubmitting: false,
   page: location.pathname === '/settings' ? 'settings' : location.pathname === '/jobs' ? 'jobs' : location.pathname === '/recognized' ? 'recognized' : 'intake',
   cursor: MAX_CURSOR, previous: [], next: null, loading: null, timer: null,
   settings: null, credentials: null, dirty: false, settingsVersion: 0,
@@ -50,7 +53,8 @@ function clearPrivate(message = '') {
   for (const controller of state.requests) controller.abort();
   state.requests.clear();
   clearTimeout(state.timer);
-  state.jobs = []; state.pending.clear(); state.settings = null; state.credentials = null;
+  state.jobs = []; state.pending.clear(); state.selected.clear(); state.bulkSubmitting = false;
+  state.settings = null; state.credentials = null;
   state.previous = []; state.cursor = MAX_CURSOR; state.next = null; state.dirty = false;
   state.settingsVersion += 1;
   state.historyJob = null; state.historyVersion += 1;
@@ -143,11 +147,25 @@ async function submitAction(job, action) {
 function renderJobs() {
   const tbody = $('job-rows'); tbody.replaceChildren();
   const filter = $('status-filter').value;
-  const jobs = state.jobs.filter(job => !filter || job.state === filter);
+  const jobs = state.jobs.filter(job => state.page === 'jobs' || !filter || job.state === filter);
   $('no-jobs').hidden = jobs.length !== 0;
   for (const job of jobs) {
     const tr = node('tr');
     const td = value => { const cell = node('td', value); tr.appendChild(cell); return cell; };
+    if (state.page === 'jobs') {
+      const cell = td();
+      const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = state.selected.has(job.job_id);
+      checkbox.setAttribute('aria-label', 'Select job #' + job.job_id);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked && state.selected.size >= 100) {
+          checkbox.checked = false; notice(COPY['dashboard.bulk_limit'], true); return;
+        }
+        if (checkbox.checked) state.selected.add(job.job_id);
+        else state.selected.delete(job.job_id);
+        renderBulkControls();
+      });
+      cell.appendChild(checkbox);
+    }
     td(date(job.received_at_ms || job.created_at_ms));
     const title = td();
     title.appendChild(node('span', job.release_name || job.anime_title || 'Management job', 'job-release'));
@@ -216,13 +234,21 @@ function renderJobs() {
   }
   $('previous-page').disabled = state.previous.length === 0;
   $('next-page').disabled = state.next === null;
+  if (state.page === 'jobs') renderBulkControls();
 }
 async function loadActivity() {
   if (state.loading) return state.loading;
   const generation = state.generation;
   state.loading = (async () => {
     try {
-      const data = await request(`${API}/${state.page === 'intake' ? 'intake' : 'jobs'}?before_id=${state.cursor}&limit=30`);
+      let path = `${API}/${state.page === 'intake' ? 'intake' : 'jobs'}?before_id=${state.cursor}&limit=30`;
+      if (state.page === 'jobs') {
+        const filter = $('status-filter').value;
+        if (filter) path += '&state=' + encodeURIComponent(filter);
+        path += '&show_completed=' + Number($('show-completed').checked);
+        path += '&show_canceled=' + Number($('show-canceled').checked);
+      }
+      const data = await request(path);
       if (generation !== state.generation || !state.csrf) return;
       state.jobs = data.items; state.next = data.next_before_id ?? null; renderJobs();
       $('live-indicator').textContent = '● Live'; $('live-indicator').className = 'status running';
@@ -708,7 +734,12 @@ async function showWorkspace() {
   $('page-title').textContent = state.page === 'intake' ? 'Intake' : 'Jobs';
   $('activity-title').textContent = state.page === 'intake' ? 'Incoming anime' : 'Job activity';
   $('page-description').textContent = state.page === 'intake' ? 'Follow incoming anime through processing and staging.' : 'Track jobs and their recorded history. Status updates every five seconds.';
-  $('page-note').textContent = (state.page === 'intake' ? COPY['dashboard.scope'] + ' ' : '') + COPY['dashboard.page_filter'];
+  $('page-note').textContent = state.page === 'intake' ?
+    COPY['dashboard.scope'] + ' ' + COPY['dashboard.page_filter'] :
+    'Filters apply across all jobs. Up to 100 jobs can be selected across pages; up to five use individual actions, larger selections use a queued batch.';
+  $('bulk-heading').hidden = state.page !== 'jobs';
+  $('completed-toggle-label').hidden = state.page !== 'jobs';
+  $('canceled-toggle-label').hidden = state.page !== 'jobs';
   await loadActivity(); clearTimeout(state.timer); if (state.csrf) state.timer = setTimeout(tick, 5000);
 }
 $('login-form').addEventListener('submit', async event => {
@@ -747,7 +778,14 @@ $('reload-settings').addEventListener('click', async () => {
   if (state.dirty && !confirm(COPY['dashboard.discard'])) return;
   await loadSettings();
 });
-$('status-filter').addEventListener('change', renderJobs);
+$('status-filter').addEventListener('change', () => {
+  if (state.page !== 'jobs') { renderJobs(); return; }
+  if ($('status-filter').value === 'DONE') $('show-completed').checked = true;
+  if ($('status-filter').value === 'CANCELED') $('show-canceled').checked = true;
+  resetJobsPage();
+});
+$('show-completed').addEventListener('change', resetJobsPage);
+$('show-canceled').addEventListener('change', resetJobsPage);
 $('next-page').addEventListener('click', async () => {
   if (state.next === null || state.loading) return;
   state.previous.push(state.cursor); state.cursor = String(state.next); await loadActivity();
