@@ -245,7 +245,7 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second[0],200)
         self.assertEqual([row['job_id'] for row in second[1]['data']['items']],[jobs[-6],jobs[-7]])
         self.assertIsNone(second[1]['data']['next_before_id'])
-        done=await self.request('GET','/api/v1/jobs?state=DONE',token=ADMIN)
+        done=await self.request('GET','/api/v1/jobs?before_id=9223372036854775807&state=DONE',token=ADMIN)
         self.assertEqual([row['job_id'] for row in done[1]['data']['items']],[jobs[-1],jobs[-3]])
         for route in ('/api/v1/jobs?state=WRONG', '/api/v1/jobs?show_completed=2',
                       '/api/v1/jobs?show_canceled=maybe',
