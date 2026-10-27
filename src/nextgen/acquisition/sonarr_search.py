@@ -127,7 +127,7 @@ def _magnet_hash(uri):
         return None
 
 
-def _release(row, series_id, episode_id):
+def _release(row, series_id, episode_id, identity):
     if type(row) is not dict: raise SearchReview()
     title = _text(row.get('title'), 2048)
     indexer = _text(row.get('indexer') or '', 256)
@@ -157,7 +157,17 @@ def _release(row, series_id, episode_id):
         episode_ids.append(entry['id'])
     ids = tuple(episode_ids)
     match_series = row.get('mappedSeriesId') == series_id
-    if not match_series or ids and episode_id not in ids:
+    matching = [item for item in mapped if item['id'] == episode_id]
+    verified_placement = (len(matching) == 1
+                          and matching[0].get('seasonNumber') == identity.tvdb_season
+                          and matching[0].get('episodeNumber') == identity.tvdb_episode)
+    mapped_season = row.get('mappedSeasonNumber')
+    mapped_numbers = row.get('mappedEpisodeNumbers')
+    if (mapped_season is not None and mapped_season != identity.tvdb_season
+            or mapped_numbers is not None and
+            (type(mapped_numbers) is not list or identity.tvdb_episode not in mapped_numbers)):
+        verified_placement = False
+    if not match_series or ids and not verified_placement:
         scope = 'mismatched'
     elif not ids:
         scope = 'unmapped'
@@ -256,4 +266,4 @@ class Client:
         try: _, eid = resolve_episode(identity, series[0], episodes)
         except SonarrEpisodeMismatch: raise SearchNotFound() from None
         rows = self._get('release', {'episodeId': eid})
-        return SearchResult(sid, eid, tuple(_release(row, sid, eid) for row in rows))
+        return SearchResult(sid, eid, tuple(_release(row, sid, eid, identity) for row in rows))
