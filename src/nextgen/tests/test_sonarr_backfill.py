@@ -103,7 +103,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BackfillSchemaTests(unittest.TestCase):
-    def test_explicit_v41_to_v42_and_fresh_schema_match(self):
+    def test_explicit_v41_to_v43_and_fresh_schema_match(self):
         old = sqlite3.connect(':memory:')
         fresh = sqlite3.connect(':memory:')
         try:
@@ -114,13 +114,24 @@ class BackfillSchemaTests(unittest.TestCase):
             old.commit()
             before = old.execute('SELECT * FROM incoming_events').fetchall()
             old.executescript((SQL_DIR/'042_sonarr_backfill.sql').read_text())
+            old.executescript((SQL_DIR/'043_sonarr_selection.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],42)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],43)
         finally:
             old.close()
             fresh.close()
+
+    def test_v43_allows_local_candidates_even_when_sonarr_approved_zero(self):
+        db = sqlite3.connect(':memory:')
+        try:
+            initialize(db)
+            sql = db.execute("SELECT sql FROM sqlite_master WHERE name='sonarr_backfill_results'").fetchone()[0]
+            self.assertIn('exact BETWEEN 0 AND candidates', sql)
+            self.assertNotIn('exact BETWEEN 0 AND approved', sql)
+        finally:
+            db.close()
 
     def test_wrong_starting_version_rolls_back(self):
         db = sqlite3.connect(':memory:')
