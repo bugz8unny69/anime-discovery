@@ -274,3 +274,41 @@ test('Matching details does not fabricate evidence for older or queued jobs', as
     .map(item => item.textContent || '').join(' ');
   assert.match(text, /No detailed evidence was saved/);
 });
+
+
+test('checkpoint Retry posts the same reviewed job snapshot without restarting acquisition', async () => {
+  const h = await harness();
+  h.ctx.fixture = target();
+  h.ctx.fixture.state = 'NEEDS_REVIEW';
+  h.ctx.fixture.attempt_count = 4;
+  h.ctx.fixture.reason = {code: 'JOB_RETRY_EXHAUSTED', message: 'Retry limit reached.'};
+  h.ctx.fixture.actions.retry = {enabled: true, disabled_reason: null};
+  h.run('state.jobs=[fixture]; renderJobs();');
+  const rows = h.elements.get('job-rows');
+  const text = element => [element.textContent || '', ...element.children.map(text)].join(' ');
+  assert.ok(text(rows).includes('Retry'));
+  const calls = [];
+  h.ctx.fetch = async (url, options) => {
+    calls.push({url, options});
+    return response(url.includes('/retry') ? {notification:{message:'Job submitted.'},job_id:7} :
+      {items:[],next_before_id:null});
+  };
+  await h.run("submitAction(fixture,'retry')");
+  const sent = calls.filter(item => item.options.method === 'POST');
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].url,'/api/v1/jobs/7/retry');
+  assert.deepEqual(JSON.parse(sent[0].options.body),
+    {expected_attempt:4,expected_reason:'JOB_RETRY_EXHAUSTED'});
+  assert.equal(sent[0].options.headers['X-CSRF-Token'],'session-csrf');
+});
+
+test('Retry does not submit if the API capability disables the reviewed step', async () => {
+  const h=await harness(); h.ctx.fixture=target();
+  h.ctx.fixture.state='NEEDS_REVIEW';
+  h.ctx.fixture.actions.retry={enabled:false,disabled_reason:{message:'This action is not available.'}};
+  const button=h.run("actionButton(fixture,'retry','Retry')");
+  assert.equal(button.children[0].disabled,true);
+  assert.equal(button.title,'This action is not available.');
+  h.ctx.fetch=async () => {throw Error('disabled Retry must not POST');};
+  await h.run("submitAction(fixture,'retry')");
+});
