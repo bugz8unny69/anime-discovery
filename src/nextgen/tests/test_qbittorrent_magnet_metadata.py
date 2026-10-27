@@ -293,6 +293,32 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in client._request.call_args_list],
                          ['torrents/resume'])
 
+    def test_metadata_poll_after_upgrade_uses_current_52_stop_start(self):
+        from types import SimpleNamespace
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        client=self.client((2,11,9),5)
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client.options=options
+        # The magnet was originally admitted on 4.2, not sent again.
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,
+                            'UNCERTAIN','f'*64)
+        stopped=Observation(HASH,'pausedDL',options.download_root,
+                            'anime',('ad-'+'c'*32,),False,())
+        pending=Observation(HASH,'metaDL',options.download_root,
+                            'anime',('ad-'+'c'*32,),False,())
+        with patch.object(client,'inspect',side_effect=[stopped,pending]):
+            with patch.object(client,'stop_legacy_metadata',
+                              return_value=None) as stop:
+                client.poll_legacy_metadata(
+                    intent,SimpleNamespace(is_set=lambda:False),
+                    attempts=1,interval=0,sleep=lambda _:None)
+        client._request.assert_called_once_with(
+            'torrents/start',form={'hashes':HASH},limit=4096)
+        stop.assert_called_once_with(intent)
+
     def test_42_metadata_poll_refuses_foreign_marker(self):
         from types import SimpleNamespace
         from src.nextgen.acquisition.submission import Observation
