@@ -62,6 +62,9 @@ class CancellationService(OwnedCleanup):
             if state=='COMPLETE':
                 from src.nextgen.storage.reservation_release import release_cancelled
                 records+=release_cancelled(db,op[0],job_id,now,component=self.component)
+                if op[2]!='COMPLETE':
+                    from src.nextgen.storage.sonarr_candidates import schedule_after_cleanup
+                    records+=schedule_after_cleanup(db,op[0])
         self._log(records)
     def _targets(self,job_id):
         with self.store.queue.connection() as db,transaction(db):
