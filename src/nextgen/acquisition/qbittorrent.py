@@ -108,6 +108,10 @@ class Client:
             code=exc.code
             exc.close()
             if code in (401,403):raise ClientAuthenticationFailed() from None
+            if code==400:raise ClientInvalid() from None
+            if path=='torrents/saveMetadata' and code==409:
+                # Metadata is still resolving; the caller retries later.
+                return b'',{}
             raise ClientUnavailable() from None
         except (OSError,TimeoutError,urllib.error.URLError):raise ClientUnavailable() from None
 
@@ -170,6 +174,7 @@ class Client:
         if 'info' not in data:return None
         if type(data['info']) is not dict:raise ClientInvalid()
         raw,_=self._request('torrents/saveMetadata',form={'source':source},limit=MAX_METAINFO)
+        if not raw:return None
         return parse_metainfo(raw,expected_hash),raw
 
     def export_metainfo(self,expected_hash):
