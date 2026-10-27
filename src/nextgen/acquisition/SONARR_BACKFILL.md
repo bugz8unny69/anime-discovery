@@ -192,6 +192,32 @@ Do not deploy the v43 schema without the compatible worker version and
 an explicit maintenance migration. The v42 SQL file is unchanged; v43
 provides an additive upgrade and fixes the observational constraint.
 
+## Opt-in worker source selection (no torrent submission)
+
+The regular Sonarr backfill worker can now optionally choose the first locally
+eligible torrent for a **recognized** episode in the same search that records
+the discovery counts. Set both `sonarr_backfill=True` and
+`sonarr_select=True` when composing `build_identity_worker` or
+`run_identity_worker`; default behavior is unchanged.
+
+Selection is performed during the worker's existing fenced completion
+transaction, not in another asynchronous job or additional indexer query.
+The worker carries one temporary `CandidateSelection` (episode identity,
+Sonarr search result and local policy) and persists only the normalized info
+hash through the existing v43 selection helper. The candidate must have a
+matching independent `recognized_episodes` row, remain in the frozen selection
+window, and have no active single/batch episode reservation. On conflicting
+selection or changed identity, the operation requires review; no qBittorrent
+operation is performed.
+
+The v43 receipt is NOT an acquisition permit or a substitute for the current
+event-bound release verification. The existing PREPARE_ACQUISITION /
+SUBMIT_TORRENT code still requires an incoming release reservation and a
+hash-checked torrent file; this batch intentionally does not bypass those
+requirements to acquire Sonarr-only releases. This source-choice opt-in
+must stay disabled in production until a separately verified backfill
+reservation and metadata path is connected.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
