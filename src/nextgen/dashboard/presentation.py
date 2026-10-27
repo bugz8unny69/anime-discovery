@@ -24,6 +24,7 @@ from src.nextgen.jobs.stage_trial_media_job import DEFINITION as stage
 from src.nextgen.jobs.reject_media_job import DEFINITION as reject
 from src.nextgen.jobs.keep_media_job import DEFINITION as keep
 from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanup
+from src.nextgen.jobs.management_bulk_job import DEFINITION as bulk
 
 from src.nextgen.jobs.refresh_jellyfin_job import DEFINITION as refresh
 
@@ -33,4 +34,4 @@ from src.nextgen.decision_download_cleanup import DEFINITION as cleanup_download
 
 from src.nextgen.jobs.enrich_shoko_job import DEFINITION as shoko
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,reject_batch,cleanup_batch_download,cleanup_batch_kept_media,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download,shoko))
+HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,reject_batch,cleanup_batch_download,cleanup_batch_kept_media,bulk,prepare,submit,download,media,stage,keep,reject,cleanup,refresh,cleanup_kept,cleanup_download,shoko))

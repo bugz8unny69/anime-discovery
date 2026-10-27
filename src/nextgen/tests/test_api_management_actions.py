@@ -119,6 +119,67 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(original['data']['actions']['cancel']['enabled'])
 
 
+    async def test_bulk_endpoint_requires_six_ids_and_queues_worker_without_inline_actions(self):
+        jobs=[]
+        for index in range(6):
+            _,created,_=await self.request('POST','/api/v1/webhook',
+                self.release(release_name=f'Test Anime - {index}'),token=WEB)
+            jobs.append(created['data']['job_id'])
+        body={'action':'cancel','job_ids':jobs}
+        for invalid in (
+            {'action':'cancel','job_ids':jobs[:5]},
+            {'action':'cancel','job_ids':jobs+[jobs[-1]]},
+            {'action':'complete','job_ids':jobs},
+            {'action':'cancel','job_ids':jobs[:5]+[99999999]},
+            {'action':'cancel','job_ids':[True,*jobs[1:]]},
+        ):
+            status,_,_=await self.request('POST','/api/v1/jobs/bulk',invalid,token=ADMIN)
+            self.assertEqual(status,400)
+        self.assertEqual((await self.request('GET','/api/v1/jobs/bulk',token=ADMIN))[0],405)
+        self.assertEqual((await self.request('POST','/api/v1/jobs/bulk',body,token=WEB))[0],401)
+        self.assertEqual((await self.request('POST','/api/v1/jobs/bulk',body,
+            headers={'Cookie':self.admin_cookie,'Origin':'https://anime.example'}))[0],403)
+        self.assertEqual(self.rows('SELECT count(*) FROM jobs'),[(6,)])
+        status,result,headers=await self.request('POST','/api/v1/jobs/bulk',body,token=ADMIN)
+        self.assertEqual(status,202)
+        batch=result['data']['job_id']
+        self.assertEqual(result['data']['count'],6)
+        self.assertEqual(headers[b'location'].decode(),f'/api/v1/jobs/{batch}')
+        self.assertEqual(self.rows('SELECT kind,state FROM jobs WHERE job_id=?',(batch,)),
+                         [('BULK_MANAGE_JOBS','PENDING')])
+        self.assertEqual(self.rows('SELECT count(*) FROM jobs WHERE state=?',('PENDING',)),[(7,)])
+        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(0,)])
+        status,job,_=await self.request('GET',f'/api/v1/jobs/{batch}',token=ADMIN)
+        self.assertEqual(status,200)
+        self.assertEqual(job['data']['label']['message'],'Apply bulk job actions')
+
+    async def test_bulk_worker_reuses_existing_cancel_admission(self):
+        from src.nextgen.jobs.management_bulk_job import registration
+        from src.nextgen.job_contracts import Registry
+        from src.nextgen.worker import Worker
+        from src.nextgen.storage.job_queue import JobQueue
+        jobs=[]
+        for index in range(6):
+            _,created,_=await self.request('POST','/api/v1/webhook',
+                self.release(release_name=f'Test Anime - {index}'),token=WEB)
+            jobs.append(created['data']['job_id'])
+        # Leave targets pending but defer their normal processing, so the
+        # explicitly submitted batch is the only claimable work.
+        with connect(self.database) as db,transaction(db):
+            db.execute('UPDATE jobs SET available_at_ms=9999999999999')
+        status,result,_=await self.request('POST','/api/v1/jobs/bulk',
+            {'action':'cancel','job_ids':jobs},token=ADMIN)
+        self.assertEqual(status,202)
+        batch=result['data']['job_id']
+        worker=Worker(self.store,self.startup,Registry((registration(),)))
+        self.addAsyncCleanup(worker.close)
+        self.assertTrue(await worker.attempt())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(batch,)),[('DONE',)])
+        for job in jobs:
+            self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('CANCELED',)])
+        self.assertEqual(self.rows('SELECT count(*) FROM management_actions'),[(0,)])
+
+
 class ActionMessageTests(unittest.TestCase):
     def test_disabled_explanations_follow_state_not_stale_progress_reason(self):
         expected={'PENDING':'A job is already queued.',
