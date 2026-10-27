@@ -1,0 +1,96 @@
+# Batch 2 — opt-in Sonarr backfill discovery
+
+Batch 1 supplies a read-only Sonarr ranked-release client. Batch 2 schedules
+bounded search observations for the **first X episodes** of a **frozen**
+`trial_plans` window. Neither batch submits torrents or authorizes acquisition.
+
+## Activation
+
+Explicitly upgrade the NextGen SQLite database from v41 to v42 under the
+existing maintenance/migration flow. Neither startup nor this handler upgrades
+the database implicitly. Do **not** operate an old worker against a v42
+database; restart with compatible worker code before reopening admission.
+
+The default provider worker retains prior behavior. To opt into backfill
+observation, a trusted caller supplies `sonarr_backfill=True` to
+`build_identity_worker(...)`. The existing Sonarr URL, API key and timeout
+are used. The feature introduces no Prowlarr account or quality scoring.
+
+**This branch is not deployed, the v42 migration has not been applied, and
+CI/offline tests have not been run.**
+
+## Frozen window
+
+On the first successfully committed `EVALUATE_TRIAL`, the worker retains
+the original plan anchor and counts, and atomically inserts one discovery
+job per trial plan only when `backfill_count > 0` and the opt-in handler
+is installed. Further incoming episodes of the same AniDB anime/TVDB season
+cannot enqueue a second chain. Discovery is scoped to episodes
+`1..backfill_count` — **not** the entire continuation range.
+
+Each `DISCOVER_SONARR_BACKFILL` attempt handles up to **four** positions,
+then atomically stores summary receipts and schedules the next page on
+successful completion. The existing operation's cancellation and worker
+lease/transaction rules apply. Failure to contact Sonarr retries using the
+worker's standard failure budget; missing Sonarr series is held for review.
+No new DB job payloads contain credentials, magnet URIs, or download URLs.
+
+For E10 with backfill 6 and following 2:
+- The first evaluated plan schedules E01–E04, then E05–E06.
+- E10 and E11 remain covered **only as matching releases arrive through
+  the existing intake flow**; the batch does not proactively search E11.
+- When Sonarr already has a file or NextGen has an active reservation,
+  the episode is recorded without sending an indexer query.
+
+## Recorded results
+
+`sonarr_backfill_results` (v42) is a new **observation-only** table:
+
+| Column | Meaning |
+| --- | --- |
+| `plan_id`, `tvdb_episode` | Frozen plan and season position; unique |
+| `job_id` | Worker provenance |
+| `sonarr_episode_id`, `tvdb_episode_id` | IDs **as reported by Sonarr**, not independent verification |
+| `status` | `IN_PROGRESS`, `NOT_LISTED`, `IDENTITY_UNKNOWN`, `IDENTITY_CONFLICT`, `HAS_FILE`, `CANDIDATES` or `NO_RESULTS` |
+| `candidates`, `approved`, `exact` | Counts derived from Sonarr's prioritized search and discovery-only eligibility checks |
+| `observed_at_ms` | Recorded wall-clock observation time |
+
+A read-only query to review progress after running an enabled worker:
+
+```sql
+SELECT p.anidb_id,p.tvdb_series_id,p.tvdb_season,
+       r.tvdb_episode,r.status,r.candidates,r.approved,r.exact
+FROM sonarr_backfill_results AS r
+JOIN trial_plans AS p USING(plan_id)
+ORDER BY r.plan_id,r.tvdb_episode;
+```
+
+### Critical identity boundary
+
+The verified incoming anime/season is the scope anchor. Backfilled episode IDs
+may come **only from Sonarr's catalog** until a provider-verified per-episode
+mapping exists in `recognized_episodes`. The worker cross-checks a recognized
+ID when available, marking conflicting identities without searching.
+
+Sonarr catalog IDs and Sonarr's `approved` flag **never prove** an AniDB
+episode identity, JP+EN audio, or a correct torrent. The DB records no torrent
+hashes or URLs, has no reservation/submit permit, and has no automatic
+re-queue or download handoff. Additional AniDB/TVDB verification and actual
+download ownership are distinct future batches.
+
+The Sonarr GET request contacts indexers and can update episode last-search
+timestamps. Search-only opt-in is intentional, so installing the branch or
+running a normal worker does not automatically create these requests.
+
+## Remaining work
+
+Offline tests in `tests/test_sonarr_backfill.py` and
+`tests/test_sonarr_discovery.py` cover paginated work, deduplication,
+explicit opt-in, retry, version upgrade, and safe positional queries.
+They are authored but **not executed**.
+
+Before activating: run these tests, validate migration and code against the
+running Sonarr v4 configuration, check recognized season mapping and indexer
+request rate, and ensure that missing Sonarr series are registered through
+an explicit, separately reconciled operation. Automated candidate acquisition,
+follow-up proactive search, and the dashboard remain out of scope.
