@@ -47,6 +47,19 @@ class MagnetMetadataTests(unittest.TestCase):
             client.fetch_metadata('magnet:?xt=urn:btih:'+'b'*40,HASH)
         client._request.assert_not_called()
 
+    def test_transport_accepts_202_only_for_metadata_polling(self):
+        class Response:
+            headers={}
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def getcode(self):return 202
+            def read(self,size):return b'{"infohash_v1":"'+HASH.encode()+b'"}'
+        client=self.client((2,11,9))
+        client.options.base_url='http://localhost:8080'
+        client.options.timeout_seconds=5
+        client._transport=lambda request,timeout:Response()
+        self.assertIsNone(client.fetch_metadata(HASH,HASH))
+
     def test_hash_only_response_is_pending_not_ready(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{"infohash_v1":"'+HASH.encode()+b'"}',{})
