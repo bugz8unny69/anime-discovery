@@ -242,6 +242,36 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual(client._request.call_args.args,('torrents/resume',))
         stop.assert_called_once_with(intent)
 
+    def test_42_default_metadata_window_waits_beyond_two_seconds(self):
+        from types import SimpleNamespace
+        from src.nextgen.acquisition.metadata import TorrentFile
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        client=self.client((2,5,1),4)
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        def observation(state,files=()):
+            return Observation(HASH,state,options.download_root,'anime',
+                               ('ad-'+'c'*32,),False,files)
+        # Early metadata polls are empty; the same original torrent eventually
+        # provides its file list. Simulate elapsed time without sleeping.
+        snapshots=[observation('pausedDL')]+[observation('metaDL')]*9+[
+            observation('metaDL',(TorrentFile(0,'Episode.mkv',100),))]
+        with patch.object(client,'inspect',side_effect=snapshots) as inspected:
+            with patch.object(client,'stop_legacy_metadata',
+                              return_value='stopped') as stopped:
+                result=client.poll_legacy_metadata(
+                    intent,SimpleNamespace(is_set=lambda:False),
+                    sleep=lambda _:None)
+        self.assertEqual(result,'stopped')
+        self.assertEqual(inspected.call_count,11)
+        stopped.assert_called_once_with(intent)
+        self.assertEqual([call.args[0] for call in client._request.call_args_list],
+                         ['torrents/resume'])
+
     def test_42_metadata_poll_refuses_foreign_marker(self):
         from types import SimpleNamespace
         from src.nextgen.acquisition.submission import Observation
