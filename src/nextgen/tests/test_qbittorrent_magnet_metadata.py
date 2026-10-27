@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import Mock
 
-from src.nextgen.acquisition.qbittorrent import Client
+from src.nextgen.acquisition.qbittorrent import Client, _Protocol
 from src.nextgen.acquisition.settings import DownloadOptions, DownloadCredentials
 from src.nextgen.acquisition.submission import ClientInvalid, ClientUnsupported
 
@@ -17,6 +17,7 @@ class MagnetMetadataTests(unittest.TestCase):
         client._sid='session'
         client.major=major
         client.api_version=api_version
+        client.protocol=_Protocol(major,api_version)
         client.options=Mock(download_root='/media/downloads',category='anime')
         client._request=Mock()
         return client
@@ -27,6 +28,14 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual(self.client((2,10,0),5).metadata_strategy,'stopped_magnet')
         with self.assertRaises(ClientUnsupported):
             self.client((2,8,14),4).metadata_strategy
+
+    def test_protocol_names_cover_submission_start_stop(self):
+        old=_Protocol(4,(2,8,15))
+        new=_Protocol(5,(2,11,9))
+        self.assertEqual((old.stopped_parameter,old.start_endpoint,old.stop_endpoint),
+                         ('paused','torrents/resume','torrents/pause'))
+        self.assertEqual((new.stopped_parameter,new.start_endpoint,new.stop_endpoint),
+                         ('stopped','torrents/start','torrents/stop'))
 
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
