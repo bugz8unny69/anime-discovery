@@ -113,6 +113,28 @@ The Sonarr GET request contacts indexers and can update episode last-search
 timestamps. Search-only opt-in is intentional, so installing the branch or
 running a normal worker does not automatically create these requests.
 
+## Offline live-response validation
+
+A previously captured Sonarr `GET /api/v3/release?episodeId=...` JSON array
+can be inspected **without further indexer queries or downloads**. The following
+invocation is for the verified Solo Leveling S01E01 example; substitute IDs
+that match the response file:
+
+```bash
+python3 -m src.nextgen.acquisition.validate_sonarr_json \
+  /tmp/sonarr-releases.json \
+  --sonarr-series 126 --sonarr-episode 2504 \
+  --tvdb-series 389597 --tvdb-episode 7979142 \
+  --season 1 --number 1
+```
+
+The report prints scope distributions, count of validated magnet sources,
+number of locally eligible candidates, and the top ten candidates' resolution,
+seeders, indexer and Sonarr verdict. It deliberately does **not** print raw
+magnets, hashes, GUIDs or download URLs. It does not inspect tracker content,
+prove AniDB episode ownership, fetch torrent metadata, or submit a torrent.
+Saved Sonarr JSON may contain confidential tracker links: store it privately.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
