@@ -148,6 +148,7 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
         except (MetadataSourceConfigurationError,MetadataSourceWaiting,
                 MetadataSourceUnavailable) as original_error:
             if identity is None:raise
+            fallback_error=original_error
         # This fallback is only for the original verified Sonarr event.
         # Sonarr can rotate private tracker tokens: always re-query, never
         # persist or reconstruct credential-bearing magnets.
@@ -173,7 +174,7 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
             if qb.metadata_strategy!='fetch':
                 # Older qBittorrent needs a pre-manifest send journal;
                 # the existing .torrent source remains the safe fallback.
-                raise original_error
+                raise fallback_error
             resolved=await blocking(qb.fetch_metadata,chosen.magnet_url,source.info_hash)
             if resolved is None:raise MetadataSourceWaiting()
             if cancelled.is_set():raise asyncio.CancelledError()
