@@ -114,7 +114,7 @@ class CandidateTests(unittest.TestCase):
             item("Shikii - 10", HASH12),
         ]
         matches = candidates(releases, aliases=("Shiki [S02]",), season=2, wanted_episodes=[10])
-        self.assertEqual([m["info_hash"] for m in matches], [HASH10] if len(matches) == 1 else [])
+        self.assertEqual([m["info_hash"] for m in matches], [HASH10])
         self.assertEqual(candidates(releases, aliases=("Shiki [S02]",), season=1,
                                     wanted_episodes=[10]), [])
 
