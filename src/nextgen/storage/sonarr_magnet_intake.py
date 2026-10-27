@@ -123,7 +123,7 @@ class MagnetJournal:
                 or type(source) is not AcquisitionInput
                 or claim.event_id!=source.event_id
                 or type(options) is not DownloadOptions
-                or type(api_major) is not int or api_major!=4):
+                or type(api_major) is not int or api_major not in (4,5)):
             raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
             self.queue._owns(db,claim,self.queue.now())
@@ -144,7 +144,7 @@ class MagnetJournal:
         if (type(claim) is not Claim or claim.kind!='PREPARE_ACQUISITION'
                 or type(source) is not AcquisitionInput or source.event_id!=claim.event_id
                 or type(options) is not DownloadOptions or type(present) is not bool
-                or type(api_major) is not int or api_major!=4):
+                or type(api_major) is not int or api_major not in (4,5)):
             raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
             now=self.queue.now()
