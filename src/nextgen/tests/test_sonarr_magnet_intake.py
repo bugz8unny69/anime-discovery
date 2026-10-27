@@ -79,6 +79,18 @@ class MagnetJournalTests(unittest.TestCase):
         self.assertEqual(same,intent)
         self.assertIsNone(second)
 
+    def test_upgrade_does_not_rearm_the_prior_42_submission(self):
+        intent,permit,_=self.journal.authorize(
+            self.claim,self.source,self.options,4,False)
+        self.assertIsInstance(permit,MagnetPermit)
+        recovered=self.journal.existing(
+            self.claim,self.source,self.options,5)
+        self.assertEqual(recovered,intent)
+        self.assertEqual(recovered.api_major,4)
+        _,new_permit,_=self.journal.authorize(
+            self.claim,self.source,self.options,5,False)
+        self.assertIsNone(new_permit)
+
     def test_absence_after_restart_never_rearms_permit(self):
         intent,permit,_=self.journal.authorize(
             self.claim,self.source,self.options,4,False)
