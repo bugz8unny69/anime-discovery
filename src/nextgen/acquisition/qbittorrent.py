@@ -322,10 +322,10 @@ class Client:
         fields={'urls':magnet,'savepath':self.options.download_root,
                 'category':self.options.category,
                 **self.protocol.label_fields(intent.marker),
-                **self.protocol.add_fields(False)}
+                **self.protocol.add_fields(True)}
         permit.take(intent)
-        # The legacy discovery window starts active; the worker MUST stop it
-        # promptly at metadata arrival or a bounded deadline. No file selection.
+        # The first add is PAUSED. No discovery window opens before marker
+        # readback and a separately bounded resume.
         self._request('torrents/add',form=fields,limit=4096)
         if not self.protocol.inline_tags:
             raw,_=self._request('torrents/info',
@@ -338,10 +338,62 @@ class Client:
                     or row.get('save_path','').rstrip('/')!=self.options.download_root
                     or row.get('category')!=self.options.category
                     or row.get('auto_tmm') is not False
+                    or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
                     or row.get('tags') not in ('',None)):
                 raise ClientInvalid()
             self._request('torrents/addTags',form={
                 'hashes':intent.info_hash,'tags':'ad-'+intent.marker},limit=4096)
+
+    def poll_legacy_metadata(self,intent,cancelled,*,attempts=8,
+                             interval=0.25,sleep=None):
+        """Bounded, exact-owned 4.2.x metadata window with unconditional stop.
+
+        Never resumes when the file list already exists. A restart may run a
+        NEW bounded metadata window, but cannot re-submit the magnet.
+        """
+        import time
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        if (type(intent) is not MagnetIntent or intent.state!='UNCERTAIN'
+                or intent.options!=self.options or intent.api_major!=self.major
+                or self.metadata_strategy!='legacy_poll'
+                or type(attempts) is not int or not 1<=attempts<=20
+                or type(interval) not in (int,float) or not 0<=interval<=2):
+            raise ClientInvalid()
+        sleep=time.sleep if sleep is None else sleep
+        if not callable(sleep):raise ClientInvalid()
+        before=self.inspect(intent.info_hash)
+        def matches(row):
+            return (row is not None and row.info_hash==intent.info_hash
+                    and row.category==intent.options.category
+                    and row.save_path.rstrip('/')==intent.options.download_root
+                    and row.auto_tmm is False
+                    and 'ad-'+intent.marker in row.tags
+                    and not any(t.startswith('ad-') and t!='ad-'+intent.marker
+                                for t in row.tags))
+        if not matches(before):
+            raise ClientInvalid()
+        if before.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+            # A previous lease may have died during metadata discovery.
+            # Stop before considering another start.
+            return self.stop_legacy_metadata(intent)
+        if before.files:
+            return self.inspect_legacy_metadata(intent.info_hash,intent.marker,
+                                                intent.options.download_root)
+        if cancelled.is_set():return None
+        try:
+            self._request(self.protocol.start_endpoint,
+                          form={'hashes':intent.info_hash},limit=4096)
+            for index in range(attempts):
+                if cancelled.is_set():break
+                current=self.inspect(intent.info_hash)
+                if not matches(current):raise ClientInvalid()
+                if current.files:break
+                if index+1<attempts:sleep(interval)
+        finally:
+            # Do not leave metadata discovery active on cancellation, timeouts
+            # or invalid responses. Network failure remains an uncertain state.
+            stopped=self.stop_legacy_metadata(intent)
+        return stopped
 
     def stop_legacy_metadata(self,intent):
         """Stop a journal-owned magnet before any file inventory is accepted."""
