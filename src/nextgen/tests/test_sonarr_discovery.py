@@ -238,3 +238,33 @@ class SonarrDiscoveryTests(unittest.TestCase):
                          selection.match_sonarr_episode(series, episodes))
         with self.assertRaises(KeepSelectionInvalid):
             selection.match_sonarr_episode(series, [])
+
+    def test_backfill_queries_only_missing_listed_unreserved_episode(self):
+        c, fake = client()
+        fake.episodes.extend([
+            {'id': 23, 'seriesId': 11, 'tvdbId': 201, 'seasonNumber': 1,
+             'episodeNumber': 11, 'hasFile': False},
+            {'id': 24, 'seriesId': 11, 'tvdbId': 202, 'seasonNumber': 1,
+             'episodeNumber': 12, 'hasFile': True},
+        ])
+        fake.episodes[0]['hasFile'] = False
+        obs = c.backfill(100, 1, (10,11,12,13),
+                         reserved=(11,), verified_ids={10: 200})
+        self.assertEqual([o.status for o in obs],
+                         ['CANDIDATES','IN_PROGRESS','HAS_FILE','NOT_LISTED'])
+        self.assertEqual((obs[0].candidates,obs[0].approved,obs[0].exact),(1,1,1))
+        self.assertEqual([urlsplit(v).path for v in fake.visited].count('/api/v3/release'),1)
+
+    def test_backfill_conflicting_verified_episode_never_queries_indexers(self):
+        c, fake = client()
+        fake.episodes[0]['hasFile'] = False
+        obs = c.backfill(100, 1, (10,), verified_ids={10:999})
+        self.assertEqual(obs[0].status,'IDENTITY_CONFLICT')
+        self.assertNotIn('/api/v3/release',[urlsplit(u).path for u in fake.visited])
+
+    def test_backfill_missing_or_unsafe_sonarr_episode_id_never_queries(self):
+        c, fake = client()
+        fake.episodes[0]['hasFile'] = False
+        fake.episodes[0]['tvdbId'] = 0
+        self.assertEqual(c.backfill(100,1,(10,))[0].status,'IDENTITY_UNKNOWN')
+        self.assertNotIn('/api/v3/release',[urlsplit(u).path for u in fake.visited])
