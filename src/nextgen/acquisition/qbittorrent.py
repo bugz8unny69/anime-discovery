@@ -147,21 +147,28 @@ class Client:
             raise ClientAuthenticationFailed()
         return self.protocol.metadata_strategy
 
-    def fetch_metadata(self,magnet,expected_hash):
-        """5.2+ metadata-only fetch; call again on a later worker attempt if pending."""
+    def fetch_metadata(self,source,expected_hash):
+        """5.2+ metadata-only fetch; hash-bound and safe to poll while pending.
+
+        The source is an original magnet or a canonical v1 info hash. The
+        returned metainfo is always independently checked against the hash.
+        """
         from src.nextgen.acquisition.sonarr_search import _magnet_hash
         from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
         expected_hash=infohash(expected_hash)
-        if self.metadata_strategy!='fetch' or _magnet_hash(magnet)!=expected_hash:
+        if (self.metadata_strategy!='fetch' or
+                source!=expected_hash and _magnet_hash(source)!=expected_hash):
             raise ClientInvalid()
-        raw,_=self._request('torrents/fetchMetadata',form={'source':magnet},limit=MAX_METAINFO)
+        raw,_=self._request('torrents/fetchMetadata',form={'source':source},limit=MAX_METAINFO)
         data=_json(raw)
         if type(data) is not dict:raise ClientInvalid()
-        # An empty object means qBittorrent is still resolving the magnet.
         if not data:return None
         if data.get('infohash_v1') != expected_hash:
             raise ClientInvalid()
-        raw,_=self._request('torrents/saveMetadata',form={'source':magnet},limit=MAX_METAINFO)
+        # qBittorrent returns a hash-only description while it is resolving.
+        if 'info' not in data:return None
+        if type(data['info']) is not dict:raise ClientInvalid()
+        raw,_=self._request('torrents/saveMetadata',form={'source':source},limit=MAX_METAINFO)
         return parse_metainfo(raw,expected_hash),raw
 
     def export_metainfo(self,expected_hash):
