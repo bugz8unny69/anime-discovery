@@ -27,6 +27,7 @@ from src.nextgen.dashboard.assets import load_assets, address_mismatch, CSP as D
 from src.nextgen.dashboard.presentation import HANDLERS
 from src.nextgen.secrets import SecretStore
 from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
+from src.nextgen.storage.review_retry import request_review_retry, capability as retry_capability, RetryNotAllowed, RetryStale
 from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable, ActionNotFound
 from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import accept_event_and_job
@@ -234,6 +235,7 @@ class Application:
         except ApiError:raise
         except ActionNotFound as exc:raise ApiError(404,exc.reason_code) from None
         except ActionUnavailable as exc:raise ApiError(409,exc.reason_code) from None
+        except (RetryNotAllowed,RetryStale) as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationConflict as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationError as exc:raise ApiError(503,exc.reason_code) from None
         except (MaintenancePending,MaintenanceBusy,MaintenanceError) as exc:raise ApiError(503,exc.reason_code) from None
@@ -301,11 +303,19 @@ class Application:
         # Authentication and CSRF above apply equally to all explicit actions.
         # HTTP performs local admission only; network/filesystem cleanup is queued.
         with MaintenanceGate(configuration.value('storage.database_path')).operation():
-            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|reject|cancel|cleanup|cancellation)',path)
+            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|reject|cancel|cleanup|cancellation|retry)',path)
             if match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 job=int(match[1]);action=match[2]
                 if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                if action=='retry' and method=='POST':
+                    exact(body,('expected_attempt','expected_reason'))
+                    receipt=request_review_retry(configuration.value('storage.database_path'),job,
+                        expected_attempt=body['expected_attempt'],expected_reason=body['expected_reason'])
+                    location=f'/api/v1/jobs/{job}'
+                    return 202,{'job_id':job,'state':'PENDING','status_url':location,
+                        'history_url':location+'/history','reused':receipt.outcome=='ALREADY_QUEUED',
+                        'notification':CATALOG.reason('MANAGEMENT_JOB_SUBMITTED')},[(b'location',location.encode())]
                 actions=ManagementActions(configuration.value('storage.database_path'))
                 if action=='cancellation' and method=='GET':
                     with actions.queue.connection() as db:
@@ -568,6 +578,7 @@ class Application:
     def _job(self,queue,db,row):
         op=db.execute('SELECT o.operation_id,o.state,o.cleanup_state,o.reason_code FROM job_operations o JOIN job_operation_members m USING(operation_id) WHERE m.job_id=?',(row[0],)).fetchone()
         actions=ManagementActions(queue.database).capabilities(db,row[0])
+        actions['retry']=retry_capability(db,row[0])
         context=db.execute('SELECT j.created_at_ms,e.received_at_ms,CASE WHEN length(e.raw_body)<=65536 THEN e.raw_body ELSE NULL END '
                            'FROM jobs j LEFT JOIN incoming_events e ON e.event_id=j.event_id WHERE j.job_id=?',(row[0],)).fetchone()
         release=None
