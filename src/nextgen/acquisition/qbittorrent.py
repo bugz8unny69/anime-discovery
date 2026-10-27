@@ -235,6 +235,26 @@ class Client:
         permit.take(intent)
         self._request('torrents/add',body=b''.join(chunks),content_type='multipart/form-data; boundary='+boundary,limit=4096)
 
+    def add_magnet_stopped(self,magnet,intent,permit):
+        """Submit verified magnet through the existing one-shot journal permit.
+
+        The caller must already have a hash-bound prepared manifest. This is
+        NOT the earlier metadata bootstrap operation. Any ambiguous transport
+        outcome is reconciled through the original journal, never resent.
+        """
+        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        if (not self._sid or self.protocol is None):
+            raise ClientAuthenticationFailed()
+        if (type(permit) is not SendPermit or intent.options!=self.options
+                or intent.api_major!=self.major
+                or _magnet_hash(magnet)!=intent.plan.manifest.info_hash):
+            raise ClientInvalid()
+        fields={'urls':magnet,'savepath':self.options.download_root,
+                'category':self.options.category,'tags':'ad-'+intent.plan.marker,
+                **self.protocol.add_fields(True),'skip_checking':'false'}
+        permit.take(intent)
+        self._request('torrents/add',form=fields,limit=4096)
+
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
         before=self.inspect(expected_hash)
