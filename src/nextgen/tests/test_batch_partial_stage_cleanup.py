@@ -5,7 +5,6 @@ the production remover and the existing artifact phases, not invented paths.
 """
 from contextlib import nullcontext
 import json
-import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -14,7 +13,6 @@ from types import SimpleNamespace
 
 from src.nextgen.acquisition.media import signature
 from src.nextgen.cancellation import CancellationError
-from src.nextgen.staging import StagingReview
 from src.nextgen.staging_artifacts import (
     batch_copies, batch_copies_cleared, clean_published_batch,
 )
@@ -168,3 +166,27 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         with self.assertRaises(CancellationError):
             self.cleanup()
         self.assertTrue(video.exists())
+
+    def test_pinned_origin_is_protected_even_if_trial_root_setting_changes(self):
+        from unittest.mock import patch
+        from src.nextgen.batch_cancellation_cleanup import BatchCanceledCleanup
+        from src.nextgen.acquisition.owned_cleanup import OwnedCleanup
+        self.publish(1,plan_id=10)
+        service=SimpleNamespace(
+            queue=self.queue,configuration=object(),secrets=object(),
+            client_factory=object(),files_factory=lambda intent,roots:tuple(roots),
+            component='worker',_fence=lambda db=None:None,_log=lambda records:None,
+            guard=None)
+        cleaner=BatchCanceledCleanup(service)
+        captured=[]
+        def fake(parent,operation,intent):
+            captured.extend(parent.files_factory(
+                intent,('/different/new-trial','/different/keep')))
+            return True
+        with patch.object(OwnedCleanup,'_clean_target',fake):
+            done=cleaner._clean_target(
+                7,SimpleNamespace(plan=SimpleNamespace(plan_id=10)))
+        self.assertTrue(done)
+        self.assertIn(str(self.staging),captured)
+        self.assertIn('/different/new-trial',captured)
+        self.assertEqual(cleaner.files_factory,service.files_factory)

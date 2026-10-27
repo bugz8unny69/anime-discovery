@@ -97,6 +97,8 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
         obj.store=SimpleNamespace(queue=Queue(),
              status=lambda job_id:dict(operation_id=7,can_cleanup=True))
         obj.database=':memory:'
+        obj.configuration=SimpleNamespace(
+            value=lambda name:'/tmp/keep' if name=='storage.keep_root' else None)
         obj._admission=lambda: __import__('contextlib').nullcontext()
         obj._targets=lambda job_id:(7,[],[
             SimpleNamespace(plan=SimpleNamespace(plan_id=15))])
