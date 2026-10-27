@@ -347,7 +347,9 @@ class Client:
         """Stop a journal-owned magnet before any file inventory is accepted."""
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         if (type(intent) is not MagnetIntent or intent.options!=self.options
-                or intent.api_major!=self.major or self.metadata_strategy!='legacy_poll'):
+                or intent.api_major!=self.major
+                or intent.state not in ('UNCERTAIN','OWNED_STOPPED')
+                or self.metadata_strategy!='legacy_poll'):
             raise ClientInvalid()
         before=self.inspect(intent.info_hash)
         if (before is None or before.category!=intent.options.category
