@@ -1,4 +1,4 @@
-"""Optional 4.2.x Sonarr magnet bootstrap in the existing PREPARE job.
+"""Sonarr magnet bootstrap using the negotiated qBittorrent adapter in the existing PREPARE job.
 
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
 Observed inventories enter the existing transfer pipeline without another add.
@@ -36,12 +36,14 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             credentials=await blocking(secrets.qbittorrent_credentials)
             probe=client_factory(options,credentials)
             await blocking(probe.login)
-            if probe.metadata_strategy not in ('legacy_poll','guarded_export'):
-                return None
             if context.cancelled.is_set():return PENDING
             journal=journal_factory(configuration.value('storage.database_path'))
+            # Always recover an earlier admitted magnet, even after the daemon
+            # upgrades to an API with metadata-only fetch support.
             intent=await blocking(journal.existing,context.claim,source,
                                   options,probe.major)
+            if intent is None and probe.metadata_strategy=='fetch':
+                return None
             permit=None
             candidate=None
             if intent is None:
