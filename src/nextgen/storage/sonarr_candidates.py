@@ -46,6 +46,47 @@ def next_candidate(db, *, plan_id, episode):
     return row
 
 
+def activate_candidate(db, *, plan_id, episode, info_hash):
+    """Activate only the next untried hash; caller still needs normal verification.
+
+    A repeated activation of the same choice is idempotent. Fail closed when
+    another candidate is already active or selection order changes.
+    """
+    if not db.in_transaction:
+        raise CandidateConflict()
+    digest=infohash(info_hash)
+    active=db.execute(
+        "SELECT info_hash FROM sonarr_episode_candidates "
+        "WHERE plan_id=? AND tvdb_episode=? AND state='ACTIVE'",
+        (plan_id,episode)).fetchall()
+    if active:
+        if active==[(digest,)]:
+            return False
+        raise CandidateConflict()
+    next_row=next_candidate(db,plan_id=plan_id,episode=episode)
+    if next_row is None or next_row[1]!=digest:
+        raise CandidateConflict()
+    changed=db.execute(
+        "UPDATE sonarr_episode_candidates SET state='ACTIVE' "
+        "WHERE plan_id=? AND tvdb_episode=? AND rank=? AND state='READY'",
+        (plan_id,episode,next_row[0]))
+    if changed.rowcount!=1:
+        raise CandidateConflict()
+    return True
+
+
+def succeed_candidate(db, *, plan_id, episode, info_hash):
+    """Mark a completed candidate only after existing staging has succeeded."""
+    if not db.in_transaction:
+        raise CandidateConflict()
+    changed=db.execute(
+        "UPDATE sonarr_episode_candidates SET state='SUCCEEDED' "
+        "WHERE plan_id=? AND tvdb_episode=? AND info_hash=? AND state='ACTIVE'",
+        (plan_id,episode,infohash(info_hash)))
+    if changed.rowcount!=1:
+        raise CandidateConflict()
+
+
 def fail_candidate(db, *, plan_id, episode, info_hash, reason_code):
     """Only a previously active choice may become definitively failed."""
     if not db.in_transaction or type(reason_code) is not str or not reason_code:
