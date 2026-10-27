@@ -6,7 +6,7 @@ import sqlite3
 import unittest
 
 from src.nextgen.acquisition.contracts import AcquisitionInput
-from src.nextgen.acquisition.metadata import TorrentFile, ObservedInventory, AcquisitionConflict
+from src.nextgen.acquisition.metadata import TorrentFile, ObservedInventory, AcquisitionConflict, MetadataInvalid
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.storage.job_queue import Claim
@@ -115,6 +115,20 @@ class MagnetJournalTests(unittest.TestCase):
             (TorrentFile(0,'Example S01E10.mkv',124),),0)
         with self.assertRaises(AcquisitionConflict):
             self.journal.capture(self.claim,intent,self.source,changed)
+
+    def test_qb_inventory_cannot_disguise_multiple_videos_as_single_episode(self):
+        with self.assertRaises(MetadataInvalid):
+            ObservedInventory(HASH,(
+                TorrentFile(0,'Example S01E10.mkv',100),
+                TorrentFile(1,'Other S01E11.mkv',100),
+            ),0)
+
+    def test_qb_inventory_rejects_unsafe_extra_file_type(self):
+        with self.assertRaises(MetadataInvalid):
+            ObservedInventory(HASH,(
+                TorrentFile(0,'Example S01E10.mkv',100),
+                TorrentFile(1,'run.sh',2),
+            ),0)
 
     def test_mismatched_owned_marker_needs_review(self):
         intent,_,_=self.journal.authorize(
