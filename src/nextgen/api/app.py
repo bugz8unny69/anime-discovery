@@ -308,32 +308,24 @@ class Application:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 exact(body,('action','job_ids'))
                 action,ids=body['action'],body['job_ids']
-                if action not in ('cancel','retry','cleanup') or type(ids) is not list or not 1<=len(ids)<=5 or (
-                        any(type(job) is not int or not 1<=job<=(1<<63)-1 for job in ids)) or len(set(ids))!=len(ids):
+                if type(action) is not str or action not in ('cancel','retry','cleanup') or (
+                        type(ids) is not list or not 6<=len(ids)<=100 or
+                        any(type(job) is not int or not 1<=job<=(1<<63)-1 for job in ids) or
+                        len(set(ids))!=len(ids)):
                     raise ApiError(400,'API_REQUEST_INVALID')
-                database=configuration.value('storage.database_path')
-                actions=ManagementActions(database)
-                results=[]
-                for job in ids:
-                    try:
-                        if action=='retry':
-                            with actions.queue.connection() as db:
-                                snapshot=db.execute('SELECT attempt_count,last_reason_code FROM jobs WHERE job_id=?',(job,)).fetchone()
-                            if snapshot is None:raise ActionNotFound()
-                            retry=request_review_retry(database,job,expected_attempt=snapshot[0],expected_reason=snapshot[1])
-                            status=202
-                            receipt={'job_id':job,'reused':retry.outcome=='ALREADY_QUEUED',
-                                     'status_url':f'/api/v1/jobs/{job}'}
-                        else:
-                            status,receipt,records=actions.submit(job,action)
-                            for record in records:log_history(self.logger,record)
-                        results.append({'job_id':job,'accepted':True,'status':status,
-                                        'status_url':receipt.get('status_url',f'/api/v1/jobs/{job}'),
-                                        'reused':receipt.get('reused',False)})
-                    except (ActionUnavailable,RetryNotAllowed,RetryStale):
-                        results.append({'job_id':job,'accepted':False,
-                                        'error':CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE')})
-                return 200,{'results':results,'accepted':sum(item['accepted'] for item in results)},[]
+                queue=JobQueue(configuration.value('storage.database_path'))
+                from src.nextgen.storage.sqlite import transaction,enqueue_job_with_receipt
+                from src.nextgen.jobs.bulk_manage_jobs_job import KIND
+                with queue.connection() as db,transaction(db):
+                    placeholders=','.join('?' for _ in ids)
+                    found=db.execute('SELECT count(*) FROM jobs WHERE job_id IN ('+placeholders+')',ids).fetchone()[0]
+                    if found!=len(ids):raise ApiError(400,'API_REQUEST_INVALID')
+                    batch,audit=enqueue_job_with_receipt(db,kind=KIND,payload={'action':action,'job_ids':ids},component='api')
+                log_history(self.logger,audit)
+                location=f'/api/v1/jobs/{batch}'
+                return 202,{'job_id':batch,'state':'PENDING','status_url':location,
+                    'history_url':location+'/history','count':len(ids),
+                    'notification':CATALOG.reason('MANAGEMENT_JOB_SUBMITTED')},[(b'location',location.encode())]
             match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|reject|cancel|cleanup|cancellation|retry)',path)
             if match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
