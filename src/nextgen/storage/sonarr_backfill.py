@@ -162,6 +162,8 @@ def load_fallback(database,plan_id,episode):
         return FallbackTarget(
             VerifiedEpisode(row[0],row[2],row[1],episode),
             row[3],pending[1])
+    except (sqlite3.Error,OSError,MigrationError):
+        raise QueueUnavailable() from None
     finally:
         if db is not None:db.close()
 
@@ -172,6 +174,7 @@ def persist_fallback(db,claim,value):
         CandidateConflict,activate_candidate,next_candidate)
     from src.nextgen.acquisition.sonarr_search import _magnet_hash
     from src.nextgen.storage.sonarr_dispatch import dispatch as dispatch_source
+    from src.nextgen.storage.sonarr_selection import SelectionConflict
     if (not db.in_transaction or type(value) is not FallbackCompletion
             or claim.kind!='DISCOVER_SONARR_BACKFILL'
             or claim.event_id is None):
@@ -227,7 +230,7 @@ def persist_fallback(db,claim,value):
         activate_candidate(db,plan_id=plan.plan_id,episode=episode,
                            info_hash=target.next_hash)
         routed=dispatch_source(db,claim,plan,choice)
-    except CandidateConflict:raise BackfillConflict() from None
+    except (CandidateConflict,SelectionConflict):raise BackfillConflict() from None
     receipt=append_job_history(db,job_id=claim.job_id,
         event_code='SONARR_BACKFILL_OBSERVED',component='worker',
         occurred_at_ms=integer(time.time_ns()//1_000_000),
