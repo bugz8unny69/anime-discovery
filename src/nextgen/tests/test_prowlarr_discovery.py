@@ -118,6 +118,14 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(candidates(releases, aliases=("Shiki [S02]",), season=1,
                                     wanted_episodes=[10]), [])
 
+    def test_multi_episode_range_does_not_claim_one_episode(self):
+        matches = candidates([
+            item("Shiki - 10-11 [1080p]", HASH10),
+            item("Shiki - 10 & 11 [1080p]", HASH11),
+            item("Shiki - 10 [1080p]", HASH12),
+        ], aliases=("Shiki",), season=1, wanted_episodes=[10, 11])
+        self.assertEqual([m["info_hash"] for m in matches], [HASH12])
+
     def test_no_arbitrary_data_can_create_targets(self):
         with self.assertRaises(ValueError):
             candidates([], aliases=[], season=1, wanted_episodes=[10])
