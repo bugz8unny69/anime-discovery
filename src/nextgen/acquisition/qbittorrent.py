@@ -320,7 +320,7 @@ class Client:
         if (type(intent) is not MagnetIntent or type(permit) is not MagnetPermit
                 or intent.options!=self.options or intent.api_major!=self.major
                 or intent.state!='UNCERTAIN'
-                or self.metadata_strategy!='legacy_poll'
+                or self.metadata_strategy not in ('legacy_poll','guarded_export')
                 or _magnet_hash(magnet)!=intent.info_hash
                 or not self.options.download_root.endswith('/ad-'+intent.marker)):
             raise ClientInvalid()
@@ -346,7 +346,7 @@ class Client:
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         if (type(intent) is not MagnetIntent or intent.state!='UNCERTAIN'
                 or intent.options!=self.options or intent.api_major!=self.major
-                or self.metadata_strategy!='legacy_poll'
+                or self.metadata_strategy not in ('legacy_poll','guarded_export')
                 or type(attempts) is not int or not 1<=attempts<=20
                 or type(interval) not in (int,float) or not 0<=interval<=2):
             raise ClientInvalid()
@@ -392,7 +392,7 @@ class Client:
         if (type(intent) is not MagnetIntent or intent.options!=self.options
                 or intent.api_major!=self.major
                 or intent.state not in ('UNCERTAIN','OWNED_STOPPED')
-                or self.metadata_strategy!='legacy_poll'):
+                or self.metadata_strategy not in ('legacy_poll','guarded_export')):
             raise ClientInvalid()
         before=self.inspect(intent.info_hash)
         if (before is None or before.category!=intent.options.category
