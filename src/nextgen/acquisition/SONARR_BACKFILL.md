@@ -165,6 +165,33 @@ separate, independently verified and durably recorded selection/provenance
 operation with cancellation and duplicate handling. Do not substitute a
 Sonarr-guid magnet for that operation.
 
+## Durable source choice foundation (SQLite v43)
+
+Version 43 fixes the old `exact <= approved` observation constraint:
+NextGen's locally eligible count and Sonarr's approved count are independent.
+For example, `approved=0, exact=16, candidates=308` is valid.
+
+A small `sonarr_episode_selections` table records exactly one normalized
+torrent info hash for a recognized episode within a frozen Intake plan.
+`storage.sonarr_selection.select` requires the call to run inside an
+already admitted SQLite write transaction. It uses existing
+`recognized_episodes`, `trial_plans`, and both active reservation
+namespaces to reject unknown identities, out-of-window episodes,
+competing reservations, hashes reused for multiple episodes, and
+conflicting selections. Repeating the identical choice is idempotent.
+
+This receipt does **not** replace the incoming event's torrent hash,
+invent an AniDB verification, reserve an episode, enqueue any worker job,
+or authorize a torrent submission. It also does not yet fetch torrent
+metainfo for independently discovered hashes. A future small worker
+integration must perform source selection in a fenced transaction and
+hand verified metainfo into the existing preparation/submission machinery.
+Until then, the selection function is an unwired foundation.
+
+Do not deploy the v43 schema without the compatible worker version and
+an explicit maintenance migration. The v42 SQL file is unchanged; v43
+provides an additive upgrade and fixes the observational constraint.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
