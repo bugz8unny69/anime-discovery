@@ -161,13 +161,6 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
             ClientUnavailable,ClientAuthenticationFailed,ClientInvalid,ClientUnsupported,
         )
         try:
-            client=SonarrClient.from_context(configuration,sonarr_secrets)
-            result=await blocking(client.search,identity)
-            chosen=next((row for row in result.candidates
-                         if row.info_hash==source.info_hash
-                         and client.policy.accepts(row)),None)
-            if chosen is None:
-                raise MetadataSourceWaiting()
             qb=QbClient(download_options(configuration),
                         await blocking(sonarr_secrets.qbittorrent_credentials))
             await blocking(qb.login)
@@ -175,6 +168,13 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
                 # Older qBittorrent needs a pre-manifest send journal;
                 # the existing .torrent source remains the safe fallback.
                 raise fallback_error
+            client=SonarrClient.from_context(configuration,sonarr_secrets)
+            result=await blocking(client.search,identity)
+            chosen=next((row for row in result.candidates
+                         if row.info_hash==source.info_hash
+                         and client.policy.accepts(row)),None)
+            if chosen is None:
+                raise MetadataSourceWaiting()
             resolved=await blocking(qb.fetch_metadata,chosen.magnet_url,source.info_hash)
             if resolved is None:raise MetadataSourceWaiting()
             if cancelled.is_set():raise asyncio.CancelledError()
