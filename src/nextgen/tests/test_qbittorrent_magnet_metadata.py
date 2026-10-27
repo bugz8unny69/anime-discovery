@@ -60,6 +60,30 @@ class MagnetMetadataTests(unittest.TestCase):
         client._transport=lambda request,timeout:Response()
         self.assertIsNone(client.fetch_metadata(HASH,HASH))
 
+    def test_save_metadata_conflict_remains_pending(self):
+        import io
+        import urllib.error
+        class Response:
+            headers={}
+            def __init__(self,code,raw):
+                self.code,self.raw=code,raw
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def getcode(self):return self.code
+            def read(self,size):return self.raw
+        client=self.client((2,11,9))
+        client.options.base_url='http://localhost:8080'
+        client.options.timeout_seconds=5
+        requests=[]
+        def transport(request,timeout):
+            requests.append(request.full_url)
+            if request.full_url.endswith('saveMetadata'):
+                raise urllib.error.HTTPError(request.full_url,409,'pending',{},io.BytesIO())
+            return Response(200,b'{"infohash_v1":"'+HASH.encode()+b'","info":{}}')
+        client._transport=transport
+        self.assertIsNone(client.fetch_metadata(HASH,HASH))
+        self.assertEqual(len(requests),2)
+
     def test_hash_only_response_is_pending_not_ready(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{"infohash_v1":"'+HASH.encode()+b'"}',{})
