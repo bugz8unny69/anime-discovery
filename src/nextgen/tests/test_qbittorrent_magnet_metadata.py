@@ -23,8 +23,8 @@ class MagnetMetadataTests(unittest.TestCase):
 
     def test_version_selection_uses_web_api_not_app_major(self):
         self.assertEqual(self.client((2,11,9)).metadata_strategy,'fetch')
-        self.assertEqual(self.client((2,8,15),4).metadata_strategy,'guarded_bootstrap')
-        self.assertEqual(self.client((2,10,0),5).metadata_strategy,'guarded_bootstrap')
+        self.assertEqual(self.client((2,8,15),4).metadata_strategy,'guarded_export')
+        self.assertEqual(self.client((2,10,0),5).metadata_strategy,'guarded_export')
         self.assertEqual(self.client((2,5,1),4).metadata_strategy,'legacy_poll')
         with self.assertRaises(ClientUnsupported):
             self.client((2,2,9),4).metadata_strategy
@@ -92,6 +92,48 @@ class MagnetMetadataTests(unittest.TestCase):
             client.add_stopped(MAGNET,intent,SendPermit('f'*64))
         self.assertEqual([r.args[0] for r in client._request.call_args_list],
                          ['torrents/add','torrents/info'])
+
+    def test_legacy_metainfo_export_requires_webapi_2814(self):
+        from src.nextgen.acquisition.submission import ClientUnsupported
+        legacy=self.client((2,5,1),4)
+        with self.assertRaises(ClientUnsupported):
+            legacy.export_metainfo(HASH)
+        legacy._request.assert_not_called()
+
+    def test_legacy_probe_requires_proven_ownership_and_two_stable_reads(self):
+        import json
+        client=self.client((2,5,1),4)
+        root='/media/downloads/ad-'+'c'*32
+        client.options.download_root=root
+        row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
+             'save_path':root,'category':'anime','state':'pausedDL'}
+        files=[{'name':'episode.mkv','size':1024}]
+        client._request.side_effect=[
+            (json.dumps([row]).encode(),{}),(json.dumps(files).encode(),{}),
+            (json.dumps([row]).encode(),{}),(json.dumps(files).encode(),{}),
+        ]
+        result=client.inspect_legacy_metadata(HASH,'c'*32,root)
+        self.assertEqual(len(result.files),1)
+        self.assertEqual(client._request.call_count,4)
+        client._request.reset_mock()
+        with self.assertRaises(ClientInvalid):
+            client.inspect_legacy_metadata(HASH,'d'*32,root)
+
+    def test_legacy_probe_rejects_changed_inventory(self):
+        import json
+        client=self.client((2,5,1),4)
+        root='/media/downloads/ad-'+'c'*32
+        client.options.download_root=root
+        row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
+             'save_path':root,'category':'anime','state':'pausedDL'}
+        client._request.side_effect=[
+            (json.dumps([row]).encode(),{}),
+            (json.dumps([{'name':'episode.mkv','size':1024}]).encode(),{}),
+            (json.dumps([row]).encode(),{}),
+            (json.dumps([{'name':'different.mkv','size':1024}]).encode(),{}),
+        ]
+        with self.assertRaises(ClientInvalid):
+            client.inspect_legacy_metadata(HASH,'c'*32,root)
 
     def test_42_file_lists_without_index_use_stable_response_order(self):
         import json
