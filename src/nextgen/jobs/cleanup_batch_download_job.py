@@ -13,7 +13,7 @@ from src.nextgen.acquisition.metainfo_source import (
 )
 from src.nextgen.async_io import blocking
 from src.nextgen.batch_decision_cleanup import BatchDecisionCleanup
-from src.nextgen.cancellation import CancellationError
+from src.nextgen.cancellation import CancellationError, CleanupBusy
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
@@ -88,6 +88,9 @@ def registration(read_batch_metainfo,secrets,*,
             return Outcome('retry',exc.reason_code)
         except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:
             return Outcome('review',exc.reason_code)
+        except CleanupBusy:
+            return Outcome('defer','DECISION_DOWNLOAD_CLEANUP_WAITING',
+                           delay_ms=1000)
         except (ClientUnavailable,):
             return Outcome('retry','DECISION_DOWNLOAD_CLEANUP_UNAVAILABLE')
         except (CancellationError,ClientInvalid,ClientAuthenticationFailed,

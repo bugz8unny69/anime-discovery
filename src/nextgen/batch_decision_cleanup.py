@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from src.nextgen.acquisition.cleanup import FileCleanup
 from src.nextgen.acquisition.owned_cleanup import OwnedCleanup
 from src.nextgen.acquisition.qbittorrent import Client
-from src.nextgen.cancellation import CancellationError
+from src.nextgen.cancellation import CancellationError, OperationGate
 from src.nextgen.history import append_job_history, job_attempt, integer
 from src.nextgen.storage.batch_acquisition_candidate import _candidate
 from src.nextgen.storage.batch_submission_journal import _intent
@@ -33,6 +33,23 @@ def batch_cleanup_intent(intent):
                 files=intent.inventory.files)))
 
 
+def protected_staging_roots(publications):
+    """Use pinned staging paths, not only the worker's current settings."""
+    roots=set()
+    try:
+        for row in publications:
+            plan=json.loads(row[2])
+            if (plan.get('transfer')!='COPY'
+                    or type(plan.get('root')) is not str):
+                raise CancellationError()
+            roots.add(plan['root'])
+    except (TypeError,ValueError,KeyError,IndexError):
+        raise CancellationError() from None
+    if not roots:
+        raise CancellationError()
+    return tuple(sorted(roots))
+
+
 class BatchDecisionCleanup(OwnedCleanup):
     cleanup_event='DECISION_DOWNLOAD_CONTROL_RECORDED'
     complete_reason='DECISION_DOWNLOAD_CLEANUP_COMPLETE'
@@ -47,6 +64,7 @@ class BatchDecisionCleanup(OwnedCleanup):
         self.guard=self._fence
         self.claim=None
         self.decision=None
+        self.cancelled=None
 
     def _log(self,records):
         pass  # Audit receipts are committed by the shared journal.
@@ -89,15 +107,18 @@ class BatchDecisionCleanup(OwnedCleanup):
                 "WHERE job_id=? AND operation_id=? AND decision='REJECT'",
                 (self.decision,op)).fetchone()
             if decided!=('COMPLETE',):raise CancellationError()
+        protected=protected_staging_roots(staged)
         plan=staged[0][0]
         source=db.execute(
             "SELECT s.reservation_job_id,s.info_hash,s.info_sha256,s.state "
             "FROM batch_torrent_submissions s WHERE s.plan_id=?",
             (plan,)).fetchone()
         if source is None or source[3]!='OWNED_STOPPED':raise CancellationError()
-        return op,plan,source[0],source[1],source[2]
+        return op,plan,source[0],source[1],source[2],protected
 
     def _fence(self,db=None):
+        if self.cancelled is not None and self.cancelled.is_set():
+            raise CancellationError()
         if db is not None:
             return self.facts(db)
         with self.queue.connection() as connection,transaction(connection):
@@ -105,7 +126,7 @@ class BatchDecisionCleanup(OwnedCleanup):
 
     def source_hash(self,claim,decision):
         integer(decision,positive=True)
-        self.claim,self.decision=claim,decision
+        self.claim,self.decision,self.cancelled=claim,decision,None
         with self.queue.connection() as db,transaction(db):
             return self.facts(db)[3]
 
@@ -153,10 +174,10 @@ class BatchDecisionCleanup(OwnedCleanup):
         self._log((audit,))
 
     def run(self,claim,decision,inventory,cancelled):
-        self.claim,self.decision=claim,decision
+        self.claim,self.decision,self.cancelled=claim,decision,cancelled
         if cancelled.is_set():raise CancellationError()
         with self.queue.connection() as db,transaction(db):
-            op,plan,reservation,digest,sha=self.facts(db)
+            op,plan,reservation,digest,sha,protected=self.facts(db)
             if (inventory.info_hash,inventory.info_sha256)!=(digest,sha):
                 raise CancellationError()
             candidate=_candidate(db,reservation,inventory,cleanup=True)
@@ -165,5 +186,13 @@ class BatchDecisionCleanup(OwnedCleanup):
             if source is None or source.state!='OWNED_STOPPED':
                 raise CancellationError()
             adapter=batch_cleanup_intent(source)
-        if cancelled.is_set():raise CancellationError()
-        return self._clean_target(op,adapter)
+        # Mirror the single-file cleanup gate: a recovering attempt must not
+        # overtake external qBittorrent I/O from an expired earlier lease.
+        with OperationGate(self.queue.database).hold(op,cleanup=True):
+            self._fence()
+            factory=self.files_factory
+            self.files_factory=lambda target,roots:factory(target,(*roots,*protected))
+            try:
+                return self._clean_target(op,adapter)
+            finally:
+                self.files_factory=factory
