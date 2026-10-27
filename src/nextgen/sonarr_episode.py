@@ -1,0 +1,45 @@
+"""Pure TVDB-to-Sonarr episode matching shared by discovery and Keep."""
+from dataclasses import dataclass
+
+
+class SonarrEpisodeMismatch(ValueError):
+    """Sonarr does not uniquely identify the verified TVDB episode."""
+
+
+def _positive(value):
+    return type(value) is int and value > 0
+
+
+@dataclass(frozen=True)
+class VerifiedEpisode:
+    tvdb_series_id: int
+    tvdb_episode_id: int
+    tvdb_season: int
+    tvdb_episode: int
+
+    def __post_init__(self):
+        if (not _positive(self.tvdb_series_id) or not _positive(self.tvdb_episode_id)
+                or type(self.tvdb_season) is not int or self.tvdb_season < 0
+                or not _positive(self.tvdb_episode)):
+            raise SonarrEpisodeMismatch("Verified TVDB episode identity is invalid.")
+
+
+def resolve_episode(identity, series, episodes):
+    """Return exact (Sonarr series ID, episode ID); never match by titles."""
+    if (type(series) is not dict or type(episodes) is not list
+            or not _positive(series.get('id')) or series.get('tvdbId') != identity.tvdb_series_id):
+        raise SonarrEpisodeMismatch("Sonarr series does not match TVDB.")
+    sid = series['id']
+    matches = [
+        row for row in episodes
+        if type(row) is dict
+        and row.get('seriesId') == sid
+        and type(row.get('seasonNumber')) is int and row['seasonNumber'] == identity.tvdb_season
+        and type(row.get('episodeNumber')) is int and row['episodeNumber'] == identity.tvdb_episode
+    ]
+    if len(matches) != 1 or not _positive(matches[0].get('id')):
+        raise SonarrEpisodeMismatch("Sonarr episode mapping is missing or ambiguous.")
+    match = matches[0]
+    if match.get('tvdbId') not in (None, 0, identity.tvdb_episode_id):
+        raise SonarrEpisodeMismatch("Sonarr episode has a different TVDB ID.")
+    return sid, match['id']
