@@ -83,6 +83,57 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_episode_selections"),
                          [(0,)])
 
+    async def test_recognized_candidate_is_selected_without_download(self):
+        from src.nextgen.acquisition.sonarr_search import CandidateSelection, Release, SearchResult, DiscoveryPolicy
+        from src.nextgen.sonarr_episode import VerifiedEpisode
+
+        self.source(10)
+        _, release_job, _ = self.source(1)
+        db = connect(self.database)
+        try:
+            with db:
+                db.execute(
+                    "INSERT INTO recognized_seasons VALUES(456,1,123,'Test',?,1)",
+                    (db.execute("SELECT verification_id FROM release_verifications "
+                                "WHERE job_id=?", (release_job,)).fetchone()[0],))
+                db.execute(
+                    "INSERT INTO recognized_episodes VALUES(456,1,123,1,11001,1,111001,?,1)",
+                    (db.execute("SELECT verification_id FROM release_verifications "
+                                "WHERE job_id=?", (release_job,)).fetchone()[0],))
+        finally:
+            db.close()
+
+        class VerifiedFake(FakeDiscovery):
+            def backfill(self, tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None, select_candidates=False):
+                assert select_candidates is True
+                result = list(super().backfill(tvdb_series_id,season,numbers,
+                                              reserved=reserved,verified_ids=verified_ids))
+                assert verified_ids.get(1) == 111001
+                release = Release('Test S01E01', 'Nyaa', 'torrent', '1080p',
+                                  1080, 0, 9, 0, 123456789, False,
+                                  ('Sonarr quality rejected',), (901,), 'exact',
+                                  'a'*40, 'magnet:?xt=urn:btih:'+'a'*40, True)
+                result[0] = BackfillObservation(
+                    1,901,111001,'CANDIDATES',1,0,1,
+                    CandidateSelection(VerifiedEpisode(456,111001,1,1),
+                                       SearchResult(90,901,(release,)),release,DiscoveryPolicy()))
+                return tuple(result)
+
+        trial = trial_registration(discovery_kind=DISCOVER_KIND)
+        registry = Registry((trial, discovery_registration(None,
+            client_factory=lambda config,secrets:VerifiedFake(),select_candidates=True)))
+        worker = Worker(self.store,self.startup,registry,policy=Policy(lease_ms=30000))
+        self.addAsyncCleanup(worker.close)
+        await worker.attempt()
+        await worker.attempt()
+        self.assertEqual(self.rows(
+            "SELECT tvdb_episode,tvdb_episode_id,info_hash FROM sonarr_episode_selections"),
+            [(1,111001,'a'*40)])
+        self.assertEqual(self.rows(
+            "SELECT candidates,approved,exact FROM sonarr_backfill_results WHERE tvdb_episode=1"),
+            [(1,0,1)])
+        self.assertEqual(self.rows("SELECT COUNT(*) FROM torrent_submissions"),[(0,)])
+
     async def test_opt_in_off_means_no_new_discovery_jobs(self):
         self.source(10)
         worker = self.worker(FakeDiscovery(),enabled=False)
