@@ -46,6 +46,8 @@ def admit_candidate(*, result, release, identity, source, metainfo, policy,
             or _magnet_hash(release.magnet_url) != source.info_hash):
         raise AcquisitionConflict()
     manifest = parse_metainfo(metainfo, source.info_hash)
+    if type(manifest) is not Manifest:
+        raise AcquisitionConflict()
     validate_declaration(source, manifest)
     limits.admit(manifest.files[manifest.selected_index].size)
     return AdmittedCandidate(source, manifest, release.resolution, release.seeders)
