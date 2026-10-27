@@ -137,6 +137,9 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             "SELECT candidates,approved,exact FROM sonarr_backfill_results WHERE tvdb_episode=1"),
             [(1,0,1)])
         self.assertEqual(self.rows("SELECT COUNT(*) FROM torrent_submissions"),[(0,)])
+        self.assertEqual(self.rows(
+            "SELECT state FROM sonarr_episode_candidates WHERE plan_id=1 AND tvdb_episode=1"),
+            [('ACTIVE' if acquire else 'READY',)])
 
         events=self.rows("SELECT raw_body,state FROM incoming_events WHERE source='sonarr-discovery'")
         if acquire:
