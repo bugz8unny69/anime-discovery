@@ -37,6 +37,17 @@ def dispatch(db, claim, plan, choice):
         "AND r.tvdb_episode_id=e.tvdb_episode_id",
         (plan.anidb_id,identity.tvdb_series_id,identity.tvdb_season,
          identity.tvdb_episode,identity.tvdb_episode_id)).fetchone()
+    if row is None:
+        # Newly discovered backfill episodes have no incoming verification yet.
+        # Copy only the already verified series identity from the frozen anchor.
+        row=db.execute(
+            "SELECT i.series_json, NULL FROM trial_plans p "
+            "JOIN release_verifications r ON r.verification_id=p.anchor_verification_id "
+            "JOIN identity_results i ON i.result_id=r.identity_result_id "
+            "WHERE p.plan_id=? AND p.anidb_id=r.anidb_id "
+            "AND p.tvdb_series_id=r.tvdb_series_id AND p.tvdb_season=r.tvdb_season",
+            (plan.plan_id,)
+        ).fetchone()
     if row is None: raise SelectionConflict()
     try:
         # The release declaration is rechecked by VERIFY_RELEASE and then the
@@ -44,10 +55,11 @@ def dispatch(db, claim, plan, choice):
         from src.nextgen.providers.release_mapping import declared_episode
         origin,season,episode=declared_episode(choice.release.title)
         if ((origin=='tvdb' and (season,episode)!=(identity.tvdb_season,identity.tvdb_episode))
-                or (origin=='anidb' and episode!=row[1])):
+                or (origin=='anidb' and row[1] is not None and episode!=row[1])):
             raise SelectionConflict()
         validated=parse_payload(row[0])
-        if validated.get('anime',{}).get('anidb_id')!=plan.anidb_id:
+        if (validated.get('anime',{}).get('anidb_id')!=plan.anidb_id
+                or validated['anime'].get('tvdb_series_id')!=plan.tvdb_series_id):
             raise SelectionConflict()
         body=json.dumps({'release_name':choice.release.title,
                          'torrent_infohash':choice.release.info_hash},
