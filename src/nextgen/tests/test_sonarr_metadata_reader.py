@@ -61,7 +61,7 @@ class SonarrMetadataReaderTests(unittest.IsolatedAsyncioTestCase):
         self.qb.add_stopped.assert_not_called()
 
     async def test_legacy_client_does_not_add_unverified_magnet(self):
-        self.qb.metadata_strategy='guarded_bootstrap'
+        self.qb.metadata_strategy='guarded_export'
         reader=make_reader(sonarr_secrets=self.secrets)
         with self.assertRaises(MetadataSourceConfigurationError):
             await reader(self.source,self.configuration,asyncio.Event())
