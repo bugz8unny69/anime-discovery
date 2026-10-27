@@ -17,6 +17,13 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('SONARR_BACKFILL_PLAN_CONFLICT','Frozen backfill scope or stored search receipt did not match the worker plan.','Backfill discovery needs review.','Check the immutable episode window and persisted discovery receipts; no download occurred.','WARNING',False),
+    Reason('SONARR_DISCOVERY_EPISODE_NOT_FOUND','The verified TVDB series is not currently present in Sonarr.','Waiting for the anime to be registered in Sonarr.','Register the correct series in Sonarr before resuming discovery; no torrent was grabbed.','WARNING',False),
+    Reason('SONARR_DISCOVERY_AUTH_FAILED','Sonarr rejected the configured API key.','Sonarr search authentication failed.','Check the existing Sonarr API key, then resume discovery.','WARNING',False),
+    Reason('SONARR_DISCOVERY_UNSUPPORTED','The connected Sonarr server is not a supported v4 instance.','Sonarr discovery requires v4.','Check Sonarr version and the configured address.','WARNING',False),
+    Reason('SONARR_DISCOVERY_CONFIGURATION_INVALID','The Sonarr address, key or search timeout is not configured.','Configure Sonarr before backfill discovery.','Set the existing Sonarr connection and API key; no download occurred.','WARNING',False),
+    Reason('SONARR_DISCOVERY_REVIEW','Sonarr interactive search returned ambiguous or invalid mapping or release evidence.','Sonarr discovery needs review.','Inspect Sonarr release mapping and indexer responses, then retry.','WARNING',False),
+    Reason('SONARR_DISCOVERY_UNAVAILABLE','Sonarr or its interactive search is temporarily unavailable.','Sonarr discovery will retry.','Check Sonarr and indexer availability.','WARNING',True),
     Reason('SHOKO_CONFIGURATION_INVALID','Optional Shoko address or API key is missing or rejected.','Configure optional Shoko metadata.','Update Shoko settings/credentials, then retry Shoko metadata. The episode remains kept.','WARNING',False),
     Reason('SHOKO_UNAVAILABLE','Optional Shoko metadata could not be read.','Optional Shoko metadata will retry.','Check Shoko availability. Keep and cleanup remain independent.','WARNING',True),
     Reason('SHOKO_METADATA_REVIEW','Shoko did not return the expected AniDB anime and episode records.','Optional Shoko metadata needs review.','Check the Shoko catalog and saved AniDB IDs, then retry Shoko metadata. The Sonarr mapping is unchanged.','WARNING',False),
