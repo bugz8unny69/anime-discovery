@@ -109,9 +109,43 @@ def _prior(db,event_id):
     return None if row is None else _restore(row)
 
 
+def _matches_prior(prior,claim,source,options,api_major):
+    return (prior.job_id==claim.job_id
+            and prior.event_id==source.event_id
+            and prior.info_hash==source.info_hash
+            and prior.api_major==api_major
+            and prior.options.base_url==options.base_url
+            and prior.options.category==options.category
+            and prior.options.timeout_seconds==options.timeout_seconds
+            and prior.options.download_root==str(
+                PurePosixPath(options.download_root)/('ad-'+prior.marker)))
+
+
 class MagnetJournal:
     def __init__(self,database,*,clock=None):
         self.queue=JobQueue(database,clock=clock)
+
+    def existing(self,claim,source,options,api_major):
+        """Read original admission for crash recovery without a Sonarr call.
+
+        Ownership remains scoped to the same worker job, verified reservation,
+        client endpoint, category and isolated download destination.
+        """
+        if (type(claim) is not Claim or claim.kind!='PREPARE_ACQUISITION'
+                or type(source) is not AcquisitionInput
+                or claim.event_id!=source.event_id
+                or type(options) is not DownloadOptions
+                or type(api_major) is not int or api_major!=4):
+            raise AcquisitionConflict()
+        with self.queue.connection() as db,transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            if _source(db,source.evaluation_job_id,source.event_id)!=source:
+                raise AcquisitionConflict()
+            prior=_prior(db,source.event_id)
+            if prior is not None and not _matches_prior(
+                    prior,claim,source,options,api_major):
+                raise AcquisitionConflict()
+            return prior
 
     def authorize(self,claim,source,options,api_major,present):
         """Commit irreversible uncertainty before issuing a send permit.
@@ -132,12 +166,7 @@ class MagnetJournal:
             plan_id,episode=_verified_candidate(db,source)
             prior=_prior(db,source.event_id)
             if prior is not None:
-                expected=DownloadOptions(options.base_url,prior.options.download_root,
-                                         options.category,options.timeout_seconds)
-                if (prior.job_id!=claim.job_id or prior.info_hash!=source.info_hash
-                        or prior.api_major!=api_major or expected!=prior.options
-                        or prior.options.download_root!=str(
-                            PurePosixPath(options.download_root)/('ad-'+prior.marker))):
+                if not _matches_prior(prior,claim,source,options,api_major):
                     raise AcquisitionConflict()
                 return prior,None,()
             if db.execute(
