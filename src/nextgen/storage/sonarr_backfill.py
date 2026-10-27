@@ -120,6 +120,115 @@ def schedule_first(db, claim, source, *, kind):
     return (receipt,)
 
 
+
+@dataclass(frozen=True)
+class FallbackTarget:
+    """Current failed selection and next stored, untried candidate."""
+    identity: object
+    failed_hash: str
+    next_hash: str
+
+
+@dataclass(frozen=True)
+class FallbackCompletion:
+    plan: BackfillBatch
+    episode: int
+    target: FallbackTarget
+    selection: CandidateSelection
+
+
+def load_fallback(database,plan_id,episode):
+    """Read the next candidate without changing any selection or sending."""
+    from src.nextgen.sonarr_episode import VerifiedEpisode
+    from src.nextgen.storage.sonarr_candidates import next_candidate
+    db=None
+    try:
+        db=_open(database,readonly=True,timeout_ms=5000)
+        db.execute('BEGIN')
+        if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:
+            raise QueueUnavailable()
+        row=db.execute(
+            "SELECT p.tvdb_series_id,p.tvdb_season,s.tvdb_episode_id,s.info_hash "
+            "FROM trial_plans p JOIN sonarr_episode_selections s USING(plan_id) "
+            "WHERE p.plan_id=? AND s.tvdb_episode=?",
+            (plan_id,episode)).fetchone()
+        if row is None:raise BackfillConflict()
+        failed=db.execute(
+            "SELECT state FROM sonarr_episode_candidates WHERE plan_id=? "
+            "AND tvdb_episode=? AND info_hash=?",
+            (plan_id,episode,row[3])).fetchone()
+        pending=next_candidate(db,plan_id=plan_id,episode=episode)
+        if failed!=('FAILED',) or pending is None:raise BackfillConflict()
+        return FallbackTarget(
+            VerifiedEpisode(row[0],row[2],row[1],episode),
+            row[3],pending[1])
+    finally:
+        if db is not None:db.close()
+
+
+def persist_fallback(db,claim,value):
+    """Replace a failed current choice only after operation cleanup is complete."""
+    from src.nextgen.storage.sonarr_candidates import (
+        CandidateConflict,activate_candidate,next_candidate)
+    from src.nextgen.acquisition.sonarr_search import _magnet_hash
+    from src.nextgen.storage.sonarr_dispatch import dispatch as dispatch_source
+    if (not db.in_transaction or type(value) is not FallbackCompletion
+            or claim.kind!='DISCOVER_SONARR_BACKFILL'
+            or claim.event_id is None):
+        raise BackfillConflict()
+    plan,episode,target,choice=value.plan,value.episode,value.target,value.selection
+    if (type(plan) is not BackfillBatch or episode not in plan.numbers
+            or type(target) is not FallbackTarget
+            or type(choice) is not CandidateSelection
+            or choice.identity!=target.identity
+            or choice.release.info_hash!=target.next_hash
+            or _magnet_hash(choice.release.magnet_url)!=target.next_hash
+            or not choice.policy.accepts(choice.release)
+            or not any(x is choice.release for x in choice.result.candidates)
+            or (_plan(db,plan.plan_id,plan.start).anidb_id,
+                _plan(db,plan.plan_id,plan.start).tvdb_series_id,
+                _plan(db,plan.plan_id,plan.start).season)!=(plan.anidb_id,plan.tvdb_series_id,plan.season)):
+        raise BackfillConflict()
+    current=db.execute(
+        "SELECT s.info_hash,c.state FROM sonarr_episode_selections s "
+        "JOIN sonarr_episode_candidates c ON c.plan_id=s.plan_id "
+        "AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=s.info_hash "
+        "WHERE s.plan_id=? AND s.tvdb_episode=? AND s.tvdb_episode_id=?",
+        (plan.plan_id,episode,target.identity.tvdb_episode_id)).fetchone()
+    if current!=(target.failed_hash,'FAILED'):
+        raise BackfillConflict()
+    if db.execute(
+        "SELECT 1 FROM sonarr_episode_candidates WHERE plan_id=? "
+        "AND tvdb_episode=? AND state='ACTIVE'",(plan.plan_id,episode)).fetchone():
+        raise BackfillConflict()
+    pending=next_candidate(db,plan_id=plan.plan_id,episode=episode)
+    if pending is None or pending[1]!=target.next_hash:
+        raise BackfillConflict()
+    # The canceled operation has already released its episode reservation.
+    for table in ('episode_reservations','batch_episode_reservations'):
+        if db.execute(
+            f"SELECT 1 FROM {table} WHERE state='ACTIVE' "
+            "AND tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=? LIMIT 1",
+            (plan.tvdb_series_id,plan.season,episode)).fetchone():
+            raise BackfillConflict()
+    updated=db.execute(
+        "UPDATE sonarr_episode_selections SET info_hash=?,selected_at_ms=? "
+        "WHERE plan_id=? AND tvdb_episode=? AND info_hash=?",
+        (target.next_hash,integer(time.time_ns()//1_000_000),
+         plan.plan_id,episode,target.failed_hash))
+    if updated.rowcount!=1:raise BackfillConflict()
+    try:
+        activate_candidate(db,plan_id=plan.plan_id,episode=episode,
+                           info_hash=target.next_hash)
+        routed=dispatch_source(db,claim,plan,choice)
+    except CandidateConflict:raise BackfillConflict() from None
+    receipt=append_job_history(db,job_id=claim.job_id,
+        event_code='SONARR_BACKFILL_OBSERVED',component='worker',
+        occurred_at_ms=integer(time.time_ns()//1_000_000),
+        details={'attempt':claim.attempt})
+    return (receipt,*routed)
+
+
 def persist_observations(db, claim, value, *, dispatch=False):
     if type(dispatch) is not bool: raise ValueError('invalid dispatch mode')
     if not db.in_transaction or type(value) is not BackfillCompletion:
