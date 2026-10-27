@@ -124,8 +124,9 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             client_factory=lambda config,secrets:VerifiedFake(),select_candidates=True)))
         worker = Worker(self.store,self.startup,registry,policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
-        await worker.attempt()
-        await worker.attempt()
+        await worker.attempt()  # First evaluation.
+        await worker.attempt()  # Additional episode evaluation.
+        await worker.attempt()  # Sonarr observation and selection.
         self.assertEqual(self.rows(
             "SELECT tvdb_episode,tvdb_episode_id,info_hash FROM sonarr_episode_selections"),
             [(1,111001,'a'*40)])
