@@ -144,6 +144,16 @@ class BackfillObservation:
     candidates: int = 0
     approved: int = 0
     exact: int = 0
+    # In-memory only; never persisted as Sonarr URLs or raw release data.
+    selection: object = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class CandidateSelection:
+    identity: VerifiedEpisode
+    result: SearchResult = field(repr=False)
+    release: Release = field(repr=False)
+    policy: DiscoveryPolicy
 
 
 def _positive(value):
@@ -323,7 +333,7 @@ class Client:
         return payload
 
 
-    def backfill(self, tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None):
+    def backfill(self, tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None, select_candidates=False):
         """Read-only bounded positional lookup for a frozen backfill window.
 
         Sonarr episode IDs are untrusted discovery hints unless independently
@@ -335,7 +345,8 @@ class Client:
                 or any(not _positive(n) for n in numbers) or len(set(numbers)) != len(numbers)
                 or type(reserved) not in (tuple, frozenset)
                 or any(not _positive(n) for n in reserved)
-                or type(verified_ids) not in (dict, type(None))):
+                or type(verified_ids) not in (dict, type(None))
+                or type(select_candidates) is not bool):
             raise SearchReview()
         verified_ids = verified_ids or {}
         if any(not _positive(n) or not _positive(v) for n, v in verified_ids.items()):
@@ -383,9 +394,16 @@ class Client:
                             for r in self._get('release', {'episodeId': eid}))
             approved = sum(r.approved and not r.rejections and r.scope == 'exact' for r in results)
             exact = sum(self.policy.accepts(r) for r in results)
+            choice = None
+            if select_candidates and verified_ids.get(number) == tid:
+                ranked = self.policy.rank(results)
+                picked = next((item for item in ranked if self.policy.accepts(item)), None)
+                if picked is not None:
+                    choice = CandidateSelection(identity, SearchResult(sid, eid, ranked),
+                                                picked, self.policy)
             output.append(BackfillObservation(number, eid, tid,
                           'CANDIDATES' if results else 'NO_RESULTS',
-                          len(results), approved, exact))
+                          len(results), approved, exact, choice))
         return tuple(output)
 
     def search(self, identity: VerifiedEpisode):
