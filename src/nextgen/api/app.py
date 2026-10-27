@@ -315,7 +315,7 @@ class Application:
                     raise ApiError(400,'API_REQUEST_INVALID')
                 queue=JobQueue(configuration.value('storage.database_path'))
                 from src.nextgen.storage.sqlite import transaction,enqueue_job_with_receipt
-                from src.nextgen.jobs.bulk_manage_jobs_job import KIND
+                from src.nextgen.jobs.management_bulk_job import KIND
                 with queue.connection() as db,transaction(db):
                     placeholders=','.join('?' for _ in ids)
                     found=db.execute('SELECT count(*) FROM jobs WHERE job_id IN ('+placeholders+')',ids).fetchone()[0]
