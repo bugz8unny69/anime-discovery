@@ -7,8 +7,8 @@ open in scope; the complete acquisition/failover assignment is not finished.
 
 - The installed `python -m src.nextgen worker` entry point now accepts
   `--sonarr-acquire`. It enables the existing backfill, source selection,
-  and acquisition registrations together. This is opt-in; service units must
-  explicitly include the flag for Sonarr downloads to run.
+  and acquisition registrations together. The example NextGen systemd worker
+  unit now passes the flag so a deployed worker activates that existing path.
 - The 4.2.5 adapter now permits up to 20 one-second metadata polls during
   each owned resume/pause window instead of the former ~2-second window.
   This improves slow metadata discovery but is not live-daemon validation.
