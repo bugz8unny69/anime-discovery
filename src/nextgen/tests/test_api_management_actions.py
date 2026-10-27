@@ -137,8 +137,8 @@ class ApiManagementActionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status,400)
         self.assertEqual((await self.request('GET','/api/v1/jobs/bulk',token=ADMIN))[0],405)
         self.assertEqual((await self.request('POST','/api/v1/jobs/bulk',body,token=WEB))[0],401)
-        self.assertEqual((await self.request('POST','/api/v1/jobs/bulk',body,token=ADMIN,
-            headers={'X-CSRF-Token':'invalid'}))[0],403)
+        self.assertEqual((await self.request('POST','/api/v1/jobs/bulk',body,
+            headers={'Cookie':self.admin_cookie,'Origin':'https://anime.example'}))[0],403)
         self.assertEqual(self.rows('SELECT count(*) FROM jobs'),[(6,)])
         status,result,headers=await self.request('POST','/api/v1/jobs/bulk',body,token=ADMIN)
         self.assertEqual(status,202)
