@@ -24,7 +24,7 @@ from src.nextgen.jobs.stage_trial_media_job import DEFINITION as stage
 from src.nextgen.jobs.reject_media_job import DEFINITION as reject
 from src.nextgen.jobs.keep_media_job import DEFINITION as keep
 from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanup
-from src.nextgen.jobs.bulk_manage_jobs_job import DEFINITION as bulk
+from src.nextgen.jobs.management_bulk_job import DEFINITION as bulk
 
 from src.nextgen.jobs.refresh_jellyfin_job import DEFINITION as refresh
 
