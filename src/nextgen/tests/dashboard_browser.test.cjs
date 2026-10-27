@@ -10,7 +10,7 @@ const vm = require('node:vm');
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag; this.children = []; this.dataset = {}; this.attributes = {};
-    this.listeners = {}; this.value = ''; this.hidden = false;
+    this.listeners = {}; this.value = ''; this.hidden = false; this.checked = false;
     this.classList = {toggle() {}, add() {}};
   }
   set innerHTML(value) { throw new Error('Untrusted HTML must never be inserted'); }
@@ -311,4 +311,55 @@ test('Retry does not submit if the API capability disables the reviewed step', a
   assert.equal(button.title,'This action is not available.');
   h.ctx.fetch=async () => {throw Error('disabled Retry must not POST');};
   await h.run("submitAction(fixture,'retry')");
+});
+
+test('bulk UI uses individual endpoints for five jobs and queues a worker for six', async () => {
+  for (const count of [5, 6]) {
+    const h = await harness();
+    h.run("state.page='jobs'; state.selected=new Set([" +
+      Array.from({length: count}, (_, i) => i + 1).join(',') + "]);");
+    h.elements.get('bulk-action').value = 'cancel';
+    h.elements.get('show-completed').checked = false;
+    h.elements.get('show-canceled').checked = false;
+    const calls = [];
+    h.ctx.fetch = async (url, options) => {
+      calls.push({url, options});
+      if (options.method === 'POST') {
+        return response({job_id: 81, notification: {message: 'Job submitted.'}});
+      }
+      return response({items: [], next_before_id: null});
+    };
+    await h.run('submitSelected()');
+    const posts = calls.filter(call => call.options.method === 'POST');
+    assert.equal(posts.length, count <= 5 ? count : 1);
+    if (count <= 5) {
+      assert.deepEqual(posts.map(call => call.url), Array.from({length: count},
+        (_, i) => '/api/v1/jobs/' + (i + 1) + '/cancel'));
+      assert.ok(posts.every(call => call.options.headers['X-CSRF-Token'] === 'session-csrf'));
+    } else {
+      assert.equal(posts[0].url, '/api/v1/jobs/bulk');
+      assert.deepEqual(JSON.parse(posts[0].options.body),
+        {action: 'cancel', job_ids: [1,2,3,4,5,6]});
+      assert.match(h.elements.get('notice').textContent, /Bulk job #81/);
+    }
+    assert.ok(calls.some(call => call.url.includes('show_completed=0&show_canceled=0')));
+  }
+});
+test('selected jobs remain selected across filtered pages until explicitly cleared', async () => {
+  const h = await harness();
+  h.run("state.page='jobs'; state.selected=new Set([1,2]);");
+  h.ctx.fixture = target();
+  h.ctx.fixture.job_id = 7;
+  h.ctx.fixture.state = 'PENDING';
+  h.run("state.jobs=[fixture]; renderJobs();");
+  assert.equal(h.elements.get('selection-count').textContent, '2 selected (max 100)');
+  h.elements.get('select-page').checked = true;
+  h.elements.get('select-page').listeners.change();
+  assert.equal(h.run('state.selected.size'), 3);
+  h.ctx.fetch = async () => response({items: [], next_before_id: null});
+  h.elements.get('show-canceled').checked = true;
+  await h.run('resetJobsPage()');
+  assert.equal(h.run('state.selected.size'), 3);
+  h.elements.get('bulk-clear').listeners.click();
+  assert.equal(h.run('state.selected.size'), 0);
 });
