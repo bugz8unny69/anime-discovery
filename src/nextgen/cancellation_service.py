@@ -72,6 +72,15 @@ class CancellationService(OwnedCleanup):
             # Exclusive OperationGate proves participating handlers have drained.
             for (member,) in db.execute('SELECT job_id FROM job_operation_members WHERE operation_id=?',(op[0],)).fetchall():
                 receipts.extend(cancel_job(db,member,now,self.component))
+            # v45 pre-manifest torrents are not yet covered by the manifest-
+            # bounded deletion journal. Never release this operation's
+            # reservation while one could remain in qBittorrent or on disk.
+            pending=db.execute(
+                "SELECT 1 FROM sonarr_magnet_intents i "
+                "JOIN job_operation_members m ON m.job_id=i.job_id "
+                "WHERE m.operation_id=? LIMIT 1",(op[0],)).fetchone()
+            if pending:
+                raise CancellationError()
             rows=db.execute('SELECT p.job_id,j.event_id FROM acquisition_plans p JOIN jobs j ON j.job_id=p.job_id '
                 'JOIN job_operation_members m ON m.job_id=p.job_id WHERE m.operation_id=? ORDER BY p.plan_id',(op[0],)).fetchall()
             if len(rows)>1000:raise CancellationError()
