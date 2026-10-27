@@ -8,6 +8,7 @@ import json
 
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.messages import MessageCatalog, safe_code
+from src.nextgen.reasons import get_reason
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction
 
@@ -42,7 +43,7 @@ class RetryReceipt:
 def _allowed(db, job_id, row):
     kind, state, attempt, reason, token, expiry = row
     if (kind not in RETRY_KINDS or state != 'NEEDS_REVIEW' or attempt <= 0
-            or reason is None or token is not None or expiry is not None):
+            or get_reason(reason) is None or token is not None or expiry is not None):
         return False
     if db.execute('SELECT 1 FROM management_actions WHERE job_id=?', (job_id,)).fetchone():
         return False
@@ -89,7 +90,7 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
         if (state == 'PENDING' and kind in RETRY_KINDS and token is None
                 and expiry is None and db.execute(
                     'SELECT 1 FROM job_operation_members m JOIN job_operations o '
-                    'USING(operation_id) WHERE m.job_id=? AND o.state=\'ACTIVE\'',
+                    "USING(operation_id) WHERE m.job_id=? AND o.state='ACTIVE'",
                     (job_id,)).fetchone()):
             previous = db.execute(
                 "SELECT history_id,details_json FROM job_history WHERE job_id=? "
