@@ -1,0 +1,203 @@
+"""Pre-manifest legacy magnet admission using the existing fenced worker.
+
+The marker is committed before a single network send. Replays can inspect
+qBittorrent but cannot get another send permit. No magnet or passkey in SQLite.
+This is not a replacement for the verified acquisition plan or download journal.
+"""
+from dataclasses import dataclass, field
+from pathlib import PurePosixPath
+import hashlib
+import json
+import re
+import threading
+import uuid
+
+from src.nextgen.acquisition.contracts import AcquisitionInput
+from src.nextgen.acquisition.metadata import AcquisitionConflict, infohash
+from src.nextgen.acquisition.settings import DownloadOptions
+from src.nextgen.acquisition.submission import ClientInvalid, Observation
+from src.nextgen.history import append_job_history
+from src.nextgen.storage.acquisition import _source
+from src.nextgen.storage.job_queue import JobQueue, Claim
+from src.nextgen.storage.sqlite import transaction
+
+STOPPED=frozenset(('pausedDL','pausedUP','stoppedDL','stoppedUP'))
+
+
+@dataclass(frozen=True)
+class MagnetIntent:
+    event_id: int
+    job_id: int
+    info_hash: str
+    marker: str = field(repr=False)
+    options: DownloadOptions = field(repr=False)
+    api_major: int
+    state: str
+    fingerprint: str
+
+    def __post_init__(self):
+        if (type(self.event_id) is not int or self.event_id<=0
+                or type(self.job_id) is not int or self.job_id<=0
+                or infohash(self.info_hash)!=self.info_hash
+                or type(self.marker) is not str
+                or not re.fullmatch('[a-f0-9]{32}',self.marker)
+                or type(self.options) is not DownloadOptions
+                or self.api_major not in (4,5)
+                or self.state not in ('UNCERTAIN','OWNED_STOPPED','REVIEW','EXTERNAL')
+                or type(self.fingerprint) is not str
+                or not re.fullmatch('[a-f0-9]{64}',self.fingerprint)):
+            raise AcquisitionConflict()
+
+
+class MagnetPermit:
+    """The single process-local send right from a newly committed DB intent."""
+    def __init__(self,fingerprint):
+        self.fingerprint=fingerprint
+        self._used=False
+        self._lock=threading.Lock()
+
+    def take(self,intent):
+        with self._lock:
+            if (self._used or type(intent) is not MagnetIntent
+                    or intent.fingerprint!=self.fingerprint):
+                raise ClientInvalid()
+            self._used=True
+
+
+def _fingerprint(event_id,hash_value,marker,options,api_major):
+    body=json.dumps((event_id,hash_value,marker,options.base_url,
+                     options.download_root,options.category,options.timeout_seconds,
+                     api_major),separators=(',',':'))
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
+def _verified_candidate(db,source):
+    """Only a dispatched, provider-verified Sonarr candidate may bootstrap."""
+    if type(source) is not AcquisitionInput:
+        raise AcquisitionConflict()
+    rows=db.execute(
+        "SELECT p.plan_id,c.tvdb_episode FROM incoming_events e "
+        "JOIN jobs verification ON verification.event_id=e.event_id "
+        " AND verification.kind='VERIFY_RELEASE' AND verification.state='DONE' "
+        "JOIN jobs parent ON parent.job_id=verification.created_by_job_id "
+        " AND parent.kind='DISCOVER_SONARR_BACKFILL' "
+        "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+        "JOIN sonarr_episode_selections selected ON selected.plan_id=p.plan_id "
+        "JOIN sonarr_episode_candidates c ON c.plan_id=selected.plan_id "
+        " AND c.tvdb_episode=selected.tvdb_episode AND c.info_hash=selected.info_hash "
+        "WHERE e.event_id=? AND e.source='sonarr-discovery' "
+        "AND p.tvdb_season=? AND selected.tvdb_episode=? "
+        "AND selected.info_hash=? AND c.state='ACTIVE'",
+        (source.event_id,source.tvdb_season,source.tvdb_episode,
+         source.info_hash)).fetchall()
+    if len(rows)!=1:raise AcquisitionConflict()
+    return rows[0]
+
+
+def _restore(row):
+    event_id,job_id,digest,marker,major,endpoint,root,category,timeout,state=row
+    options=DownloadOptions(endpoint,root,category,timeout)
+    return MagnetIntent(event_id,job_id,digest,marker,options,major,state,
+                        _fingerprint(event_id,digest,marker,options,major))
+
+
+def _prior(db,event_id):
+    row=db.execute(
+        "SELECT event_id,job_id,info_hash,marker,api_major,base_url,save_path,"
+        "category,timeout_seconds,state FROM sonarr_magnet_intents WHERE event_id=?",
+        (event_id,)).fetchone()
+    return None if row is None else _restore(row)
+
+
+class MagnetJournal:
+    def __init__(self,database,*,clock=None):
+        self.queue=JobQueue(database,clock=clock)
+
+    def authorize(self,claim,source,options,api_major,present):
+        """Commit irreversible uncertainty before issuing a send permit.
+
+        A later attempt receives the same intent and NO permit even when the
+        torrent is absent. Existing same-hash torrents always remain external.
+        """
+        if (type(claim) is not Claim or claim.kind!='PREPARE_ACQUISITION'
+                or type(source) is not AcquisitionInput or source.event_id!=claim.event_id
+                or type(options) is not DownloadOptions or type(present) is not bool
+                or type(api_major) is not int or api_major!=4):
+            raise AcquisitionConflict()
+        with self.queue.connection() as db,transaction(db):
+            now=self.queue.now()
+            self.queue._owns(db,claim,now)
+            if _source(db,source.evaluation_job_id,source.event_id)!=source:
+                raise AcquisitionConflict()
+            plan_id,episode=_verified_candidate(db,source)
+            prior=_prior(db,source.event_id)
+            if prior is not None:
+                expected=DownloadOptions(options.base_url,prior.options.download_root,
+                                         options.category,options.timeout_seconds)
+                if (prior.job_id!=claim.job_id or prior.info_hash!=source.info_hash
+                        or prior.api_major!=api_major or expected!=prior.options):
+                    raise AcquisitionConflict()
+                return prior,None,()
+            if db.execute(
+                "SELECT 1 FROM acquisition_plans WHERE reservation_id=?",
+                (source.reservation_id,)).fetchone():
+                raise AcquisitionConflict()
+            marker=uuid.uuid4().hex
+            target=DownloadOptions(options.base_url,
+                str(PurePosixPath(options.download_root)/('ad-'+marker)),
+                options.category,options.timeout_seconds)
+            state='EXTERNAL' if present else 'UNCERTAIN'
+            db.execute(
+                "INSERT INTO sonarr_magnet_intents"
+                "(event_id,job_id,plan_id,tvdb_episode,info_hash,marker,api_major,"
+                "base_url,save_path,category,state,created_at_ms,updated_at_ms,"
+                "timeout_seconds) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (source.event_id,claim.job_id,plan_id,episode,source.info_hash,
+                 marker,api_major,target.base_url,target.download_root,
+                 target.category,state,now,now,target.timeout_seconds))
+            intent=_prior(db,source.event_id)
+            receipt=append_job_history(
+                db,job_id=claim.job_id,event_code='TORRENT_INTENT_RECORDED',
+                reason_code=('TORRENT_ALREADY_PRESENT' if present else
+                             'TORRENT_SUBMISSION_UNCERTAIN'),
+                component='worker',occurred_at_ms=now,
+                details={'attempt':claim.attempt})
+            return intent,(None if present else MagnetPermit(intent.fingerprint)),(receipt,)
+
+    def guard(self,claim,intent):
+        with self.queue.connection() as db,transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            current=_prior(db,intent.event_id)
+            if (current!=intent or current.job_id!=claim.job_id
+                    or current.state!='UNCERTAIN'):
+                raise AcquisitionConflict()
+
+    def reconcile(self,claim,intent,observation):
+        """Never adopt another client's torrent or grant a second send."""
+        with self.queue.connection() as db,transaction(db):
+            now=self.queue.now()
+            self.queue._owns(db,claim,now)
+            current=_prior(db,intent.event_id)
+            if current!=intent or current.job_id!=claim.job_id:
+                raise AcquisitionConflict()
+            if current.state in ('REVIEW','EXTERNAL','OWNED_STOPPED'):
+                return current.state
+            state='UNCERTAIN'
+            if observation is not None:
+                if type(observation) is not Observation:raise AcquisitionConflict()
+                if (observation.info_hash!=intent.info_hash
+                        or observation.save_path.rstrip('/')!=intent.options.download_root
+                        or observation.category!=intent.options.category
+                        or observation.auto_tmm is not False
+                        or 'ad-'+intent.marker not in observation.tags
+                        or any(t.startswith('ad-') and t!='ad-'+intent.marker
+                               for t in observation.tags)):
+                    state='REVIEW'
+                elif observation.files and observation.state in STOPPED:
+                    state='OWNED_STOPPED'
+            if state!=current.state:
+                db.execute(
+                    "UPDATE sonarr_magnet_intents SET state=?,updated_at_ms=? "
+                    "WHERE event_id=? AND state='UNCERTAIN'",
+                    (state,now,intent.event_id))
+            return state
