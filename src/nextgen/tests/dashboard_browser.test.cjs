@@ -318,9 +318,9 @@ test('bulk UI uses individual endpoints for five jobs and queues a worker for si
     const h = await harness();
     h.run("state.page='jobs'; state.selected=new Set([" +
       Array.from({length: count}, (_, i) => i + 1).join(',') + "]);");
-    h.elements.get('bulk-action').value = 'cancel';
-    h.elements.get('show-completed').checked = false;
-    h.elements.get('show-canceled').checked = false;
+    h.run("$('bulk-action').value = 'cancel';");
+    h.run("$('show-completed').checked = false;");
+    h.run("$('show-canceled').checked = false;");
     const calls = [];
     h.ctx.fetch = async (url, options) => {
       calls.push({url, options});
