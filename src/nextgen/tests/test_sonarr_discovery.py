@@ -6,7 +6,7 @@ import urllib.error
 from urllib.parse import urlsplit, parse_qs
 
 from src.nextgen.acquisition.sonarr_search import (
-    Client, Options, SearchConfiguration, SearchNotFound, SearchReview,
+    Client, Options, DiscoveryPolicy, SearchConfiguration, SearchNotFound, SearchReview,
     SearchUnauthorized, SearchUnavailable, SearchUnsupported, MAX_RESPONSE,
 )
 from src.nextgen.keep_selection import KeepSelection, KeepSelectionInvalid
@@ -97,7 +97,7 @@ class SonarrDiscoveryTests(unittest.TestCase):
         self.assertEqual([c.title for c in selected.candidates],
                          ['First - rejected', 'Second - approved'])
         self.assertEqual(selected.candidates[0].rejections, ('Quality not wanted',))
-        self.assertFalse(selected.candidates[0].eligible_for_handoff)
+        self.assertTrue(selected.candidates[0].eligible_for_handoff)
         self.assertTrue(selected.candidates[1].eligible_for_handoff)
         self.assertEqual(selected.candidates[1].resolution, 1080)
         self.assertEqual(selected.candidates[1].seeders, 9)
@@ -166,6 +166,41 @@ class SonarrDiscoveryTests(unittest.TestCase):
         self.assertIsNone(rows[0].magnet_url)
         self.assertIsNone(rows[1].magnet_url)
         self.assertIsNone(rows[2].info_hash)
+
+
+    def test_guid_magnet_consistency_and_sonarr_rejected_discovery(self):
+        magnet = 'magnet:?xt=urn:btih:' + HASH + '&tr=udp%3A%2F%2Ftracker.example%3A80'
+        rows = client(FakeSonarr(releases=[
+            release(title='Rejected', approved=False, rejected=True,
+                    rejections=['Custom format minimum'], guid=magnet, magnetUrl=''),
+            release(title='Conflict', guid='magnet:?xt=urn:btih:' + OTHER_HASH, magnetUrl=''),
+            release(title='HTTP', guid='https://example.invalid/torrent', magnetUrl=''),
+        ]))[0].search(ID).candidates
+        by_title = {r.title: r for r in rows}
+        self.assertTrue(by_title['Rejected'].eligible_for_handoff)
+        self.assertEqual(by_title['Rejected'].magnet_url, magnet)
+        self.assertFalse(by_title['Conflict'].eligible_for_handoff)
+        self.assertFalse(by_title['HTTP'].eligible_for_handoff)
+
+    def test_local_resolution_and_seeder_ranking(self):
+        rows = [
+            release(title='720 many peers', quality={'quality': {'name': 'HDTV-720p', 'resolution': 720}}, seeders=100),
+            release(title='1080 fewer peers', seeders=15),
+            release(title='2160 above ceiling', quality={'quality': {'name': 'WEBDL-2160p', 'resolution': 2160}}, seeders=300),
+            release(title='1080 below seeder minimum', seeders=2),
+        ]
+        def ranked(policy):
+            return Client(Options('http://sonarr.invalid', 13), 'private-sonarr-key',
+                          transport=FakeSonarr(releases=rows), policy=policy).search(ID).candidates
+        a = ranked(DiscoveryPolicy())
+        b = ranked(DiscoveryPolicy(rank_by='seeders'))
+        self.assertEqual([r.title for r in a[:2]], ['1080 fewer peers', '720 many peers'])
+        self.assertEqual([r.title for r in b[:2]], ['720 many peers', '1080 fewer peers'])
+        self.assertEqual(sum(DiscoveryPolicy().accepts(r) for r in a), 2)
+        for params in ({'max_resolution': 1440}, {'max_resolution': True},
+                       {'min_seeders': -1}, {'rank_by': 'sonarr'}):
+            with self.subTest(params=params), self.assertRaises(SearchConfiguration):
+                DiscoveryPolicy(**params)
 
     def test_does_not_leak_secret_or_magnet_via_repr(self):
         c, _ = client()
