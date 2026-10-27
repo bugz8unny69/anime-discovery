@@ -48,6 +48,13 @@ class MagnetMetadataTests(unittest.TestCase):
             client.fetch_metadata('magnet:?xt=urn:btih:'+'b'*40,HASH)
         client._request.assert_not_called()
 
+    def test_metadata_hash_mismatch_does_not_export_or_authorize(self):
+        client=self.client((2,11,9))
+        client._request.return_value=(b'{"infohash_v1":"'+b'b'*40+b'"}',{})
+        with self.assertRaises(ClientInvalid):
+            client.fetch_metadata(MAGNET,HASH)
+        client._request.assert_called_once()
+
     def test_legacy_add_uses_metadata_stop_condition(self):
         client=self.client((2,8,15),major=4)
         client._request.return_value=(b'Ok.',{})
