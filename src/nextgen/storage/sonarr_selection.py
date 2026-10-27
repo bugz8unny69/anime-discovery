@@ -27,6 +27,8 @@ def select(db, *, plan_id, identity, result, release, policy):
             or type(result) is not SearchResult or type(release) is not Release
             or type(policy) is not DiscoveryPolicy
             or not any(candidate is release for candidate in result.candidates)
+            or result.series_id <= 0 or result.episode_id <= 0
+            or release.mapped_episode_ids != (result.episode_id,)
             or not policy.accepts(release)
             or not release.info_hash
             or _magnet_hash(release.magnet_url) != release.info_hash):
