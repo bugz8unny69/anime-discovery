@@ -97,8 +97,10 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
 
 
 async def run_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
-                              policy=Policy(), read_metainfo=None, read_batch_metainfo=None):
+                              policy=Policy(), read_metainfo=None, read_batch_metainfo=None,
+                              sonarr_backfill=False):
     worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
                                          release_kind=release_kind,policy=policy,read_metainfo=read_metainfo,
-                                         read_batch_metainfo=read_batch_metainfo)
+                                         read_batch_metainfo=read_batch_metainfo,
+                                         sonarr_backfill=sonarr_backfill)
     await serve_worker(worker)
