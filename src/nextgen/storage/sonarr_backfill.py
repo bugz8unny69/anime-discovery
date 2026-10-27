@@ -160,4 +160,4 @@ def persist_observations(db, claim, value):
         )
     return (append_job_history(db,job_id=claim.job_id,
         event_code='SONARR_BACKFILL_OBSERVED',component='worker',occurred_at_ms=now,
-        details={'attempt':claim.attempt,'episode_count':len(value.observations)}),)
+        details={'attempt':claim.attempt}),)
