@@ -46,7 +46,7 @@ class _Protocol:
         if self.major == 5 and self.api_version >= (2,11,9):
             return 'fetch'
         if self.api_version >= (2,8,15):
-            return 'stopped_magnet'
+            return 'guarded_bootstrap'
         raise ClientUnsupported()
 
     @property
@@ -100,6 +100,8 @@ class Client:
                     raise ClientInvalid()
                 raw=response.read(limit+1)
                 if type(raw) is not bytes or len(raw)>limit:raise ClientInvalid()
+                if path=='torrents/add' and raw.strip()==b'Fails.':
+                    raise ClientInvalid()
                 return raw,response.headers
         except urllib.error.HTTPError as exc:
             code=exc.code
