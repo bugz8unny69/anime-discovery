@@ -48,6 +48,9 @@ class PostKeepCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(cleanup,)),[('DONE',)])
         _,receipt,_=actions.submit(target,'keep')
         self.assertTrue(receipt['post_keep_cleanup']['completed'])
+        # The completed Keep already queues one scan; cleanup queues no duplicate.
+        self.assertEqual(self.rows(
+            "SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(1,)])
         self.assertEqual(self.rows('SELECT count(*) FROM episode_reservations'),[(1,)])
         self.assertEqual(fake.posts.count('command'),1)
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='CLEANUP_KEPT_MEDIA'"),[(1,)])

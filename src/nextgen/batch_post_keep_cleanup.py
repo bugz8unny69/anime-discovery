@@ -4,13 +4,15 @@ import json
 from src.nextgen.acquisition.media import MediaInvalid
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.keep_selection import KeepSelection, KeepSelectionInvalid
-from src.nextgen.sonarr import Client, Options, KeepReview, KeepUnavailable, existing_file
+from src.nextgen.sonarr import Client, Options, KeepReview, KeepUnavailable
 from src.nextgen.staging import StagingReview
 from src.nextgen.storage.batch_keep_imports import batch_publications
 from src.nextgen.storage.cancellation import operation
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.review_decisions import remove_selected
 from src.nextgen.storage.sqlite import transaction
+from src.nextgen.storage.staging import Journal as StageJournal
+from src.nextgen.keep_cleanup_proof import staged_keep, permanent_keep
 
 
 class BatchPostKeepCleanup:
@@ -44,6 +46,11 @@ class BatchPostKeepCleanup:
         return published,keep
 
     def run(self,claim,decision,cancelled):
+        # Recovered leases cannot overlap an earlier attempt still doing I/O.
+        with StageJournal(self.queue.database).lock(claim):
+            return self._run(claim,decision,cancelled)
+
+    def _run(self,claim,decision,cancelled):
         with self.queue.connection() as db,transaction(db):
             published,keep=self.facts(db,claim,decision)
             state=db.execute(
@@ -60,34 +67,28 @@ class BatchPostKeepCleanup:
                 if state[1]=='COMPLETE':return True
         for stage,(_,phase,raw) in zip(published,keep):
             if cancelled.is_set():raise KeepReview()
-            plan=json.loads(stage[2]);proof=json.loads(stage[3])
             data=json.loads(raw)
-            selection=KeepSelection(**data['selection'])
+            selection=staged_keep(stage[2],stage[3],data,stage[0],
+                                  copy_only=True)
+            if tuple(getattr(selection,name) for name in (
+                    'anidb_id','anidb_episode_id','tvdb_series_id',
+                    'tvdb_episode_id','tvdb_season','tvdb_episode'))!=stage[4:10]:
+                raise KeepReview()
             options=Options(**data['options'])
             client=self.client_factory(options,self.secrets.sonarr_api_key())
-            series=client.series(selection.tvdb_series_id)
-            if not series or (series.get('id'),series.get('path'))!=(
-                    data['series_id'],data['series_path']):
-                raise KeepReview()
-            episode=client.episode(selection,series)
-            if episode.get('id')!=data['episode_id'] or not episode.get('hasFile'):
-                raise KeepReview()
-            record=client.request(
-                'episodefile/'+str(data['result']['episode_file_id']))
             def guard():
                 if cancelled.is_set():raise KeepReview()
                 with self.queue.connection() as db,transaction(db):
-                    self.facts(db,claim,decision)
-                current=client.request(
-                    'episodefile/'+str(data['result']['episode_file_id']))
-                if existing_file(
-                        options,series,episode,current,
-                        data['source_file'][2])!=data['result']:
-                    raise KeepReview()
+                    if self.facts(db,claim,decision)!=(published,keep):
+                        raise KeepReview()
+                permanent_keep(client,selection,options,data)
             guard()
             self.remove(stage[2],stage[3],guard,options.keep_root)
+            guard()
+        if cancelled.is_set():raise KeepReview()
         with self.queue.connection() as db,transaction(db):
-            self.facts(db,claim,decision)
+            if self.facts(db,claim,decision)!=(published,keep):
+                raise KeepReview()
             changed=db.execute(
                 "UPDATE batch_keep_cleanup SET phase='COMPLETE',updated_at_ms=? "
                 "WHERE job_id=? AND decision_job_id=? AND phase='PENDING'",

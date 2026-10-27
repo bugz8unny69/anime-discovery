@@ -5,7 +5,7 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
 from src.nextgen.sonarr import KeepReview, KeepUnavailable
-from src.nextgen.staging import StagingReview
+from src.nextgen.staging import StagingReview, StagingBusy
 from src.nextgen.keep_selection import KeepSelectionInvalid
 from src.nextgen.acquisition.media import MediaInvalid
 from src.nextgen.storage.sqlite import enqueue_job
@@ -22,7 +22,7 @@ def enqueue(db,claim):
 
 
 def _persist(db,claim,value):
-    if type(value) is not dict or set(value)!={'keep_job_id','refresh'}:
+    if type(value) is not dict or set(value)!={'keep_job_id'}:
         raise CompletionRejected(Outcome('review','POST_KEEP_CLEANUP_REVIEW'))
     keep=integer(value['keep_job_id'],positive=True)
     row=db.execute(
@@ -32,9 +32,6 @@ def _persist(db,claim,value):
         raise CompletionRejected(Outcome('review','POST_KEEP_CLEANUP_REVIEW'))
     from src.nextgen.jobs.cleanup_batch_download_job import enqueue as enqueue_download
     enqueue_download(db,claim,decision=keep)
-    if value['refresh']:
-        from src.nextgen.jobs.refresh_jellyfin_job import enqueue as refresh
-        refresh(db,claim)
 
 
 def registration(secrets,*,service_factory=BatchPostKeepCleanup):
@@ -49,13 +46,13 @@ def registration(secrets,*,service_factory=BatchPostKeepCleanup):
             complete=await blocking(
                 service_factory(context.configuration,secrets).run,
                 context.claim,keep,context.cancelled)
+        except StagingBusy:
+            return Outcome('defer','POST_KEEP_CLEANUP_WAITING',delay_ms=1000)
         except (KeepReview,StagingReview,KeepSelectionInvalid,MediaInvalid,
                 ValueError,KeyError,TypeError):
             return Outcome('review','POST_KEEP_CLEANUP_REVIEW')
         except (KeepUnavailable,OSError):
             return Outcome('retry','POST_KEEP_CLEANUP_UNAVAILABLE')
-        return (Outcome(value={
-            'keep_job_id':keep,'refresh':bool(context.configuration.value(
-                'jellyfin.base_url'))}) if complete
+        return (Outcome(value={'keep_job_id':keep}) if complete
                 else Outcome('defer','POST_KEEP_CLEANUP_WAITING',delay_ms=30000))
     return Registration(KIND,DEFINITION,execute,persist=_persist)

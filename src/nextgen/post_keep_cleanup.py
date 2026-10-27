@@ -6,7 +6,7 @@ from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import Outcome, Registration
 from src.nextgen.keep_selection import KeepSelection, KeepSelectionInvalid
-from src.nextgen.sonarr import Client, Options, KeepReview, KeepUnavailable, existing_file
+from src.nextgen.sonarr import Client, Options, KeepReview, KeepUnavailable
 from src.nextgen.staging import StagingReview, StagingBusy
 from src.nextgen.acquisition.media import MediaInvalid
 from src.nextgen.storage.job_queue import JobQueue
@@ -14,6 +14,7 @@ from src.nextgen.storage.staging import Journal as StageJournal
 from src.nextgen.storage.sqlite import enqueue_job, transaction
 from src.nextgen.storage.review_decisions import staged, remove_selected
 from src.nextgen.storage.cancellation import operation
+from src.nextgen.keep_cleanup_proof import staged_keep, permanent_keep
 
 KIND='CLEANUP_KEPT_MEDIA'
 DEFINITION=HandlerDefinition(KIND,'Remove kept episode from staging')
@@ -64,16 +65,8 @@ class Service:
         data=json.loads(row[1]);cleanup=data.get('post_cleanup')
         if not cleanup or cleanup.get('job_id')!=claim.job_id or cleanup.get('state') not in ('PENDING','COMPLETE'):raise KeepReview()
         if operation(db,row[2])[:2]!=(row[3],'STAGED'):raise KeepReview()
-        source=staged(db,row[3]);selection=KeepSelection(**data['selection'])
-        plan=json.loads(source[2]);proofs=json.loads(source[3])
-        if (len(plan['entries'])!=3 or len(proofs)!=3
-                or {p['role'] for p in proofs}!={'media','episode','series'}
-                or [p['role'] for p in proofs]!=[p['role'] for p in plan['entries']]):raise KeepReview()
-        media=[p for p in proofs if p['role']=='media']
-        if (source[1]!=selection.preparation_plan_id or plan['root']!=selection.staging_root
-                or plan['root_identity']!=data['root_identity'] or len(media)!=1
-                or media[0]['path']!=selection.media_relative_path or media[0]['file']!=data['source_file']
-                or media[0]['root']!=data['source_parent']):raise KeepReview()
+        source=staged(db,row[3])
+        staged_keep(source[2],source[3],data,source[1])
         return data,source
 
     def run(self,claim,keep,cancelled):
@@ -83,17 +76,12 @@ class Service:
             if data['post_cleanup']['state']=='COMPLETE':return
             options=Options(**data['options']);selection=KeepSelection(**data['selection'])
             client=self.client_factory(options,self.secrets.sonarr_api_key())
-            series=client.series(selection.tvdb_series_id)
-            if not series or (series.get('id'),series.get('path'))!=(data['series_id'],data['series_path']):raise KeepReview()
-            episode=client.episode(selection,series)
-            if episode.get('id')!=data['episode_id'] or not episode.get('hasFile'):raise KeepReview()
-            record=client.request('episodefile/'+str(data['result']['episode_file_id']))
             def guard():
                 if cancelled.is_set():raise KeepReview()
-                with self.queue.connection() as db,transaction(db):self.facts(db,claim,keep)
-                # Recheck the permanent regular file before each source unlink.
-                # No hash or byte-for-byte readback is performed.
-                if existing_file(options,series,episode,record,data['source_file'][2])!=data['result']:raise KeepReview()
+                with self.queue.connection() as db,transaction(db):
+                    fresh,_=self.facts(db,claim,keep)
+                    if fresh!=data:raise KeepReview()
+                permanent_keep(client,selection,options,data)
             guard()
             self.remove(source[2],source[3],guard,options.keep_root)
             guard()
@@ -111,9 +99,6 @@ def _persist(db,claim,value):
     if record!={'job_id':claim.job_id,'state':'COMPLETE'}:raise KeepReview()
     from src.nextgen.decision_download_cleanup import enqueue as enqueue_download_cleanup
     enqueue_download_cleanup(db,claim,value['keep_job_id'])
-    if value['refresh']:
-        from src.nextgen.jobs.refresh_jellyfin_job import enqueue as enqueue_refresh
-        enqueue_refresh(db,claim)
 
 
 def registration(secrets,*,service_factory=Service):
@@ -130,5 +115,5 @@ def registration(secrets,*,service_factory=Service):
             return Outcome('review','POST_KEEP_CLEANUP_REVIEW')
         except FileNotFoundError:return Outcome('review','POST_KEEP_CLEANUP_REVIEW')
         except OSError:return Outcome('retry','POST_KEEP_CLEANUP_UNAVAILABLE')
-        return Outcome(value={'keep_job_id':keep,'refresh':bool(context.configuration.value('jellyfin.base_url'))})
+        return Outcome(value={'keep_job_id':keep})
     return Registration(KIND,DEFINITION,execute,persist=_persist)
