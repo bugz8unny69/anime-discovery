@@ -224,6 +224,33 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
             status,_,_=await self.request('GET',route,token=ADMIN)
             self.assertEqual(status,400)
 
+    async def test_job_visibility_filter_uses_database_before_pagination(self):
+        jobs=[]
+        for index in range(7):
+            _,created,_=await self.request('POST','/api/v1/webhook',
+                self.release(release_name=f'Test Anime - {index}'),token=WEB)
+            jobs.append(created['data']['job_id'])
+        with connect(self.database) as db,transaction(db):
+            db.execute("UPDATE jobs SET state='DONE' WHERE job_id IN (?,?)",(jobs[-1],jobs[-3]))
+            db.execute("UPDATE jobs SET state='CANCELED' WHERE job_id=?",(jobs[-2],))
+            db.execute("UPDATE job_operations SET state='CANCELED' WHERE operation_id="
+                       "(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(jobs[-2],))
+        first=await self.request('GET','/api/v1/jobs?limit=2&show_completed=0&show_canceled=0',token=ADMIN)
+        self.assertEqual(first[0],200)
+        self.assertEqual([row['job_id'] for row in first[1]['data']['items']],[jobs[-4],jobs[-5]])
+        cursor=first[1]['data']['next_before_id']
+        second=await self.request('GET',
+            f'/api/v1/jobs?limit=2&before_id={cursor}&show_completed=0&show_canceled=0',token=ADMIN)
+        self.assertEqual(second[0],200)
+        self.assertEqual([row['job_id'] for row in second[1]['data']['items']],[jobs[-6],jobs[-7]])
+        self.assertIsNone(second[1]['data']['next_before_id'])
+        done=await self.request('GET','/api/v1/jobs?state=DONE',token=ADMIN)
+        self.assertEqual([row['job_id'] for row in done[1]['data']['items']],[jobs[-1],jobs[-3]])
+        for route in ('/api/v1/jobs?state=WRONG', '/api/v1/jobs?show_completed=2',
+                      '/api/v1/jobs?show_canceled=maybe',
+                      '/api/v1/jobs/1/history?show_completed=0'):
+            self.assertEqual((await self.request('GET',route,token=ADMIN))[0],400)
+
     async def test_display_context_ignores_unknown_and_malformed_stored_declarations(self):
         _,result,_=await self.request('POST','/api/v1/webhook',self.release(),token=WEB)
         job=result['data']['job_id'];db=connect(self.database)
