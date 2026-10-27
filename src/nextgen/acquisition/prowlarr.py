@@ -136,9 +136,16 @@ def _episode(title, alias, season):
                       stripped, re.I)
     if not scoped and not dashed:
         return None
+    # Season-qualified aliases must not guess a season from unqualified dashes.
+    if qualified and not scoped:
+        return None
     if scoped and int(scoped.group("s")) != season:
         return None
-    number = int((scoped or dashed).group("e"))
+    matched = scoped or dashed
+    # A range or combined release is not a verified single-episode result.
+    if re.match(r"\s*(?:[-+&~]|to)\s*(?:E)?\d{1,4}(?:\D|$)", stripped[matched.end():], re.I):
+        return None
+    number = int(matched.group("e"))
     return number if number > 0 else None
 
 
