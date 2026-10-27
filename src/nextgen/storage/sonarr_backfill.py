@@ -177,6 +177,7 @@ def persist_fallback(db,claim,value):
             or claim.event_id is None):
         raise BackfillConflict()
     plan,episode,target,choice=value.plan,value.episode,value.target,value.selection
+    frozen=_plan(db,plan.plan_id,plan.start) if type(plan) is BackfillBatch else None
     if (type(plan) is not BackfillBatch or episode not in plan.numbers
             or type(target) is not FallbackTarget
             or type(choice) is not CandidateSelection
@@ -185,9 +186,14 @@ def persist_fallback(db,claim,value):
             or _magnet_hash(choice.release.magnet_url)!=target.next_hash
             or not choice.policy.accepts(choice.release)
             or not any(x is choice.release for x in choice.result.candidates)
-            or (_plan(db,plan.plan_id,plan.start).anidb_id,
-                _plan(db,plan.plan_id,plan.start).tvdb_series_id,
-                _plan(db,plan.plan_id,plan.start).season)!=(plan.anidb_id,plan.tvdb_series_id,plan.season)):
+            or choice.release.mapped_episode_ids!=(choice.result.episode_id,)
+            or choice.result.series_id<=0 or choice.result.episode_id<=0
+            or choice.identity.tvdb_series_id!=plan.tvdb_series_id
+            or choice.identity.tvdb_season!=plan.season
+            or choice.identity.tvdb_episode!=episode
+            or (frozen.anidb_id,frozen.tvdb_series_id,frozen.season,
+                frozen.backfill_count,frozen.numbers)!=(plan.anidb_id,
+                plan.tvdb_series_id,plan.season,plan.backfill_count,plan.numbers)):
         raise BackfillConflict()
     current=db.execute(
         "SELECT s.info_hash,c.state FROM sonarr_episode_selections s "
