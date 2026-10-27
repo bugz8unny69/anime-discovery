@@ -163,7 +163,7 @@ def persist_observations(db, claim, value, *, dispatch=False):
                     or item.number != choice.identity.tvdb_episode
                     or plan.tvdb_series_id != choice.identity.tvdb_series_id
                     or plan.season != choice.identity.tvdb_season
-                    or dict(plan.verified).get(item.number) != item.tvdb_episode_id):
+                    or dict(plan.verified).get(item.number) not in (None,item.tvdb_episode_id)):
                 raise BackfillConflict()
             try:
                 inserted=select(db, plan_id=plan.plan_id, identity=choice.identity,
