@@ -19,9 +19,9 @@ def registration():
                 or payload['action'] not in ('retry', 'cancel', 'cleanup')
                 or type(payload['job_ids']) is not list
                 or not 6 <= len(payload['job_ids']) <= 100
-                or len(set(map(str, payload['job_ids']))) != len(payload['job_ids'])
                 or any(type(job) is not int or not 1 <= job <= (1 << 63)-1
-                       for job in payload['job_ids'])):
+                       for job in payload['job_ids'])
+                or len(set(payload['job_ids'])) != len(payload['job_ids'])):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
         action,ids=payload['action'],payload['job_ids']
         database=context.configuration.value('storage.database_path')
