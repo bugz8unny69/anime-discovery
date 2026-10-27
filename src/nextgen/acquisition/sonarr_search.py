@@ -395,7 +395,7 @@ class Client:
             approved = sum(r.approved and not r.rejections and r.scope == 'exact' for r in results)
             exact = sum(self.policy.accepts(r) for r in results)
             choice = None
-            if select_candidates and verified_ids.get(number) == tid:
+            if select_candidates:
                 ranked = self.policy.rank(results)
                 picked = next((item for item in ranked if self.policy.accepts(item)), None)
                 if picked is not None:
