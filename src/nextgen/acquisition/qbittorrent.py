@@ -46,8 +46,8 @@ class _Protocol:
     def metadata_strategy(self):
         if self.major == 5 and self.api_version >= (2,11,9):
             return 'fetch'
-        if self.api_version >= (2,8,15):
-            return 'guarded_bootstrap'
+        if self.api_version >= (2,8,14):
+            return 'guarded_export'
         return 'legacy_poll'
 
     @property
@@ -201,8 +201,13 @@ class Client:
         return parse_metainfo(raw,expected_hash),raw
 
     def export_metainfo(self,expected_hash):
-        """4.x/5.x: export metadata only from an already owned torrent."""
+        """Export hash-bound bytes only when the server actually supports it.
+
+        Ownership must be established by the caller; export grants no rights.
+        """
         from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
+        if self.protocol is None or self.api_version < (2,8,14):
+            raise ClientUnsupported()
         expected_hash=infohash(expected_hash)
         raw,_=self._request('torrents/export',query={'hash':expected_hash},limit=MAX_METAINFO)
         return parse_metainfo(raw,expected_hash),raw
@@ -263,6 +268,39 @@ class Client:
             raise ClientInvalid()
         self._request('torrents/addTags',form={
             'hashes':digest,'tags':'ad-'+intent.plan.marker},limit=4096)
+
+    def inspect_legacy_metadata(self,expected_hash,marker,download_root):
+        """Read-only pre-manifest observation for a journaled magnet intake.
+
+        Metadata is not a send permit. Empty file lists are pending; snapshots
+        are usable only after full ownership readback and a stopped state.
+        Never claim that qBittorrent's files alone prove BEP3 info bytes.
+        """
+        from src.nextgen.acquisition.metadata import infohash, MetadataInvalid
+        expected_hash=infohash(expected_hash)
+        if (not self._sid or self.protocol is None
+                or type(marker) is not str or not re.fullmatch('[a-f0-9]{32}',marker)
+                or type(download_root) is not str
+                or download_root!=self.options.download_root):
+            raise ClientInvalid()
+        snapshot=self.inspect(expected_hash)
+        if snapshot is None:
+            return None
+        if (snapshot.save_path.rstrip('/')!=download_root
+                or snapshot.category!=self.options.category
+                or snapshot.auto_tmm is not False
+                or 'ad-'+marker not in snapshot.tags
+                or any(t.startswith('ad-') and t!='ad-'+marker for t in snapshot.tags)):
+            raise ClientInvalid()
+        if not snapshot.files:
+            return None
+        if snapshot.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+            return None
+        # Read the exact same inventory again, rejecting concurrent changes.
+        confirmed=self.inspect(expected_hash)
+        if confirmed!=snapshot:
+            raise ClientInvalid()
+        return snapshot
 
     def add_stopped(self,raw,intent,permit):
         """Single journaled submission for verified .torrent bytes or a magnet."""
