@@ -109,6 +109,61 @@ class BatchInventory:
                           sort_keys=True,separators=(',',':'))
 
 
+@dataclass(frozen=True)
+class ObservedInventory:
+    """Stable, stopped qB file list; deliberately NOT BEP3 metainfo evidence.
+
+    A verified source hash links the observed torrent, but no info SHA256 is
+    fabricated. The regular Manifest and SubmissionPlan cannot accept this type.
+    """
+    info_hash: str
+    files: tuple[TorrentFile,...] = field(repr=False)
+    selected_index: int
+
+    def __post_init__(self):
+        if infohash(self.info_hash)!=self.info_hash or type(self.files) is not tuple:
+            raise MetadataInvalid()
+        if not 1<=len(self.files)<=10000 or any(
+                type(f) is not TorrentFile or f.index!=i
+                for i,f in enumerate(self.files)):
+            raise MetadataInvalid()
+        names=[f.path.casefold() for f in self.files]
+        if len(names)!=len(set(names)):
+            raise MetadataInvalid()
+        paths=set(names)
+        if any('/'.join(p.split('/')[:n]) in paths
+               for p in names for n in range(1,len(p.split('/')))):
+            raise MetadataInvalid()
+        if sum(f.size for f in self.files)>MAX_INTEGER:raise MetadataInvalid()
+        allowed={'.mkv','.mp4','.nfo','.srt','.ass','.ssa','.txt'}
+        if any(PurePosixPath(f.path).suffix.lower() not in allowed for f in self.files):
+            raise MetadataInvalid()
+        videos=[f.index for f in self.files
+                if PurePosixPath(f.path).suffix.lower() in ('.mkv','.mp4')]
+        if type(self.selected_index) is not int or videos!=[self.selected_index]:
+            raise MetadataInvalid()
+        if self.files[self.selected_index].size<=0:raise MetadataInvalid()
+        if len(self.json().encode('utf-8'))>1048576:raise MetadataInvalid()
+
+    @classmethod
+    def from_observation(cls,observation):
+        from src.nextgen.acquisition.submission import Observation
+        if type(observation) is not Observation or not observation.files:
+            raise MetadataInvalid()
+        videos=[f.index for f in observation.files
+                if PurePosixPath(f.path).suffix.lower() in ('.mkv','.mp4')]
+        if len(videos)!=1:raise MetadataInvalid()
+        return cls(observation.info_hash,observation.files,videos[0])
+
+    def json(self):
+        return json.dumps({
+            'evidence':'qbittorrent_stopped_inventory','info_hash':self.info_hash,
+            'files':[{'index':f.index,'path':f.path,'size':f.size}
+                     for f in self.files],
+            'selected_index':self.selected_index
+        },sort_keys=True,separators=(',',':'))
+
+
 class _Decoder:
     def __init__(self,raw):self.raw,self.pos,self.nodes,self.info_span=raw,0,0,None
     def string(self):
