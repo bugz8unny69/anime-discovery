@@ -37,6 +37,27 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual((new.stopped_parameter,new.start_endpoint,new.stop_endpoint),
                          ('stopped','torrents/start','torrents/stop'))
 
+    def test_45_and_50_reuse_stopped_magnet_adapter(self):
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        for major,version in ((4,(2,8,15)),(5,(2,10,0))):
+            with self.subTest(major=major):
+                client=self.client(version,major)
+                options=DownloadOptions('http://localhost:8080',
+                    '/downloads/ad-'+'c'*32,'anime',10)
+                client.options=options
+                intent=MagnetIntent(4,21,HASH,'c'*32,options,major,
+                                    'UNCERTAIN','f'*64)
+                client._request.return_value=(b'Ok.',{})
+                client.add_legacy_magnet(MAGNET,intent,SendPermit('f'*64))
+                sent=client._request.call_args_list
+                self.assertEqual(len(sent),1)
+                self.assertEqual(sent[0].args,('torrents/add',))
+                self.assertEqual(sent[0].kwargs['form']['urls'],MAGNET)
+                self.assertEqual(sent[0].kwargs['form']['category'],'anime')
+                self.assertEqual(sent[0].kwargs['form']['tags'],'ad-'+'c'*32)
+                self.assertEqual(sent[0].kwargs['form']['paused'],'true')
+
     def test_42_protocol_omits_unsupported_add_fields(self):
         old=_Protocol(4,(2,5,1))
         self.assertFalse(old.inline_tags)
