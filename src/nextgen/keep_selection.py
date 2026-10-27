@@ -37,19 +37,12 @@ class KeepSelection:
 
     def match_sonarr_episode(self,series,episodes):
         """TVDB mapping is authoritative; titles/AniDB/Shoko do not pick a series."""
-        if type(series) is not dict or type(episodes) is not list:raise KeepSelectionInvalid()
-        if type(series.get('tvdbId')) is not int or series['tvdbId']!=self.tvdb_series_id:raise KeepSelectionInvalid()
-        try:series_id=integer(series['id'],positive=True)
-        except (ValueError,KeyError):raise KeepSelectionInvalid() from None
-        matches=[row for row in episodes if type(row) is dict and row.get('seriesId')==series_id
-                 and type(row.get('seasonNumber')) is int and row['seasonNumber']==self.tvdb_season
-                 and type(row.get('episodeNumber')) is int and row['episodeNumber']==self.tvdb_episode]
-        if len(matches)!=1:raise KeepSelectionInvalid()
-        match=matches[0]
-        try:episode_id=integer(match['id'],positive=True)
-        except (ValueError,KeyError):raise KeepSelectionInvalid() from None
-        if match.get('tvdbId') not in (None,0,self.tvdb_episode_id):raise KeepSelectionInvalid()
-        return series_id,episode_id
+        from src.nextgen.sonarr_episode import VerifiedEpisode, resolve_episode, SonarrEpisodeMismatch
+        try:
+            verified=VerifiedEpisode(self.tvdb_series_id,self.tvdb_episode_id,self.tvdb_season,self.tvdb_episode)
+            return resolve_episode(verified,series,episodes)
+        except SonarrEpisodeMismatch:
+            raise KeepSelectionInvalid() from None
 
 
 def load_selection(db,target_job_id):

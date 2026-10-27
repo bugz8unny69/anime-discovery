@@ -18,21 +18,29 @@ class EvaluationCompletion:
     evaluation_job_id: int
 
 
-def _persist(db,claim,value):
+def _persist(db,claim,value,*,discovery_kind=None):
     if type(value) is not EvaluationCompletion or value.evaluation_job_id!=claim.job_id:
         raise ValueError('episode selection completion does not match its job')
     from src.nextgen.storage.review_decisions import require_allowed, AnimeRejected
     try:
         require_allowed(db,value.proposal.source.anidb_id)
-        return (persist_trial(db,claim,value.proposal),)
+        receipts=(persist_trial(db,claim,value.proposal),)
+        if discovery_kind is not None:
+            from src.nextgen.storage.sonarr_backfill import schedule_first, BackfillConflict
+            try: receipts+=schedule_first(db,claim,value.proposal.source,kind=discovery_kind)
+            except BackfillConflict:raise CompletionRejected(Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')) from None
+        return receipts
     except AnimeRejected as exc:raise CompletionRejected(Outcome('hold',exc.reason_code)) from None
     except TrialConflict as exc:raise CompletionRejected(Outcome('review',exc.reason_code)) from None
 
 
-def registration(*, reservation_kind=None):
+def registration(*, reservation_kind=None, discovery_kind=None):
     if reservation_kind is not None and (type(reservation_kind) is not str or not reservation_kind.strip()
                                          or len(reservation_kind)>64 or reservation_kind==KIND):
         raise ValueError('invalid episode reservation successor')
+    if discovery_kind is not None and (type(discovery_kind) is not str or not discovery_kind.strip()
+                                       or len(discovery_kind)>64 or discovery_kind in (KIND,reservation_kind)):
+        raise ValueError('invalid Sonarr discovery registration')
     async def execute(context):
         payload=context.data()
         try:
@@ -51,5 +59,5 @@ def registration(*, reservation_kind=None):
         if type(value) is not EvaluationCompletion:raise ValueError('typed episode selection completion required')
         return () if reservation_kind is None else (Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
 
-    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+    return Registration(KIND,DEFINITION,execute,persist=lambda db,claim,value:_persist(db,claim,value,discovery_kind=discovery_kind),route=route,
                         successor_kinds=() if reservation_kind is None else (reservation_kind,))

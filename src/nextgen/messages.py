@@ -49,6 +49,7 @@ _EVENTS = (
     EventDefinition("EPISODE_RESERVATION_CREATED", "job", "Episode reserved for acquisition.", True),
     EventDefinition("EPISODE_RESERVATION_SKIPPED", "job", "Episode reservation was not needed.", True),
     EventDefinition("TRIAL_EVALUATED", "job", "Intake episode selection evaluated.", True),
+    EventDefinition("SONARR_BACKFILL_OBSERVED", "job", "Read-only Sonarr backfill results recorded."),
     EventDefinition("DONE", "job", "Job completed."),
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),
     EventDefinition("BLOCKED", "job", "Job blocked from proceeding.", True),

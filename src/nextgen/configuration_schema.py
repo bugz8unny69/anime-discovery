@@ -75,6 +75,9 @@ FIELDS = MappingProxyType({
     "jellyfin.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Jellyfin timeout"),
     "sonarr.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Sonarr address", help_text="HTTP(S) server address for Sonarr v4."),
     "sonarr.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Sonarr timeout"),
+    "sonarr.discovery_max_resolution": FieldDefinition(1080, "resolution", "next_operation", label="Discovery maximum resolution", help_text="Upper limit for torrent discovery. 1080 keeps 720p and 1080p; 2160 also permits 4K."),
+    "sonarr.discovery_min_seeders": FieldDefinition(5, "integer", "next_operation", minimum=0, maximum=1000000, label="Discovery minimum seeders", help_text="Minimum required seeders for candidate ranking. Missing counts do not satisfy the minimum."),
+    "sonarr.discovery_rank_by": FieldDefinition("resolution", "ranking", "next_operation", label="Discovery ranking", help_text="Rank usable torrent candidates by resolution then seeders, or seeders then resolution."),
     "sonarr.quality_profile_id": FieldDefinition(0, "integer", "next_operation", minimum=0, maximum=2147483647, label="Sonarr quality profile ID", help_text="Required for new series. Zero means unconfigured."),
     "sonarr.staging_root": FieldDefinition("", "directory", "next_operation", label="Staging folder as seen by Sonarr", help_text="Blank uses the recorded local staging root."),
     "sonarr.library_root": FieldDefinition("", "directory", "next_operation", label="Permanent folder as seen by Sonarr", help_text="Blank uses the local Keep folder. Local and Sonarr folders must refer to the same storage."),
@@ -178,6 +181,12 @@ def validate_values(value):
             spec = FIELDS[section + "." + key]
             if spec.kind == "integer":
                 if type(item) is not int or not spec.minimum <= item <= spec.maximum:
+                    raise ConfigurationError()
+            elif spec.kind == "resolution":
+                if type(item) is not int or item not in (720, 1080, 2160):
+                    raise ConfigurationError()
+            elif spec.kind == "ranking":
+                if type(item) is not str or item not in ("resolution", "seeders"):
                     raise ConfigurationError()
             elif spec.kind == "metadata_source":
                 if type(item) is not str:raise ConfigurationError()

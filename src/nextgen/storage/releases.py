@@ -48,6 +48,11 @@ def persist_release(db, claim, value):
     if claim.event_id!=source.event_id: raise ReleaseConflict()
     current=_source(db,source.event_id,source.anidb_id)
     if current!=source: raise ReleaseConflict()
+    origin=db.execute("SELECT source FROM incoming_events WHERE event_id=?",
+                      (source.event_id,)).fetchone()
+    if origin==('sonarr-discovery',):
+        from src.nextgen.storage.sonarr_selection import require_verified_delivery
+        require_verified_delivery(db,value)
     stored=db.execute("SELECT tvdb_series_id FROM identified_anime WHERE anidb_id=?",(source.anidb_id,)).fetchone()
     if stored is None or stored[0]!=source.tvdb_series_id: raise ReleaseConflict()
     owner=db.execute("SELECT anidb_id FROM identified_episodes WHERE anidb_episode_id=?",(value.anidb_episode_id,)).fetchone()
