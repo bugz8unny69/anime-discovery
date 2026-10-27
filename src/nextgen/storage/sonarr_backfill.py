@@ -154,7 +154,8 @@ def persist_observations(db, claim, value, *, dispatch=False):
     # Selection is an opt-in side effect of the same fenced worker completion.
     # Keep source URLs out of SQLite and reject stale/unverified identity facts.
     from src.nextgen.storage.sonarr_selection import select, SelectionConflict
-    from src.nextgen.storage.sonarr_candidates import save_candidates, CandidateConflict
+    from src.nextgen.storage.sonarr_candidates import (save_candidates, activate_candidate,
+                                                        CandidateConflict)
     routed=[]
     for item in value.observations:
         choice = item.selection
@@ -171,6 +172,9 @@ def persist_observations(db, claim, value, *, dispatch=False):
                                 result=choice.result,policy=choice.policy)
                 inserted=select(db, plan_id=plan.plan_id, identity=choice.identity,
                        result=choice.result, release=choice.release, policy=choice.policy)
+                if inserted:
+                    activate_candidate(db,plan_id=plan.plan_id,episode=item.number,
+                                       info_hash=choice.release.info_hash)
                 if inserted and dispatch:
                     from src.nextgen.storage.sonarr_dispatch import dispatch as dispatch_source
                     routed.extend(dispatch_source(db,claim,plan,choice))
