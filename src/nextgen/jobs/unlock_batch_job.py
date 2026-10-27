@@ -1,4 +1,4 @@
-"""Opt-in one-time, JP+EN-gated trial episode unlock/transfer worker.
+"""One-time, JP+EN-gated batch episode unlock/transfer worker.
 
 No release-file guess or job payload can authorize a priority change. A
 persisted ffprobe+SHA256 proof from the completed E01 verifier is mandatory.
@@ -35,7 +35,7 @@ DEFINITION=HandlerDefinition(KIND,'Unlock JP+EN-approved trial episodes')
 
 def _persist(db,claim,value):
     try:
-        if (type(value) is not dict or set(value)!={'verification_job_id','unlock_job_id'}
+        if (type(value) is not dict or set(value)!={'verification_job_id','unlock_job_id','file_indices'}
                 or value['unlock_job_id']!=claim.job_id):
             raise TransferConflict()
         verification=integer(value['verification_job_id'],positive=True)
@@ -44,6 +44,14 @@ def _persist(db,claim,value):
             "JOIN batch_probe_media m USING(plan_id) "
             "WHERE m.verification_job_id=?",(verification,)).fetchone()
         if row!=('COMPLETE',claim.job_id):raise TransferConflict()
+        rows=db.execute(
+            'SELECT t.file_index FROM batch_torrent_unlocks u '
+            'JOIN batch_trial_files t USING(plan_id) '
+            'JOIN batch_probe_media m USING(plan_id) '
+            'WHERE m.verification_job_id=? ORDER BY t.file_index',
+            (verification,)).fetchall()
+        if not 1<=len(rows)<=32 or value['file_indices']!=tuple(r[0] for r in rows):
+            raise TransferConflict()
     except (ValueError,TypeError,TransferConflict):
         raise CompletionRejected(Outcome('review','TORRENT_TRANSFER_CONFLICT')) from None
 
@@ -85,9 +93,34 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             await blocking(client.login)
             snapshot=await blocking(client.inspect_transfer,digest)
             if snapshot is None:return wait('TORRENT_DOWNLOAD_WAITING')
-            validate_unlock_snapshot(intent,snapshot)
-            if snapshot.observation.state in CHECKING:
-                return wait('TORRENT_SNAPSHOT_CHANGED')
+            # E01-only stopping is necessary only before the first
+            # expanded-selection intent. Once that intent exists, even an
+            # uncertain one, never re-enter the probe-only stop path:
+            # authoritative priorities may already include E02+.
+            if record is None:
+                phase,stop_permit,stop_fingerprint,receipts=await blocking(
+                    journal.stop_probe,context.claim,intent,snapshot,reservation)
+                log(receipts)
+                if stop_permit is not None:
+                    if context.cancelled.is_set():
+                        return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    await blocking(journal.guard_probe_stop,context.claim,intent,
+                                   reservation,stop_fingerprint)
+                    try:
+                        await blocking(client.stop_completed_probe,intent,
+                                       stop_fingerprint,stop_permit)
+                    except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
+                        return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    snapshot=await blocking(client.inspect_transfer,digest)
+                    if snapshot is None:return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                    phase,_,_,receipts=await blocking(
+                        journal.stop_probe,context.claim,intent,snapshot,reservation)
+                    log(receipts)
+                if phase!='STOPPED':
+                    return wait('TORRENT_PROBE_STOP_UNCERTAIN')
+                validate_unlock_snapshot(intent,snapshot,stopped=True)
+            else:
+                validate_unlock_snapshot(intent,snapshot)
             if record is None:
                 record,permit,receipts=await blocking(
                     journal.authorize,context.claim,intent,media,snapshot,reservation)
@@ -135,7 +168,8 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             log(receipts)
             if record.phase=='COMPLETE':
                 return Outcome(value={'verification_job_id':verification,
-                                      'unlock_job_id':context.claim.job_id})
+                                      'unlock_job_id':context.claim.job_id,
+                                      'file_indices':tuple(sorted(i for _,i in intent.candidate.planned_episodes))})
             if record.phase=='REVIEW':
                 return Outcome('review',record.reason_code)
             return wait('TORRENT_DOWNLOAD_IN_PROGRESS' if record.phase=='ACTIVE'
@@ -157,7 +191,9 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             return Outcome('review',exc.reason_code)
 
     def route(value):
-        return () if next_kind is None else (
-            Successor.create(next_kind,{'unlock_job_id':value['unlock_job_id']}),)
+        return () if next_kind is None else tuple(
+            Successor.create(next_kind,{
+                'unlock_job_id':value['unlock_job_id'],'file_index':index})
+            for index in value['file_indices'])
     return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
                         successor_kinds=() if next_kind is None else (next_kind,))

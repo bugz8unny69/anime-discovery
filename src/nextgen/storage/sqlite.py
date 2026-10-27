@@ -573,6 +573,95 @@ CREATE TABLE IF NOT EXISTS batch_torrent_unlocks (
        (phase='COMPLETE' AND reason_code='TORRENT_DOWNLOAD_COMPLETE') OR
        (phase='REVIEW' AND reason_code IN ('TORRENT_TRANSFER_CONFLICT','TORRENT_PIECE_OVERLAP')))
 );
+CREATE TABLE IF NOT EXISTS batch_probe_stops (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_probe_media(plan_id),
+ stop_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ stop_attempt INTEGER NOT NULL CHECK(stop_attempt>0),
+ fingerprint TEXT NOT NULL UNIQUE CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ phase TEXT NOT NULL CHECK(phase IN ('STOP_UNCERTAIN','STOPPED')),
+ piece_size INTEGER NOT NULL CHECK(piece_size BETWEEN 1 AND 67108864),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE TABLE IF NOT EXISTS batch_episode_media (
+ plan_id INTEGER NOT NULL,
+ file_index INTEGER NOT NULL,
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ unlock_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ submission_fingerprint TEXT NOT NULL CHECK(length(submission_fingerprint)=64),
+ transfer_fingerprint TEXT NOT NULL CHECK(length(transfer_fingerprint)=64),
+ evidence_json TEXT NOT NULL CHECK(json_valid(evidence_json) AND length(CAST(evidence_json AS BLOB))<=65536),
+ verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
+ PRIMARY KEY(plan_id,file_index),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_trial_files(plan_id,file_index),
+ FOREIGN KEY(plan_id) REFERENCES batch_torrent_unlocks(plan_id)
+);
+
+CREATE TABLE IF NOT EXISTS batch_staging_publications (
+ plan_id INTEGER NOT NULL,
+ file_index INTEGER NOT NULL,
+ job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ manifest_json TEXT NOT NULL CHECK(json_valid(manifest_json) AND length(CAST(manifest_json AS BLOB)) BETWEEN 1 AND 65536),
+ state TEXT NOT NULL CHECK(state IN ('PLANNED','PUBLISHED')),
+ receipts_json TEXT CHECK(receipts_json IS NULL OR
+  (json_valid(receipts_json) AND length(CAST(receipts_json AS BLOB))<=16384)),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ published_at_ms INTEGER CHECK(published_at_ms IS NULL OR published_at_ms>=created_at_ms),
+ PRIMARY KEY(plan_id,file_index),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_episode_media(plan_id,file_index),
+ CHECK((state='PLANNED' AND receipts_json IS NULL AND published_at_ms IS NULL) OR
+       (state='PUBLISHED' AND receipts_json IS NOT NULL AND published_at_ms IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS batch_keep_imports (
+ job_id INTEGER NOT NULL REFERENCES jobs(job_id),
+ plan_id INTEGER NOT NULL,
+ file_index INTEGER NOT NULL,
+ phase TEXT NOT NULL CHECK(phase IN ('PLANNED','ADD_UNCERTAIN','SERIES_READY','IMPORT_UNCERTAIN','COMPLETE')),
+ data_json TEXT NOT NULL CHECK(json_valid(data_json) AND length(CAST(data_json AS BLOB)) BETWEEN 1 AND 65536),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=0),
+ PRIMARY KEY(job_id,file_index),
+ UNIQUE(job_id,plan_id,file_index),
+ FOREIGN KEY(plan_id,file_index) REFERENCES batch_staging_publications(plan_id,file_index)
+);
+CREATE TABLE IF NOT EXISTS batch_download_cleanup (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_submissions(plan_id),
+ decision_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ files_json TEXT NOT NULL CHECK(json_valid(files_json) AND length(CAST(files_json AS BLOB))<=1048576),
+ phase TEXT NOT NULL CHECK(phase IN ('PREPARED','STOP_UNCERTAIN','REMOVE_UNCERTAIN','FILES','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE TABLE IF NOT EXISTS batch_keep_cleanup (
+ job_id INTEGER PRIMARY KEY REFERENCES jobs(job_id),
+ decision_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ phase TEXT NOT NULL CHECK(phase IN ('PENDING','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE TABLE IF NOT EXISTS batch_submission_inventories (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_submissions(plan_id),
+ inventory_json TEXT NOT NULL CHECK(json_valid(inventory_json) AND length(CAST(inventory_json AS BLOB)) BETWEEN 1 AND 1048576),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0)
+);
+CREATE TABLE IF NOT EXISTS batch_cancellation_cleanup (
+ plan_id INTEGER PRIMARY KEY REFERENCES batch_torrent_submissions(plan_id),
+ operation_id INTEGER NOT NULL REFERENCES job_operations(operation_id),
+ fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64 AND fingerprint NOT GLOB '*[^a-f0-9]*'),
+ files_json TEXT NOT NULL CHECK(json_valid(files_json) AND length(CAST(files_json AS BLOB))<=1048576),
+ phase TEXT NOT NULL CHECK(phase IN ('PREPARED','STOP_UNCERTAIN','REMOVE_UNCERTAIN','FILES','COMPLETE')),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+
+
+
+
+
+
+
 
 
 
@@ -615,13 +704,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v33; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v41; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v33 storage.
+    before accessing v41 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 33:
+    if version == 41:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -631,7 +720,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=33;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=41;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

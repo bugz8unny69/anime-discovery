@@ -278,3 +278,85 @@ class BatchUnlockJournal:
                 occurred_at_ms=now,details={'attempt':claim.attempt}),)
             self.queue._owns(db,claim,self.queue.now())
             return _record(db,intent,proof),audit
+
+
+    def stop_probe(self,claim,intent,snapshot,reservation_job_id):
+        """Durable one-shot stop permission, or read-only stopped reconciliation."""
+        import hashlib
+        from src.nextgen.batch.probe_transfer import (
+            exact_probe_selection, verify_probe_snapshot,
+        )
+        from src.nextgen.acquisition.transfers import TransferPermit, ACTIVE, STOPPED
+        with self.queue.connection() as db,transaction(db):
+            current,media,_=self._current(db,claim,reservation_job_id,intent.inventory)
+            if current!=intent or snapshot is None:
+                raise TransferConflict()
+            verify_probe_snapshot(intent,snapshot)
+            if not exact_probe_selection(intent,snapshot):
+                raise TransferConflict()
+            probe=intent.candidate.probe_index
+            if snapshot.progress[probe]!=1:
+                raise TransferConflict()
+            fingerprint=hashlib.sha256(
+                ('batch-probe-stop:'+intent.fingerprint+':'+
+                 str(snapshot.piece_size)+':'+str(probe)).encode()).hexdigest()
+            prior=db.execute(
+                'SELECT stop_job_id,stop_attempt,fingerprint,phase,piece_size '
+                'FROM batch_probe_stops WHERE plan_id=?',
+                (intent.candidate.plan_id,)).fetchone()
+            now=self.queue.now()
+            if prior is not None:
+                if prior[2]!=fingerprint or prior[4]!=snapshot.piece_size:
+                    raise TransferConflict()
+                if prior[3]=='STOPPED':
+                    if snapshot.observation.state not in STOPPED:
+                        raise TransferConflict()
+                    return 'STOPPED',None,fingerprint,()
+                if prior[3]!='STOP_UNCERTAIN':
+                    raise TransferConflict()
+                if snapshot.observation.state in STOPPED:
+                    db.execute(
+                        "UPDATE batch_probe_stops SET phase='STOPPED',updated_at_ms=? "
+                        "WHERE plan_id=? AND phase='STOP_UNCERTAIN'",
+                        (now,intent.candidate.plan_id))
+                    record=append_job_history(
+                        db,job_id=claim.job_id,event_code='TORRENT_TRANSFER_CHANGED',
+                        reason_code='TORRENT_STOPPED_CONFIRMED',component='worker',
+                        occurred_at_ms=now,details={'attempt':claim.attempt})
+                    return 'STOPPED',None,fingerprint,(record,)
+                # The old process may have sent stop; never recreate its permit.
+                return 'STOP_UNCERTAIN',None,fingerprint,()
+            if snapshot.observation.state in STOPPED:
+                phase='STOPPED'
+                permit=None
+                reason='TORRENT_STOPPED_CONFIRMED'
+            elif snapshot.observation.state in ACTIVE:
+                phase='STOP_UNCERTAIN'
+                permit=TransferPermit(fingerprint,('stop',))
+                reason='TORRENT_PROBE_STOP_UNCERTAIN'
+            else:
+                raise TransferConflict()
+            db.execute(
+                'INSERT INTO batch_probe_stops(plan_id,stop_job_id,stop_attempt,'
+                'fingerprint,phase,piece_size,created_at_ms,updated_at_ms) '
+                'VALUES(?,?,?,?,?,?,?,?)',
+                (intent.candidate.plan_id,claim.job_id,claim.attempt,
+                 fingerprint,phase,snapshot.piece_size,now,now))
+            record=append_job_history(
+                db,job_id=claim.job_id,event_code='TORRENT_TRANSFER_CHANGED',
+                reason_code=reason,component='worker',
+                occurred_at_ms=now,details={'attempt':claim.attempt})
+            self.queue._owns(db,claim,self.queue.now())
+            return phase,permit,fingerprint,(record,)
+
+    def guard_probe_stop(self,claim,intent,reservation_job_id,fingerprint):
+        with self.queue.connection() as db,transaction(db):
+            current,_,_=self._current(db,claim,reservation_job_id,intent.inventory)
+            if current!=intent:raise TransferConflict()
+            row=db.execute(
+                'SELECT stop_job_id,stop_attempt,fingerprint,phase '
+                'FROM batch_probe_stops WHERE plan_id=?',
+                (intent.candidate.plan_id,)).fetchone()
+            if row!=(claim.job_id,claim.attempt,fingerprint,'STOP_UNCERTAIN'):
+                raise TransferConflict()
+            self.queue._owns(db,claim,self.queue.now())

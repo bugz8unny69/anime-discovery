@@ -11,7 +11,7 @@ import json
 import secrets
 import threading
 
-from src.nextgen.acquisition.metadata import BatchInventory, AcquisitionConflict
+from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile, AcquisitionConflict
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.acquisition.transfers import STOPPED, CHECKING
@@ -84,6 +84,36 @@ def _fingerprint(candidate,inventory,options,marker,major):
         'stopped':True,'auto_tmm':False,'skip_checking':False,
         'content_layout':'Original','use_download_path':False,
     },sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
+
+def stored_inventory(db,plan_id,info_hash,info_sha256):
+    """Recover the immutable, canonical torrent file list saved at submission.
+
+    This is evidence of the original manifest, not permission to send or delete.
+    The existing candidate, submission fingerprint and qB ownership checks
+    remain mandatory before any external cleanup.
+    """
+    row=db.execute(
+        "SELECT inventory_json FROM batch_submission_inventories "
+        "WHERE plan_id=?",(plan_id,)).fetchone()
+    if row is None:raise AcquisitionConflict()
+    raw=row[0]
+    try:
+        def unique(pairs):
+            out={}
+            for key,value in pairs:
+                if key in out:raise AcquisitionConflict()
+                out[key]=value
+            return out
+        document=json.loads(raw,object_pairs_hook=unique)
+        if (type(document) is not dict or set(document)!={'files'}
+                or type(document['files']) is not list):
+            raise AcquisitionConflict()
+        inventory=BatchInventory(info_hash,info_sha256,
+                                 tuple(TorrentFile(**f) for f in document['files']))
+        if inventory.json()!=raw:raise AcquisitionConflict()
+        return inventory
+    except (TypeError,KeyError,ValueError):
+        raise AcquisitionConflict() from None
 
 
 def _intent(db,candidate,inventory):
@@ -218,6 +248,13 @@ class BatchSubmissionJournal:
                  inventory.info_hash,inventory.info_sha256,marker,target.base_url,
                  target.download_root,target.category,target.timeout_seconds,api_major,
                  fingerprint,revision,state,reason,now,now))
+            raw_inventory=inventory.json()
+            if len(raw_inventory.encode('utf-8'))>1048576:
+                raise AcquisitionConflict()
+            db.execute(
+                'INSERT INTO batch_submission_inventories(plan_id,inventory_json,created_at_ms) '
+                'VALUES(?,?,?)',
+                (candidate.plan_id,raw_inventory,now))
             receipt=append_job_history(
                 db,job_id=claim.job_id,event_code='TORRENT_INTENT_RECORDED',
                 reason_code=reason,component='worker',occurred_at_ms=now,

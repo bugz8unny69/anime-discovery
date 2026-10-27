@@ -161,3 +161,33 @@ class BatchClient(Client):
         self._request(
             'torrents/start' if self.major==5 else 'torrents/resume',
             form={'hashes':intent.inventory.info_hash},limit=4096)
+
+    def stop_completed_probe(self,intent,fingerprint,permit):
+        """One irreversible stop send; never replay after network uncertainty."""
+        from src.nextgen.acquisition.transfers import (
+            TransferPermit, TransferConflict, ACTIVE,
+        )
+        from src.nextgen.batch.probe_transfer import (
+            verify_probe_snapshot, exact_probe_selection,
+        )
+        import hashlib
+        if (not self._sid or self.major not in (4,5)
+                or type(intent) is not BatchSubmissionIntent
+                or type(permit) is not TransferPermit
+                or self.options!=intent.options):
+            raise ClientInvalid()
+        snapshot=self.inspect_transfer(intent.inventory.info_hash)
+        if snapshot is None:raise TransferConflict()
+        verify_probe_snapshot(intent,snapshot)
+        probe=intent.candidate.probe_index
+        calculated=hashlib.sha256(
+            ('batch-probe-stop:'+intent.fingerprint+':'+
+             str(snapshot.piece_size)+':'+str(probe)).encode()).hexdigest()
+        if (calculated!=fingerprint or snapshot.progress[probe]!=1
+                or not exact_probe_selection(intent,snapshot)
+                or snapshot.observation.state not in ACTIVE):
+            raise TransferConflict()
+        permit.take(fingerprint,'stop')
+        self._request(
+            'torrents/stop' if self.major==5 else 'torrents/pause',
+            form={'hashes':intent.inventory.info_hash},limit=4096)

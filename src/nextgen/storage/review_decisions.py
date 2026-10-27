@@ -30,9 +30,20 @@ def remove_selected(manifest,receipts,guard,keep_root):
     """Delete only this decision's video and episode NFO; leave series metadata."""
     plan=json.loads(manifest);proofs=json.loads(receipts)
     disjoint(plan['root'],(keep_root,))
-    for entry,proof in zip(plan['entries'],proofs):
+    entries=plan['entries']
+    # Preflight the entire proven publication before the first unlink.
+    # zip() alone silently truncates missing or extra receipts.
+    if (type(entries) is not list or type(proofs) is not list
+            or not entries or len(entries)!=len(proofs)):
+        raise StagingReview()
+    for entry,proof in zip(entries,proofs):
+        if (type(entry) is not dict or type(proof) is not dict
+                or entry.get('role') not in ('media','episode','series')
+                or entry.get('role')!=proof.get('role')
+                or entry.get('path')!=proof.get('path')):
+            raise StagingReview()
+    for entry,proof in zip(entries,proofs):
         if entry['role']=='series':continue
-        if entry['role'] not in ('media','episode') or entry['path']!=proof['path']:raise StagingReview()
         guard()
         with directory(plan['root']) as root:
             if [os.fstat(root).st_dev,os.fstat(root).st_ino]!=plan['root_identity']:raise StagingReview()

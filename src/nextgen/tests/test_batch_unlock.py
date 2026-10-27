@@ -82,6 +82,30 @@ class AudioGatedUnlockTests(unittest.TestCase):
                 self.media,15)
         self.assertEqual(self.calls,[])
 
+    def test_probe_stop_can_only_be_sent_once_after_e01_completion(self):
+        import hashlib
+        self.current[0]=self.snapshot(state='downloading')
+        probe=self.intent.candidate.probe_index
+        fp=hashlib.sha256(
+            ('batch-probe-stop:'+self.intent.fingerprint+':'+
+             str(self.current[0].piece_size)+':'+str(probe)).encode()).hexdigest()
+        permit=TransferPermit(fp,('stop',))
+        self.client.stop_completed_probe(self.intent,fp,permit)
+        self.assertEqual(self.calls[0][0],'torrents/stop')
+        with self.assertRaises(TransferConflict):
+            self.client.stop_completed_probe(self.intent,fp,permit)
+        self.assertEqual(len(self.calls),1)
+
+    def test_probe_stop_rejects_wrong_priorities_and_unowned_files(self):
+        import hashlib
+        self.current[0]=self.snapshot(state='downloading',priorities=(1,1,0))
+        fp=hashlib.sha256(
+            ('batch-probe-stop:'+self.intent.fingerprint+':100:0').encode()).hexdigest()
+        permit=TransferPermit(fp,('stop',))
+        with self.assertRaises(TransferConflict):
+            self.client.stop_completed_probe(self.intent,fp,permit)
+        self.assertEqual(self.calls,[])
+
     def test_outside_trial_and_ova_are_always_priority_zero(self):
         plan=plan_verified_unlock(self.intent,self.snapshot(),self.media,15)
         self.assertEqual(plan.priorities[2],0)

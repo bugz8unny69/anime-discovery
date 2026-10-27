@@ -25,7 +25,9 @@ class BatchAcquisitionCandidate:
     planned_size_bytes: int
 
 
-def _candidate(db,reservation_job_id,inventory):
+def _candidate(db,reservation_job_id,inventory,*,cleanup=False):
+    owner_state=("AND j.state='DONE' AND o.state IN ('ACTIVE','STAGED') "
+                 if cleanup else "AND j.state='DONE' AND o.state='ACTIVE' ")
     rows=db.execute(
         "SELECT r.plan_id,r.file_index,r.tvdb_episode,b.info_hash,b.info_sha256,"
         "p.anchor_episode,p.planned_size_bytes,f.file_path,f.file_size_bytes "
@@ -38,7 +40,7 @@ def _candidate(db,reservation_job_id,inventory):
         "JOIN job_operation_members m ON m.job_id=j.job_id "
         "JOIN job_operations o USING(operation_id) "
         "WHERE r.owner_job_id=? AND r.state='ACTIVE' AND j.kind='RESERVE_BATCH' "
-        "AND j.state='DONE' AND o.state='ACTIVE' "
+        + owner_state +
         "ORDER BY r.tvdb_episode,r.file_index",
         (reservation_job_id,)).fetchall()
     if not rows:raise AcquisitionConflict()
@@ -64,8 +66,9 @@ def _candidate(db,reservation_job_id,inventory):
                    "JOIN batch_verifications b USING(batch_id) WHERE p.plan_id=?",
                    (plan,)).fetchone()
     if aid is None:raise AcquisitionConflict()
-    try:require_allowed(db,aid[0])
-    except AnimeRejected:raise AcquisitionConflict() from None
+    if not cleanup:
+        try:require_allowed(db,aid[0])
+        except AnimeRejected:raise AcquisitionConflict() from None
     selected,indices,probe,budget=[],set(),None,0
     for current_plan,index,episode,current_hash,current_sha,current_anchor,current_total,path,size in rows:
         if ((current_plan,current_hash,current_sha,current_anchor,current_total)!=(plan,info_hash,sha,anchor,total)

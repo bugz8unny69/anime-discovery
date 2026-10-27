@@ -42,6 +42,32 @@ class RejectMediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(list(target.rglob('*.nfo'))),1)
         with self.assertRaises(ActionUnavailable):actions.submit(job,'keep')
 
+    async def test_missing_receipt_is_reviewed_before_deleting_any_video(self):
+        import json
+        worker,target,job=await self.staged()
+        video=next(target.rglob('*.mkv'))
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                row=db.execute(
+                    "SELECT receipts_json FROM staging_publications "
+                    "WHERE state='PUBLISHED'").fetchone()
+                receipts=json.loads(row[0])
+                self.assertGreater(len(receipts),1)
+                db.execute(
+                    "UPDATE staging_publications SET receipts_json=? "
+                    "WHERE state='PUBLISHED'",(json.dumps(receipts[:-1]),))
+        finally:db.close()
+        _,control,_=ManagementActions(self.database).submit(job,'reject')
+        await worker.attempt()
+        self.assertTrue(video.exists())
+        self.assertEqual(self.rows(
+            'SELECT cleanup_state FROM anime_review_decisions'),[('PENDING',)])
+        self.assertEqual(self.rows(
+            'SELECT state,last_reason_code FROM jobs WHERE job_id=?',
+            (control['job_id'],)),
+            [('NEEDS_REVIEW','REJECT_CLEANUP_REVIEW')])
+
     async def test_new_episode_for_rejected_anime_stops_before_reservation(self):
         worker,target,job=await self.staged()
         ManagementActions(self.database).submit(job,'reject');await worker.attempt()

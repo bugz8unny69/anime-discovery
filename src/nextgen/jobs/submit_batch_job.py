@@ -1,4 +1,4 @@
-"""Opt-in, single-shot stopped batch submission. Not registered by default.
+"""One-shot stopped batch submission; registered in the default worker.
 
 The configured metadata source is hash-only; the durable journal owns
 permission for one stopped add and all later attempts reconcile without

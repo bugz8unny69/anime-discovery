@@ -16,6 +16,7 @@ from src.nextgen.maintenance import MaintenanceGate
 from src.nextgen.storage.cancellation import CancellationStore, operation, cancel_job
 from src.nextgen.storage.sqlite import transaction
 from src.nextgen.storage.submissions import _plan, _intent
+from src.nextgen.staging_artifacts import BatchStageCleanupRetry
 
 
 class CancellationService(OwnedCleanup):
@@ -89,7 +90,19 @@ class CancellationService(OwnedCleanup):
                 if intent is not None:
                     if intent.state!='OWNED_STOPPED':raise CancellationError()
                     targets.append(intent)
-            result=(op[0],targets)
+            # The batch canceled-cleanup journal already exists. Feed it only
+            # submission plans owned by this canceled operation, using frozen
+            # inventory and the same exclusive drain fence as single torrents.
+            plans=db.execute(
+                "SELECT DISTINCT s.plan_id FROM batch_torrent_submissions s "
+                "JOIN batch_episode_reservations r ON r.plan_id=s.plan_id "
+                "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
+                "WHERE m.operation_id=? AND r.state='ACTIVE' "
+                "ORDER BY s.plan_id",(op[0],)).fetchall()
+            if len(plans)>1000:raise CancellationError()
+            from src.nextgen.batch_cancellation_cleanup import load_cancelled_batch
+            batches=[load_cancelled_batch(db,op[0],plan) for (plan,) in plans]
+            result=(op[0],targets,batches)
         self._log(receipts)
         return result
     def cleanup(self,job_id,*,max_targets=1):
@@ -99,7 +112,7 @@ class CancellationService(OwnedCleanup):
             if not status['can_cleanup']:return status
             try:
                 with OperationGate(self.database).hold(status['operation_id'],cleanup=True):
-                    op,targets=self._targets(job_id)
+                    op,targets,batches=self._targets(job_id)
                     complete=True;processed=0
                     for target in targets:
                         with self.store.queue.connection() as db:
@@ -109,15 +122,42 @@ class CancellationService(OwnedCleanup):
                             complete=False;continue
                         processed+=1
                         complete=self._clean_target(op,target) and complete
+                    if batches:
+                        from src.nextgen.batch_cancellation_cleanup import BatchCanceledCleanup
+                        batch_cleaner=BatchCanceledCleanup(self)
+                        for target in batches:
+                            with self.store.queue.connection() as db:
+                                prior=db.execute(
+                                    'SELECT phase FROM batch_cancellation_cleanup '
+                                    'WHERE plan_id=?',(target.plan.plan_id,)).fetchone()
+                            if prior==('COMPLETE',):continue
+                            if processed>=max_targets:
+                                complete=False;continue
+                            processed+=1
+                            complete=batch_cleaner._clean_target(op,target) and complete
                     if complete:
-                        from src.nextgen.staging_artifacts import clean_temporaries
+                        from src.nextgen.staging_artifacts import (
+                            clean_temporaries, clean_published_batch,
+                            reconcile_planned_batch,
+                        )
                         self._fence()
+                        reconcile_planned_batch(
+                            self.store.queue,op,guard=self._fence,
+                            keep_root=self.configuration.value('storage.keep_root'))
+                        clean_published_batch(
+                            self.store.queue,op,guard=self._fence,
+                            keep_root=self.configuration.value('storage.keep_root'))
                         clean_temporaries(self.store.queue,op,guard=self._fence)
                     self._state(job_id,'COMPLETE' if complete else 'PENDING',
                                 'CANCELLATION_COMPLETE' if complete else 'CANCELLATION_PENDING')
             except CleanupBusy:
                 # Keep CANCEL_REQUESTED and leases intact until drain is proven.
                 return self.store.status(job_id)
+            except BatchStageCleanupRetry:
+                # Use the existing worker retry policy; no new retry journal.
+                self._state(job_id,'PENDING','CANCELLATION_PENDING',
+                            cause='STAGING_REVIEW')
+                return {**self.store.status(job_id),'staging_retry':True}
             except ClientUnavailable:
                 self._state(job_id,'PENDING','CANCELLATION_PENDING',cause='DOWNLOAD_CLIENT_UNAVAILABLE')
             except (CancellationError,ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,OSError,ValueError) as exc:
