@@ -56,7 +56,7 @@ class FakeSonarr:
         assert request.get_method() == 'GET'
         assert request.data is None
         assert request.get_header('X-api-key') == 'private-sonarr-key'
-        assert timeout == 13
+        assert timeout == (180 if urlsplit(request.full_url).path == '/api/v3/release' else 13)
         url = urlsplit(request.full_url)
         assert url.netloc == 'sonarr.invalid'
         path = url.path.removeprefix('/api/v3/')
