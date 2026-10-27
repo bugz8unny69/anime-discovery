@@ -140,7 +140,8 @@ def persist_observations(db, claim, value):
         if (type(item) is not BackfillObservation or item.number != number
                 or item.status not in ('IN_PROGRESS','NOT_LISTED','IDENTITY_UNKNOWN',
                                        'IDENTITY_CONFLICT','HAS_FILE','CANDIDATES','NO_RESULTS')
-                or not 0 <= item.exact <= item.approved <= item.candidates <= 1000
+                or not 0 <= item.approved <= item.candidates <= 1000
+                or not 0 <= item.exact <= item.candidates <= 1000
                 or item.status != 'CANDIDATES' and (item.candidates or item.approved or item.exact)):
             raise BackfillConflict()
         previous = db.execute(
