@@ -66,8 +66,9 @@ class ReviewRetryTests(unittest.TestCase):
     def test_budget_restarts_after_manual_retry_without_deleting_history(self):
         self.retry()
         queue=JobQueue(self.database,policy=Policy(max_retries=1),clock=lambda:123457)
+        claim,_=queue.claim()
+        self.assertEqual(claim.attempt,5)
         with queue.connection() as db,transaction(db):
-            claim=Claim(self.job,self.event,'STAGE_TRIAL_MEDIA','{}',5,'a'*32)
             record=queue._transition(db,claim,Outcome('retry','STAGING_UNAVAILABLE'),123457)
             self.assertEqual(record.event_code,'RETRY_SCHEDULED')
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(self.job,)),
@@ -94,13 +95,15 @@ class ReviewRetryTests(unittest.TestCase):
         with transaction(db):
             op=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',
                           (self.job,)).fetchone()[0]
-            db.execute("UPDATE job_operations SET state='CANCELED' WHERE operation_id=?",(op,))
+            db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
+                       "reason_code='CANCELLATION_COMPLETE' WHERE operation_id=?",(op,))
             self.assertFalse(capability(db,self.job)['enabled'])
         db.close()
         with self.assertRaises(RetryNotAllowed):self.retry()
         db=connect(self.database)
         with transaction(db):
-            db.execute("UPDATE job_operations SET state='ACTIVE' WHERE operation_id=?",(op,))
+            db.execute("UPDATE job_operations SET state='ACTIVE',cleanup_state='NONE',"
+                       "reason_code=NULL WHERE operation_id=?",(op,))
             db.execute("INSERT INTO jobs(event_id,created_by_job_id,kind,payload_json,state,"
                 "available_at_ms,created_at_ms,updated_at_ms) "
                 "VALUES(?,?,'VERIFY_MEDIA','{}','DONE',1,1,1)",(self.event,self.job))
@@ -179,7 +182,8 @@ class ReviewRetryApiTests(unittest.IsolatedAsyncioTestCase):
         with connect(self.database) as db,transaction(db):
             db.execute("UPDATE jobs SET state='NEEDS_REVIEW',attempt_count=1,"
                        "last_reason_code='IDENTITY_INCOMPLETE' WHERE job_id=?",(job,))
-            db.execute("UPDATE job_operations SET state='CANCELED' WHERE operation_id="
+            db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
+                       "reason_code='CANCELLATION_COMPLETE' WHERE operation_id="
                        "(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(job,))
         status,_,_=await self.request('POST',f'/api/v1/jobs/{job}/retry',body,token=ADMIN)
         self.assertEqual(status,409)
