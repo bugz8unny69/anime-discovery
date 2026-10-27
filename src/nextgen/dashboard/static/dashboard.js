@@ -155,8 +155,10 @@ function renderJobs() {
     if (state.page === 'jobs') {
       const cell = td();
       const checkbox = node('input'); checkbox.type = 'checkbox'; checkbox.checked = state.selected.has(job.job_id);
+      checkbox.disabled = state.bulkSubmitting;
       checkbox.setAttribute('aria-label', 'Select job #' + job.job_id);
       checkbox.addEventListener('change', () => {
+        if (state.bulkSubmitting) return;
         if (checkbox.checked && state.selected.size >= 100) {
           checkbox.checked = false; notice(COPY['dashboard.bulk_limit'], true); return;
         }
@@ -235,6 +237,62 @@ function renderJobs() {
   $('previous-page').disabled = state.previous.length === 0;
   $('next-page').disabled = state.next === null;
   if (state.page === 'jobs') renderBulkControls();
+}
+function renderBulkControls() {
+  if (state.page !== 'jobs') return;
+  const count = state.selected.size;
+  $('bulk-actions').hidden = count === 0;
+  $('selection-count').textContent = count + ' selected (max 100)';
+  $('bulk-submit').disabled = !count || state.bulkSubmitting;
+  $('bulk-action').disabled = state.bulkSubmitting;
+  $('bulk-clear').disabled = state.bulkSubmitting;
+  const onPage = state.jobs;
+  $('select-page').disabled = state.bulkSubmitting || !onPage.length;
+  $('select-page').checked = Boolean(onPage.length && onPage.every(job => state.selected.has(job.job_id)));
+  $('select-page').indeterminate = onPage.some(job => state.selected.has(job.job_id)) && !$('select-page').checked;
+}
+async function resetJobsPage() {
+  if (!state.csrf || state.page !== 'jobs') return;
+  if (state.loading) await state.loading;
+  state.previous = []; state.cursor = MAX_CURSOR; state.next = null;
+  await loadActivity();
+}
+async function submitSelected() {
+  if (state.bulkSubmitting || !state.csrf || state.page !== 'jobs' || !state.selected.size) return;
+  const ids = [...state.selected];
+  const action = $('bulk-action').value;
+  if (!['retry', 'cancel', 'cleanup'].includes(action)) return;
+  if (!confirm(`Apply ${action} to ${ids.length} selected jobs? Existing lifecycle and cleanup checks still apply.`)) return;
+  state.bulkSubmitting = true; renderJobs();
+  let successful = 0, failed = 0, submitted = null;
+  try {
+    if (ids.length > 5) {
+      submitted = await request(API + '/jobs/bulk', {method: 'POST', body: {action, job_ids: ids}});
+      state.selected.clear();
+      notice(`Bulk job #${submitted.job_id} submitted for ${ids.length} selected jobs. Follow its history for the result.`);
+    } else {
+      for (const id of ids) {
+        if (!state.csrf) break;
+        try {
+          let body = {};
+          if (action === 'retry') {
+            const job = await request(`${API}/jobs/${id}`);
+            if (!job.actions?.retry?.enabled) { failed++; continue; }
+            body = {expected_attempt: job.attempt_count, expected_reason: job.reason?.code};
+          }
+          await request(`${API}/jobs/${id}/${action}`, {method: 'POST', body});
+          state.selected.delete(id);
+          successful++;
+        } catch (error) { failed++; if (!state.csrf) break; }
+      }
+      if (state.csrf) notice(`${successful} job action(s) accepted; ${failed} could not be applied.`, failed > 0);
+    }
+  } catch (error) { displayError(error); }
+  finally {
+    if (state.loading) await state.loading;
+    state.bulkSubmitting = false;
+    if (state.csrf) await loadActivity();
+  }
 }
 async function loadActivity() {
   if (state.loading) return state.loading;
@@ -786,6 +844,24 @@ $('status-filter').addEventListener('change', () => {
 });
 $('show-completed').addEventListener('change', resetJobsPage);
 $('show-canceled').addEventListener('change', resetJobsPage);
+$('select-page').addEventListener('change', () => {
+  if (state.bulkSubmitting || state.page !== 'jobs') return;
+  if ($('select-page').checked) {
+    for (const job of state.jobs) {
+      if (state.selected.size >= 100) { notice(COPY['dashboard.bulk_limit'], true); break; }
+      state.selected.add(job.job_id);
+    }
+  } else {
+    for (const job of state.jobs) state.selected.delete(job.job_id);
+  }
+  renderJobs();
+});
+$('bulk-clear').addEventListener('click', () => {
+  if (state.bulkSubmitting) return;
+  state.selected.clear();
+  renderJobs();
+});
+$('bulk-submit').addEventListener('click', submitSelected);
 $('next-page').addEventListener('click', async () => {
   if (state.next === null || state.loading) return;
   state.previous.push(state.cursor); state.cursor = String(state.next); await loadActivity();
