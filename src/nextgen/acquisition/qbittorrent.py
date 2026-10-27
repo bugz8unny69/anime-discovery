@@ -236,6 +236,29 @@ class Client:
         except ValueError:raise ClientInvalid() from None
         return Observation(expected_hash,state,save_path,category,tags,row['auto_tmm'],tuple(result))
 
+    def _tag_legacy_submission(self,intent):
+        """Tag only an exact, stopped, isolated admission on older Web APIs.
+
+        A successful add HTTP response cannot establish torrent ownership.
+        Do not mutate an existing same-hash torrent with different provenance.
+        On ambiguity leave the journal UNCERTAIN for operator-safe recovery.
+        """
+        digest=intent.plan.manifest.info_hash
+        raw,_=self._request('torrents/info',query={'hashes':digest,'limit':2})
+        rows=_json(raw)
+        if type(rows) is not list or len(rows)!=1 or type(rows[0]) is not dict:
+            raise ClientInvalid()
+        row=rows[0]
+        if (row.get('hash')!=digest
+                or row.get('save_path','').rstrip('/')!=self.options.download_root
+                or row.get('category')!=self.options.category
+                or row.get('auto_tmm') is not False
+                or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
+                or not self.options.download_root.endswith('/ad-'+intent.plan.marker)):
+            raise ClientInvalid()
+        self._request('torrents/addTags',form={
+            'hashes':digest,'tags':'ad-'+intent.plan.marker},limit=4096)
+
     def add_stopped(self,raw,intent,permit):
         """Single journaled submission for verified .torrent bytes or a magnet."""
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
@@ -251,8 +274,7 @@ class Client:
             permit.take(intent)
             self._request('torrents/add',form=fields,limit=4096)
             if not self.protocol.inline_tags:
-                self._request('torrents/addTags',form={
-                    'hashes':intent.plan.manifest.info_hash,'tags':'ad-'+intent.plan.marker},limit=4096)
+                self._tag_legacy_submission(intent)
             return
         manifest=parse_metainfo(raw,intent.plan.manifest.info_hash)
         if manifest!=intent.plan.manifest:raise ClientInvalid()
@@ -273,8 +295,7 @@ class Client:
             # qBittorrent 4.2.x requires a second API call to attach the
             # marker. Never re-add after an ambiguous first call. If tagging
             # fails, the existing journal keeps submission UNCERTAIN.
-            self._request('torrents/addTags',form={
-                'hashes':intent.plan.manifest.info_hash,'tags':'ad-'+intent.plan.marker},limit=4096)
+            self._tag_legacy_submission(intent)
 
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
