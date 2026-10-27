@@ -29,9 +29,11 @@ class ReviewRetryTests(unittest.TestCase):
             db.execute("UPDATE jobs SET state='NEEDS_REVIEW',attempt_count=4,"
                 "last_reason_code='JOB_RETRY_EXHAUSTED' WHERE job_id=?", (self.job,))
             for n in (1, 2, 3):
+                db.execute('UPDATE jobs SET attempt_count=? WHERE job_id=?',(n,self.job))
                 append_job_history(db, job_id=self.job, event_code='RETRY_SCHEDULED',
                     reason_code='STAGING_UNAVAILABLE', component='worker',
                     occurred_at_ms=n, details={'attempt':n})
+            db.execute('UPDATE jobs SET attempt_count=4 WHERE job_id=?',(self.job,))
         db.close()
 
     def rows(self, query, args=()):
