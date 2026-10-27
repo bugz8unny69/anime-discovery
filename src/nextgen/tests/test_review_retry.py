@@ -113,6 +113,32 @@ class ReviewRetryTests(unittest.TestCase):
         db.close()
         with self.assertRaises(RetryNotAllowed):self.retry()
 
+    def test_requeues_single_and_batch_failed_steps_without_new_jobs(self):
+        for kind in ('SUBMIT_TORRENT','DOWNLOAD_TORRENT','STAGE_TRIAL_MEDIA',
+                     'SUBMIT_BATCH','TRANSFER_BATCH','STAGE_BATCH_EPISODE'):
+            with self.subTest(kind=kind):
+                db=connect(self.database)
+                with transaction(db):
+                    db.execute("UPDATE jobs SET kind=?,state='NEEDS_REVIEW',attempt_count=4,"
+                               "last_reason_code='JOB_RETRY_EXHAUSTED',"
+                               "lease_token=NULL,lease_expires_at_ms=NULL WHERE job_id=?",
+                               (kind,self.job))
+                    self.assertTrue(capability(db,self.job)['enabled'])
+                db.close()
+                self.assertEqual(self.retry().job_id,self.job)
+                self.assertEqual(self.rows('SELECT count(*) FROM jobs'),[(1,)])
+
+    def test_duplicate_retry_after_cancel_is_not_acknowledged_as_queued(self):
+        self.retry()
+        db=connect(self.database)
+        with transaction(db):
+            op=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',
+                          (self.job,)).fetchone()[0]
+            db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
+                       "reason_code='CANCELLATION_COMPLETE' WHERE operation_id=?",(op,))
+        db.close()
+        with self.assertRaises(RetryNotAllowed):self.retry()
+
     def test_acquisition_only_allowlist_covers_batch_and_single_steps(self):
         for kind in ('IDENTIFY_ANIME','VERIFY_RELEASE','SUBMIT_TORRENT',
                      'DOWNLOAD_TORRENT','STAGE_TRIAL_MEDIA','SUBMIT_BATCH',
