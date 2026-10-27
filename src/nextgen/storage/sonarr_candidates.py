@@ -124,3 +124,59 @@ def mark_published(db, *, event_id, info_hash):
     plan_id,episode=rows[0]
     succeed_candidate(db,plan_id=plan_id,episode=episode,info_hash=digest)
     return True
+
+
+def schedule_after_cleanup(db,operation_id):
+    """Only a reviewed, fully cleaned Sonarr attempt advances the ranked list.
+
+    A user cancel without a terminal review never triggers another download.
+    The next choice is re-fetched by the existing Sonarr discovery worker.
+    """
+    if not db.in_transaction:raise CandidateConflict()
+    issue=db.execute(
+        "SELECT h.reason_code FROM job_history h "
+        "JOIN job_operation_members m ON m.job_id=h.job_id "
+        "WHERE m.operation_id=? AND h.event_code='NEEDS_REVIEW' "
+        "ORDER BY h.history_id DESC LIMIT 1",(operation_id,)).fetchone()
+    if issue is None:return ()
+    rows=db.execute(
+        "SELECT s.plan_id,s.tvdb_episode,s.info_hash,parent.event_id,parent.job_id "
+        "FROM job_operation_members m "
+        "JOIN jobs verify ON verify.job_id=m.job_id AND verify.kind='VERIFY_RELEASE' "
+        "JOIN incoming_events e ON e.event_id=verify.event_id "
+        "AND e.source='sonarr-discovery' "
+        "JOIN jobs parent ON parent.job_id=verify.created_by_job_id "
+        "AND parent.kind='DISCOVER_SONARR_BACKFILL' "
+        "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+        "JOIN sonarr_episode_selections s ON s.plan_id=p.plan_id "
+        "JOIN sonarr_episode_candidates c ON c.plan_id=s.plan_id "
+        "AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=s.info_hash "
+        "AND c.state='ACTIVE' "
+        "WHERE m.operation_id=? "
+        "AND s.info_hash=json_extract(CAST(e.raw_body AS TEXT),'$.torrent_infohash')",
+        (operation_id,)).fetchall()
+    if not rows:return ()
+    if len(rows)!=1:raise CandidateConflict()
+    plan_id,episode,digest,parent_event,parent_job=rows[0]
+    if parent_event is None:raise CandidateConflict()
+    # CancellationService has already confirmed cleanup and released all
+    # reservations inside this transaction. Never advance before that point.
+    if db.execute(
+        "SELECT 1 FROM episode_reservations r "
+        "JOIN acquisition_plans p USING(reservation_id) "
+        "WHERE p.info_hash=? AND r.state='ACTIVE' LIMIT 1",
+        (digest,)).fetchone():
+        raise CandidateConflict()
+    fail_candidate(db,plan_id=plan_id,episode=episode,info_hash=digest,
+                   reason_code=issue[0] or 'JOB_RETRY_EXHAUSTED')
+    pending=next_candidate(db,plan_id=plan_id,episode=episode)
+    if pending is None:return ()
+    from src.nextgen.storage.sqlite import enqueue_job_with_receipt
+    page_start=((episode-1)//4)*4+1
+    _,receipt=enqueue_job_with_receipt(
+        db,kind='DISCOVER_SONARR_BACKFILL',
+        payload={'plan_id':plan_id,'start':page_start,
+                 'fallback_episode':episode},
+        component='worker',event_id=parent_event,
+        created_by_job_id=parent_job)
+    return (receipt,)
