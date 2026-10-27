@@ -192,7 +192,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BackfillSchemaTests(unittest.TestCase):
-    def test_explicit_v41_to_v44_and_fresh_schema_match(self):
+    def test_explicit_v41_to_v45_and_fresh_schema_match(self):
         old = sqlite3.connect(':memory:')
         fresh = sqlite3.connect(':memory:')
         try:
@@ -205,10 +205,11 @@ class BackfillSchemaTests(unittest.TestCase):
             old.executescript((SQL_DIR/'042_sonarr_backfill.sql').read_text())
             old.executescript((SQL_DIR/'043_sonarr_selection.sql').read_text())
             old.executescript((SQL_DIR/'044_sonarr_candidates.sql').read_text())
+            old.executescript((SQL_DIR/'045_sonarr_magnet_intents.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],44)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],45)
         finally:
             old.close()
             fresh.close()
