@@ -1,4 +1,4 @@
-"""Opt-in one-time, JP+EN-gated trial episode unlock/transfer worker.
+"""One-time, JP+EN-gated batch episode unlock/transfer worker.
 
 No release-file guess or job payload can authorize a priority change. A
 persisted ffprobe+SHA256 proof from the completed E01 verifier is mandatory.

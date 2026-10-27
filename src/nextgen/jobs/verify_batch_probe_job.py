@@ -1,4 +1,4 @@
-"""Optional E01 media hash and Japanese+English audio verification worker."""
+"""E01 media hash and Japanese+English audio verification worker."""
 import inspect
 
 from src.nextgen.acquisition.metadata import (

@@ -6,7 +6,6 @@ stopped and removed. No unstored path ever grants file deletion authority.
 """
 import json
 from src.nextgen.acquisition.owned_cleanup import OwnedCleanup
-from src.nextgen.acquisition.cleanup import FileCleanup
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.storage.batch_acquisition_candidate import BatchAcquisitionCandidate
 from src.nextgen.storage.batch_submission_journal import _intent, stored_inventory
