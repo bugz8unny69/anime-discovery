@@ -11,6 +11,7 @@ from src.nextgen.cancellation import CancellationError
 from src.nextgen.storage.batch_acquisition_candidate import BatchAcquisitionCandidate
 from src.nextgen.storage.batch_submission_journal import _intent, stored_inventory
 from src.nextgen.history import job_attempt,append_job_history
+from src.nextgen.batch_decision_cleanup import protected_staging_roots
 
 
 def load_cancelled_batch(db,operation_id,plan_id):
@@ -147,3 +148,21 @@ class BatchCanceledCleanup(OwnedCleanup):
                 component=self.component,occurred_at_ms=now,
                 details={'attempt':job_attempt(db,intent.plan.preparation_job_id)})
         self._log((receipt,))
+
+    def _clean_target(self,op,intent):
+        # Reuse the same pinned-root protection as decision cleanup. A changed
+        # trial_root setting cannot permit removal inside an old staging tree.
+        from src.nextgen.storage.sqlite import transaction
+        with self.queue.connection() as db,transaction(db):
+            self._fence(db)
+            rows=db.execute(
+                "SELECT plan_id,file_index,manifest_json "
+                "FROM batch_staging_publications WHERE plan_id=?",
+                (intent.plan.plan_id,)).fetchall()
+            protected=protected_staging_roots(rows) if rows else ()
+        factory=self.files_factory
+        self.files_factory=lambda target,roots:factory(target,(*roots,*protected))
+        try:
+            return super()._clean_target(op,intent)
+        finally:
+            self.files_factory=factory

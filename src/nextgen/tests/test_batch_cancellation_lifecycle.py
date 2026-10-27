@@ -31,7 +31,14 @@ class BatchCancellationReleaseTests(unittest.TestCase):
             CREATE TABLE batch_cancellation_cleanup(
                 plan_id INTEGER,operation_id INTEGER,phase TEXT);
             CREATE TABLE staging_publications(job_id INTEGER,state TEXT);
-            CREATE TABLE batch_staging_publications(job_id INTEGER,state TEXT);
+            CREATE TABLE batch_staging_publications(
+                plan_id INTEGER,file_index INTEGER,job_id INTEGER,
+                manifest_json TEXT,receipts_json TEXT,state TEXT);
+            CREATE TABLE staging_cleanup_artifacts(
+                artifact_id INTEGER,operation_id INTEGER,job_id INTEGER,
+                root_path TEXT,relative_path TEXT,root_device INTEGER,
+                root_inode INTEGER,file_device INTEGER,file_inode INTEGER,
+                phase TEXT);
             CREATE TABLE job_operations(operation_id INTEGER,state TEXT,
                 cleanup_state TEXT);
             CREATE TABLE acquisition_plans(plan_id INTEGER,reservation_id INTEGER);
@@ -72,7 +79,7 @@ class BatchCancellationReleaseTests(unittest.TestCase):
             "INSERT INTO batch_cancellation_cleanup VALUES(15,7,'COMPLETE')")
         self.db.execute("INSERT INTO jobs VALUES(61,'DONE','STAGE_BATCH_EPISODE',NULL,'{}')")
         self.db.execute('INSERT INTO job_operation_members VALUES(7,61)')
-        self.db.execute("INSERT INTO batch_staging_publications VALUES(61,'PUBLISHED')")
+        self.db.execute("INSERT INTO batch_staging_publications VALUES(15,1,61,'{}','[]','PUBLISHED')")
         with self.assertRaises(CancellationError):
             release_cancelled(self.db,7,51,1000,component='worker')
 
@@ -98,7 +105,8 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
         with (patch('src.nextgen.cancellation_service.OperationGate') as gate,
               patch('src.nextgen.batch_cancellation_cleanup.BatchCanceledCleanup')
               as cleaner,
-              patch('src.nextgen.staging_artifacts.clean_temporaries')):
+              patch('src.nextgen.staging_artifacts.clean_temporaries'),
+              patch('src.nextgen.staging_artifacts.clean_published_batch')):
             gate.return_value.hold.return_value.__enter__.return_value=None
             result=obj.cleanup(51)
             self.assertEqual(result['operation_id'],7)
