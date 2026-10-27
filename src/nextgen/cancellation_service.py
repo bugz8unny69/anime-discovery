@@ -16,6 +16,7 @@ from src.nextgen.maintenance import MaintenanceGate
 from src.nextgen.storage.cancellation import CancellationStore, operation, cancel_job
 from src.nextgen.storage.sqlite import transaction
 from src.nextgen.storage.submissions import _plan, _intent
+from src.nextgen.staging_artifacts import BatchStageCleanupRetry
 
 
 class CancellationService(OwnedCleanup):
@@ -148,6 +149,11 @@ class CancellationService(OwnedCleanup):
             except CleanupBusy:
                 # Keep CANCEL_REQUESTED and leases intact until drain is proven.
                 return self.store.status(job_id)
+            except BatchStageCleanupRetry:
+                # Use the existing worker retry policy; no new retry journal.
+                self._state(job_id,'PENDING','CANCELLATION_PENDING',
+                            cause='STAGING_REVIEW')
+                return {**self.store.status(job_id),'staging_retry':True}
             except ClientUnavailable:
                 self._state(job_id,'PENDING','CANCELLATION_PENDING',cause='DOWNLOAD_CLIENT_UNAVAILABLE')
             except (CancellationError,ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,OSError,ValueError) as exc:

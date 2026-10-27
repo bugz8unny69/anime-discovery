@@ -7,6 +7,12 @@ from src.nextgen.storage.cancellation import operation
 from src.nextgen.storage.sqlite import transaction
 
 
+class BatchStageCleanupRetry(CancellationError):
+    """A staging receipt or file needs bounded recovery, not immediate review."""
+    reason_code='STAGING_REVIEW'
+
+
+
 def _stage_claim(db,claim):
     import time
     row=db.execute('SELECT state,lease_token,attempt_count,lease_expires_at_ms FROM jobs WHERE job_id=?',(claim.job_id,)).fetchone()
@@ -100,7 +106,8 @@ def batch_copies(db, operation_id):
             # Without the full publication receipt, do not guess what to delete.
             if db.execute(
                 "SELECT 1 FROM staging_cleanup_artifacts "
-                "WHERE operation_id=? AND job_id=? AND phase='PUBLISHED' LIMIT 1",
+                "WHERE operation_id=? AND job_id=? "
+                "AND phase IN ('PUBLISH_UNCERTAIN','PUBLISHED') LIMIT 1",
                 (operation_id,job)).fetchone():
                 raise CancellationError()
             continue
@@ -175,25 +182,28 @@ def clean_published_batch(queue,operation_id,*,guard,keep_root,remove=None):
     if remove is None:remove=remove_selected
     with queue.connection() as db,transaction(db):
         guard(db)
-        items=batch_copies(db,operation_id)
+        try:items=batch_copies(db,operation_id)
+        except CancellationError:raise BatchStageCleanupRetry() from None
     for manifest,receipts,artifacts in items:
         guard()
         try:remove(manifest,receipts,guard,keep_root)
-        except StagingReview:raise CancellationError() from None
+        except (StagingReview,OSError):
+            raise BatchStageCleanupRetry() from None
         with queue.connection() as db,transaction(db):
             guard(db)
             # Revalidate all publication and inode receipts before completing.
-            current=batch_copies(db,operation_id)
+            try:current=batch_copies(db,operation_id)
+            except CancellationError:raise BatchStageCleanupRetry() from None
             if not any(m==manifest and p==receipts and a==artifacts
                        for m,p,a in current):
-                raise CancellationError()
+                raise BatchStageCleanupRetry()
             for artifact,phase in artifacts:
                 if phase=='REMOVED':continue
                 updated=db.execute(
                     "UPDATE staging_cleanup_artifacts SET phase='REMOVED' "
                     "WHERE artifact_id=? AND operation_id=? AND phase='PUBLISHED'",
                     (artifact,operation_id)).rowcount
-                if updated!=1:raise CancellationError()
+                if updated!=1:raise BatchStageCleanupRetry()
 
 
 def batch_copies_cleared(db,operation_id):

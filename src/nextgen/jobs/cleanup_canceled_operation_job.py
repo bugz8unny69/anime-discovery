@@ -33,6 +33,9 @@ def registration(secrets,*,service_factory=CancellationService):
         status=await blocking(service.cleanup,target)
         if status['cleanup_state']=='COMPLETE':return Outcome(value=target)
         if status['cleanup_state']=='REVIEW':return Outcome('review','CANCELLATION_REVIEW')
+        if status.get('staging_retry'):
+            # Distinct from open-ended waiting for uncertain torrent controls.
+            return Outcome('retry','STAGING_REVIEW')
         # A bounded reconciliation pass frees a slot. Waiting is not retry failure
         # and never rearms an uncertain external cleanup command.
         return Outcome('defer',status['reason_code'] or 'CANCELLATION_PENDING',delay_ms=30000)

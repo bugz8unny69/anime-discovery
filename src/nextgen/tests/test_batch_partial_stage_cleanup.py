@@ -115,9 +115,10 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         self.assertTrue(extra.exists())
 
     def test_changed_video_is_never_unlinked_or_marked_complete(self):
+        from src.nextgen.staging_artifacts import BatchStageCleanupRetry
         video,_=self.publish(1)
         video.write_bytes(b'tampered video')
-        with self.assertRaises(CancellationError):
+        with self.assertRaises(BatchStageCleanupRetry):
             self.cleanup()
         self.assertTrue(video.exists())
         self.assertFalse(batch_copies_cleared(self.db,7))
@@ -142,12 +143,13 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         self.assertEqual(calls,[True])
 
     def test_uncommitted_or_orphan_published_inode_is_preserved(self):
+        from src.nextgen.staging_artifacts import BatchStageCleanupRetry
         video,episode=self.publish(1)
         self.db.execute(
             "UPDATE batch_staging_publications SET state='PLANNED',"
             "receipts_json=NULL")
         self.db.commit()
-        with self.assertRaises(CancellationError):
+        with self.assertRaises(BatchStageCleanupRetry):
             self.cleanup()
         self.assertTrue(video.exists())
         self.assertTrue(episode.exists())
@@ -190,3 +192,18 @@ class PartialBatchStageCleanupTests(unittest.TestCase):
         self.assertIn(str(self.staging),captured)
         self.assertIn('/different/new-trial',captured)
         self.assertEqual(cleaner.files_factory,service.files_factory)
+
+    def test_uncertain_rename_is_retried_without_deleting_unproven_media(self):
+        from src.nextgen.staging_artifacts import BatchStageCleanupRetry
+        video,_=self.publish(1)
+        self.db.execute(
+            "UPDATE batch_staging_publications SET state='PLANNED',"
+            "receipts_json=NULL")
+        self.db.execute(
+            "UPDATE staging_cleanup_artifacts SET phase='PUBLISH_UNCERTAIN' "
+            "WHERE artifact_id=(SELECT min(artifact_id) "
+            "FROM staging_cleanup_artifacts)")
+        self.db.commit()
+        with self.assertRaises(BatchStageCleanupRetry):
+            self.cleanup()
+        self.assertTrue(video.exists())
