@@ -176,7 +176,7 @@ class ReviewRetryApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(original['data']['actions']['retry']['enabled'])
         body={'expected_attempt':3,'expected_reason':'IDENTITY_INCOMPLETE'}
         for token in (None, WEB):
-            status,_,_=await self.request('POST',f'/api/v1/jobs/{job}/retry',body,token=token)
+            status,_,_=await self.request('POST',f'/api/v1/jobs/{job}/retry',body,token=token,headers={'origin':'https://anime.example'})
             self.assertEqual(status,401)
         status,_,_=await self.request('POST',f'/api/v1/jobs/{job}/retry',body,
                                      headers={'cookie':self.admin_cookie,'origin':'https://anime.example'})

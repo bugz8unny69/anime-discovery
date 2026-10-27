@@ -14,6 +14,7 @@ from src.nextgen.jobs.verify_release_job import registration as release_registra
 from src.nextgen.jobs.evaluate_batch_job import registration as batch_registration
 from src.nextgen.jobs.reserve_batch_job import registration as reserve_batch_registration
 from src.nextgen.providers.http import Credentials
+from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import (connect, initialize, accept_event_and_job,
     save_identity, transaction, enqueue_job)
 from src.nextgen.storage.job_queue import JobQueue
@@ -43,7 +44,7 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.startup=self.store.initialize({'storage':{'database_path':str(self.database)}}).snapshot
         db=connect(self.database)
         initialize(db)
-        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(36,))
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(LATEST_VERSION,))
         self.event,self.verification_job=accept_event_and_job(
             db,'test',b'{"release_name":"Shiki (S01 + OVA)","torrent_infohash":"'+b'a'*40+b'"}',
             kind='VERIFY_RELEASE',payload={'anidb_id':123})
@@ -126,7 +127,9 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
             with transaction(db):
                 submission=enqueue_job(
                     db,kind='SUBMIT_BATCH',payload={'reservation_job_id':reservation},
-                    component='worker',event_id=self.event,created_by_job_id=reservation)
+                    component='worker',event_id=self.event,created_by_job_id=reservation,
+                    operation_id=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',
+                                            (reservation,)).fetchone()[0])
         finally:
             db.close()
         claim,_=JobQueue(self.database).claim()
@@ -184,7 +187,9 @@ class BatchTrialWorkerTests(unittest.IsolatedAsyncioTestCase):
             with transaction(db):
                 enqueue_job(db,kind='SUBMIT_BATCH',
                     payload={'reservation_job_id':reservation},
-                    component='worker',event_id=self.event,created_by_job_id=reservation)
+                    component='worker',event_id=self.event,created_by_job_id=reservation,
+                    operation_id=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',
+                                            (reservation,)).fetchone()[0])
         finally:
             db.close()
         claim,_=JobQueue(self.database).claim()

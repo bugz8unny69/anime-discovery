@@ -88,7 +88,8 @@ class RecognitionTests(unittest.TestCase):
             if rows:
                 old.executemany('INSERT INTO '+table+' VALUES('+','.join('?' for _ in rows[0])+')',rows)
         old.commit()
-        old.executescript((migrations.SQL_DIR/migrations.SCRIPTS[25]).read_text())
+        for name in migrations.SCRIPTS[25:]:
+            old.executescript((migrations.SQL_DIR/name).read_text())
         self.assertEqual(migrations._structure(old),migrations._structure(self.db))
         self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
         self.assertEqual(recognized_for_release(old,'Example Anime S01E03',season=1)['anidb_id'],1001)

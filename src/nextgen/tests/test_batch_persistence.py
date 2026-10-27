@@ -11,6 +11,7 @@ from src.nextgen.release_contracts import ReleaseConflict
 from src.nextgen.storage.batch_verifications import persist_batch_verification
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.releases import load_release
+from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import (
     connect, initialize, accept_event_and_job, save_identity, transaction,
 )
@@ -28,7 +29,7 @@ class BatchPersistenceTests(unittest.TestCase):
             TorrentFile(2,'Shiki/OVA/Shiki OVA 01.mkv',50)))
         db=connect(self.database)
         initialize(db)
-        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(36,))
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(),(LATEST_VERSION,))
         self.event,self.job=accept_event_and_job(
             db,'test',('{"release_name":"Shiki S01 + OVA","torrent_infohash":"%s"}' %
                        self.info_hash).encode(),kind='VERIFY_RELEASE',payload={'anidb_id':123})

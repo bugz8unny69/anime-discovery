@@ -48,23 +48,22 @@ class PostKeepCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(cleanup,)),[('DONE',)])
         _,receipt,_=actions.submit(target,'keep')
         self.assertTrue(receipt['post_keep_cleanup']['completed'])
-        # The completed Keep already queues one scan; cleanup queues no duplicate.
+        # Jellyfin is unconfigured in this fixture, so neither step queues a scan.
         self.assertEqual(self.rows(
-            "SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(1,)])
+            "SELECT count(*) FROM jobs WHERE kind='REFRESH_JELLYFIN'"),[(0,)])
         self.assertEqual(self.rows('SELECT count(*) FROM episode_reservations'),[(1,)])
         self.assertEqual(fake.posts.count('command'),1)
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='CLEANUP_KEPT_MEDIA'"),[(1,)])
 
-    async def test_missing_permanent_preserves_staging_and_explicit_retry_does_not_reimport(self):
+    async def test_missing_permanent_preserves_staging_and_automatic_retry_does_not_reimport(self):
         worker,fake,actions,target,keep,cleanup=await self.cleanup_ready()
         permanent=fake.root/'Series'/'episode.mkv';saved=permanent.read_bytes();permanent.unlink()
         await worker.attempt()
         self.assertTrue(Path(fake.selection.media_path).is_file())
-        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(cleanup,)),[('NEEDS_REVIEW','POST_KEEP_CLEANUP_REVIEW')])
+        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(cleanup,)),[('RETRY_WAIT','POST_KEEP_CLEANUP_UNAVAILABLE')])
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(keep,)),[('DONE',)])
         permanent.write_bytes(saved)
-        _,receipt,_=actions.submit(target,'keep')
-        self.assertTrue(receipt['cleanup_resumed'])
+        await self.make_due(cleanup)
         await worker.attempt()
         self.assertFalse(Path(fake.selection.media_path).exists())
         self.assertEqual(fake.posts.count('command'),1)

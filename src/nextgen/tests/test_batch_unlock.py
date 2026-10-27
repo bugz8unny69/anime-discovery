@@ -40,12 +40,12 @@ class AudioGatedUnlockTests(unittest.TestCase):
         self.client.inspect_transfer=lambda _:self.current[0]
 
     def snapshot(self,*,priorities=(1,0,0),ranges=((0,0),(1,1),(2,2)),
-                 state='stoppedDL',tags=None):
+                 state='stoppedDL',tags=None,piece_size=100):
         observed=Observation(self.intent.inventory.info_hash,state,
             self.options.download_root,self.options.category,
             ('ad-'+self.intent.marker,) if tags is None else tags,
             False,self.intent.inventory.files)
-        return TransferSnapshot(observed,tuple(priorities),(1.,0.,0.),100,tuple(ranges))
+        return TransferSnapshot(observed,tuple(priorities),(1.,0.,0.),piece_size,tuple(ranges))
 
     def test_real_verified_probe_gates_one_time_file_unlock_and_start(self):
         plan=plan_verified_unlock(self.intent,self.snapshot(),self.media,15)
@@ -69,12 +69,14 @@ class AudioGatedUnlockTests(unittest.TestCase):
     def test_unverified_or_wrong_owner_never_sends(self):
         from dataclasses import replace
         with self.assertRaises(TransferConflict):
+            plan_verified_unlock(self.intent,self.snapshot(ranges=((0,0),(0,1),(2,2))),self.media,15)
+        with self.assertRaises(TransferConflict):
             plan_verified_unlock(
                 self.intent,self.snapshot(),
                 replace(self.media,relative_path='Other.mkv'),15)
         with self.assertRaises(PieceOverlap):
             plan_verified_unlock(
-                self.intent,self.snapshot(ranges=((0,0),(0,1),(2,2))),
+                self.intent,self.snapshot(piece_size=150,ranges=((0,0),(0,1),(1,1))),
                 self.media,15)
         with self.assertRaises(TransferConflict):
             plan_verified_unlock(
