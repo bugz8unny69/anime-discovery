@@ -67,6 +67,18 @@ class MagnetJournalTests(unittest.TestCase):
         self.assertEqual(same,intent)
         self.assertIsNone(second)
 
+    def test_newer_5x_daemon_uses_the_same_single_admission(self):
+        intent,permit,_=self.journal.authorize(
+            self.claim,self.source,self.options,5,False)
+        self.assertEqual(intent.api_major,5)
+        self.assertIsInstance(permit,MagnetPermit)
+        recovered=self.journal.existing(self.claim,self.source,self.options,5)
+        self.assertEqual(recovered,intent)
+        same,second,_=self.journal.authorize(
+            self.claim,self.source,self.options,5,False)
+        self.assertEqual(same,intent)
+        self.assertIsNone(second)
+
     def test_absence_after_restart_never_rearms_permit(self):
         intent,permit,_=self.journal.authorize(
             self.claim,self.source,self.options,4,False)
