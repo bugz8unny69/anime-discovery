@@ -67,9 +67,6 @@ def dispatch(db, claim, plan, choice):
         if len(body)>65536: raise SelectionConflict()
     except (ValueError,TypeError,KeyError,AttributeError):
         raise SelectionConflict() from None
-    op=db.execute("SELECT operation_id FROM job_operation_members WHERE job_id=?",
-                  (claim.job_id,)).fetchone()
-    if op is None: raise SelectionConflict()
     now=time.time_ns()//1_000_000
     event_id=db.execute(
         "INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES(?,?,?)",
@@ -82,5 +79,6 @@ def dispatch(db, claim, plan, choice):
     job_id,created=enqueue_job_with_receipt(
         db,kind='VERIFY_RELEASE',payload={'anidb_id':plan.anidb_id},
         component='worker',event_id=event_id,created_by_job_id=claim.job_id,
-        operation_id=op[0])
+        # Each chosen torrent has its own cleanup/cancellation scope.
+        operation_id=None)
     return (receipt, *((audit,) if audit is not None else ()), created)
