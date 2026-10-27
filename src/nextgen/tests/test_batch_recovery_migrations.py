@@ -16,7 +16,7 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
         return db
 
     def test_all_batch_upgrades_have_fresh_schema_parity(self):
-        self.assertEqual(migrations.LATEST_VERSION,41)
+        self.assertGreaterEqual(migrations.LATEST_VERSION,41)
         upgraded=self.prefix(30)
         self.addCleanup(upgraded.close)
         for version in range(31,migrations.LATEST_VERSION+1):
@@ -39,7 +39,8 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
             'batch_torrent_transfers','batch_probe_media','batch_torrent_unlocks',
             'batch_probe_stops','batch_episode_media','batch_staging_publications',
             'batch_keep_imports','batch_download_cleanup','batch_keep_cleanup',
-            'batch_submission_inventories','batch_cancellation_cleanup')
+            'batch_submission_inventories','batch_cancellation_cleanup',
+            'sonarr_backfill_results')
         self.assertEqual(len(new_tables),migrations.LATEST_VERSION-30)
         for version,table in zip(range(31,migrations.LATEST_VERSION+1),new_tables):
             with self.subTest(version=version):
