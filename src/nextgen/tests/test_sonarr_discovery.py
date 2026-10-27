@@ -202,6 +202,27 @@ class SonarrDiscoveryTests(unittest.TestCase):
             with self.subTest(params=params), self.assertRaises(SearchConfiguration):
                 DiscoveryPolicy(**params)
 
+
+    def test_configuration_metadata_exposes_validated_local_discovery_preferences(self):
+        from src.nextgen.configuration_schema import ConfigurationSnapshot, ConfigurationError, FIELDS
+        self.assertEqual(FIELDS['sonarr.discovery_max_resolution'].default, 1080)
+        self.assertEqual(FIELDS['sonarr.discovery_min_seeders'].default, 5)
+        self.assertEqual(FIELDS['sonarr.discovery_rank_by'].default, 'resolution')
+        snapshot = ConfigurationSnapshot(1, {'sonarr': {
+            'discovery_max_resolution': 720,
+            'discovery_min_seeders': 0,
+            'discovery_rank_by': 'seeders',
+        }})
+        policy = DiscoveryPolicy.capture(snapshot)
+        self.assertEqual((policy.max_resolution, policy.min_seeders, policy.rank_by),
+                         (720, 0, 'seeders'))
+        for field, invalid in [('discovery_max_resolution', 1440),
+                               ('discovery_max_resolution', True),
+                               ('discovery_min_seeders', -1),
+                               ('discovery_rank_by', 'custom_formats')]:
+            with self.subTest(field=field), self.assertRaises(ConfigurationError):
+                ConfigurationSnapshot(1, {'sonarr': {field: invalid}})
+
     def test_does_not_leak_secret_or_magnet_via_repr(self):
         c, _ = client()
         row = c.search(ID).candidates[0]
