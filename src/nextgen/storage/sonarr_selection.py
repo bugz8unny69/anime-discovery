@@ -122,3 +122,37 @@ def require_verified_delivery(db, verified):
             source.anidb_id,source.tvdb_series_id,verified.tvdb_season,
             verified.tvdb_episode,verified.tvdb_episode_id):
         raise ReleaseConflict()
+
+def acquisition_identity(database, source):
+    """Return exact Sonarr identity only for an active, verified source.
+
+    Hash-only and episode-scoped. No magnet URL or provider credentials are
+    stored in SQLite. The acquisition reservation remains authoritative.
+    """
+    from src.nextgen.acquisition.contracts import AcquisitionInput
+    from src.nextgen.storage.migrations import LATEST_VERSION, _open
+    from src.nextgen.storage.job_queue import QueueUnavailable
+    if type(source) is not AcquisitionInput:
+        raise SelectionConflict()
+    with _open(database,readonly=True,timeout_ms=5000) as db:
+        if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:
+            raise QueueUnavailable()
+        rows=db.execute(
+            "SELECT p.tvdb_series_id,s.tvdb_episode_id "
+            "FROM incoming_events e "
+            "JOIN jobs j ON j.event_id=e.event_id AND j.kind='VERIFY_RELEASE' "
+            "JOIN jobs parent ON parent.job_id=j.created_by_job_id "
+            "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+            "JOIN sonarr_episode_selections s ON s.plan_id=p.plan_id "
+            "JOIN sonarr_episode_candidates c ON c.plan_id=s.plan_id "
+            " AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=s.info_hash "
+            "WHERE e.event_id=? AND e.source='sonarr-discovery' "
+            "AND parent.kind='DISCOVER_SONARR_BACKFILL' "
+            "AND p.tvdb_season=? AND s.tvdb_episode=? "
+            "AND s.info_hash=? AND c.state='ACTIVE'",
+            (source.event_id,source.tvdb_season,source.tvdb_episode,source.info_hash)
+        ).fetchall()
+    if not rows:return None
+    if len(rows)!=1:raise SelectionConflict()
+    return VerifiedEpisode(rows[0][0],rows[0][1],
+                           source.tvdb_season,source.tvdb_episode)
