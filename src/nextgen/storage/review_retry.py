@@ -86,7 +86,11 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
         kind, state, attempt, reason, token, expiry = row
         if attempt != expected_attempt:
             raise RetryStale('job attempt changed')
-        if state == 'PENDING' and kind in RETRY_KINDS and token is None and expiry is None:
+        if (state == 'PENDING' and kind in RETRY_KINDS and token is None
+                and expiry is None and db.execute(
+                    'SELECT 1 FROM job_operation_members m JOIN job_operations o '
+                    'USING(operation_id) WHERE m.job_id=? AND o.state=\'ACTIVE\'',
+                    (job_id,)).fetchone()):
             previous = db.execute(
                 "SELECT history_id,details_json FROM job_history WHERE job_id=? "
                 "AND event_code='RETRY_REQUESTED' ORDER BY history_id DESC LIMIT 1",
