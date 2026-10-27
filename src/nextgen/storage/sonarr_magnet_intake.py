@@ -174,6 +174,41 @@ class MagnetJournal:
                     or current.state!='UNCERTAIN'):
                 raise AcquisitionConflict()
 
+    def capture(self,claim,intent,source,inventory):
+        """Persist only explicitly tagged, stopped metadata observations.
+
+        This file inventory has no BEP3 info SHA. Later phases must opt in to
+        its separate evidence contract; it cannot become a SubmissionPlan.
+        """
+        from src.nextgen.acquisition.metadata import ObservedInventory
+        from src.nextgen.storage.acquisition import validate_declaration
+        if (type(inventory) is not ObservedInventory
+                or type(source) is not AcquisitionInput
+                or inventory.info_hash!=source.info_hash
+                or source.event_id!=intent.event_id):
+            raise AcquisitionConflict()
+        validate_declaration(source,inventory)
+        encoded=inventory.json()
+        with self.queue.connection() as db,transaction(db):
+            self.queue._owns(db,claim,self.queue.now())
+            if (_source(db,source.evaluation_job_id,source.event_id)!=source
+                    or _prior(db,intent.event_id).state!='OWNED_STOPPED'):
+                raise AcquisitionConflict()
+            row=db.execute(
+                "SELECT inventory_json FROM sonarr_magnet_intents "
+                "WHERE event_id=? AND job_id=? AND info_hash=? AND marker=?",
+                (intent.event_id,intent.job_id,intent.info_hash,intent.marker)
+            ).fetchone()
+            if row is None or row[0] is not None and row[0]!=encoded:
+                raise AcquisitionConflict()
+            if row[0] is None:
+                updated=db.execute(
+                    "UPDATE sonarr_magnet_intents SET inventory_json=?,"
+                    "updated_at_ms=? WHERE event_id=? AND inventory_json IS NULL",
+                    (encoded,self.queue.now(),intent.event_id))
+                if updated.rowcount!=1:raise AcquisitionConflict()
+            return inventory
+
     def reconcile(self,claim,intent,observation):
         """Never adopt another client's torrent or grant a second send."""
         with self.queue.connection() as db,transaction(db):
