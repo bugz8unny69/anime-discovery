@@ -113,3 +113,47 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
             result=obj.cleanup(51)
             self.assertEqual(result['operation_id'],7)
             cleaner.return_value._clean_target.assert_not_called()
+
+class BoundedStagingRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uncertain_staging_uses_existing_retry_not_open_ended_defer(self):
+        from src.nextgen.jobs.cleanup_canceled_operation_job import registration
+        from src.nextgen.job_contracts import Policy
+        self.assertGreater(Policy().max_retries,0)
+        self.assertEqual(Policy().max_retries,3)
+
+        class Actions:
+            def __init__(self,database):
+                self.queue=SimpleNamespace()
+            def bind(self,claim,action):
+                return 52
+        class Service:
+            def __init__(self,*args,**kwargs):
+                pass
+            def cleanup(self,target):
+                self_target=target
+                return {'cleanup_state':'PENDING',
+                        'reason_code':'CANCELLATION_PENDING',
+                        'staging_retry':True}
+        context=SimpleNamespace(
+            configuration=SimpleNamespace(
+                value=lambda key:'/tmp/nextgen-not-used.sqlite'),
+            claim=SimpleNamespace(job_id=105),
+            logger=object())
+        with patch('src.nextgen.jobs.cleanup_canceled_operation_job.ManagementActions',
+                   Actions):
+            result=await registration(object(),service_factory=Service).execute(
+                context)
+        self.assertEqual((result.kind,result.reason_code),
+                         ('retry','STAGING_REVIEW'))
+        # Non-staging uncertainty must keep reconciling without using the
+        # finite retry budget or resending an uncertain qBittorrent control.
+        class Waiting(Service):
+            def cleanup(self,target):
+                return {'cleanup_state':'PENDING',
+                        'reason_code':'CANCELLATION_PENDING'}
+        with patch('src.nextgen.jobs.cleanup_canceled_operation_job.ManagementActions',
+                   Actions):
+            waiting=await registration(object(),service_factory=Waiting).execute(
+                context)
+        self.assertEqual(waiting.kind,'defer')
+
