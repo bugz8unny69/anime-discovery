@@ -111,7 +111,9 @@ class SonarrDiscoveryTests(unittest.TestCase):
         fake.episodes[0]['hasFile'] = False
         discovery = client(fake)[0]
         unchecked = discovery.backfill(100, 1, (10,), select_candidates=True)
-        self.assertIsNone(unchecked[0].selection)
+        self.assertIsNotNone(unchecked[0].selection)
+        # Provisional Sonarr hints require provider re-verification before
+        # the original reservation and acquisition stages can proceed.
         verified = discovery.backfill(100, 1, (10,), verified_ids={10: 200},
                                       select_candidates=True)
         self.assertEqual(verified[0].exact, 1)
