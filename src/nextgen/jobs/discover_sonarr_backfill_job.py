@@ -18,7 +18,8 @@ KIND = 'DISCOVER_SONARR_BACKFILL'
 DEFINITION = HandlerDefinition(KIND, 'Discover missing backfill episodes in Sonarr')
 
 
-def registration(secrets, *, client_factory=Client.from_context):
+def registration(secrets, *, client_factory=Client.from_context, select_candidates=False):
+    if type(select_candidates) is not bool: raise ValueError('invalid Sonarr selection toggle')
     async def execute(context):
         payload = context.data()
         try:
@@ -35,7 +36,8 @@ def registration(secrets, *, client_factory=Client.from_context):
             client = client_factory(context.configuration,secrets)
             observed = await blocking(
                 client.backfill,plan.tvdb_series_id,plan.season,plan.numbers,
-                reserved=plan.reserved,verified_ids=dict(plan.verified))
+                reserved=plan.reserved,verified_ids=dict(plan.verified),
+                **({'select_candidates': True} if select_candidates else {}))
             if len(observed) != len(plan.numbers):
                 raise BackfillConflict()
             return Outcome(value=BackfillCompletion(plan,observed))

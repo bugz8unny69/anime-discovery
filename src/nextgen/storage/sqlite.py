@@ -664,9 +664,18 @@ CREATE TABLE IF NOT EXISTS sonarr_backfill_results (
  status TEXT NOT NULL CHECK(status IN ('IN_PROGRESS','NOT_LISTED','IDENTITY_UNKNOWN','IDENTITY_CONFLICT','HAS_FILE','CANDIDATES','NO_RESULTS')),
  candidates INTEGER NOT NULL CHECK(candidates BETWEEN 0 AND 1000),
  approved INTEGER NOT NULL CHECK(approved BETWEEN 0 AND candidates),
- exact INTEGER NOT NULL CHECK(exact BETWEEN 0 AND approved),
+ exact INTEGER NOT NULL CHECK(exact BETWEEN 0 AND candidates),
  observed_at_ms INTEGER NOT NULL CHECK(observed_at_ms>=0),
  PRIMARY KEY(plan_id,tvdb_episode)
+);
+CREATE TABLE IF NOT EXISTS sonarr_episode_selections (
+ plan_id INTEGER NOT NULL REFERENCES trial_plans(plan_id),
+ tvdb_episode INTEGER NOT NULL CHECK(tvdb_episode>0),
+ tvdb_episode_id INTEGER NOT NULL CHECK(tvdb_episode_id>0),
+ info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^0-9a-f]*'),
+ selected_at_ms INTEGER NOT NULL CHECK(selected_at_ms>=0),
+ PRIMARY KEY(plan_id,tvdb_episode),
+ UNIQUE(plan_id,info_hash)
 );
 
 """

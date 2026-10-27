@@ -135,6 +135,89 @@ magnets, hashes, GUIDs or download URLs. It does not inspect tracker content,
 prove AniDB episode ownership, fetch torrent metadata, or submit a torrent.
 Saved Sonarr JSON may contain confidential tracker links: store it privately.
 
+## Acquisition handoff admission (next batch boundary)
+
+`sonarr_handoff.admit_candidate(...)` is a **pure, side-effect-free**
+bridge between a ranked Sonarr result and an existing acquisition source.
+It requires:
+
+- A candidate present in the specific Sonarr `SearchResult`, with exact
+  episode scope and a validated magnet/info-hash identity.
+- Locally accepted resolution and seeder count. Sonarr's approval remains
+  diagnostic only.
+- `AcquisitionInput` obtained through the existing
+  `load_acquisition_input` admission path, carrying an active, provider-verified
+  episode reservation and incoming release hash. Sonarr cannot invent this
+  missing provenance.
+- The candidate hash matching the immutable incoming release hash, plus
+  independently fetched torrent metainfo parsed against that hash, matching
+  the reserved episode filename and size constraints.
+
+The output is a transient `AdmittedCandidate`; it is **not** a submission
+permit or persisted torrent job. The original `PREPARE_ACQUISITION` and
+`SUBMIT_TORRENT` worker steps retain their fenced transactions, manifest
+recheck and one-shot stopped-download authorization. No alternate qBittorrent
+submission route or arbitrary Prowlarr URL-fetching path is created.
+
+This bridge intentionally does **not** yet enable acquisition of a Sonarr-found
+torrent whose hash differs from the incoming torrent hash. That requires a
+separate, independently verified and durably recorded selection/provenance
+operation with cancellation and duplicate handling. Do not substitute a
+Sonarr-guid magnet for that operation.
+
+## Durable source choice foundation (SQLite v43)
+
+Version 43 fixes the old `exact <= approved` observation constraint:
+NextGen's locally eligible count and Sonarr's approved count are independent.
+For example, `approved=0, exact=16, candidates=308` is valid.
+
+A small `sonarr_episode_selections` table records exactly one normalized
+torrent info hash for a recognized episode within a frozen Intake plan.
+`storage.sonarr_selection.select` requires the call to run inside an
+already admitted SQLite write transaction. It uses existing
+`recognized_episodes`, `trial_plans`, and both active reservation
+namespaces to reject unknown identities, out-of-window episodes,
+competing reservations, hashes reused for multiple episodes, and
+conflicting selections. Repeating the identical choice is idempotent.
+
+This receipt does **not** replace the incoming event's torrent hash,
+invent an AniDB verification, reserve an episode, enqueue any worker job,
+or authorize a torrent submission. It also does not yet fetch torrent
+metainfo for independently discovered hashes. A future small worker
+integration must perform source selection in a fenced transaction and
+hand verified metainfo into the existing preparation/submission machinery.
+Until then, the selection function is an unwired foundation.
+
+Do not deploy the v43 schema without the compatible worker version and
+an explicit maintenance migration. The v42 SQL file is unchanged; v43
+provides an additive upgrade and fixes the observational constraint.
+
+## Opt-in worker source selection (no torrent submission)
+
+The regular Sonarr backfill worker can now optionally choose the first locally
+eligible torrent for a **recognized** episode in the same search that records
+the discovery counts. Set both `sonarr_backfill=True` and
+`sonarr_select=True` when composing `build_identity_worker` or
+`run_identity_worker`; default behavior is unchanged.
+
+Selection is performed during the worker's existing fenced completion
+transaction, not in another asynchronous job or additional indexer query.
+The worker carries one temporary `CandidateSelection` (episode identity,
+Sonarr search result and local policy) and persists only the normalized info
+hash through the existing v43 selection helper. The candidate must have a
+matching independent `recognized_episodes` row, remain in the frozen selection
+window, and have no active single/batch episode reservation. On conflicting
+selection or changed identity, the operation requires review; no qBittorrent
+operation is performed.
+
+The v43 receipt is NOT an acquisition permit or a substitute for the current
+event-bound release verification. The existing PREPARE_ACQUISITION /
+SUBMIT_TORRENT code still requires an incoming release reservation and a
+hash-checked torrent file; this batch intentionally does not bypass those
+requirements to acquire Sonarr-only releases. This source-choice opt-in
+must stay disabled in production until a separately verified backfill
+reservation and metadata path is connected.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
