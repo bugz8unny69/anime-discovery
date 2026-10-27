@@ -169,25 +169,6 @@ class Client:
         raw,_=self._request('torrents/export',query={'hash':expected_hash},limit=MAX_METAINFO)
         return parse_metainfo(raw,expected_hash),raw
 
-    def add_magnet_metadata(self,magnet,expected_hash,marker):
-        """4.x metadata-only admission. Caller must journal/guard this add first.
-
-        No automatic retry: a transport error leaves an uncertain submission,
-        which must be reconciled by hash and ownership before another action.
-        """
-        from src.nextgen.acquisition.sonarr_search import _magnet_hash
-        from src.nextgen.acquisition.metadata import infohash
-        expected_hash=infohash(expected_hash)
-        if (self.metadata_strategy!='stopped_magnet'
-                or _magnet_hash(magnet)!=expected_hash
-                or type(marker) is not str or not re.fullmatch('[a-f0-9]{32}',marker)):
-            raise ClientInvalid()
-        self._request('torrents/add',form={
-            'urls':magnet,'savepath':self.options.download_root,
-            'category':self.options.category,'tags':'ad-'+marker,
-            'stopCondition':'MetadataReceived',
-            **self.protocol.add_fields(False)},limit=4096)
-
     def inspect(self,expected_hash):
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
         from src.nextgen.acquisition.metadata import infohash
@@ -218,8 +199,20 @@ class Client:
         return Observation(expected_hash,state,save_path,category,tags,row['auto_tmm'],tuple(result))
 
     def add_stopped(self,raw,intent,permit):
+        """Single journaled submission for verified .torrent bytes or a magnet."""
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
         if type(permit) is not SendPermit or intent.options!=self.options or intent.api_major!=self.major:raise ClientInvalid()
+        if type(raw) is str:
+            # Exactly the same journal permit protects both source formats.
+            from src.nextgen.acquisition.sonarr_search import _magnet_hash
+            if _magnet_hash(raw)!=intent.plan.manifest.info_hash:
+                raise ClientInvalid()
+            fields={'urls':raw,'savepath':self.options.download_root,
+                    'category':self.options.category,'tags':'ad-'+intent.plan.marker,
+                    **self.protocol.add_fields(True),'skip_checking':'false'}
+            permit.take(intent)
+            self._request('torrents/add',form=fields,limit=4096)
+            return
         manifest=parse_metainfo(raw,intent.plan.manifest.info_hash)
         if manifest!=intent.plan.manifest:raise ClientInvalid()
         boundary='ad'+uuid.uuid4().hex
@@ -234,26 +227,6 @@ class Client:
         # Consume before the single transport call. Never retry, even on HTTP error.
         permit.take(intent)
         self._request('torrents/add',body=b''.join(chunks),content_type='multipart/form-data; boundary='+boundary,limit=4096)
-
-    def add_magnet_stopped(self,magnet,intent,permit):
-        """Submit verified magnet through the existing one-shot journal permit.
-
-        The caller must already have a hash-bound prepared manifest. This is
-        NOT the earlier metadata bootstrap operation. Any ambiguous transport
-        outcome is reconciled through the original journal, never resent.
-        """
-        from src.nextgen.acquisition.sonarr_search import _magnet_hash
-        if (not self._sid or self.protocol is None):
-            raise ClientAuthenticationFailed()
-        if (type(permit) is not SendPermit or intent.options!=self.options
-                or intent.api_major!=self.major
-                or _magnet_hash(magnet)!=intent.plan.manifest.info_hash):
-            raise ClientInvalid()
-        fields={'urls':magnet,'savepath':self.options.download_root,
-                'category':self.options.category,'tags':'ad-'+intent.plan.marker,
-                **self.protocol.add_fields(True),'skip_checking':'false'}
-        permit.take(intent)
-        self._request('torrents/add',form=fields,limit=4096)
 
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
