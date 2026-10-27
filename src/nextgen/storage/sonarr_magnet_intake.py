@@ -101,7 +101,6 @@ def _matches_prior(prior,claim,source,options,api_major):
     return (prior.job_id==claim.job_id
             and prior.event_id==source.event_id
             and prior.info_hash==source.info_hash
-            and prior.api_major==api_major
             and prior.options.base_url==options.base_url
             and prior.options.category==options.category
             and prior.options.timeout_seconds==options.timeout_seconds
