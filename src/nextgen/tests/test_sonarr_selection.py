@@ -51,6 +51,7 @@ class SelectionTests(unittest.TestCase):
 
     def test_unapproved_candidate_allowed_and_idempotent(self):
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
             self.assertTrue(self.choose())
             self.assertFalse(self.choose())
         self.assertEqual(self.db.execute(
@@ -59,14 +60,17 @@ class SelectionTests(unittest.TestCase):
 
     def test_conflict_does_not_replace_prior_selection(self):
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
             self.choose()
         with self.db, self.assertRaises(SelectionConflict):
+            self.db.execute('BEGIN IMMEDIATE')
             self.choose(release(OTHER))
         self.assertEqual(self.db.execute(
             'SELECT info_hash FROM sonarr_episode_selections').fetchone()[0],HASH)
 
     def test_unrecognized_or_reserved_is_refused(self):
         with self.db, self.assertRaises(SelectionConflict):
+            self.db.execute('BEGIN IMMEDIATE')
             self.choose(identity=VerifiedEpisode(100,201,1,10))
         self.db.execute("INSERT INTO episode_reservations VALUES ('ACTIVE',100,1,10)")
         with self.db, self.assertRaises(SelectionConflict):
@@ -79,6 +83,7 @@ class SelectionTests(unittest.TestCase):
     def test_unbound_wrong_scope_and_low_seeders_rejected(self):
         for item in (release(scope='pack'), release(seeders=0), release(OTHER)):
             with self.subTest(item=item.scope), self.db, self.assertRaises(SelectionConflict):
+                self.db.execute('BEGIN IMMEDIATE')
                 self.choose(selected=item, result=SearchResult(11,22,(release(),)))
 
     def test_requires_transaction(self):
