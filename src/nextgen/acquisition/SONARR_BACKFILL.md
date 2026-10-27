@@ -135,6 +135,36 @@ magnets, hashes, GUIDs or download URLs. It does not inspect tracker content,
 prove AniDB episode ownership, fetch torrent metadata, or submit a torrent.
 Saved Sonarr JSON may contain confidential tracker links: store it privately.
 
+## Acquisition handoff admission (next batch boundary)
+
+`sonarr_handoff.admit_candidate(...)` is a **pure, side-effect-free**
+bridge between a ranked Sonarr result and an existing acquisition source.
+It requires:
+
+- A candidate present in the specific Sonarr `SearchResult`, with exact
+  episode scope and a validated magnet/info-hash identity.
+- Locally accepted resolution and seeder count. Sonarr's approval remains
+  diagnostic only.
+- `AcquisitionInput` obtained through the existing
+  `load_acquisition_input` admission path, carrying an active, provider-verified
+  episode reservation and incoming release hash. Sonarr cannot invent this
+  missing provenance.
+- The candidate hash matching the immutable incoming release hash, plus
+  independently fetched torrent metainfo parsed against that hash, matching
+  the reserved episode filename and size constraints.
+
+The output is a transient `AdmittedCandidate`; it is **not** a submission
+permit or persisted torrent job. The original `PREPARE_ACQUISITION` and
+`SUBMIT_TORRENT` worker steps retain their fenced transactions, manifest
+recheck and one-shot stopped-download authorization. No alternate qBittorrent
+submission route or arbitrary Prowlarr URL-fetching path is created.
+
+This bridge intentionally does **not** yet enable acquisition of a Sonarr-found
+torrent whose hash differs from the incoming torrent hash. That requires a
+separate, independently verified and durably recorded selection/provenance
+operation with cancellation and duplicate handling. Do not substitute a
+Sonarr-guid magnet for that operation.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
