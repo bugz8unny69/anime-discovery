@@ -128,7 +128,8 @@ async function submitAction(job, action) {
   if (action === 'cleanup' && !confirm(COPY['dashboard.confirm_cleanup'])) return;
   state.pending.add(job.cancellation.operation_id); renderJobs();
   try {
-    const receipt = await request(`${API}/jobs/${job.job_id}/${action}`, {method: 'POST', body: {}});
+    const body = action === 'retry' ? {expected_attempt: job.attempt_count, expected_reason: job.reason?.code} : {};
+    const receipt = await request(`${API}/jobs/${job.job_id}/${action}`, {method: 'POST', body});
     notice(receipt.notification?.message || COPY['dashboard.request_failed']);
   } catch (error) { displayError(error); }
   finally {
@@ -193,6 +194,9 @@ function renderJobs() {
       if (job.actions?.reject) actions.appendChild(actionButton(job, 'reject', retryDownload('reject') ? 'Retry download cleanup' : 'Reject'));
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
+    }
+    if (job.state === 'NEEDS_REVIEW' && job.actions?.retry) {
+      actions.appendChild(actionButton(job, 'retry', 'Retry'));
     }
     if (job.event_id && !job.is_management_action) {
       const matching = node('button', 'Matching details', 'secondary');
