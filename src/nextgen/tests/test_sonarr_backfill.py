@@ -73,6 +73,16 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             "SELECT count(*) FROM jobs WHERE kind IN "
             "('SUBMIT_TORRENT','RESERVE_EPISODE','DOWNLOAD_TORRENT')"),[(0,)])
 
+    async def test_optional_selection_does_not_invent_identity(self):
+        """Unverified catalog episodes remain observations and never gain a choice."""
+        self.source(10)
+        fake = FakeDiscovery()
+        worker = self.worker(fake)
+        await worker.attempt()
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_episode_selections"),
+                         [(0,)])
+
     async def test_opt_in_off_means_no_new_discovery_jobs(self):
         self.source(10)
         worker = self.worker(FakeDiscovery(),enabled=False)
