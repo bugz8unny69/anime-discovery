@@ -120,7 +120,8 @@ def schedule_first(db, claim, source, *, kind):
     return (receipt,)
 
 
-def persist_observations(db, claim, value):
+def persist_observations(db, claim, value, *, dispatch=False):
+    if type(dispatch) is not bool: raise ValueError('invalid dispatch mode')
     if not db.in_transaction or type(value) is not BackfillCompletion:
         raise ValueError('worker transaction and typed results required')
     plan = value.plan
@@ -153,6 +154,7 @@ def persist_observations(db, claim, value):
     # Selection is an opt-in side effect of the same fenced worker completion.
     # Keep source URLs out of SQLite and reject stale/unverified identity facts.
     from src.nextgen.storage.sonarr_selection import select, SelectionConflict
+    routed=[]
     for item in value.observations:
         choice = item.selection
         if choice is not None:
@@ -164,8 +166,11 @@ def persist_observations(db, claim, value):
                     or dict(plan.verified).get(item.number) != item.tvdb_episode_id):
                 raise BackfillConflict()
             try:
-                select(db, plan_id=plan.plan_id, identity=choice.identity,
+                inserted=select(db, plan_id=plan.plan_id, identity=choice.identity,
                        result=choice.result, release=choice.release, policy=choice.policy)
+                if inserted and dispatch:
+                    from src.nextgen.storage.sonarr_dispatch import dispatch as dispatch_source
+                    routed.extend(dispatch_source(db,claim,plan,choice))
             except SelectionConflict:
                 raise BackfillConflict() from None
         db.execute(
@@ -178,4 +183,4 @@ def persist_observations(db, claim, value):
         )
     return (append_job_history(db,job_id=claim.job_id,
         event_code='SONARR_BACKFILL_OBSERVED',component='worker',occurred_at_ms=now,
-        details={'attempt':claim.attempt}),)
+        details={'attempt':claim.attempt}),*routed)

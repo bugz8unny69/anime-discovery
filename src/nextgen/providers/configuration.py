@@ -49,14 +49,16 @@ def validate_provider_configuration(configuration, *, secrets):
 
 async def build_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
                                 policy=Policy(), logger=None, read_metainfo=None, read_batch_metainfo=None,
-                                sonarr_backfill=False, sonarr_select=False):
+                                sonarr_backfill=False, sonarr_select=False, sonarr_acquire=False):
     """Validate required local settings, then return an unstarted worker.
 
     Call close() if not serving it. Both providers are mandatory for this
     composition. Generic Worker still supports unrelated explicitly installed
     jobs without requiring identity-provider credentials.
     """
-    if type(sonarr_select) is not bool or (sonarr_select and not sonarr_backfill):
+    if (type(sonarr_select) is not bool or type(sonarr_acquire) is not bool
+            or sonarr_select and not sonarr_backfill
+            or sonarr_acquire and not sonarr_select):
         raise ValueError('Sonarr source selection requires opt-in backfill discovery')
     store = ConfigurationStore(config_directory)
     secrets = SecretStore(config_directory)
@@ -92,7 +94,8 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                          trial_registration(reservation_kind=RESERVE_KIND,
                                             discovery_kind=SONARR_BACKFILL_KIND if sonarr_backfill else None),
                          reserve_registration(preparation_kind=PREPARE_KIND),
-                         *((sonarr_backfill_registration(secrets,select_candidates=sonarr_select),) if sonarr_backfill else ()),
+                         *((sonarr_backfill_registration(secrets,select_candidates=sonarr_select,
+                              acquire_candidates=sonarr_acquire),) if sonarr_backfill else ()),
                          *batch_handlers,*preparation,
                          *management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
@@ -104,5 +107,6 @@ async def run_identity_worker(config_directory, *, additional_registrations=(), 
     worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
                                          release_kind=release_kind,policy=policy,read_metainfo=read_metainfo,
                                          read_batch_metainfo=read_batch_metainfo,
-                                         sonarr_backfill=sonarr_backfill,sonarr_select=sonarr_select)
+                                         sonarr_backfill=sonarr_backfill,sonarr_select=sonarr_select,
+                                         sonarr_acquire=sonarr_acquire)
     await serve_worker(worker)

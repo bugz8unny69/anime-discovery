@@ -1,5 +1,6 @@
 """Offline lease-fenced Sonarr backfill scheduling and observation tests."""
 import sqlite3
+import json
 import unittest
 
 from src.nextgen.configuration import ConfigurationStore
@@ -83,7 +84,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_episode_selections"),
                          [(0,)])
 
-    async def test_recognized_candidate_is_selected_without_download(self):
+    async def _run_recognized_candidate(self, acquire=False):
         from src.nextgen.acquisition.sonarr_search import CandidateSelection, Release, SearchResult, DiscoveryPolicy
         from src.nextgen.sonarr_episode import VerifiedEpisode
 
@@ -121,7 +122,8 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         trial = trial_registration(discovery_kind=DISCOVER_KIND)
         registry = Registry((trial, discovery_registration(None,
-            client_factory=lambda config,secrets:VerifiedFake(),select_candidates=True)))
+            client_factory=lambda config,secrets:VerifiedFake(),select_candidates=True,
+            acquire_candidates=acquire)))
         worker = Worker(self.store,self.startup,registry,policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
         await worker.attempt()  # First evaluation.
@@ -134,6 +136,24 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             "SELECT candidates,approved,exact FROM sonarr_backfill_results WHERE tvdb_episode=1"),
             [(1,0,1)])
         self.assertEqual(self.rows("SELECT COUNT(*) FROM torrent_submissions"),[(0,)])
+
+        events=self.rows("SELECT raw_body,state FROM incoming_events WHERE source='sonarr-discovery'")
+        if acquire:
+            self.assertEqual(len(events),1)
+            self.assertEqual(events[0][1],'IDENTIFIED')
+            self.assertEqual(json.loads(events[0][0])['torrent_infohash'],'a'*40)
+            self.assertEqual(self.rows(
+                "SELECT kind FROM jobs WHERE event_id IN "
+                "(SELECT event_id FROM incoming_events WHERE source='sonarr-discovery')"),
+                [('VERIFY_RELEASE',)])
+        else:
+            self.assertEqual(events,[])
+
+    async def test_recognized_candidate_is_selected_without_download(self):
+        await self._run_recognized_candidate(False)
+
+    async def test_opted_in_candidate_routes_to_existing_verification(self):
+        await self._run_recognized_candidate(True)
 
     async def test_opt_in_off_means_no_new_discovery_jobs(self):
         self.source(10)
