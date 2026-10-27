@@ -53,8 +53,16 @@ def select(db, *, plan_id, identity, result, release, policy):
         (aid, identity.tvdb_series_id, identity.tvdb_season,
          identity.tvdb_episode, identity.tvdb_episode_id)
     ).fetchone()
+    # Catalog-only placements are *hints*, not proof of anime identity.
+    # VERIFY_RELEASE must independently resolve them before any reservation.
     if recognized is None:
-        raise SelectionConflict()
+        conflicting=db.execute(
+            "SELECT tvdb_episode_id FROM recognized_episodes WHERE "
+            "tvdb_series_id=? AND tvdb_season=? AND tvdb_episode=?",
+            (identity.tvdb_series_id,identity.tvdb_season,identity.tvdb_episode)
+        ).fetchone()
+        if conflicting is not None:
+            raise SelectionConflict()
     previous = db.execute(
         "SELECT tvdb_episode_id,info_hash FROM sonarr_episode_selections "
         "WHERE plan_id=? AND tvdb_episode=?", (plan_id, identity.tvdb_episode)
