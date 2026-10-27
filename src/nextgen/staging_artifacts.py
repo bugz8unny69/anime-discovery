@@ -176,6 +176,9 @@ def reconcile_planned_batch(queue,operation_id,*,guard,keep_root):
                         "AND phase=?",(target_phase,aid,operation_id,job,phase)
                     ).rowcount
                     if updated!=1:raise BatchStageCleanupRetry()
+        except CancellationError:
+            # A failed operation/lease fence is not a staging retry.
+            raise
         except (ValueError,KeyError,TypeError,IndexError,OSError):
             raise BatchStageCleanupRetry() from None
 
