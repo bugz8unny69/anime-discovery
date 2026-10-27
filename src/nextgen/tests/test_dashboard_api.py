@@ -233,7 +233,8 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
         with connect(self.database) as db,transaction(db):
             db.execute("UPDATE jobs SET state='DONE' WHERE job_id IN (?,?)",(jobs[-1],jobs[-3]))
             db.execute("UPDATE jobs SET state='CANCELED' WHERE job_id=?",(jobs[-2],))
-            db.execute("UPDATE job_operations SET state='CANCELED' WHERE operation_id="
+            db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
+                       "reason_code='CANCELLATION_COMPLETE' WHERE operation_id="
                        "(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(jobs[-2],))
         first=await self.request('GET','/api/v1/jobs?limit=2&show_completed=0&show_canceled=0',token=ADMIN)
         self.assertEqual(first[0],200)
