@@ -1,6 +1,6 @@
 """Offline version-gated magnet metadata transport contracts (no network or CI)."""
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from src.nextgen.acquisition.qbittorrent import Client, _Protocol
 from src.nextgen.acquisition.submission import ClientInvalid, ClientUnsupported, SendPermit
