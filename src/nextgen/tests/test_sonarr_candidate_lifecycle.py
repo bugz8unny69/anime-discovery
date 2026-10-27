@@ -84,7 +84,9 @@ class CandidateStateTests(unittest.TestCase):
                 activate_candidate(self.db,plan_id=1,episode=2,info_hash=SECOND)
 
 
-class FallbackWiringTests(CandidateStateTests):
+class FallbackWiringTests(unittest.TestCase):
+    setUp=CandidateStateTests.setUp
+    tearDown=CandidateStateTests.tearDown
     def test_cleanup_failure_schedules_existing_discovery_job_once(self):
         from unittest.mock import patch
         from src.nextgen.storage.sonarr_candidates import schedule_after_cleanup
