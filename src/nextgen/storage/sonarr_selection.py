@@ -91,3 +91,34 @@ def select(db, *, plan_id, identity, result, release, policy):
          time.time_ns()//1_000_000)
     )
     return True
+
+
+def require_verified_delivery(db, verified):
+    """Cross-check an internal Sonarr event against provider-verified placement.
+
+    This is called by the normal VERIFY_RELEASE persistence BEFORE its release
+    verification is saved. A Sonarr catalog match cannot bypass AniDB/TVDB.
+    """
+    from src.nextgen.release_contracts import ReleaseConflict, VerifiedRelease
+    from src.nextgen.job_contracts import parse_payload
+    if type(verified) is not VerifiedRelease:
+        raise ReleaseConflict()
+    source=verified.source
+    try:
+        document=parse_payload(source.raw_body.decode('utf-8'))
+        digest=infohash(document.get('torrent_infohash'))
+    except (ValueError,TypeError,UnicodeError):
+        raise ReleaseConflict() from None
+    rows=db.execute(
+        "SELECT p.anidb_id,p.tvdb_series_id,p.tvdb_season,"
+        "s.tvdb_episode,s.tvdb_episode_id "
+        "FROM jobs j JOIN jobs parent ON parent.job_id=j.created_by_job_id "
+        "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+        "JOIN sonarr_episode_selections s ON s.plan_id=p.plan_id "
+        "WHERE j.event_id=? AND j.kind='VERIFY_RELEASE' "
+        "AND parent.kind='DISCOVER_SONARR_BACKFILL' AND s.info_hash=?",
+        (source.event_id,digest)).fetchall()
+    if len(rows)!=1 or rows[0]!=(
+            source.anidb_id,source.tvdb_series_id,verified.tvdb_season,
+            verified.tvdb_episode,verified.tvdb_episode_id):
+        raise ReleaseConflict()
