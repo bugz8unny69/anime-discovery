@@ -105,6 +105,23 @@ class SonarrDiscoveryTests(unittest.TestCase):
                          ['/api/v3/system/status', '/api/v3/series',
                           '/api/v3/episode', '/api/v3/release'])
 
+    def test_backfill_selection_only_for_independently_verified_episode(self):
+        fake = FakeSonarr(releases=[release(approved=False, rejected=True,
+                                           rejections=['Sonarr profile rejected'])])
+        fake.episodes[0]['hasFile'] = False
+        discovery = client(fake)[0]
+        unchecked = discovery.backfill(100, 1, (10,), select_candidates=True)
+        self.assertIsNone(unchecked[0].selection)
+        verified = discovery.backfill(100, 1, (10,), verified_ids={10: 200},
+                                      select_candidates=True)
+        self.assertEqual(verified[0].exact, 1)
+        choice = verified[0].selection
+        self.assertIsNotNone(choice)
+        self.assertFalse(choice.release.approved)
+        self.assertEqual(choice.identity, ID)
+        self.assertEqual(choice.release.info_hash, HASH)
+        self.assertNotIn('magnet:', repr(verified[0]))
+
     def test_does_not_create_missing_series(self):
         c, fake = client()
         fake.series = []
