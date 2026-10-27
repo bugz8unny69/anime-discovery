@@ -218,6 +218,42 @@ requirements to acquire Sonarr-only releases. This source-choice opt-in
 must stay disabled in production until a separately verified backfill
 reservation and metadata path is connected.
 
+## Optional acquisition through the existing job pipeline
+
+`sonarr_acquire=True` is a **third, explicitly enabled** worker-composition
+switch requiring both `sonarr_backfill=True` and `sonarr_select=True`. It
+turns a successfully selected, independently recognized episode into a new
+internal delivery with source `sonarr-discovery`. That delivery holds its own
+Sonarr release name and selected info hash; it **does not impersonate** the
+original incoming event or overwrite that event's torrent source.
+
+In the same fenced completion transaction the worker:
+
+1. Stores the validated selected hash and rejects competing reservations.
+2. Reuses a previously provider-verified AnimeSeries identity and verifies the
+   candidate's declared episode against the recognized episode.
+3. Stores an auditable internal event and queues ordinary `VERIFY_RELEASE`
+   in the same active operation.
+
+The new delivery then runs the **existing** verify → evaluate → reserve →
+prepare → submit-stopped → transfer → verify-media → stage workflow. The
+original hash-locked metainfo reader, size policy, duplicate checks, original
+submission journal, stopped-add one-use permit, cancellation and review rules
+remain authoritative; no second qBittorrent client or submission journal exists.
+
+**Metainfo prerequisite:** Before automatic download can succeed, the
+operator's configured `torrent_metadata.base_url` must serve the selected
+`<40-lowercase-hex-infohash>.torrent` with correct torrent metainfo. A
+magnet GUID by itself does not supply that file; this code does not crawl
+Prowlarr `downloadUrl` or resolve magnets to metadata. When the source is
+not yet available, the preexisting metadata waiting/retry behavior applies,
+and **no torrent is submitted**.
+
+Default worker behavior remains discovery-only; merely installing or
+migrating this branch never switches on acquisition. Test in a disposable
+environment first; do not enable this option on a production worker before
+final CI and an explicit database migration.
+
 ## Remaining work
 
 Offline tests in `tests/test_sonarr_backfill.py` and
