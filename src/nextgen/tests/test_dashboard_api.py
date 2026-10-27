@@ -236,7 +236,7 @@ class DashboardApiTests(unittest.IsolatedAsyncioTestCase):
             db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE',"
                        "reason_code='CANCELLATION_COMPLETE' WHERE operation_id="
                        "(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(jobs[-2],))
-        first=await self.request('GET','/api/v1/jobs?limit=2&show_completed=0&show_canceled=0',token=ADMIN)
+        first=await self.request('GET','/api/v1/jobs?limit=2&before_id=9223372036854775807&show_completed=0&show_canceled=0',token=ADMIN)
         self.assertEqual(first[0],200)
         self.assertEqual([row['job_id'] for row in first[1]['data']['items']],[jobs[-4],jobs[-5]])
         cursor=first[1]['data']['next_before_id']
