@@ -5,6 +5,21 @@ open in scope; the complete acquisition/failover assignment is not finished.
 
 ## Implemented in this checkpoint
 
+- The version-specific qBittorrent adapter now reuses the stopped magnet
+  admission path for 4.2.x, newer 4.x, and 5.x versions without metadata-only
+  fetch. A running 4.2.x magnet can be recovered after upgrading to 5.x,
+  including 5.2+; the original submission marker stays valid and no second
+  magnet add is authorized.
+- Sonarr deliveries now use an independent existing operation per candidate.
+  Canceling one candidate no longer cancels the backfill worker or siblings.
+- After a *reviewed* candidate is canceled, its cleanup completes and its
+  reservation is released, the existing ranked candidate records advance and
+  schedule another `DISCOVER_SONARR_BACKFILL` job. That worker re-fetches
+  Sonarr's next ranked magnet and sends it through the normal verification
+  pipeline. This uses existing tables and existing worker services.
+- Regression tests for the upgrade path, isolated operations and fallback
+  scheduling/selection have been written but deliberately **not executed**.
+
 - The installed `python -m src.nextgen worker` entry point now accepts
   `--sonarr-acquire`. It enables the existing backfill, source selection,
   and acquisition registrations together. The example NextGen systemd worker
@@ -36,15 +51,15 @@ new persistent table or worker service.
 
 ## Remaining work
 
-1. Connect definitive candidate failure to ownership-checked cleanup, confirmed
-   reservation retirement, and ranked replacement through normal verification.
-   `fail_candidate` and `next_candidate` are still disconnected from that flow.
-2. Replace the one-choice-per-episode selection constraint with per-attempt
-   history and a current selection, without allowing old attempts to reactivate.
-3. Finish cancellation/cleanup for admissions lacking a usable inventory.
-4. Consolidate the pre-manifest journal with the submission journal, including
-   recovery of existing v45 rows. It cannot simply be dropped: those rows may
-   represent live torrents or uncertain submissions.
+1. Automate the cleanup request for a definitively failed candidate, if
+   desired. Current fallback is wired to *completed cancellation cleanup* of
+   a reviewed attempt; it does not silently cancel an operation or bypass
+   existing cleanup.
+2. Finish cancellation/cleanup for pre-manifest admissions that never obtained
+   a usable inventory. These remain blocked rather than risking foreign files.
+3. Consolidate the pre-manifest journal with the submission journal only if
+   it actually reduces complexity; recovery of existing v45 rows must remain.
+   The current implementation does not require another journal or table.
 5. Verify the pre-selection metadata window on a live daemon. qBittorrent 4.2.5 requires a
    resume to obtain magnet metadata; a bounded client-side poll/finally-pause
    does not guarantee zero unwanted payload, particularly on process death or
@@ -65,3 +80,4 @@ This source inspection is not a live daemon test.
 The local runtime denies AF_UNIX socket creation, affecting the admin socket
 and systemd notification tests. Preserve those tests; do not skip or weaken them.
 GitHub CI has deliberately not been triggered while the feature is incomplete.
+New regression tests were authored without running them, per instruction.
