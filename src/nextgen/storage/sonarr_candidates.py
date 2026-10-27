@@ -96,3 +96,31 @@ def fail_candidate(db, *, plan_id, episode, info_hash, reason_code):
         "WHERE plan_id=? AND tvdb_episode=? AND info_hash=? AND state='ACTIVE'",
         (reason_code,plan_id,episode,infohash(info_hash)))
     if result.rowcount!=1:raise CandidateConflict()
+
+def mark_published(db, *, event_id, info_hash):
+    """Complete the active choice only for a verified, staged Sonarr event.
+
+    Caller has already published media and marked the operation STAGED in the
+    same worker transaction. Ordinary non-Sonarr staging is unaffected.
+    """
+    if not db.in_transaction:
+        raise CandidateConflict()
+    digest=infohash(info_hash)
+    rows=db.execute(
+        "SELECT c.plan_id,c.tvdb_episode FROM incoming_events e "
+        "JOIN jobs verify ON verify.event_id=e.event_id AND verify.kind='VERIFY_RELEASE' "
+        "JOIN jobs parent ON parent.job_id=verify.created_by_job_id "
+        " AND parent.kind='DISCOVER_SONARR_BACKFILL' "
+        "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+        "JOIN sonarr_episode_selections s ON s.plan_id=p.plan_id AND s.info_hash=? "
+        "JOIN sonarr_episode_candidates c ON c.plan_id=s.plan_id "
+        " AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=? AND c.state='ACTIVE' "
+        "WHERE e.event_id=? AND e.source='sonarr-discovery'",
+        (digest,digest,event_id)).fetchall()
+    if not rows:
+        return False
+    if len(rows)!=1:
+        raise CandidateConflict()
+    plan_id,episode=rows[0]
+    succeed_candidate(db,plan_id=plan_id,episode=episode,info_hash=digest)
+    return True
