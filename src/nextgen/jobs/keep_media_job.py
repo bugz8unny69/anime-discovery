@@ -34,8 +34,8 @@ def _persist(db,claim,value):
             "WHERE job_id=? AND action='KEEP'",(claim.job_id,)).fetchone()
         if target is None or not is_batch_staged(db,target[0]):
             raise CompletionRejected(Outcome('review','KEEP_IMPORT_REVIEW'))
-        # Batch staging cleanup has a separate per-file ownership journal.
-        # No single-episode source deletion is authorized by this completion.
+        from src.nextgen.batch.post_keep_cleanup import enqueue as enqueue_batch_cleanup
+        enqueue_batch_cleanup(db,claim)
     else:
         raise CompletionRejected(Outcome('review','KEEP_IMPORT_REVIEW'))
     if value and value.get('refresh'):
