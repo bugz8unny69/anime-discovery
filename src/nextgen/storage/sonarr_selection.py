@@ -134,7 +134,8 @@ def acquisition_identity(database, source):
     from src.nextgen.storage.job_queue import QueueUnavailable
     if type(source) is not AcquisitionInput:
         raise SelectionConflict()
-    with _open(database,readonly=True,timeout_ms=5000) as db:
+    db=_open(database,readonly=True,timeout_ms=5000)
+    try:
         if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:
             raise QueueUnavailable()
         rows=db.execute(
@@ -152,6 +153,8 @@ def acquisition_identity(database, source):
             "AND s.info_hash=? AND c.state='ACTIVE'",
             (source.event_id,source.tvdb_season,source.tvdb_episode,source.info_hash)
         ).fetchall()
+    finally:
+        db.close()
     if not rows:return None
     if len(rows)!=1:raise SelectionConflict()
     return VerifiedEpisode(rows[0][0],rows[0][1],
