@@ -74,6 +74,34 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await cb(self.source,self.context))
         factory.assert_not_called()
 
+    async def test_restart_recovers_admitted_torrent_without_sonarr_search(self):
+        from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
+        root='/downloads/ad-'+'c'*32
+        options=DownloadOptions('http://localhost:8080',root,'anime',10)
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN',
+                            _fingerprint(4,HASH,'c'*32,options,4))
+        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        owned=Mock()
+        owned.inspect.return_value=Observation(
+            HASH,'pausedDL',root,'anime',('ad-'+'c'*32,),False,())
+        owned.poll_legacy_metadata.return_value=None
+        journal=Mock()
+        journal.existing.return_value=intent
+        journal.reconcile.return_value='UNCERTAIN'
+        factory=Mock(side_effect=[probe,owned])
+        search_factory=Mock(side_effect=AssertionError('must not search'))
+        cb=make_bootstrap(self.secrets,client_factory=factory,
+                          journal_factory=lambda db:journal,
+                          sonarr_factory=search_factory)
+        with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
+                   return_value=self.identity):
+            result=await cb(self.source,self.context)
+        self.assertEqual(result.kind,'defer')
+        search_factory.assert_not_called()
+        journal.authorize.assert_not_called()
+        owned.add_legacy_magnet.assert_not_called()
+        owned.poll_legacy_metadata.assert_called_once()
+
     async def test_42_owned_metadata_defers_without_false_manifest(self):
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
         root='/downloads/ad-'+'c'*32
@@ -88,6 +116,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         owned.inspect.return_value=observation
         owned.poll_legacy_metadata.return_value=None
         journal=Mock()
+        journal.existing.return_value=None
         journal.authorize.return_value=(intent,MagnetPermit(intent.fingerprint),())
         journal.reconcile.return_value='UNCERTAIN'
         release=SimpleNamespace(info_hash=HASH,magnet_url=MAGNET)
