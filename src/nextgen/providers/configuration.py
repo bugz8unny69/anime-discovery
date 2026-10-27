@@ -72,7 +72,8 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                                      read_batch_metainfo,client_pool=pool)
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool,
                            batch_verifier=verify_batch)
-    read_metainfo=make_reader() if read_metainfo is None else read_metainfo
+    read_metainfo=(make_reader(sonarr_secrets=secrets if sonarr_acquire else None)
+                   if read_metainfo is None else read_metainfo)
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
