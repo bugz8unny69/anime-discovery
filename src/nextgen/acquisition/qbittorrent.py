@@ -40,11 +40,12 @@ class Client:
         self.options,self._credentials=options,credentials
         self._sid=None
         self.major=None
+        self.api_version=None
         opener=urllib.request.build_opener(_NoRedirect(),urllib.request.ProxyHandler({}))
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
     def _request(self,path,*,query=None,form=None,body=None,content_type=None,limit=3145728):
-        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete'):raise ValueError('unsupported client operation')
+        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete','torrents/fetchMetadata','torrents/saveMetadata','torrents/export'):raise ValueError('unsupported client operation')
         url=self.options.base_url+'/api/v2/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'User-Agent':'AnimeDiscoveryNextGen/1','Referer':self.options.base_url+'/','Accept':'application/json'}
@@ -71,6 +72,7 @@ class Client:
     def login(self):
         self._sid=None
         self.major=None
+        self.api_version=None
         raw,headers=self._request('auth/login',form={'username':self._credentials.username,'password':self._credentials.password},limit=4096)
         if raw.strip()!=b'Ok.':raise ClientAuthenticationFailed()
         cookies=headers.get_all('Set-Cookie',[])
@@ -91,7 +93,64 @@ class Client:
             if not match or not api_match or int(api_match[1])<8:raise ClientUnsupported()
             if match[1]=='4' and int(match[2]) not in (5,6):raise ClientUnsupported()
             self.major=int(match[1])
+            api_parts=api.decode().strip().split('.')
+            self.api_version=tuple(int(part) for part in api_parts[:3])
+            self.api_version+=(0,)*(3-len(self.api_version))
         except UnicodeError:raise ClientUnsupported() from None
+
+    @property
+    def metadata_strategy(self):
+        """Select one safe metadata strategy from the advertised Web API."""
+        if not self._sid or self.api_version is None:
+            raise ClientAuthenticationFailed()
+        if self.api_version >= (2,11,9):
+            return 'fetch'
+        if self.api_version >= (2,8,15):
+            return 'stopped_magnet'
+        raise ClientUnsupported()
+
+    def fetch_metadata(self,magnet,expected_hash):
+        """5.2+ metadata-only fetch; call again on a later worker attempt if pending."""
+        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
+        expected_hash=infohash(expected_hash)
+        if self.metadata_strategy!='fetch' or _magnet_hash(magnet)!=expected_hash:
+            raise ClientInvalid()
+        raw,_=self._request('torrents/fetchMetadata',form={'source':magnet},limit=MAX_METAINFO)
+        data=_json(raw)
+        if type(data) is not dict:raise ClientInvalid()
+        # An empty response means the daemon is still fetching metadata.
+        if not data:return None
+        raw,_=self._request('torrents/saveMetadata',form={'source':magnet},limit=MAX_METAINFO)
+        return parse_metainfo(raw,expected_hash),raw
+
+    def export_metainfo(self,expected_hash):
+        """4.x/5.x: export metadata only from an already owned torrent."""
+        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
+        expected_hash=infohash(expected_hash)
+        raw,_=self._request('torrents/export',query={'hash':expected_hash},limit=MAX_METAINFO)
+        return parse_metainfo(raw,expected_hash),raw
+
+    def add_magnet_metadata(self,magnet,expected_hash,marker):
+        """4.x metadata-only admission. Caller must journal/guard this add first.
+
+        No automatic retry: a transport error leaves an uncertain submission,
+        which must be reconciled by hash and ownership before another action.
+        """
+        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        from src.nextgen.acquisition.metadata import infohash
+        expected_hash=infohash(expected_hash)
+        if (self.metadata_strategy!='stopped_magnet'
+                or _magnet_hash(magnet)!=expected_hash
+                or type(marker) is not str or not re.fullmatch('[a-f0-9]{32}',marker)):
+            raise ClientInvalid()
+        self._request('torrents/add',form={
+            'urls':magnet,'savepath':self.options.download_root,
+            'category':self.options.category,'tags':'ad-'+marker,
+            'stopCondition':'MetadataReceived',
+            'stopped' if self.major==5 else 'paused':'false',
+            'autoTMM':'false','useDownloadPath':'false',
+            'contentLayout':'Original'},limit=4096)
 
     def inspect(self,expected_hash):
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
