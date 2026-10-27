@@ -16,6 +16,7 @@ from src.nextgen.sonarr_episode import VerifiedEpisode, SonarrEpisodeMismatch, r
 
 MAX_RESPONSE = 4 * 1024 * 1024
 MAX_RELEASES = 1000
+INTERACTIVE_SEARCH_TIMEOUT_SECONDS = 180
 
 
 class SearchReview(ValueError):
@@ -238,7 +239,7 @@ class Client:
             'User-Agent': 'AnimeDiscoveryNextGen/1'
         })
         try:
-            with self._transport(request, self.options.timeout_seconds) as response:
+            with self._transport(request, max(self.options.timeout_seconds, INTERACTIVE_SEARCH_TIMEOUT_SECONDS) if path == 'release' else self.options.timeout_seconds) as response:
                 code = response.getcode()
                 if code in (401, 403): raise SearchUnauthorized()
                 if code == 429 or code >= 500: raise SearchUnavailable()
