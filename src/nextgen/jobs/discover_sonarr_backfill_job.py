@@ -18,8 +18,11 @@ KIND = 'DISCOVER_SONARR_BACKFILL'
 DEFINITION = HandlerDefinition(KIND, 'Discover missing backfill episodes in Sonarr')
 
 
-def registration(secrets, *, client_factory=Client.from_context, select_candidates=False):
-    if type(select_candidates) is not bool: raise ValueError('invalid Sonarr selection toggle')
+def registration(secrets, *, client_factory=Client.from_context, select_candidates=False,
+                 acquire_candidates=False):
+    if (type(select_candidates) is not bool or type(acquire_candidates) is not bool
+            or acquire_candidates and not select_candidates):
+        raise ValueError('Sonarr acquisition requires opted-in source selection')
     async def execute(context):
         payload = context.data()
         try:
@@ -57,7 +60,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
             return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
 
     def persist(db,claim,value):
-        try: return persist_observations(db,claim,value)
+        try: return persist_observations(db,claim,value,dispatch=acquire_candidates)
         except BackfillConflict:
             raise CompletionRejected(Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')) from None
 
