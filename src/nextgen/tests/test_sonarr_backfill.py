@@ -156,7 +156,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT count(DISTINCT m.operation_id) FROM job_operation_members m "
                 "JOIN jobs j USING(job_id) WHERE j.kind IN "
                 "('DISCOVER_SONARR_BACKFILL','VERIFY_RELEASE')"),
-                [(2,)])
+                [(4,)])
         else:
             self.assertEqual(events,[])
 
