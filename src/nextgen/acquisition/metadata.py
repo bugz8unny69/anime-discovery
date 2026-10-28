@@ -31,6 +31,37 @@ def infohash(value):
     return value.lower()
 
 
+def hash_magnet(digest,value=None):
+    """A magnet bound to exactly one v1 info hash (Legacy webhook behavior).
+
+    A supplied magnet keeps only its xt, dn and plain public announce
+    trackers; trackers with credentials, queries or per-user paths are
+    dropped. With nothing usable supplied, qBittorrent resolves the bare
+    hash through DHT/PEX exactly as Legacy did. Returns None on a hash
+    mismatch, so a conflicting magnet is never silently replaced.
+    """
+    from urllib.parse import parse_qs, urlencode, urlsplit
+    digest=infohash(digest)
+    bare='magnet:?xt=urn:btih:'+digest
+    if value is None or value=='':return bare
+    if type(value) is not str or len(value)>8192 or not value.startswith('magnet:?'):return None
+    try:fields=parse_qs(urlsplit(value).query)
+    except ValueError:return None
+    xt=fields.get('xt',[])
+    if len(xt)!=1 or xt[0].lower()!='urn:btih:'+digest:return None
+    keep=[('xt','urn:btih:'+digest)]
+    names=fields.get('dn',[])
+    if len(names)==1 and len(names[0])<=1024 and all(32<=ord(c)!=127 for c in names[0]):
+        keep.append(('dn',names[0]))
+    for tracker in fields.get('tr',[])[:20]:
+        try:parts=urlsplit(tracker)
+        except ValueError:continue
+        if (parts.scheme in ('http','https','udp') and parts.hostname and '@' not in parts.netloc
+                and not parts.query and not parts.fragment and parts.path in ('','/','/announce')):
+            keep.append(('tr',tracker))
+    return 'magnet:?'+urlencode(keep,safe=':/')
+
+
 def safe_path(value):
     if (type(value) is not str or not 1<=len(value)<=2048 or '\\' in value or ':' in value
             or any(unicodedata.category(c).startswith('C') for c in value)

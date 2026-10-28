@@ -92,7 +92,9 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
                 from contextlib import nullcontext
                 return nullcontext(SimpleNamespace(
                     execute=lambda sql,args=():SimpleNamespace(
-                        fetchone=lambda:('COMPLETE',))))
+                        fetchone=lambda:('COMPLETE',),
+                        # No pre-manifest magnet intents in this batch scenario.
+                        fetchall=lambda:[])))
         obj=CancellationService.__new__(CancellationService)
         obj.store=SimpleNamespace(queue=Queue(),
              status=lambda job_id:dict(operation_id=7,can_cleanup=True))
@@ -100,7 +102,7 @@ class BatchCancellationOrchestrationTests(unittest.TestCase):
         obj.configuration=SimpleNamespace(
             value=lambda name:'/tmp/keep' if name=='storage.keep_root' else None)
         obj._admission=lambda: __import__('contextlib').nullcontext()
-        obj._targets=lambda job_id:(7,[],[
+        obj._targets=lambda job_id,*,resolved=():(7,[],[
             SimpleNamespace(plan=SimpleNamespace(plan_id=15))])
         obj._state=lambda *args,**kwargs:None
         obj._fence=lambda *args,**kwargs:None

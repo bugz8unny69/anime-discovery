@@ -129,9 +129,11 @@ class Client:
 def make_reader(*,client_factory=Client,sonarr_secrets=None):
     """One metainfo reader for preparation and exact-plan submission checks.
 
-    Opt-in Sonarr sources first use the existing hash-addressed cache. If that
-    is unavailable, qBittorrent 5.2+ may retrieve the *same* verified hash
-    from a freshly revalidated Sonarr magnet. No source URL is persisted.
+    The configured hash-addressed .torrent source is tried first. Verified
+    Sonarr sources fall back to a freshly revalidated Sonarr magnet; ordinary
+    webhooks without a configured source fall back to their own hash-bound
+    magnet. Either way qBittorrent 5.2+ fetches metadata only, and the bytes
+    are re-verified against the hash.
     """
     async def read_metainfo(source,configuration,cancelled):
         if cancelled.is_set():raise asyncio.CancelledError()
@@ -147,11 +149,14 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
                                   source.info_hash,cancelled)
         except (MetadataSourceConfigurationError,MetadataSourceWaiting,
                 MetadataSourceUnavailable) as original_error:
-            if identity is None:raise
+            # A verified Sonarr event may always fall back. An ordinary
+            # webhook falls back only when no .torrent source is configured.
+            if sonarr_secrets is None or identity is None and type(
+                    original_error) is not MetadataSourceConfigurationError:raise
             fallback_error=original_error
-        # This fallback is only for the original verified Sonarr event.
         # Sonarr can rotate private tracker tokens: always re-query, never
-        # persist or reconstruct credential-bearing magnets.
+        # persist or reconstruct credential-bearing magnets. An ordinary
+        # webhook uses its own sanitized hash-bound magnet (Legacy behavior).
         from src.nextgen.acquisition.sonarr_search import (
             Client as SonarrClient, SearchUnavailable, SearchReview,
         )
@@ -168,14 +173,20 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
                 # Older qBittorrent needs a pre-manifest send journal;
                 # the existing .torrent source remains the safe fallback.
                 raise fallback_error
-            client=SonarrClient.from_context(configuration,sonarr_secrets)
-            result=await blocking(client.search,identity)
-            chosen=next((row for row in result.candidates
-                         if row.info_hash==source.info_hash
-                         and client.policy.accepts(row)),None)
-            if chosen is None:
-                raise MetadataSourceWaiting()
-            resolved=await blocking(qb.fetch_metadata,chosen.magnet_url,source.info_hash)
+            if identity is None:
+                from src.nextgen.storage.acquisition import source_magnet
+                magnet=await blocking(source_magnet,
+                    configuration.value('storage.database_path'),source)
+            else:
+                client=SonarrClient.from_context(configuration,sonarr_secrets)
+                result=await blocking(client.search,identity)
+                chosen=next((row for row in result.candidates
+                             if row.info_hash==source.info_hash
+                             and client.policy.accepts(row)),None)
+                if chosen is None:
+                    raise MetadataSourceWaiting()
+                magnet=chosen.magnet_url
+            resolved=await blocking(qb.fetch_metadata,magnet,source.info_hash)
             if resolved is None:raise MetadataSourceWaiting()
             if cancelled.is_set():raise asyncio.CancelledError()
             return resolved[1]

@@ -68,10 +68,28 @@ class SonarrMetadataReaderTests(unittest.IsolatedAsyncioTestCase):
         self.qb.fetch_metadata.assert_not_called()
         self.qb.add_stopped.assert_not_called()
 
-    async def test_unrelated_event_retains_original_configuration_requirement(self):
+    async def test_webhook_event_with_waiting_torrent_source_keeps_that_source(self):
         from src.nextgen.storage import sonarr_selection
+        failing=Mock()
+        failing.return_value.fetch.side_effect=MetadataSourceWaiting()
         with patch.object(sonarr_selection,'acquisition_identity',return_value=None):
-            reader=make_reader(sonarr_secrets=self.secrets)
-            with self.assertRaises(MetadataSourceConfigurationError):
-                await reader(self.source,self.configuration,asyncio.Event())
+            values={k:self.configuration.value(k) for k in (
+                'storage.database_path','torrent_metadata.timeout_seconds')}
+            values['torrent_metadata.base_url']='https://cache.example/torrents'
+            configured=SimpleNamespace(value=values.__getitem__)
+            reader=make_reader(sonarr_secrets=self.secrets,client_factory=failing)
+            with self.assertRaises(MetadataSourceWaiting):
+                await reader(self.source,configured,asyncio.Event())
         self.qb.login.assert_not_called()
+
+    async def test_webhook_event_without_torrent_source_fetches_its_own_magnet(self):
+        from src.nextgen.storage import sonarr_selection
+        search=Mock(side_effect=AssertionError('must not search Sonarr'))
+        with patch.object(sonarr_selection,'acquisition_identity',return_value=None), \
+             patch('src.nextgen.acquisition.sonarr_search.Client.from_context',search), \
+             patch('src.nextgen.storage.acquisition.source_magnet',return_value=MAGNET):
+            reader=make_reader(sonarr_secrets=self.secrets)
+            self.assertEqual(await reader(self.source,self.configuration,asyncio.Event()),
+                             b'metainfo')
+        self.qb.fetch_metadata.assert_called_once_with(MAGNET,HASH)
+        search.assert_not_called()

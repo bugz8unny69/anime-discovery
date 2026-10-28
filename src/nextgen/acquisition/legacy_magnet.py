@@ -1,4 +1,4 @@
-"""Sonarr magnet bootstrap using the negotiated qBittorrent adapter in the existing PREPARE job.
+"""Hash-bound magnet bootstrap (Sonarr-selected or ordinary webhook) using the negotiated qBittorrent adapter in the existing PREPARE job.
 
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
 Observed inventories enter the existing transfer pipeline without another add.
@@ -9,7 +9,7 @@ from src.nextgen.acquisition.qbittorrent import Client as QBClient
 from src.nextgen.acquisition.settings import (download_options, size_limits, DownloadConfigurationError,
     SizeLimitExceeded, SizeEvidenceMissing)
 from src.nextgen.acquisition.metadata import (ObservedInventory, MetadataInvalid,
-    AcquisitionConflict)
+    AcquisitionConflict, SourceMissing)
 from src.nextgen.acquisition.submission import (
     ClientInvalid, ClientUnavailable, ClientAuthenticationFailed, ClientUnsupported,
 )
@@ -19,6 +19,7 @@ from src.nextgen.acquisition.sonarr_search import (
 from src.nextgen.job_contracts import Outcome
 from src.nextgen.storage.sonarr_magnet_intake import MagnetJournal
 from src.nextgen.storage.sonarr_selection import acquisition_identity, SelectionConflict
+from src.nextgen.storage.acquisition import source_magnet
 
 PENDING=Outcome('defer','TORRENT_METADATA_WAITING',delay_ms=60000)
 
@@ -29,9 +30,15 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
     async def bootstrap(source,context):
         configuration=context.configuration
         try:
-            identity=await blocking(acquisition_identity,
-                configuration.value('storage.database_path'),source)
-            if identity is None:return None
+            database=configuration.value('storage.database_path')
+            identity=await blocking(acquisition_identity,database,source)
+            magnet=None
+            if identity is None:
+                # Ordinary webhook (autobrr). An operator-configured .torrent
+                # source keeps its existing path; otherwise qBittorrent
+                # resolves the event's own hash-bound magnet, as Legacy did.
+                if configuration.value('torrent_metadata.base_url'):return None
+                magnet=await blocking(source_magnet,database,source)
             options=download_options(configuration)
             credentials=await blocking(secrets.qbittorrent_credentials)
             probe=client_factory(options,credentials)
@@ -45,18 +52,19 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             if intent is None and probe.metadata_strategy=='fetch':
                 return None
             permit=None
-            candidate=None
             if intent is None:
-                # Only a NEW submission needs a fresh Sonarr search. Recovery
-                # works even when Sonarr no longer lists the release.
-                search=sonarr_factory(configuration,secrets)
-                result=await blocking(search.search,identity)
-                candidate=next((release for release in result.candidates
-                                if release.info_hash==source.info_hash
-                                and search.policy.accepts(release)
-                                and _magnet_hash(release.magnet_url)==source.info_hash),
-                               None)
-                if candidate is None:return PENDING
+                # Only a NEW Sonarr submission needs a fresh Sonarr search.
+                # Recovery works even when Sonarr no longer lists the release.
+                if identity is not None:
+                    search=sonarr_factory(configuration,secrets)
+                    result=await blocking(search.search,identity)
+                    candidate=next((release for release in result.candidates
+                                    if release.info_hash==source.info_hash
+                                    and search.policy.accepts(release)
+                                    and _magnet_hash(release.magnet_url)==source.info_hash),
+                                   None)
+                    if candidate is None:return PENDING
+                    magnet=candidate.magnet_url
                 before=await blocking(probe.inspect,source.info_hash)
                 if context.cancelled.is_set():return PENDING
                 intent,permit,_=await blocking(
@@ -73,7 +81,7 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 await blocking(journal.guard,context.claim,intent)
                 try:
                     await blocking(owned.add_legacy_magnet,
-                                   candidate.magnet_url,intent,permit)
+                                   magnet,intent,permit)
                 except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
                     return PENDING
             current=await blocking(owned.inspect,source.info_hash)
@@ -118,7 +126,7 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
         except ClientUnavailable:
             return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
         except (MetadataInvalid,AcquisitionConflict,SizeLimitExceeded,
-                SizeEvidenceMissing) as exc:
+                SizeEvidenceMissing,SourceMissing) as exc:
             return Outcome('review',exc.reason_code)
         except (SelectionConflict,ClientInvalid,ClientAuthenticationFailed,
                 ClientUnsupported,DownloadConfigurationError):

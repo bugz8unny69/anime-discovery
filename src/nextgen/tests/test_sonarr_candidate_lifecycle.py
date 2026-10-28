@@ -162,7 +162,7 @@ class FallbackWiringTests(unittest.TestCase):
             INSERT INTO jobs VALUES(12,25,'PREPARE_ACQUISITION',11,'{}');
             INSERT INTO job_operation_members VALUES(11,7);
             INSERT INTO job_operation_members VALUES(12,7);
-            INSERT INTO job_operations VALUES(7,'ACTIVE');
+            INSERT INTO job_operations(operation_id,state) VALUES(7,'ACTIVE');
             INSERT INTO trial_plans VALUES(1);
         """)
         self.db.execute(

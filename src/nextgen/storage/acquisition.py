@@ -56,6 +56,26 @@ def load_acquisition_input(database,evaluation_job_id,event_id):
         if db is not None:db.close()
 
 
+def source_magnet(database,source):
+    """Hash-bound magnet for an accepted event: its sanitized declared magnet
+    or, when none was declared, the bare info hash (Legacy behavior)."""
+    from src.nextgen.acquisition.metadata import hash_magnet
+    if type(source) is not AcquisitionInput:raise AcquisitionConflict()
+    db=None
+    try:
+        db=_open(database,readonly=True,timeout_ms=5000)
+        row=db.execute('SELECT raw_body FROM incoming_events WHERE event_id=?',(source.event_id,)).fetchone()
+    except (OSError,sqlite3.Error,MigrationError):raise QueueUnavailable() from None
+    finally:
+        if db is not None:db.close()
+    if row is None:raise SourceMissing()
+    try:declared=parse_payload(bytes(row[0]).decode('utf-8')).get('magnet_uri')
+    except (ValueError,TypeError,AttributeError,UnicodeError):raise SourceMissing() from None
+    magnet=hash_magnet(source.info_hash,declared)
+    if magnet is None:raise SourceMissing()
+    return magnet
+
+
 def validate_declaration(source,manifest):
     """Filename alignment only; never proves bytes, audio or acquisition rights."""
     try:
