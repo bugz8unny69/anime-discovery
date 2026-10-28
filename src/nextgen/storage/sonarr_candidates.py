@@ -170,14 +170,13 @@ def schedule_after_cleanup(db,operation_id):
     fail_candidate(db,plan_id=plan_id,episode=episode,info_hash=digest,
                    reason_code=issue[0] or 'JOB_RETRY_EXHAUSTED')
     pending=next_candidate(db,plan_id=plan_id,episode=episode)
-    if pending is None:return ()
     from src.nextgen.storage.sqlite import enqueue_job_with_receipt
     from src.nextgen.storage.sonarr_backfill import PAGE_SIZE
     page_start=((episode-1)//PAGE_SIZE)*PAGE_SIZE+1
     _,receipt=enqueue_job_with_receipt(
         db,kind='DISCOVER_SONARR_BACKFILL',
         payload={'plan_id':plan_id,'start':page_start,
-                 'fallback_episode':episode},
+                 ('fallback_episode' if pending else 'exhausted_episode'):episode},
         component='worker',event_id=parent_event,
         created_by_job_id=parent_job)
     return (receipt,)
