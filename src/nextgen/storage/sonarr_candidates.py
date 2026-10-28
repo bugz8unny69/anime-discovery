@@ -190,11 +190,18 @@ def auto_cleanup_failed_candidate(db,claim):
     NEEDS_REVIEW. The rejected candidate owns its own operation; siblings and
     the backfill discovery worker are not canceled. Ordinary jobs are untouched.
     """
-    if not db.in_transaction or claim.event_id is None:return ()
+    if (not db.in_transaction or claim.event_id is None or claim.kind not in
+            ('VERIFY_RELEASE','EVALUATE_TRIAL','RESERVE_EPISODE',
+             'PREPARE_ACQUISITION','SUBMIT_TORRENT','DOWNLOAD_TORRENT',
+             'VERIFY_MEDIA','STAGE_TRIAL_MEDIA')):
+        return ()
     row=db.execute(
         "SELECT c.state FROM incoming_events e "
         "JOIN jobs verify ON verify.event_id=e.event_id "
         "AND verify.kind='VERIFY_RELEASE' "
+        "JOIN job_operation_members owner ON owner.job_id=verify.job_id "
+        "JOIN job_operation_members target ON target.operation_id=owner.operation_id "
+        "AND target.job_id=? "
         "JOIN jobs parent ON parent.job_id=verify.created_by_job_id "
         "AND parent.kind='DISCOVER_SONARR_BACKFILL' "
         "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
@@ -203,7 +210,7 @@ def auto_cleanup_failed_candidate(db,claim):
         "AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=s.info_hash "
         "WHERE e.event_id=? AND e.source='sonarr-discovery' "
         "AND s.info_hash=json_extract(CAST(e.raw_body AS TEXT),'$.torrent_infohash')",
-        (claim.event_id,)).fetchall()
+        (claim.job_id,claim.event_id)).fetchall()
     if row!=[('ACTIVE',)]:return ()
     from src.nextgen.storage.cancellation import CancellationStore,operation
     from src.nextgen.storage.sqlite import enqueue_job_with_receipt
@@ -213,7 +220,8 @@ def auto_cleanup_failed_candidate(db,claim):
                   "AND action='CLEANUP'",(op[0],)).fetchone():return ()
     # This is the same cancellation transition and control job used by the
     # manual UI. Only its *trigger* differs. No new worker/cleanup path.
-    canceled,records=CancellationStore('').request_in_transaction(
+    database=db.execute('PRAGMA database_list').fetchone()[2] or ':memory:'
+    canceled,records=CancellationStore(database).request_in_transaction(
         db,claim.job_id)
     now=__import__('time').time_ns()//1000000
     control,created=enqueue_job_with_receipt(
