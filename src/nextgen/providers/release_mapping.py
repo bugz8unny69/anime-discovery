@@ -52,7 +52,9 @@ def forward_mappings(payload, aid, tid, catalog):
     rules=[]
     for item in node.findall("mapping-list/mapping"):
         if item.get("anidbseason")!="1": continue
-        season=item.get("tvdbseason","")
+        # Anime-Lists also contains TMDB-only mappings; those are not TVDB rules.
+        season=item.get("tvdbseason")
+        if season is None: continue
         if not re.fullmatch(r"[0-9]{1,3}",season): raise ReleaseNotReady("RELEASE_MAPPING_UNSUPPORTED")
         target_season=int(season)
         text=(item.text or "").strip()
@@ -65,10 +67,13 @@ def forward_mappings(payload, aid, tid, catalog):
         start,end=item.get("start"),item.get("end")
         if start is not None or end is not None:
             offset=item.get("offset") or "0"
-            if (not re.fullmatch(r"[1-9][0-9]{0,3}",start or "") or not re.fullmatch(r"[1-9][0-9]{0,3}",end or "")
-                    or not re.fullmatch(r"-?[0-9]{1,5}",offset or "") or int(start)>int(end)):
+            # An omitted end means the range continues through later AniDB episodes.
+            # Resolve only against episode numbers present in the AniDB catalog.
+            last=end if end is not None else "9999"
+            if (not re.fullmatch(r"[1-9][0-9]{0,3}",start or "") or not re.fullmatch(r"[1-9][0-9]{0,3}",last)
+                    or not re.fullmatch(r"-?[0-9]{1,5}",offset or "") or int(start)>int(last)):
                 raise ReleaseNotReady("RELEASE_MAPPING_UNSUPPORTED")
-            rules.append((1,int(start),int(end),target_season,int(offset)))
+            rules.append((1,int(start),int(last),target_season,int(offset)))
     default_season,default_offset=node.get("defaulttvdbseason"),node.get("episodeoffset") or "0"
     default=None
     if re.fullmatch(r"[0-9]{1,3}",default_season or "") and re.fullmatch(r"-?[0-9]{1,5}",default_offset or ""):
