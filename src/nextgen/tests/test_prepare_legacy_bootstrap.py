@@ -1,4 +1,5 @@
 """Offline routing and recovery contracts for opted-in legacy magnet intake."""
+import logging
 import asyncio
 from types import SimpleNamespace
 import unittest
@@ -74,7 +75,8 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 'qbittorrent.timeout_seconds':10,
                 'torrent_metadata.base_url':'',**extra}
         return SimpleNamespace(claim=CLAIM,configuration=SimpleNamespace(value=values.__getitem__),
-                               cancelled=asyncio.Event())
+                               cancelled=asyncio.Event(),
+                               logger=logging.getLogger('anime-discovery.test.bootstrap'))
 
     async def test_webhook_event_with_configured_torrent_source_never_contacts_qbittorrent(self):
         factory=Mock()
@@ -126,9 +128,14 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(reason=reason), \
                  patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',return_value=None), \
                  patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET):
-                outcome=await cb(self.source,self._config())
+                with self.assertLogs('anime-discovery.test.bootstrap','WARNING') as logs:
+                    outcome=await cb(self.source,self._config())
                 self.assertEqual((outcome.kind,outcome.reason_code),('review',reason))
                 journal.authorize.assert_not_called()
+                # Which call failed is recorded as line numbers only, never secrets.
+                self.assertIn('frame_lines=',logs.output[0])
+                self.assertIn('reason_code='+reason,logs.output[0])
+                self.assertNotIn('SID',logs.output[0])
 
     async def test_webhook_event_on_fetch_client_defers_to_metadata_reader(self):
         probe=Mock(major=5,metadata_strategy='fetch')
