@@ -234,7 +234,7 @@ def auto_cleanup_oversized(db,claim):
     """
     if (not db.in_transaction or claim.event_id is None or claim.kind!='PREPARE_ACQUISITION'
             or db.execute('SELECT last_reason_code FROM jobs WHERE job_id=?',
-                          (claim.job_id,)).fetchone()!=('ACQUISITION_SIZE_LIMIT',)
+                          (claim.job_id,)).fetchone() not in (('ACQUISITION_SIZE_LIMIT',),('ACQUISITION_PLAN_SIZE_LIMIT',))
             or db.execute("SELECT 1 FROM incoming_events WHERE event_id=? AND source='sonarr-discovery'",
                           (claim.event_id,)).fetchone()):
         return ()

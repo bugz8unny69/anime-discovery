@@ -22,7 +22,7 @@ def _persist(db,claim,value):
         raise ValueError('preparation facts do not match job')
     try:return (persist_acquisition(db,claim,value),)
     except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:
-        raise CompletionRejected(Outcome('review',exc.reason_code)) from None
+        raise CompletionRejected(Outcome('review',exc.reason_code,facts=getattr(exc,'facts',None))) from None
 
 
 def registration(read_metainfo,*,submission_kind=None,legacy_bootstrap=None):
@@ -55,7 +55,7 @@ def registration(read_metainfo,*,submission_kind=None,legacy_bootstrap=None):
         except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:return Outcome('review',exc.reason_code)
         except ProviderDeferred as exc:return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
         except ProviderUnavailable as exc:return Outcome('retry',exc.reason_code)
-        except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:return Outcome('review',exc.reason_code)
+        except (AcquisitionConflict,MetadataInvalid,SourceMissing,SizeLimitExceeded,SizeEvidenceMissing) as exc:return Outcome('review',exc.reason_code,facts=getattr(exc,'facts',None))
         return Outcome(value=AcquisitionProposal(source,manifest,context.configuration.desired_revision,size_limits(context.configuration),context.claim.job_id))
     def route(value):
         if submission_kind is None:return ()

@@ -45,7 +45,16 @@ class AcquisitionBudgetTests(unittest.IsolatedAsyncioTestCase):
         # The over-budget copy is canceled automatically so another release can take the episode.
         self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind='PREPARE_ACQUISITION' ORDER BY state"),
                          [('CANCELED','JOB_CANCELED'),('DONE',None)])
-        self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE reason_code='ACQUISITION_SIZE_LIMIT'"),[(1,)])
+        # Two 0.7 MB videos against a 1 MB trial total: the trial-total limit, with its numbers.
+        (details,),=self.rows("SELECT details_json FROM job_history WHERE reason_code='ACQUISITION_PLAN_SIZE_LIMIT'")
+        import json
+        self.assertEqual({k:v for k,v in json.loads(details).items() if k!='attempt'},
+                         {'video_mb':1,'plan_used_mb':1,'limit_mb':1})
+        from src.nextgen.api.app import size_detail
+        self.assertEqual(size_detail(json.loads(details)),
+            "The video is 1 MB; this anime's trial episodes already use 1 MB of their 1 MB total limit.")
+        self.assertEqual(size_detail({'video_mb':800,'limit_mb':600}),
+            'The video is 800 MB; the episode limit is 600 MB.')
         self.assertEqual(self.rows('SELECT max_episode_bytes,max_plan_bytes FROM acquisition_budgets'),[(1000000,1000000)])
 
     async def test_existing_budget_retains_captured_limits_after_live_settings_change(self):

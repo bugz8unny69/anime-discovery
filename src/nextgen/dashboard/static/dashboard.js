@@ -179,6 +179,7 @@ function renderJobs() {
       details.appendChild(node('p', job.reason.message));
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
     } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
+    if (job.size_detail) details.appendChild(node('p', job.size_detail));
     const activeAction = ['cleanup', 'keep', 'reject'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
       details.appendChild(node('p', `Job #${activeAction.job_id}: ${activeAction.status.message}`));
@@ -341,6 +342,7 @@ async function loadHistory() {
       article.appendChild(node('small', date(entry.occurred_at_ms), 'muted'));
       article.appendChild(node('p', `${worker}: ${entry.event.message}`));
       if (entry.reason) { article.appendChild(node('p', entry.reason.message)); article.appendChild(node('small', entry.reason.action, 'muted')); }
+      if (entry.detail) article.appendChild(node('p', entry.detail));
       $('history-rows').appendChild(article);
     }
     if (!data.items.length && !state.historyCursor) $('history-rows').appendChild(node('p', COPY['dashboard.no_history']));
