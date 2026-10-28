@@ -228,6 +228,39 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake.registered), 1)
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
 
+    async def test_unlisted_season_waits_and_searches_again(self):
+        self.source(10)
+        fake = FakeDiscovery()
+        def unlisted(tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None):
+            return tuple(BackfillObservation(n, None, None, 'NOT_LISTED') for n in numbers)
+        fake.backfill = unlisted
+        worker = self.worker(fake)
+        await worker.attempt()  # EVALUATE_TRIAL
+        await worker.attempt()  # nothing listed yet -> wait, nothing recorded
+        self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
+                         [('RETRY_WAIT','SONARR_DISCOVERY_UNAVAILABLE')])
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(0,)])
+        del fake.backfill  # Sonarr now lists the season
+        self.make_due()
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results WHERE status='CANDIDATES'"),[(4,)])
+
+    async def test_unlisted_season_is_recorded_once_the_wait_limit_is_reached(self):
+        from src.nextgen.jobs.discover_sonarr_backfill_job import LISTING_ATTEMPTS
+        self.source(10)
+        fake = FakeDiscovery()
+        fake.backfill = lambda tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None: tuple(
+            BackfillObservation(n, None, None, 'NOT_LISTED') for n in numbers)
+        worker = self.worker(fake)
+        await worker.attempt()
+        db = connect(self.database)
+        try:
+            with transaction(db):
+                db.execute("UPDATE jobs SET attempt_count=? WHERE kind=?",(LISTING_ATTEMPTS-1,DISCOVER_KIND))
+        finally: db.close()
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results WHERE status='NOT_LISTED'"),[(4,)])
+
     async def test_backfill_held_by_an_older_release_resumes_automatically(self):
         self.source(10)
         fake = FakeDiscovery()

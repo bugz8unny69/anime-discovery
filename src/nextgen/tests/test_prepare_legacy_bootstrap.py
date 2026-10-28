@@ -113,6 +113,23 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(owned.add_legacy_magnet.call_args.args[0].startswith(MAGNET))
         search_factory.assert_not_called()
 
+    async def test_qbittorrent_failures_report_the_failed_check(self):
+        from src.nextgen.acquisition.submission import ClientInvalid, ClientAuthenticationFailed
+        for error,reason in ((ClientInvalid,'DOWNLOAD_CLIENT_RESPONSE_INVALID'),
+                             (ClientAuthenticationFailed,'DOWNLOAD_CLIENT_AUTH_FAILED')):
+            probe=Mock(major=4,metadata_strategy='legacy_poll')
+            probe.inspect.side_effect=error()
+            journal=Mock()
+            journal.existing.return_value=None
+            cb=make_bootstrap(self.secrets,client_factory=Mock(return_value=probe),
+                              journal_factory=lambda _:journal)
+            with self.subTest(reason=reason), \
+                 patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',return_value=None), \
+                 patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET):
+                outcome=await cb(self.source,self._config())
+                self.assertEqual((outcome.kind,outcome.reason_code),('review',reason))
+                journal.authorize.assert_not_called()
+
     async def test_webhook_event_on_fetch_client_defers_to_metadata_reader(self):
         probe=Mock(major=5,metadata_strategy='fetch')
         journal=Mock()

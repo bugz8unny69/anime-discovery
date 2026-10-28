@@ -128,7 +128,10 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
         except (MetadataInvalid,AcquisitionConflict,SizeLimitExceeded,
                 SizeEvidenceMissing,SourceMissing) as exc:
             return Outcome('review',exc.reason_code)
-        except (SelectionConflict,ClientInvalid,ClientAuthenticationFailed,
-                ClientUnsupported,DownloadConfigurationError):
+        except (ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,
+                DownloadConfigurationError) as exc:
+            # Name the failed check (as SUBMIT_TORRENT does), not a generic conflict.
+            return Outcome('review',exc.reason_code)
+        except SelectionConflict:
             return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
     return bootstrap
