@@ -86,6 +86,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             HASH,'pausedDL',root,'anime',('ad-'+'c'*32,),False,())
         owned.poll_legacy_metadata.return_value=None
         journal=Mock()
+        journal.metadata_expired.return_value=False
         journal.existing.return_value=intent
         journal.reconcile.return_value='UNCERTAIN'
         factory=Mock(side_effect=[probe,owned])
@@ -114,6 +115,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             HASH,'pausedDL',root,'anime',('ad-'+'c'*32,),False,())
         owned.poll_legacy_metadata.return_value=None
         journal=Mock()
+        journal.metadata_expired.return_value=False
         journal.existing.return_value=intent
         journal.reconcile.return_value='UNCERTAIN'
         factory=Mock(side_effect=[probe,owned])
@@ -144,6 +146,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         owned.inspect.return_value=observation
         owned.poll_legacy_metadata.return_value=None
         journal=Mock()
+        journal.metadata_expired.return_value=False
         journal.existing.return_value=None
         journal.authorize.return_value=(intent,MagnetPermit(intent.fingerprint),())
         journal.reconcile.return_value='UNCERTAIN'
