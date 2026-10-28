@@ -209,6 +209,12 @@ class JobQueue:
             now = self.now()
             self._owns(db,claim,now)
             records.append(self._transition(db,claim,outcome,now))
+            # Failed Sonarr candidates use the existing cancellation worker,
+            # never the user-facing Cancel button. Non-Sonarr jobs are untouched.
+            if db.execute('SELECT state FROM jobs WHERE job_id=?',
+                          (claim.job_id,)).fetchone()==('NEEDS_REVIEW',):
+                from src.nextgen.storage.sonarr_candidates import auto_cleanup_failed_candidate
+                records.extend(auto_cleanup_failed_candidate(db,claim))
             return tuple(records)
 
     def recover_expired(self, limit=100):

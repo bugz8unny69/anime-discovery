@@ -137,6 +137,9 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             "SELECT candidates,approved,exact FROM sonarr_backfill_results WHERE tvdb_episode=1"),
             [(1,0,1)])
         self.assertEqual(self.rows("SELECT COUNT(*) FROM torrent_submissions"),[(0,)])
+        self.assertEqual(self.rows(
+            "SELECT state FROM sonarr_episode_candidates WHERE plan_id=1 AND tvdb_episode=1"),
+            [('ACTIVE' if acquire else 'READY',)])
 
         events=self.rows("SELECT raw_body,state FROM incoming_events WHERE source='sonarr-discovery'")
         if acquire:
@@ -147,6 +150,13 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                 "SELECT kind FROM jobs WHERE event_id IN "
                 "(SELECT event_id FROM incoming_events WHERE source='sonarr-discovery')"),
                 [('VERIFY_RELEASE',)])
+            # The discovery page may spawn several episodes; cancellation of
+            # one acquisition must not cancel its sibling or the backfill job.
+            self.assertEqual(self.rows(
+                "SELECT count(DISTINCT m.operation_id) FROM job_operation_members m "
+                "JOIN jobs j USING(job_id) WHERE j.kind IN "
+                "('DISCOVER_SONARR_BACKFILL','VERIFY_RELEASE')"),
+                [(4,)])
         else:
             self.assertEqual(events,[])
 
@@ -189,7 +199,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BackfillSchemaTests(unittest.TestCase):
-    def test_explicit_v41_to_v43_and_fresh_schema_match(self):
+    def test_explicit_v41_to_v46_and_fresh_schema_match(self):
         old = sqlite3.connect(':memory:')
         fresh = sqlite3.connect(':memory:')
         try:
@@ -201,10 +211,13 @@ class BackfillSchemaTests(unittest.TestCase):
             before = old.execute('SELECT * FROM incoming_events').fetchall()
             old.executescript((SQL_DIR/'042_sonarr_backfill.sql').read_text())
             old.executescript((SQL_DIR/'043_sonarr_selection.sql').read_text())
+            old.executescript((SQL_DIR/'044_sonarr_candidates.sql').read_text())
+            old.executescript((SQL_DIR/'045_sonarr_magnet_intents.sql').read_text())
+            old.executescript((SQL_DIR/'046_observed_acquisition.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],43)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],46)
         finally:
             old.close()
             fresh.close()

@@ -4,7 +4,7 @@ import json
 import re
 import threading
 
-from src.nextgen.acquisition.metadata import Manifest, TorrentFile, infohash
+from src.nextgen.acquisition.metadata import Manifest, ObservedInventory, TorrentFile, infohash
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.history import integer
 
@@ -36,10 +36,10 @@ class SubmissionPlan:
     evaluation_job_id: int
     event_id: int
     marker: str = field(repr=False)
-    manifest: Manifest = field(repr=False)
+    manifest: Manifest | ObservedInventory = field(repr=False)
     def __post_init__(self):
         for name in ('preparation_job_id','plan_id','evaluation_job_id','event_id'):integer(getattr(self,name),positive=True)
-        if type(self.marker) is not str or not re.fullmatch('[a-f0-9]{32}',self.marker) or type(self.manifest) is not Manifest:
+        if type(self.marker) is not str or not re.fullmatch('[a-f0-9]{32}',self.marker) or type(self.manifest) not in (Manifest, ObservedInventory):
             raise ClientInvalid()
 
 
@@ -98,12 +98,16 @@ def manifest_from_json(info_hash,info_sha256,encoded):
         return result
     try:
         value=json.loads(encoded,object_pairs_hook=pairs)
-        if type(value) is not dict or set(value)!={'files','selected_index'} or type(value['files']) is not list:raise ClientInvalid()
+        observed=info_sha256 is None
+        keys={'files','selected_index','evidence','info_hash'} if observed else {'files','selected_index'}
+        if type(value) is not dict or set(value)!=keys or type(value['files']) is not list:raise ClientInvalid()
+        if observed and (value['evidence']!='qbittorrent_stopped_inventory' or value['info_hash']!=info_hash):raise ClientInvalid()
         files=[]
         for row in value['files']:
             if type(row) is not dict or set(row)!={'index','path','size'}:raise ClientInvalid()
             files.append(TorrentFile(row['index'],row['path'],row['size']))
-        result=Manifest(info_hash,info_sha256,tuple(files),value['selected_index'])
+        result=(ObservedInventory(info_hash,tuple(files),value['selected_index']) if observed
+                else Manifest(info_hash,info_sha256,tuple(files),value['selected_index']))
         if result.json()!=encoded:raise ClientInvalid()
         return result
     except (ValueError,TypeError,KeyError,RecursionError):raise ClientInvalid() from None

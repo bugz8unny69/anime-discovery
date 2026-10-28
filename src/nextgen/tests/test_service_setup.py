@@ -77,7 +77,7 @@ class ServiceSetupTests(unittest.TestCase):
         run=AsyncMock()
         with patch('src.nextgen.__main__.check_local') as check,patch('src.nextgen.providers.configuration.run_identity_worker',run):
             self.assertEqual(main(['worker','--config-dir',str(self.root)]),0)
-        check.assert_called_once_with(str(self.root),worker=True);run.assert_awaited_once_with(str(self.root))
+        check.assert_called_once_with(str(self.root),worker=True);run.assert_awaited_once_with(str(self.root),sonarr_backfill=False,sonarr_select=False,sonarr_acquire=False)
 
     def test_check_command_does_not_start_worker(self):
         with patch('src.nextgen.__main__.check_local',return_value={'local_ready':True}) as check,redirect_stdout(io.StringIO()):

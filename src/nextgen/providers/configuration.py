@@ -24,6 +24,7 @@ from src.nextgen.jobs.verify_media_job import KIND as MEDIA_KIND, registration a
 from src.nextgen.jobs.stage_trial_media_job import KIND as STAGE_KIND, registration as stage_registration
 from src.nextgen.jobs.management import registrations as management_registrations
 from src.nextgen.acquisition.metainfo_source import make_reader, make_batch_reader
+from src.nextgen.acquisition.legacy_magnet import make_bootstrap
 from src.nextgen.batch.provider_worker import make_batch_verifier
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
@@ -72,8 +73,10 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                                      read_batch_metainfo,client_pool=pool)
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool,
                            batch_verifier=verify_batch)
-    read_metainfo=make_reader() if read_metainfo is None else read_metainfo
-    preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND),
+    read_metainfo=(make_reader(sonarr_secrets=secrets if sonarr_acquire else None)
+                   if read_metainfo is None else read_metainfo)
+    preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND,
+                    legacy_bootstrap=make_bootstrap(secrets) if sonarr_acquire else None),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
     # Batch jobs share trusted hash-only metadata and the same ownership safeguards.

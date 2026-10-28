@@ -6,7 +6,7 @@ import uuid
 
 from src.nextgen.acquisition.settings import SizeLimits, SizeEvidenceMissing
 from src.nextgen.acquisition.contracts import AcquisitionInput, AcquisitionProposal
-from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing, infohash
+from src.nextgen.acquisition.metadata import ObservedInventory, AcquisitionConflict, MetadataInvalid, SourceMissing, infohash
 from src.nextgen.episode_reservations import ReservationConflict
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.job_contracts import parse_payload
@@ -91,6 +91,21 @@ def persist_acquisition(db,claim,value):
     if claim.event_id!=source.event_id or _source(db,source.evaluation_job_id,claim.event_id)!=source:
         raise AcquisitionConflict()
     validate_declaration(source,manifest)
+    admission=None
+    if type(manifest) is ObservedInventory:
+        from src.nextgen.storage.sonarr_magnet_intake import _prior, _verified_candidate
+        _verified_candidate(db,source)
+        admission=_prior(db,source.event_id)
+        inventory=db.execute('SELECT inventory_json FROM sonarr_magnet_intents WHERE event_id=?',
+                             (source.event_id,)).fetchone()
+        if (admission is None or admission.job_id!=claim.job_id
+                or admission.info_hash!=source.info_hash or admission.state!='OWNED_STOPPED'
+                or inventory!=(manifest.json(),)):
+            raise AcquisitionConflict()
+    elif db.execute('SELECT 1 FROM sonarr_magnet_intents WHERE event_id=?',
+                    (source.event_id,)).fetchone():
+        # Existing admission must be reconciled, never superseded by a new send.
+        raise AcquisitionConflict()
     encoded=manifest.json()
     rows=db.execute("SELECT job_id,reservation_id,info_hash,info_sha256,manifest_json,configuration_revision "
                     "FROM acquisition_plans WHERE reservation_id=? OR (info_hash=? AND state='PREPARED')",
@@ -103,6 +118,23 @@ def persist_acquisition(db,claim,value):
     if not rows:
         db.execute("INSERT INTO acquisition_plans(job_id,reservation_id,info_hash,info_sha256,manifest_json,"
             "submission_marker,configuration_revision,prepared_at_ms,selected_size_bytes) VALUES(?,?,?,?,?,?,?,?,?)",
-            (*expected[:5],uuid.uuid4().hex,expected[5],now,size))
+            (*expected[:5],admission.marker if admission else uuid.uuid4().hex,expected[5],now,size))
+    if admission is not None:
+        from src.nextgen.acquisition.submission import SubmissionPlan
+        from src.nextgen.storage.submissions import _fingerprint
+        plan_id=db.execute('SELECT plan_id FROM acquisition_plans WHERE job_id=?',
+                           (claim.job_id,)).fetchone()[0]
+        plan=SubmissionPlan(claim.job_id,plan_id,source.evaluation_job_id,
+                            source.event_id,admission.marker,manifest)
+        fingerprint=_fingerprint(plan,admission.options,admission.api_major)
+        prior=db.execute('SELECT fingerprint,state FROM torrent_submissions WHERE plan_id=?',
+                         (plan_id,)).fetchone()
+        if prior is not None and prior!=(fingerprint,'OWNED_STOPPED'):raise AcquisitionConflict()
+        if prior is None:
+            db.execute("INSERT INTO torrent_submissions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (plan_id,claim.job_id,claim.attempt,admission.options.base_url,
+                 admission.options.download_root,admission.options.category,
+                 admission.options.timeout_seconds,admission.api_major,fingerprint,
+                 value.configuration_revision,'OWNED_STOPPED','TORRENT_STOPPED_CONFIRMED',now,now))
     return append_job_history(db,job_id=claim.job_id,event_code='ACQUISITION_PREPARED',reason_code='ACQUISITION_PLAN_READY',
                               component='worker',occurred_at_ms=now,details={'attempt':claim.attempt})

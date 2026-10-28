@@ -31,7 +31,7 @@ class QBTransportTests(unittest.TestCase):
                       DownloadCredentials('private-user','private-pass'),transport=transport)
 
     def login_responses(self,version=b'v5.0.0'):
-        return [Response(b'Ok.',cookie=True),Response(version),Response(b'2.11.0')]
+        return [Response(b'Ok.',cookie=True),Response(version),Response(b'2.8.19' if version.startswith(b'v4.') else b'2.11.0')]
 
     def test_login_and_version_specific_stopped_upload_have_no_start_or_retry(self):
         raw,digest=metadata()
