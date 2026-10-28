@@ -151,7 +151,7 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
                 tvdb_episode INTEGER,info_hash TEXT);
             CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
-            CREATE TABLE job_operations(operation_id INTEGER,state TEXT);
+            CREATE TABLE job_operations(operation_id INTEGER,state TEXT,cleanup_state TEXT,reason_code TEXT);
             CREATE TABLE management_actions(operation_id INTEGER,action TEXT,
                 target_job_id INTEGER,job_id INTEGER,created_at_ms INTEGER);
             INSERT INTO incoming_events VALUES(25,'sonarr-discovery',
