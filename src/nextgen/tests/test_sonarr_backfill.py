@@ -304,7 +304,7 @@ class RegisterSeriesTests(unittest.TestCase):
         method, path, body = sent[0]
         self.assertEqual((method, path), ('POST', 'series'))
         self.assertIs(body['monitored'], False)
-        self.assertEqual(body['addOptions'], {'searchForMissingEpisodes': False,
+        self.assertEqual(body['addOptions'], {'monitor': 'all', 'searchForMissingEpisodes': False,
                                               'searchForCutoffUnmetEpisodes': False})
         self.assertEqual((body['tvdbId'], body['rootFolderPath'], body['qualityProfileId']),
                          (456, '/library', 1))

@@ -143,7 +143,7 @@ class Client:
         value={k:v for k,v in matches[0].items() if k not in ('id','path','qualityProfileId','addOptions')}
         value.update(rootFolderPath=self.options.library_root,qualityProfileId=self.options.quality_profile_id,
                      monitored=monitored,seasonFolder=True,seriesType='anime',
-                     addOptions={'searchForMissingEpisodes':False,'searchForCutoffUnmetEpisodes':False})
+                     addOptions={'monitor':'all','searchForMissingEpisodes':False,'searchForCutoffUnmetEpisodes':False})
         return value
 
     def import_payload(self,selection,series,episode):

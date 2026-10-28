@@ -107,10 +107,17 @@ Sonarr yet. Previously this parked `DISCOVER_SONARR_BACKFILL` in `ON_HOLD` with
 
 - **Trial/backfill:** when Sonarr has no series for the verified TVDB ID, the job
   adds it through the existing Keep client (`sonarr.Client.add_payload`) with
-  `monitored=false` and both `searchFor…` options off, then defers two minutes so
+  `monitored=false`, `addOptions.monitor: "all"` and both `searchFor…` options off,
+  then defers two minutes so
   Sonarr can finish its post-add refresh. An existing series is never modified.
   The discovery search client remains GET-only.
-- **Keep:** if the exact TVDB-matched series is unmonitored, Keep sends one PUT of
+- **Episode monitoring:** without `addOptions.monitor` Sonarr falls back to its
+  legacy path, where episode monitoring depends on the lookup's season flags. An
+  explicit `all` gives a defined state. It is inert during the trial because Sonarr
+  never grabs for an unmonitored series, and Keep's PUT resends seasons unchanged,
+  so Sonarr does not re-apply episode monitoring.
+- **Keep:** after the existing library-path check passes, if the exact TVDB-matched
+  series is unmonitored, Keep sends one PUT of
   the series record it just read with only `monitored` changed to `true`, so all
   other series settings are preserved. Already-monitored series are untouched.
   There is no ownership tracking: Keep is the decision to follow the anime.

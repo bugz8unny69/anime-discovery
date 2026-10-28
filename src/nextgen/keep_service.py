@@ -41,15 +41,17 @@ class Service:
                 series=client.series(selection.tvdb_series_id)
                 if series is None:return False
             if type(series.get('id')) is not int or series['id']<=0:raise KeepReview()
-            if series.get('monitored') is False:
-                # Keep follows this series: change only the flag, preserve the rest.
-                guard();client.request('series/'+str(series['id']),body={**series,'monitored':True},put=True)
-                series=client.series(selection.tvdb_series_id)
-                if series is None or series.get('monitored') is not True:return False
             path=PurePosixPath(series['path'])
             if not path.is_relative_to(options.library_root) or path==PurePosixPath(options.library_root):raise KeepReview()
             if str(path)!=series['path']:raise KeepReview()
             safe_path(str(path.relative_to(options.library_root)))
+            if series.get('monitored') is False:
+                # Keep follows this series: change only the flag, preserve the rest.
+                guard();client.request('series/'+str(series['id']),body={**series,'monitored':True},put=True)
+                current=client.series(selection.tvdb_series_id)
+                if current is None or (current.get('id'),current.get('path'))!=(series['id'],series['path']):raise KeepReview()
+                if current.get('monitored') is not True:return False
+                series=current
             data['series_id']=series['id'];data['series_path']=str(path)
             journal.change(claim,phase,'SERIES_READY',data);phase='SERIES_READY'
         if series is None or (series.get('id'),series.get('path'))!=(data['series_id'],data['series_path']):raise KeepReview()
