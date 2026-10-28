@@ -153,7 +153,8 @@ class Client:
                 parsed=SimpleCookie();parsed.load(value)
                 if 'SID' in parsed:found.append(parsed['SID'].value)
             except Exception:raise ClientInvalid() from None
-        if len(found)!=1 or not re.fullmatch('[A-Za-z0-9_-]{8,256}',found[0]):raise ClientAuthenticationFailed()
+        # qBittorrent generates Base64 SIDs, which can include +, / and =.
+        if len(found)!=1 or not re.fullmatch('[A-Za-z0-9_+/=-]{8,256}',found[0]):raise ClientAuthenticationFailed()
         self._sid=found[0]
         version,_=self._request('app/version',limit=128)
         api,_=self._request('app/webapiVersion',limit=128)

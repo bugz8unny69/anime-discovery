@@ -33,6 +33,33 @@ class QBTransportTests(unittest.TestCase):
     def login_responses(self,version=b'v5.0.0'):
         return [Response(b'Ok.',cookie=True),Response(version),Response(b'2.8.19' if version.startswith(b'v4.') else b'2.11.0')]
 
+    def test_base64_session_cookie_is_preserved_on_authenticated_requests(self):
+        for version in (b'v4.2.5',b'v5.0.0'):
+            for sid in ('abcd+efg/hijklmnopqrstuvwxy0123456', 'abcd+efg/hijklmnopqrstuvwxy01234=='):
+                with self.subTest(version=version,sid=sid):
+                    responses=self.login_responses(version)+[Response(b'[]')]
+                    responses[0].headers.replace_header('Set-Cookie',
+                        'SID='+sid+'; HttpOnly; path=/')
+                    client=self.client(responses)
+                    client.login()
+                    self.assertIsNone(client.inspect('a'*40))
+                    self.assertIsNone(self.requests[0][0].get_header('Cookie'))
+                    self.assertEqual(len(self.requests),4)
+                    for request,_ in self.requests[1:]:
+                        self.assertEqual(request.get_header('Cookie'),'SID='+sid)
+
+    def test_invalid_or_duplicate_session_cookies_are_rejected_before_api_calls(self):
+        for cookies in ([], ['SID=short'], ['SID='+'a'*257],
+                        ['SID="abcdefgh;injected=value"'], ['SID="abcdefgh value"'],
+                        ['SID="abcdefgh\\015\\012value"'],
+                        ['SID=abcdefgh', 'SID=ijklmnop']):
+            with self.subTest(cookies=cookies):
+                response=Response(b'Ok.')
+                for cookie in cookies:response.headers['Set-Cookie']=cookie
+                client=self.client([response])
+                with self.assertRaises((ClientAuthenticationFailed,ClientInvalid)):client.login()
+                self.assertEqual(len(self.requests),1)
+
     def test_login_and_version_specific_stopped_upload_have_no_start_or_retry(self):
         raw,digest=metadata()
         for version,parameter in ((b'v5.0.0',b'name="stopped"'),(b'v4.5.2',b'name="paused"')):
