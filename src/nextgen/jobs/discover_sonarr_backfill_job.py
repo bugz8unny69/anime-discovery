@@ -28,7 +28,8 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
         payload = context.data()
         try:
             if (set(payload) not in ({'plan_id','start'},
-                                    {'plan_id','start','fallback_episode'})
+                                    {'plan_id','start','fallback_episode'},
+                                    {'plan_id','start','exhausted_episode'})
                     or context.claim.event_id is None):
                 raise ValueError()
             plan_id = integer(payload['plan_id'], positive=True)
@@ -36,11 +37,17 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
             if (start-1) % PAGE_SIZE: raise ValueError()
             fallback_episode = (integer(payload['fallback_episode'],positive=True)
                                 if 'fallback_episode' in payload else None)
+            exhausted_episode = (integer(payload['exhausted_episode'],positive=True)
+                                 if 'exhausted_episode' in payload else None)
         except (ValueError, TypeError):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
         try:
             plan = await blocking(load_batch,
                 context.configuration.value('storage.database_path'),plan_id,start)
+            if exhausted_episode is not None:
+                if not acquire_candidates or exhausted_episode not in plan.numbers:
+                    raise BackfillConflict()
+                return Outcome('review','SONARR_CANDIDATES_EXHAUSTED')
             client = client_factory(context.configuration,secrets)
             if fallback_episode is not None:
                 if not acquire_candidates or fallback_episode not in plan.numbers:
