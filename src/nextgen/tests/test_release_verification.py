@@ -35,6 +35,14 @@ class ReleaseMappingTests(unittest.TestCase):
         for title in ("Show S02E02 | Show Season 3","Show S02E02 S03"):
             with self.subTest(title=title),self.assertRaises(ReleaseNotReady):declared_episode(title)
 
+    def test_type_words_inside_a_parenthesized_alternate_title_are_part_of_the_name(self):
+        self.assertEqual(declared_episode("[Judas] Kikansha no Mahou wa Tokubetsu desu (A Returner's Magic Should Be Special) "
+                                          "- S02E05 [1080p][HEVC x265 10bit][Multi-Subs] (Weekly)"),('tvdb',2,5))
+        for title in ("[Group] Test Anime (Batch) [1080p]","[Group] Test Anime (OVA) - 01","[Group] Test Anime OVA - 01",
+                      "[Group] Test Anime - Special 01","[Group] Test Anime - 01 [Batch]","[Group] Test Anime S01E03 NCOP"):
+            with self.subTest(title=title),self.assertRaises(ReleaseNotReady) as raised:declared_episode(title)
+            self.assertEqual(raised.exception.reason_code,'RELEASE_TYPE_UNSUPPORTED')
+
     def test_single_declarations_do_not_apply_legacy_trial_window_or_season_one_rule(self):
         self.assertEqual(declared_episode('[Group] Test - 12 [1080p]'),('anidb',None,12))
         self.assertEqual(declared_episode('Test S02E13'),('tvdb',2,13))
