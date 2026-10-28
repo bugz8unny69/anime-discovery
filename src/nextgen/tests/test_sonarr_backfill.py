@@ -238,7 +238,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         await worker.attempt()  # EVALUATE_TRIAL
         await worker.attempt()  # nothing listed yet -> wait, nothing recorded
         self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
-                         [('RETRY_WAIT','SONARR_DISCOVERY_UNAVAILABLE')])
+                         [('RETRY_WAIT','SONARR_EPISODES_NOT_LISTED')])
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(0,)])
         del fake.backfill  # Sonarr now lists the season
         self.make_due()
