@@ -136,7 +136,9 @@ def main(argv=None):
         # Do not print raw settings, URLs, transport responses or credentials.
         code=getattr(exc,'reason_code','SERVICE_SETUP_FAILED')
         if not isinstance(code,str) or not code.isupper() or not all(c.isalpha() or c=='_' for c in code):code='SERVICE_SETUP_FAILED'
+        from src.nextgen.diagnostics import exact_error
         print(code+': Local setup/service operation stopped. Review configuration, local files and maintenance state. A failed initialization may have created some files; existing files are never replaced.',file=sys.stderr)
+        print('Cause: '+exact_error(exc),file=sys.stderr)
         return 1
 
 

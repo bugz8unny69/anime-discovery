@@ -82,10 +82,9 @@ class DiagnosticLoggingTests(unittest.TestCase):
                       reason_code="JOB_HANDLER_FAILED", job_id=1)
         self.assertIsNone(capture.record.exc_info)
         content = capture.record.getMessage()
-        self.assertIn("Traceback (safe)", content)
-        self.assertIn("ValueError", content)
+        # The exact error is shown; named credentials are still redacted.
+        self.assertIn("error=ValueError: token=[REDACTED] at nextgen/tests/test_diagnostic_logging.py:", content)
         self.assertNotIn("arbitrary secret", content)
-        self.assertNotIn(__file__, content)
 
     def test_safe_exception_at_all_supported_levels_including_custom_names(self):
         malicious_type = type("private_secret_class_name", (Exception,), {})
@@ -97,10 +96,8 @@ class DiagnosticLoggingTests(unittest.TestCase):
                 exception(logger, "OPERATION_FAILED", failure, level=level,
                           reason_code="JOB_HANDLER_FAILED")
             content = stream.getvalue()
-            self.assertIn("exception=Exception", content)
-            self.assertNotIn("private_secret_class_name", content)
-            self.assertNotIn("unknown credential", content)
-            self.assertLess(len(content), 2048)
+            self.assertIn("error=private_secret_class_name: entire provider body", content)
+            self.assertLess(len(content), 4096)
 
     def test_formatter_discards_cached_exception_text_and_raw_stack(self):
         record = logging.LogRecord("safe", logging.ERROR, __file__, 1, "Static message.", (), None)

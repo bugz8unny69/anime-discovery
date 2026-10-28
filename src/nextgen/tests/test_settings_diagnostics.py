@@ -63,8 +63,7 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("event_code=OPERATION_FAILED", content)
         self.assertIn("job_id=42", content)
         self.assertIn("trace_id=AD-2", content)
-        self.assertIn("RuntimeError", content)
-        self.assertIn("Traceback", content)
+        self.assertIn("error=RuntimeError: authorization=[REDACTED] at nextgen/tests/test_settings_diagnostics.py:", content)
 
     def test_metadata_allowlist(self):
         logger, stream = self.logger()

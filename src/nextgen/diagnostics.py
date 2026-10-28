@@ -173,10 +173,32 @@ def event(logger, level, name: str, **fields):
     return _emit(logger, level, _message(name, fields))
 
 
-def exception(logger, name: str, exc: Exception, *, level=logging.ERROR, **fields):
-    """Catch-boundary diagnostic; never hand raw exc_info to any handler."""
+def exact_error(exc, *, database=None):
+    """The real failure, including errors re-raised "from None".
+
+    Each exception in the chain with its message and the file:line that raised
+    it; OSError messages name the file. Only credential patterns are redacted.
+    """
+    import traceback
+    parts, seen, current, is_sqlite = [], set(), exc, False
+    while current is not None and id(current) not in seen and len(parts) < 8:
+        seen.add(id(current))
+        is_sqlite = is_sqlite or isinstance(current, sqlite3.Error)
+        frames = traceback.extract_tb(current.__traceback__)
+        where = (" at " + frames[-1].filename.rsplit("/src/", 1)[-1] + ":" + str(frames[-1].lineno)
+                 + " in " + frames[-1].name) if frames else ""
+        parts.append(type(current).__name__ + ": " + str(current) + where)
+        current = current.__cause__ or current.__context__
+    text = " <- ".join(parts)
+    if is_sqlite and database:
+        text += " (database " + str(database) + ")"
+    return redact(text)[:2000]
+
+
+def exception(logger, name: str, exc: Exception, *, level=logging.ERROR, database=None, **fields):
+    """Catch-boundary diagnostic with the exact error."""
     fields["error_type"] = _ERROR_TYPES.get(type(exc), "Exception")
-    return _emit(logger, level, _message(name, fields) + " " + safe_traceback(exc))
+    return _emit(logger, level, _message(name, fields) + " error=" + exact_error(exc, database=database))
 
 
 def log_history(logger, record):
