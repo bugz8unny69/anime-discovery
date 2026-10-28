@@ -133,6 +133,18 @@ def schedule_after_cleanup(db,operation_id):
     The next choice is re-fetched by the existing Sonarr discovery worker.
     """
     if not db.in_transaction:raise CandidateConflict()
+    # A user-initiated Cancel stops the operation. Only a cleanup control
+    # created BY the failed Sonarr job may initiate fallback.
+    automated=db.execute(
+        "SELECT 1 FROM management_actions a "
+        "JOIN jobs control ON control.job_id=a.job_id "
+        "AND control.kind='CLEANUP_CANCELED_OPERATION' "
+        "JOIN job_operation_members source ON "
+        "source.job_id=control.created_by_job_id "
+        "AND source.operation_id=a.operation_id "
+        "WHERE a.operation_id=? AND a.action='CLEANUP' LIMIT 1",
+        (operation_id,)).fetchone()
+    if automated is None:return ()
     issue=db.execute(
         "SELECT h.reason_code FROM job_history h "
         "JOIN job_operation_members m ON m.job_id=h.job_id "
@@ -225,8 +237,8 @@ def auto_cleanup_failed_candidate(db,claim):
     now=__import__('time').time_ns()//1000000
     control,created=enqueue_job_with_receipt(
         db,component='worker',kind='CLEANUP_CANCELED_OPERATION',
-        event_id=claim.event_id,payload={'target_job_id':claim.job_id},
-        available_at_ms=now)
+        event_id=claim.event_id,created_by_job_id=claim.job_id,
+        payload={'target_job_id':claim.job_id},available_at_ms=now)
     db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',
                (canceled,'CLEANUP',claim.job_id,control,now))
     return (*records,created)
