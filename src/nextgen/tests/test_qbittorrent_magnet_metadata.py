@@ -337,6 +337,40 @@ class MagnetMetadataTests(unittest.TestCase):
                     intent,SimpleNamespace(is_set=lambda:False))
         client._request.assert_not_called()
 
+    def test_empty_owned_magnet_removal_never_deletes_files(self):
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client=self.client((2,5,1),4)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'REVIEW','f'*64)
+        owned=Observation(HASH,'pausedDL',options.download_root,
+                          'anime',('ad-'+'c'*32,),False,())
+        with patch.object(client,'inspect',side_effect=[owned,None]):
+            client._request.return_value=(b'Ok.',{})
+            self.assertTrue(client.remove_empty_legacy_magnet(intent))
+        client._request.assert_called_once_with(
+            'torrents/delete',form={'hashes':HASH,'deleteFiles':'false'},
+            limit=4096)
+
+    def test_empty_magnet_removal_rejects_foreign_owner(self):
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client=self.client((2,5,1),4)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        foreign=Observation(HASH,'pausedDL','/other','anime',
+                            ('ad-'+'c'*32,),False,())
+        with patch.object(client,'inspect',return_value=foreign):
+            with self.assertRaises(ClientInvalid):
+                client.remove_empty_legacy_magnet(intent)
+        client._request.assert_not_called()
+
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{}',{})
