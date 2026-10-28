@@ -11,7 +11,7 @@ from src.nextgen.job_contracts import (
 from src.nextgen.storage.sonarr_backfill import (
     PAGE_SIZE, BackfillConflict, BackfillCompletion,
     load_batch, persist_observations, FallbackCompletion, load_fallback,
-    persist_fallback,
+    persist_fallback, FallbackMissing, persist_fallback_missing,
 )
 from src.nextgen.worker import blocking
 
@@ -63,7 +63,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                     and row.mapped_episode_ids==(result.episode_id,)
                     and _magnet_hash(row.magnet_url)==target.next_hash),None)
                 if release is None:
-                    return Outcome('defer','SONARR_DISCOVERY_NO_RESULTS',delay_ms=60000)
+                    return Outcome(value=FallbackMissing(plan,fallback_episode,target))
                 return Outcome(value=FallbackCompletion(
                     plan,fallback_episode,target,
                     CandidateSelection(target.identity,result,release,client.policy)))
@@ -93,12 +93,14 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
         try:
             if type(value) is FallbackCompletion:
                 return persist_fallback(db,claim,value)
+            if type(value) is FallbackMissing:
+                return persist_fallback_missing(db,claim,value)
             return persist_observations(db,claim,value,dispatch=acquire_candidates)
         except BackfillConflict:
             raise CompletionRejected(Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')) from None
 
     def route(value):
-        if type(value) is FallbackCompletion: return ()
+        if type(value) in (FallbackCompletion,FallbackMissing): return ()
         if type(value) is not BackfillCompletion: raise ValueError('typed backfill result required')
         next_start=value.plan.start+len(value.plan.numbers)
         if next_start>value.plan.backfill_count: return ()
