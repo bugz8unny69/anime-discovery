@@ -94,6 +94,8 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE job_history(history_id INTEGER,job_id INTEGER,
                 event_code TEXT,reason_code TEXT);
             CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE management_actions(operation_id INTEGER,action TEXT,
+                target_job_id INTEGER,job_id INTEGER,created_at_ms INTEGER);
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
@@ -108,6 +110,8 @@ class FallbackWiringTests(unittest.TestCase):
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
+            INSERT INTO jobs VALUES(30,25,'CLEANUP_CANCELED_OPERATION',11,'{}');
+            INSERT INTO management_actions VALUES(7,'CLEANUP',11,30,1);
             INSERT INTO job_operation_members VALUES(11,7);
             INSERT INTO job_history VALUES(1,11,'NEEDS_REVIEW',
                 'ACQUISITION_METADATA_INVALID');
@@ -196,6 +200,8 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE job_history(history_id INTEGER,job_id INTEGER,
                 event_code TEXT,reason_code TEXT);
             CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE management_actions(operation_id INTEGER,action TEXT,
+                target_job_id INTEGER,job_id INTEGER,created_at_ms INTEGER);
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
@@ -208,6 +214,8 @@ class FallbackWiringTests(unittest.TestCase):
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
+            INSERT INTO jobs VALUES(30,25,'CLEANUP_CANCELED_OPERATION',11,'{}');
+            INSERT INTO management_actions VALUES(7,'CLEANUP',11,30,1);
             INSERT INTO job_operation_members VALUES(11,7);
             INSERT INTO job_history VALUES(1,11,'NEEDS_REVIEW',
                 'ACQUISITION_METADATA_INVALID');
