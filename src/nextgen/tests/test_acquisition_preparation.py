@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from src.nextgen.acquisition.contracts import AcquisitionProposal
-from src.nextgen.acquisition.metadata import MetadataInvalid, parse_metainfo
+from src.nextgen.acquisition.metadata import MetadataInvalid, ObservedInventory, parse_metainfo
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Policy, Registry, Successor
 from src.nextgen.jobs.evaluate_trial_job import registration as evaluate
@@ -41,14 +41,14 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
         try:return db.execute(sql,args).fetchall()
         finally:db.close()
 
-    def source(self,*,torrent=True,episode=10):
-        body={'release_name':f'Test Anime - {episode}'}
+    def source(self,*,torrent=True,episode=10,title='Test Anime',release_name=None):
+        body={'release_name':release_name or f'Test Anime - {episode}'}
         if torrent:body['torrent_infohash']=self.digest
         raw=json.dumps(body).encode()
         db=connect(self.database)
         try:
             event,release=accept_event_and_job(db,'test',raw,kind='VERIFY_RELEASE',payload={'anidb_id':123})
-            identity=save_identity(db,event,{'schema_version':2,'anime':{'anidb_id':123,'tvdb_series_id':456,'title':'Test Anime'}})
+            identity=save_identity(db,event,{'schema_version':2,'anime':{'anidb_id':123,'tvdb_series_id':456,'title':title}})
             with transaction(db):
                 db.execute("UPDATE jobs SET state='DONE',attempt_count=1 WHERE job_id=?",(release,))
                 db.execute('INSERT OR IGNORE INTO identified_episodes VALUES(?,123)',(900+episode,))
@@ -117,6 +117,25 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
             raw,digest=metadata(name=name)
             manifest=parse_metainfo(raw,digest)
             with self.assertRaises(MetadataInvalid):validate_declaration(replace(source,info_hash=digest),manifest)
+
+    async def test_verified_release_title_can_differ_from_canonical_title(self):
+        self.raw,self.digest=metadata(name=b"Overgeared - S01E10 - Family's Trust.mkv")
+        event,evaluation=self.source(title='Tempal: Item no Chikara',
+            release_name='[Anime Time] Overgeared - S01E10 [1080p][Dual-Audio]')
+        worker=self.worker()
+        for _ in range(3):await worker.attempt()
+        self.assertEqual(self.rows('SELECT state FROM acquisition_plans'),[('PREPARED',)])
+        source=load_acquisition_input(self.database,evaluation,event)
+        manifest=parse_metainfo(self.raw,self.digest)
+        # The magnet path uses the same declaration check with observed files.
+        validate_declaration(source,ObservedInventory(self.digest,manifest.files,0))
+        raw,digest=metadata(name=b'Tempal Item no Chikara - S01E10.mkv')
+        validate_declaration(replace(source,info_hash=digest),parse_metainfo(raw,digest))
+        for name in (b'Overgeared - S01E11.mkv',b'Overgeared - S02E10.mkv',
+                     b'Other Anime - S01E10.mkv',b'Overgeared Extra - S01E10.mkv'):
+            raw,digest=metadata(name=name)
+            with self.subTest(name=name),self.assertRaises(MetadataInvalid):
+                validate_declaration(replace(source,info_hash=digest),parse_metainfo(raw,digest))
 
     async def test_concurrent_duplicate_preparation_cannot_replace_intent_or_marker(self):
         worker=self.worker()

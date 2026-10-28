@@ -39,7 +39,10 @@ def _source(db,evaluation_job_id,event_id):
         document=parse_payload(row[13].decode('utf-8'))
         torrent_hash=infohash(document.get('torrent_infohash'))
     except (ValueError,TypeError,AttributeError,UnicodeError):raise SourceMissing() from None
-    return AcquisitionInput(row[0],row[1],evaluation_job_id,event_id,torrent_hash,row[11],row[10],row[7],row[8],row[12])
+    # episode_facts above binds this exact release body to its verified identity.
+    # Its release title may be an English/localized alias of the canonical name.
+    titles,_=release_title(document.get('release_name'))
+    return AcquisitionInput(row[0],row[1],evaluation_job_id,event_id,torrent_hash,row[11],row[10],row[7],row[8],row[12],tuple(titles))
 
 
 def load_acquisition_input(database,evaluation_job_id,event_id):
@@ -82,7 +85,8 @@ def validate_declaration(source,manifest):
         name=PurePosixPath(manifest.files[manifest.selected_index].path).stem
         origin,season,episode=declared_episode(name)
         aliases,_=release_title(name)
-        if norm(source.title) not in {norm(a) for a in aliases}:raise MetadataInvalid()
+        accepted={norm(t) for t in (source.title,*source.release_titles) if norm(t)}
+        if not accepted.intersection(norm(a) for a in aliases if norm(a)):raise MetadataInvalid()
         if (origin=='anidb' and episode!=source.anidb_episode_number) or (origin=='tvdb' and (season,episode)!=(source.tvdb_season,source.tvdb_episode)):
             raise MetadataInvalid()
     except (ValueError,TypeError,IndexError,ReleaseNotReady):raise MetadataInvalid() from None
