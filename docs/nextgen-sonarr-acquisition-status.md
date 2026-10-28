@@ -5,6 +5,24 @@ open in scope; the complete acquisition/failover assignment is not finished.
 
 ## Implemented in this checkpoint
 
+- A terminally failed Sonarr acquisition now submits the existing
+  `CLEANUP_CANCELED_OPERATION` worker automatically, in the failing job's
+  transaction. It does not require the operator to press Cancel. Other jobs
+  and unrelated episodes are unaffected. A **manual** Cancel stays final and
+  does **not** advance ranked candidates.
+- The legacy magnet wait is bounded to ten minutes using the original durable
+  intent timestamp, not a per-attempt reset. After timeout the same cleanup
+  worker reconciles qBittorrent. If the magnet is absent and its isolated
+  destination is empty, the attempt can retire; if the original owned
+  magnet has no files, its one-shot removal uses `deleteFiles=false`.
+  Ownership conflicts or unknown local files still require review.
+- Ranked fallback now runs automatically after cleanup and reservation release;
+  a final failure schedules an existing discovery job that reports
+  `SONARR_CANDIDATES_EXHAUSTED` for review. No new worker or table is added.
+- New offline regression tests cover automatic cleanup, manual cancellation,
+  exhausted ranks, magnet metadata timeout and metadata-less cleanup.
+  **None of these tests have been executed, by request.**
+
 - The version-specific qBittorrent adapter now reuses the stopped magnet
   admission path for 4.2.x, newer 4.x, and 5.x versions without metadata-only
   fetch. A running 4.2.x magnet can be recovered after upgrading to 5.x,
@@ -51,21 +69,15 @@ new persistent table or worker service.
 
 ## Remaining work
 
-1. Automate the cleanup request for a definitively failed candidate, if
-   desired. Current fallback is wired to *completed cancellation cleanup* of
-   a reviewed attempt; it does not silently cancel an operation or bypass
-   existing cleanup.
-2. Finish cancellation/cleanup for pre-manifest admissions that never obtained
-   a usable inventory. These remain blocked rather than risking foreign files.
-3. Consolidate the pre-manifest journal with the submission journal only if
-   it actually reduces complexity; recovery of existing v45 rows must remain.
-   The current implementation does not require another journal or table.
-5. Verify the pre-selection metadata window on a live daemon. qBittorrent 4.2.5 requires a
-   resume to obtain magnet metadata; a bounded client-side poll/finally-pause
-   does not guarantee zero unwanted payload, particularly on process death or
-   a network outage. Do not describe it as a metadata-only server operation.
-6. Run actual qBittorrent 4.2.5 and newer-daemon integration scenarios, then
-   GitHub CI once the whole implementation is complete.
+1. **Verification deferred by operator request.** Run the written automated
+   tests and one full Sonarr → qBittorrent 4.2.5 → stage integration scenario
+   when permitted. Repeat with newer qBittorrent API versions, then CI.
+2. **Ambiguous ownership still requires review.** An unpromoted torrent whose
+   files are unknown, whose marker/path differs, or whose removal is uncertain
+   is not deleted or silently retried. This is an intentional stop, not an
+   automatic candidate fallback.
+3. No journal consolidation or other architectural work is required for the
+   implemented path. Published migrations 1–45 are unchanged.
 
 ## Verification scope
 
