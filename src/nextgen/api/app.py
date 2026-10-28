@@ -581,7 +581,13 @@ class Application:
                 if 'before_id' in query:raise ApiError(400,'API_REQUEST_INVALID')
                 job=int(path.split('/')[-2])
                 if job>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
-                if db.execute('SELECT 1 FROM jobs WHERE job_id=?',(job,)).fetchone() is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                kind=db.execute('SELECT kind FROM jobs WHERE job_id=?',(job,)).fetchone()
+                if kind is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                # Name the job that did the work: its kind, label and src/nextgen/jobs module.
+                module=kind[0].lower()+'_job'
+                from importlib.util import find_spec
+                about={'job_id':job,'kind':kind[0],'label':CATALOG.handler(kind[0]),
+                       'module':module if find_spec('src.nextgen.jobs.'+module) else None}
                 rows=db.execute('SELECT history_id,occurred_at_ms,event_code,reason_code,component,details_json,handler_code,handler_label,invocation_id '
                     'FROM job_history WHERE job_id=? AND history_id>? ORDER BY history_id LIMIT ?',(job,after,limit+1)).fetchall()
                 items=[]
@@ -609,7 +615,8 @@ class Application:
                                 'FROM jobs WHERE '+' AND '.join(criteria)+ordering+' LIMIT ?',(*values,limit+1)).fetchall()
                 items=[self._job(queue,db,r) for r in rows[:limit]]
                 if newest:return {'items':items,'next_before_id':rows[limit-1][0] if len(rows)>limit else None}
-        return {'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
+        page={'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
+        return {**page,'job':about} if history else page
 
     def _intake(self,configuration,query):
         if set(query)-{'before_id','limit'}:raise ApiError(400,'API_REQUEST_INVALID')

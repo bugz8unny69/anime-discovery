@@ -200,8 +200,6 @@ function renderJobs() {
         if (shoko.metadata) details.appendChild(node('small', `${shoko.metadata.title} · ${shoko.metadata.episode_title}`, 'muted'));
         if (shoko.reason) details.appendChild(node('small', shoko.reason.message, 'muted'));
       }
-      const controlHistory = node('button', 'Action job history', 'secondary');
-      controlHistory.addEventListener('click', () => openHistory(activeAction.job_id)); details.appendChild(controlHistory);
     }
     const actions = td();
     if (job.actions?.keep && 'execution_available' in job.actions.keep) {
@@ -335,11 +333,13 @@ async function loadHistory() {
   try {
     const data = await request(`${API}/jobs/${job}/history?after_id=${state.historyCursor}&limit=50`);
     if (version !== state.historyVersion || !state.csrf) return;
+    // Every line names the job that did the work (its *_job.py module).
+    const worker = data.job?.module || data.job?.kind || `Job #${job}`;
+    if (data.job) $('history-title').textContent = `Job #${job} · ${data.job.label?.message || data.job.kind} · ${worker}`;
     for (const entry of data.items) {
       const article = node('article', null, 'history-entry');
       article.appendChild(node('small', date(entry.occurred_at_ms), 'muted'));
-      article.appendChild(node('p', entry.event.message));
-      if (entry.handler) article.appendChild(node('small', entry.handler.message, 'muted'));
+      article.appendChild(node('p', `${worker}: ${entry.event.message}`));
       if (entry.reason) { article.appendChild(node('p', entry.reason.message)); article.appendChild(node('small', entry.reason.action, 'muted')); }
       $('history-rows').appendChild(article);
     }

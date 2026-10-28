@@ -153,6 +153,8 @@ class ApiV1Tests(unittest.IsolatedAsyncioTestCase):
         status,result,_=await self.request('GET',f"/api/v1/jobs/{job['job_id']}/history",token=ADMIN)
         self.assertEqual(status,200)
         self.assertEqual(result['data']['items'][0]['event']['message'],'Job created.')
+        self.assertEqual(result['data']['job']['kind'],job['kind'])
+        self.assertEqual(result['data']['job']['module'],job['kind'].lower()+'_job')
         self.assertNotIn(WEB,json.dumps(result))
 
     async def test_malformed_json_duplicate_headers_and_oversized_input_never_commit(self):
