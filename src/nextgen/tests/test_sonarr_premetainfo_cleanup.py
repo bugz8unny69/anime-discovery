@@ -35,7 +35,7 @@ class PreManifestCleanupTests(unittest.TestCase):
         """)
         self.db.execute(
             "INSERT INTO sonarr_magnet_intents VALUES("
-            "4,21,1,2,?,?,?,?,?,10,NULL,'UNCERTAIN',100,100)",
+            "4,21,1,2,?,?,?,?,?,?,10,NULL,'UNCERTAIN',100,100)",
             (HASH,MARKER,4,'http://localhost:8080',ROOT,'anime'))
         self.db.commit()
         @contextmanager
