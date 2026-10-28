@@ -137,6 +137,62 @@ class FallbackCompletion:
     selection: CandidateSelection
 
 
+@dataclass(frozen=True)
+class FallbackMissing:
+    """The ranked candidate is no longer offered in a fresh Sonarr search."""
+    plan: BackfillBatch
+    episode: int
+    target: FallbackTarget
+
+
+def persist_fallback_missing(db,claim,value):
+    """Skip one withdrawn release and schedule the same existing worker."""
+    from src.nextgen.storage.sonarr_candidates import (
+        activate_candidate,fail_candidate,next_candidate,CandidateConflict)
+    if (not db.in_transaction or claim.kind!='DISCOVER_SONARR_BACKFILL'
+            or claim.event_id is None or type(value) is not FallbackMissing):
+        raise BackfillConflict()
+    plan,episode,target=value.plan,value.episode,value.target
+    if (type(plan) is not BackfillBatch or type(target) is not FallbackTarget
+            or episode not in plan.numbers):
+        raise BackfillConflict()
+    frozen=_plan(db,plan.plan_id,plan.start)
+    if (frozen.anidb_id,frozen.tvdb_series_id,frozen.season,
+            frozen.numbers)!=(plan.anidb_id,plan.tvdb_series_id,
+                              plan.season,plan.numbers):
+        raise BackfillConflict()
+    row=db.execute(
+        "SELECT p.tvdb_series_id,p.tvdb_season,s.tvdb_episode_id,s.info_hash "
+        "FROM trial_plans p JOIN sonarr_episode_selections s USING(plan_id) "
+        "WHERE p.plan_id=? AND s.tvdb_episode=?",
+        (plan.plan_id,episode)).fetchone()
+    if row!=(target.identity.tvdb_series_id,target.identity.tvdb_season,
+             target.identity.tvdb_episode_id,target.failed_hash):
+        raise BackfillConflict()
+    prior=db.execute(
+        "SELECT state FROM sonarr_episode_candidates WHERE plan_id=? "
+        "AND tvdb_episode=? AND info_hash=?",
+        (plan.plan_id,episode,target.failed_hash)).fetchone()
+    pending=next_candidate(db,plan_id=plan.plan_id,episode=episode)
+    if (prior!=('FAILED',) or pending is None
+            or pending[1]!=target.next_hash):
+        raise BackfillConflict()
+    try:
+        activate_candidate(db,plan_id=plan.plan_id,episode=episode,
+                           info_hash=target.next_hash)
+        fail_candidate(db,plan_id=plan.plan_id,episode=episode,
+                       info_hash=target.next_hash,
+                       reason_code='SONARR_DISCOVERY_NO_RESULTS')
+    except CandidateConflict:raise BackfillConflict() from None
+    following=next_candidate(db,plan_id=plan.plan_id,episode=episode)
+    _,created=enqueue_job_with_receipt(
+        db,component='worker',kind='DISCOVER_SONARR_BACKFILL',
+        event_id=claim.event_id,created_by_job_id=claim.job_id,
+        payload={'plan_id':plan.plan_id,'start':plan.start,
+                 ('fallback_episode' if following else 'exhausted_episode'):episode})
+    return (created,)
+
+
 def load_fallback(database,plan_id,episode):
     """Read the next candidate without changing any selection or sending."""
     from src.nextgen.sonarr_episode import VerifiedEpisode
