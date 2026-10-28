@@ -135,6 +135,102 @@ class FallbackWiringTests(unittest.TestCase):
             "SELECT state FROM sonarr_episode_candidates ORDER BY rank").fetchall(),
             [('FAILED',),('READY',)])
 
+    def test_failed_sonarr_job_enqueues_existing_cleanup_automatically(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_candidates import auto_cleanup_failed_candidate
+        self.db.executescript("""
+            CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
+            CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
+                created_by_job_id INTEGER,payload_json TEXT);
+            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
+                tvdb_episode INTEGER,info_hash TEXT);
+            CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE job_operations(operation_id INTEGER,state TEXT);
+            CREATE TABLE management_actions(operation_id INTEGER,action TEXT,
+                target_job_id INTEGER,job_id INTEGER,created_at_ms INTEGER);
+            INSERT INTO incoming_events VALUES(25,'sonarr-discovery',
+                '{"torrent_infohash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}');
+            INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
+                NULL,'{"plan_id":1}');
+            INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
+            INSERT INTO jobs VALUES(12,25,'PREPARE_ACQUISITION',11,'{}');
+            INSERT INTO job_operation_members VALUES(11,7);
+            INSERT INTO job_operation_members VALUES(12,7);
+            INSERT INTO job_operations VALUES(7,'ACTIVE');
+            INSERT INTO trial_plans VALUES(1);
+        """)
+        self.db.execute(
+            "INSERT INTO sonarr_episode_selections VALUES(1,2,?)",(FIRST,))
+        self.db.commit()
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            activate_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
+        claim=SimpleNamespace(job_id=12,event_id=25,kind='PREPARE_ACQUISITION')
+        with patch('src.nextgen.storage.cancellation.CancellationStore.request_in_transaction',
+                   return_value=(7,())) as cancel, patch(
+                   'src.nextgen.storage.sqlite.enqueue_job_with_receipt',
+                   return_value=(20,'new-cleanup-job')) as enqueue:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                result=auto_cleanup_failed_candidate(self.db,claim)
+            self.assertEqual(result,('new-cleanup-job',))
+            cancel.assert_called_once()
+            enqueue.assert_called_once()
+            self.assertEqual(enqueue.call_args.kwargs['kind'],
+                             'CLEANUP_CANCELED_OPERATION')
+            self.assertEqual(self.db.execute(
+                'SELECT operation_id,action,target_job_id,job_id '
+                'FROM management_actions').fetchall(),
+                [(7,'CLEANUP',12,20)])
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.assertEqual(auto_cleanup_failed_candidate(self.db,claim),())
+            self.assertEqual(enqueue.call_count,1)
+
+    def test_exhausted_rank_schedules_visible_needs_review(self):
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_candidates import schedule_after_cleanup
+        self.db.executescript("""
+            CREATE TABLE job_history(history_id INTEGER,job_id INTEGER,
+                event_code TEXT,reason_code TEXT);
+            CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
+                created_by_job_id INTEGER,payload_json TEXT);
+            CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
+            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
+                tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
+            CREATE TABLE episode_reservations(reservation_id INTEGER,state TEXT);
+            CREATE TABLE acquisition_plans(reservation_id INTEGER,info_hash TEXT);
+            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
+                NULL,'{"plan_id":1}');
+            INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
+            INSERT INTO job_operation_members VALUES(11,7);
+            INSERT INTO job_history VALUES(1,11,'NEEDS_REVIEW',
+                'ACQUISITION_METADATA_INVALID');
+        """)
+        self.db.execute("INSERT INTO incoming_events VALUES(25,'sonarr-discovery',?)",
+                        ('{"torrent_infohash":"'+FIRST+'"}',))
+        self.db.execute(
+            'INSERT INTO sonarr_episode_selections VALUES(1,2,901,?)',
+            (FIRST,))
+        self.db.execute(
+            "UPDATE sonarr_episode_candidates SET state='FAILED' WHERE rank=2")
+        self.db.commit()
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            activate_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
+        with patch('src.nextgen.storage.sqlite.enqueue_job_with_receipt',
+                   return_value=(99,'receipt')) as enqueue:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.assertEqual(schedule_after_cleanup(self.db,7),('receipt',))
+            self.assertEqual(enqueue.call_args.kwargs['payload'],
+                             {'plan_id':1,'start':1,'exhausted_episode':2})
+
     def test_fallback_reselects_next_rank_and_uses_existing_dispatch(self):
         from types import SimpleNamespace
         from unittest.mock import patch
