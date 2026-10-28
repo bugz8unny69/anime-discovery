@@ -80,6 +80,48 @@ class StagingPublicationTests(unittest.TestCase):
         self.publisher.publish(self.plan)
         self.assertEqual(self.video().stat().st_ino,inode)
 
+    def test_publication_uses_standard_rename_without_linux_specific_syscall(self):
+        from unittest.mock import patch
+        with patch('ctypes.CDLL',side_effect=AssertionError('staging must use standard file operations')):
+            self.publisher.publish(self.plan)
+        self.assertEqual(self.video().read_bytes(),b'x'*100)
+        self.assertFalse(self.file.exists())
+
+    def test_failed_final_rename_recovers_recorded_partial_without_recopy(self):
+        from unittest.mock import patch
+        real_rename=os.rename
+        failed=False
+        def interrupted(source,target,**kwargs):
+            nonlocal failed
+            if str(target).endswith('.mkv') and not failed:
+                failed=True
+                raise OSError('interrupted final rename')
+            return real_rename(source,target,**kwargs)
+        # Force cross-filesystem MOVE, as on separate download/staging mounts.
+        from src.nextgen import staging
+        real_signature=staging.signature
+        source_inode=self.file.stat().st_ino
+        def other_device(info):
+            value=real_signature(info)
+            return (value[0]+1,*value[1:]) if value[1]==source_inode else value
+        self.plan['source']['file'][0]+=1
+        with patch('src.nextgen.staging.signature',side_effect=other_device):
+            with patch('src.nextgen.staging.os.rename',side_effect=interrupted):
+                with self.assertRaises(OSError):self.publisher.publish(self.plan)
+            partial=self.video().parent/self.plan['entries'][0]['temporary']
+            self.assertEqual(partial.read_bytes(),b'x'*100)
+            inode=partial.stat().st_ino
+            self.assertEqual(next(iter(self.journal.rows.values()))['phase'],'PUBLISH_UNCERTAIN')
+            original_copy=self.publisher._copy
+            def metadata_only(plan,entry,fd):
+                if entry['role']=='media':raise AssertionError('recorded video must not be recopied')
+                return original_copy(plan,entry,fd)
+            with patch.object(self.publisher,'_copy',side_effect=metadata_only):
+                self.publisher.publish(self.plan)
+        self.assertEqual(self.video().stat().st_ino,inode)
+        self.assertFalse(partial.exists())
+        self.assertFalse(self.file.exists())
+
     def test_unknown_existing_video_is_never_overwritten_even_with_matching_bytes(self):
         target=self.video();target.parent.mkdir(parents=True);target.write_bytes(b'x'*100)
         inode=target.stat().st_ino
