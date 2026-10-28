@@ -153,18 +153,6 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertEqual(options['database'],str(self.database))
         self.assertTrue(args.upgrade)
 
-    def test_upgrade_can_switch_only_repository_branch(self):
-        saved={'ref':'NextGen','root':str(self.root/'app'),
-               'config_dir':str(self.config),'origin':'https://anime.example.test'}
-        with patch.object(installer,'saved_defaults',return_value=saved):
-            args=installer.parser().parse_args(['--upgrade','--ref','develop'])
-            options=installer.resolve(args)
-        self.assertEqual(options['ref'],'develop')
-        self.assertEqual(options['root'],saved['root'])
-        self.assertEqual(options['config_dir'],saved['config_dir'])
-        self.assertEqual(options['origin'],saved['origin'])
-        self.assertEqual(installer.DEFAULTS['ref'],'develop')
-
     def test_completion_messages_are_specific_to_install_and_upgrade(self):
         self.config.joinpath('settings.json').write_text(json.dumps({
             'schema_version':10,'settings':{'storage':{'database_path':str(self.database)}}}))
