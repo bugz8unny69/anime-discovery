@@ -134,6 +134,18 @@ class MagnetJournal:
                 raise AcquisitionConflict()
             return prior
 
+    def metadata_expired(self,claim,intent,*,timeout_ms=600000):
+        """Ten-minute acquisition limit; no repeat magnet send is permitted."""
+        if type(timeout_ms) is not int or timeout_ms<60000:raise AcquisitionConflict()
+        with self.queue.connection() as db,transaction(db):
+            now=self.queue.now()
+            self.queue._owns(db,claim,now)
+            if _prior(db,intent.event_id)!=intent:raise AcquisitionConflict()
+            row=db.execute('SELECT created_at_ms FROM sonarr_magnet_intents '
+                           'WHERE event_id=?',(intent.event_id,)).fetchone()
+            if row is None:raise AcquisitionConflict()
+            return now-row[0]>=timeout_ms
+
     def authorize(self,claim,source,options,api_major,present):
         """Commit irreversible uncertainty before issuing a send permit.
 
