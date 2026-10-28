@@ -52,10 +52,12 @@ this read-only observation job; actual acquisition remains a separate step.
 
 ## Frozen window
 
-On the first successfully committed `EVALUATE_TRIAL`, the worker retains
-the original plan anchor and counts, and atomically inserts one discovery
-job per trial plan only when `backfill_count > 0` and the opt-in handler
-is installed. Further incoming episodes of the same AniDB anime/TVDB season
+`EVALUATE_TRIAL` freezes the original plan anchor and counts. The normal worker
+starts discovery only after `SUBMIT_TORRENT` confirms the incoming acquisition
+as `OWNED_STOPPED`. Its successful completion atomically inserts one discovery
+job per trial plan when `backfill_count > 0` and backfill is enabled.
+Preparation or submission in review, and uncertain submissions, do not start
+a discovery chain. Further incoming episodes of the same AniDB anime/TVDB season
 cannot enqueue a second chain. Discovery is scoped to episodes
 `1..backfill_count` — **not** the entire continuation range.
 
@@ -67,7 +69,7 @@ worker's standard failure budget; missing Sonarr series is held for review.
 No new DB job payloads contain credentials, magnet URIs, or download URLs.
 
 For E10 with backfill 6 and following 2:
-- The first evaluated plan schedules E01–E04, then E05–E06.
+- After the incoming torrent submission is confirmed, discovery searches E01–E04, then E05–E06.
 - E10 and E11 remain covered **only as matching releases arrive through
   the existing intake flow**; the batch does not proactively search E11.
 - When Sonarr already has a file or NextGen has an active reservation,

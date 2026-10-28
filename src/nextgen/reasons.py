@@ -124,7 +124,7 @@ _ENTRIES = (
     Reason("TORRENT_SUBMISSION_UNCERTAIN", "A durable one-shot intent cannot yet be confirmed; never replay its add.",
            "The torrent submission is waiting for confirmation.", "Check the existing submission; do not add it again automatically.", "INFO", None),
     Reason("TORRENT_ALREADY_PRESENT", "Exact-hash inventory existed before this application's send authorization.",
-           "This torrent already exists in the download client.", "Review who owns it before taking any action.", "WARNING", False),
+           "This torrent already exists in qBittorrent. No new torrent was submitted.", "Check the existing torrent and its originating job before retrying.", "WARNING", False),
     Reason("TORRENT_PROVENANCE_CONFLICT", "Observed marker, destination, category, management, state or files contradict the saved intent.",
            "Torrent ownership or file details need review.", "Compare the existing torrent with the saved submission intent.", "WARNING", False),
     Reason("TORRENT_STOPPED_CONFIRMED", "Saved intent matches authoritative stopped torrent provenance and file inventory.",

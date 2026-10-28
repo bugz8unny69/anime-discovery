@@ -1,5 +1,4 @@
 """Immutable source inventory/intent publication under fenced worker completion."""
-from pathlib import PurePosixPath
 import sqlite3
 import time
 import uuid
@@ -10,9 +9,6 @@ from src.nextgen.acquisition.metadata import ObservedInventory, AcquisitionConfl
 from src.nextgen.episode_reservations import ReservationConflict
 from src.nextgen.history import append_job_history, integer
 from src.nextgen.job_contracts import parse_payload
-from src.nextgen.providers.parsing import release_title, norm
-from src.nextgen.providers.release_mapping import declared_episode
-from src.nextgen.release_contracts import ReleaseNotReady
 from src.nextgen.storage.episode_reservations import _facts as episode_facts
 from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
@@ -39,10 +35,7 @@ def _source(db,evaluation_job_id,event_id):
         document=parse_payload(row[13].decode('utf-8'))
         torrent_hash=infohash(document.get('torrent_infohash'))
     except (ValueError,TypeError,AttributeError,UnicodeError):raise SourceMissing() from None
-    # episode_facts above binds this exact release body to its verified identity.
-    # Its release title may be an English/localized alias of the canonical name.
-    titles,_=release_title(document.get('release_name'))
-    return AcquisitionInput(row[0],row[1],evaluation_job_id,event_id,torrent_hash,row[11],row[10],row[7],row[8],row[12],tuple(titles))
+    return AcquisitionInput(row[0],row[1],evaluation_job_id,event_id,torrent_hash,row[11],row[10],row[7],row[8],row[12])
 
 
 def load_acquisition_input(database,evaluation_job_id,event_id):
@@ -80,16 +73,13 @@ def source_magnet(database,source):
 
 
 def validate_declaration(source,manifest):
-    """Filename alignment only; never proves bytes, audio or acquisition rights."""
-    try:
-        name=PurePosixPath(manifest.files[manifest.selected_index].path).stem
-        origin,season,episode=declared_episode(name)
-        aliases,_=release_title(name)
-        accepted={norm(t) for t in (source.title,*source.release_titles) if norm(t)}
-        if not accepted.intersection(norm(a) for a in aliases if norm(a)):raise MetadataInvalid()
-        if (origin=='anidb' and episode!=source.anidb_episode_number) or (origin=='tvdb' and (season,episode)!=(source.tvdb_season,source.tvdb_episode)):
-            raise MetadataInvalid()
-    except (ValueError,TypeError,IndexError,ReleaseNotReady):raise MetadataInvalid() from None
+    """The torrent has a selected video file.
+
+    Title, season and episode were verified before reservation; the torrent is
+    bound to that verified release by its info hash. Filenames are not re-checked.
+    """
+    try:manifest.files[manifest.selected_index]
+    except (TypeError,IndexError,AttributeError):raise MetadataInvalid() from None
 
 
 def _admit_size(db,value,job_id,now):
