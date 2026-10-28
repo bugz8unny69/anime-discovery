@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 DEFAULTS={'root':'/opt/anime-discovery','state_dir':'/var/lib/anime-discovery',
     'config_dir':'/etc/anime-discovery','user':'anime-discovery',
-    'source':'git@github.com:bugz8unny69/anime-discovery.git','ref':'NextGen',
+    'source':'git@github.com:bugz8unny69/anime-discovery.git','ref':'develop',
     'destination':'/usr/local/bin/anime-discovery-install','unit_dir':'/etc/systemd/system','python':'python3'}
 SERVICES=('anime-discovery-api.service','anime-discovery-worker.service')
 
@@ -137,7 +137,10 @@ def resolve(args):
             raise ValueError('Upgrade requires existing installer metadata. Run --install first.')
         for k in (*DEFAULTS,'origin'):
             requested=getattr(args,k,None)
-            if requested is not None and requested!=options.get(k):
+            if k=='ref' and requested is not None:
+                # Branch migration is allowed; paths and credentials stay fixed.
+                options['ref']=requested
+            elif requested is not None and requested!=options.get(k):
                 raise ValueError('Upgrade cannot change installation settings: '+k)
         if any((args.database,args.settings_file,args.webhook_key_file,args.admin_password_file,args.install_system_deps)):
             raise ValueError('Upgrade cannot reconfigure installation or credentials.')
