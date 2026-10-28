@@ -248,6 +248,30 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         await worker.attempt()
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
 
+    async def test_configuration_review_is_labeled_and_retryable_from_dashboard(self):
+        from src.nextgen.acquisition.sonarr_search import SearchConfiguration
+        from src.nextgen.dashboard.presentation import HANDLERS
+        from src.nextgen.storage.review_retry import capability, request_review_retry
+        self.assertEqual(HANDLERS.require(DISCOVER_KIND).code, DISCOVER_KIND)
+        self.source(10)
+        fake = FakeDiscovery()
+        worker = self.worker(fake)
+        await worker.attempt()  # EVALUATE_TRIAL
+        def misconfigured(*args, **kwargs): raise SearchConfiguration()
+        fake.backfill = misconfigured
+        await worker.attempt()
+        job, attempt = self.rows("SELECT job_id,attempt_count FROM jobs WHERE kind=?",(DISCOVER_KIND,))[0]
+        self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE job_id=?",(job,)),
+                         [('NEEDS_REVIEW','SONARR_DISCOVERY_CONFIGURATION_INVALID')])
+        db = connect(self.database)
+        try: self.assertTrue(capability(db, job)['enabled'])
+        finally: db.close()
+        request_review_retry(self.database, job, expected_attempt=attempt,
+                             expected_reason='SONARR_DISCOVERY_CONFIGURATION_INVALID')
+        del fake.backfill  # settings fixed: the real fake search answers again
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
+
     async def test_other_holds_are_not_resumed(self):
         self.source(10)
         worker = self.worker(FakeDiscovery())
