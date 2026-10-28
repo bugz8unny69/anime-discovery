@@ -28,6 +28,13 @@ class ReleaseMappingTests(unittest.TestCase):
         title='[ToonsHub] PSYREN S01E02 1080p CR WEB-DL DUAL AAC2.0 H.264 (PSYЯEN, Dual-Audio, Multi-Subs)'
         self.assertEqual(declared_episode(title),('tvdb',1,2))
 
+    def test_matching_season_name_alongside_sxxeyy_is_clear(self):
+        for title in ("[AnoZu] Sasaki and Peeps S02E02 1080p CR WEB-DL Dual-Audio DDP 2.0 H.264 | Sasaki to Pii-chan Season 2",
+                      "[AnoZu] The Detective Is Already Dead S02E02 1080p CR WEB-DL Dual-Audio DDP 2.0 H.264 | Tantei wa Mou, Shindeiru. Season 2"):
+            with self.subTest(title=title):self.assertEqual(declared_episode(title),('tvdb',2,2))
+        for title in ("Show S02E02 | Show Season 3","Show S02E02 S03"):
+            with self.subTest(title=title),self.assertRaises(ReleaseNotReady):declared_episode(title)
+
     def test_single_declarations_do_not_apply_legacy_trial_window_or_season_one_rule(self):
         self.assertEqual(declared_episode('[Group] Test - 12 [1080p]'),('anidb',None,12))
         self.assertEqual(declared_episode('Test S02E13'),('tvdb',2,13))

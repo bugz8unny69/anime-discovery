@@ -139,14 +139,19 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             # S02+ is not itself a rejection. Prefer a separately named
             # sequel work over the generic season-one title for lookup.
             stage = "season_scope"
+            season_lookup = None
             if any(int(value) > 1 for value in seasons):
                 sequel = explicit_sequel_alias(title, aliases)
                 if sequel is None:
-                    incomplete("unverified_sequel")
-                aliases = [sequel]
-                if matching is not None:
-                    matching.queries(aliases, episode, int(seasons[0]))
-                check(stage, "passed", "sequel_alias_selected")
+                    # No sequel title: identify the base series, then take the
+                    # AniDB entry anime-lists records as its TVDB season N.
+                    season_lookup = int(seasons[0])
+                    check(stage, "passed", "base_series_season_lookup")
+                else:
+                    aliases = [sequel]
+                    if matching is not None:
+                        matching.queries(aliases, episode, int(seasons[0]))
+                    check(stage, "passed", "sequel_alias_selected")
             else:
                 check(stage, "passed" if seasons else "skipped")
 
@@ -175,7 +180,15 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             tid = client.mapping(aid)
             if matching is not None:
                 matching.tvdb(tid, ())
-            check(stage, "passed")
+            base_aid, base_anime = aid, anime
+            if season_lookup is not None:
+                aid = client.season_entry(tid, season_lookup, episode)
+                if matching is not None:
+                    matching.anidb(aid)
+                anime = client.anime(aid)
+                check(stage, "passed", "season_entry_selected")
+            else:
+                check(stage, "passed")
             if cancelled.is_set():
                 incomplete("canceled")
 
@@ -193,12 +206,13 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             check("tvdb_animation", "passed")
 
             stage = "provider_link"
-            if tvdb["anidb_ids"] and aid not in tvdb["anidb_ids"]:
+            # TVDB links the series to its first AniDB entry; anime-lists links the season.
+            if tvdb["anidb_ids"] and base_aid not in tvdb["anidb_ids"] and aid not in tvdb["anidb_ids"]:
                 check(stage, "failed", "tvdb_anidb_conflict")
                 raise IdentityConflict()
             check(stage, "passed")
             stage = "provider_titles"
-            if not {norm(x) for x in anime["titles"]} & {norm(x) for x in tvdb["titles"]}:
+            if not {norm(x) for x in base_anime["titles"]} & {norm(x) for x in tvdb["titles"]}:
                 check(stage, "failed", "provider_titles_disagree")
                 raise IdentityConflict()
             check(stage, "passed")

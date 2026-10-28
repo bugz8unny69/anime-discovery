@@ -368,6 +368,8 @@ const MATCHING_NOTES = Object.freeze({
   not_previously_recognized: 'No previously verified mapping matches this title and season.',
   recognized_season_reused: 'Reused an exact, previously verified season mapping.',
   unverified_sequel: 'This unfamiliar later season cannot safely inherit Season 1’s AniDB identity. Season-specific proof is required.',
+  base_series_season_lookup: 'No sequel title in the release; the base series will be identified first.',
+  season_entry_selected: 'anime-lists selected the AniDB entry for this TVDB season.',
   no_title_aliases: 'No usable anime title could be extracted.',
   no_unique_anidb_candidate: 'AniDB returned zero or multiple exact title candidates.',
   anidb_titles_disagree: 'The AniDB record does not corroborate the catalog titles.',

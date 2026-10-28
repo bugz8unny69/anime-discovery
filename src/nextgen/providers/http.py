@@ -197,10 +197,15 @@ class Clients:
                                validate=lambda value:parsing.xml(value,"animetitles"))
         return parsing.title_matches(payload,aliases)
 
+    def _mapping_payload(self):
+        return self._public("anime_lists","mapping",MAPPING_URL,limit=16777216,gap=60000,
+                            validate=lambda value:parsing.xml(value,"anime-list",limit=16777216))
+
     def mapping(self, aid):
-        payload = self._public("anime_lists","mapping",MAPPING_URL,limit=16777216,gap=60000,
-                               validate=lambda value:parsing.xml(value,"anime-list",limit=16777216))
-        return parsing.mapping_id(payload,aid)
+        return parsing.mapping_id(self._mapping_payload(),aid)
+
+    def season_entry(self, tid, season, episode=None):
+        return parsing.season_entry(self._mapping_payload(),tid,season,episode)
 
     def _anime_payload(self, aid):
         parsing.positive_text(str(aid))

@@ -28,7 +28,9 @@ def declared_episode(title):
     if len(explicit)+len(ordinary)!=1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
     if explicit:
         season,number = map(int,explicit[0].groups())
-        if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
+        # An added "Season N" (e.g. "| Sasaki to Pii-chan Season 2") must agree.
+        others={int(a or b) for a,b in re.findall(r"\b(?:Season\s*(\d+)|S(\d{1,2}))\b",rest,re.I)}
+        if others-{season}: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
         if number<1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
         return "tvdb",season,number
     if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
