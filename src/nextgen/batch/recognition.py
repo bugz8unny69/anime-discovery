@@ -31,10 +31,19 @@ def release_scope_hint(release_name):
     episodes = list(_SEASON_EP.finditer(release_name))
     seasons = {int(m.group('season') or m.group('word')) for m in _SEASON.finditer(release_name)}
     seasons.update(int(m.group('season')) for m in episodes)
-    if len(seasons) > 1 or len(episodes) > 1 or _RANGE.search(release_name) or _REPEAT.search(release_name):
+    if len(seasons) > 1 or len(episodes) > 1 or _REPEAT.search(release_name):
         return ReleaseScope('ambiguous')
     season = next(iter(seasons), None)
     special = bool(_SPECIAL.search(release_name))
+    episode_range = _RANGE.search(release_name)
+    if episode_range:
+        first, last = (int(value) for value in re.findall(r'\d+', episode_range.group()))
+        # A single-season episode range is a batch, not an invalid single episode.
+        # Torrent inventory and providers establish the actual per-file coverage.
+        if (season is None or season == 0 or special or first < 1 or last <= first
+                or (episodes and int(episodes[0].group('episode')) != first)):
+            return ReleaseScope('ambiguous', season)
+        return ReleaseScope('season_pack', season, first)
     if season == 0:
         return ReleaseScope('special', 0, int(episodes[0].group('episode')) if episodes else None)
     if episodes:
