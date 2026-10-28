@@ -16,9 +16,12 @@ open in scope; the complete acquisition/failover assignment is not finished.
   destination is empty, the attempt can retire; if the original owned
   magnet has no files, its one-shot removal uses `deleteFiles=false`.
   Ownership conflicts or unknown local files still require review.
-- Ranked fallback now runs automatically after cleanup and reservation release;
-  a final failure schedules an existing discovery job that reports
-  `SONARR_CANDIDATES_EXHAUSTED` for review. No new worker or table is added.
+- Ranked fallback now runs automatically after cleanup and reservation release.
+  If the next ranked release is missing from a successful Sonarr search,
+  the same worker records it as unavailable and advances to the next stored
+  rank; transport failures retry that rank. A final failure schedules an
+  existing discovery job that reports `SONARR_CANDIDATES_EXHAUSTED` for review.
+  No new worker or table is added.
 - New offline regression tests cover automatic cleanup, manual cancellation,
   exhausted ranks, magnet metadata timeout and metadata-less cleanup.
   **None of these tests have been executed, by request.**
