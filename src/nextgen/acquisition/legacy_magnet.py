@@ -3,7 +3,10 @@
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
 Observed inventories enter the existing transfer pipeline without another add.
 """
+import logging
+
 from src.nextgen.async_io import blocking
+from src.nextgen.diagnostics import exception
 from src.nextgen.acquisition.contracts import AcquisitionProposal
 from src.nextgen.acquisition.qbittorrent import Client as QBClient
 from src.nextgen.acquisition.settings import (download_options, size_limits, DownloadConfigurationError,
@@ -131,6 +134,11 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
         except (ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,
                 DownloadConfigurationError) as exc:
             # Name the failed check (as SUBMIT_TORRENT does), not a generic conflict.
+            # The safe traceback (line numbers only) shows which qBittorrent call failed.
+            exception(context.logger,'OPERATION_FAILED',exc,level=logging.WARNING,
+                      reason_code=exc.reason_code,component='worker',
+                      job_id=context.claim.job_id,event_id=context.claim.event_id,
+                      attempt=context.claim.attempt)
             return Outcome('review',exc.reason_code)
         except SelectionConflict:
             return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
