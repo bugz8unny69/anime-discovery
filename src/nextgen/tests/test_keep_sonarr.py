@@ -31,12 +31,13 @@ class Response(io.BytesIO):
 
 
 class FakeSonarr:
-    def __init__(self):self.selection=None;self.root=None;self.present=True;self.imported=False;self.posts=[];self.payload=None;self.lose_import=False;self.lose_add=False;self.failed=False;self.wrong_destination=False;self.imported_size=None
+    def __init__(self):self.selection=None;self.root=None;self.present=True;self.imported=False;self.posts=[];self.payload=None;self.lose_import=False;self.lose_add=False;self.failed=False;self.wrong_destination=False;self.imported_size=None;self.monitored=None;self.puts=[]
     def __call__(self,request,timeout):
         assert request.get_header('X-api-key')=='sonarr-private-key'
         path=urlsplit(request.full_url).path.removeprefix('/api/v3/')
         body=json.loads(request.data) if request.data is not None else None
         series={'id':31,'tvdbId':self.selection.tvdb_series_id,'path':str(self.root/'Series')}
+        if self.monitored is not None:series.update(monitored=self.monitored,qualityProfileId=7,tags=[3])
         episode={'id':41,'seriesId':31,'tvdbId':self.selection.tvdb_episode_id,'seasonNumber':self.selection.tvdb_season,
                  'episodeNumber':self.selection.tvdb_episode,'hasFile':self.imported,'episodeFileId':51 if self.imported else 0}
         if body is not None:self.posts.append(path)
@@ -53,6 +54,8 @@ class FakeSonarr:
                 return Response(series)
             return Response([series] if self.present else [])
         if path=='episode':return Response([episode])
+        if path=='series/31' and request.get_method()=='PUT':
+            self.puts.append(body);self.monitored=body['monitored'];return Response(body)
         quality={'quality':{'id':1},'revision':{'version':1,'real':0,'isRepack':False}}
         if path=='manualimport':
             if body is None:return Response([{'path':self.selection.media_path,'quality':quality,'languages':[{'id':1,'name':'English'}]}])
@@ -146,6 +149,21 @@ class KeepSonarrTests(unittest.IsolatedAsyncioTestCase):
         await self.make_due(job);await worker.attempt()
         self.assertEqual(fake.posts.count('series'),1);self.assertEqual(fake.posts.count('command'),1)
         self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+
+    async def test_keep_enables_monitoring_on_unmonitored_series_preserving_settings(self):
+        worker,fake,actions,target,job=await self.prepared(monitored=False)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+        self.assertEqual(len(fake.puts),1)
+        self.assertEqual(fake.puts[0],{'id':31,'tvdbId':fake.selection.tvdb_series_id,
+            'path':str(fake.root/'Series'),'monitored':True,'qualityProfileId':7,'tags':[3]})
+        self.assertNotIn('series',fake.posts)
+
+    async def test_keep_leaves_already_monitored_series_alone(self):
+        worker,fake,actions,target,job=await self.prepared(monitored=True)
+        await worker.attempt()
+        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+        self.assertEqual(fake.puts,[])
 
     async def test_failed_command_preserves_source_and_does_not_get_reimported_on_resume(self):
         worker,fake,actions,target,job=await self.prepared(failed=True)

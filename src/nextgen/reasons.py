@@ -18,7 +18,7 @@ class Reason:
 
 _ENTRIES = (
     Reason('SONARR_BACKFILL_PLAN_CONFLICT','Frozen backfill scope or stored search receipt did not match the worker plan.','Backfill discovery needs review.','Check the immutable episode window and persisted discovery receipts; no download occurred.','WARNING',False),
-    Reason('SONARR_DISCOVERY_EPISODE_NOT_FOUND','The verified TVDB series is not currently present in Sonarr.','Waiting for the anime to be registered in Sonarr.','Register the correct series in Sonarr before resuming discovery; no torrent was grabbed.','WARNING',False),
+    Reason('SONARR_DISCOVERY_EPISODE_NOT_FOUND','The verified TVDB series is not currently present in Sonarr.','Registering the anime in Sonarr (unmonitored).','Discovery adds the series to Sonarr unmonitored without searching, then continues automatically; no torrent was grabbed.','WARNING',True),
     Reason('SONARR_DISCOVERY_AUTH_FAILED','Sonarr rejected the configured API key.','Sonarr search authentication failed.','Check the existing Sonarr API key, then resume discovery.','WARNING',False),
     Reason('SONARR_DISCOVERY_UNSUPPORTED','The connected Sonarr server is not a supported v4 instance.','Sonarr discovery requires v4.','Check Sonarr version and the configured address.','WARNING',False),
     Reason('SONARR_DISCOVERY_CONFIGURATION_INVALID','The Sonarr address, key or search timeout is not configured.','Configure Sonarr before backfill discovery.','Set the existing Sonarr connection and API key; no download occurred.','WARNING',False),

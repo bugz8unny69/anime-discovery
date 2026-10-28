@@ -9,7 +9,8 @@ from src.nextgen.jobs.evaluate_trial_job import registration as trial_registrati
 from src.nextgen.jobs.discover_sonarr_backfill_job import (
     registration as discovery_registration, KIND as DISCOVER_KIND,
 )
-from src.nextgen.acquisition.sonarr_search import BackfillObservation, SearchUnavailable
+from src.nextgen.acquisition.sonarr_search import BackfillObservation, SearchUnavailable, SearchNotFound
+from src.nextgen.storage.sqlite import transaction
 from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
 from src.nextgen.storage.sqlite import connect, initialize
 from src.nextgen.tests.test_trial_policy import TrialEvaluationTests
@@ -20,10 +21,17 @@ class FakeDiscovery:
     def __init__(self):
         self.calls = []
         self.error = False
+        self.present = True
+        self.registered = []
+
+    def register(self, configuration, secrets, tvdb_series_id):
+        self.registered.append(tvdb_series_id)
+        self.present = True
 
     def backfill(self, tvdb_series_id, season, numbers, *, reserved=(), verified_ids=None):
         self.calls.append((tvdb_series_id, season, numbers, tuple(reserved), dict(verified_ids or {})))
         if self.error: raise SearchUnavailable()
+        if not self.present: raise SearchNotFound()
         return tuple(
             BackfillObservation(n, 200+n, 2000+n, 'IN_PROGRESS')
             if n in reserved else
@@ -42,7 +50,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         registrations = [trial]
         if enabled:
             registrations.append(discovery_registration(None,
-                client_factory=lambda config, secrets: fake))
+                client_factory=lambda config, secrets: fake, register=fake.register))
         worker = Worker(self.store, self.startup, Registry(registrations),
                         policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
@@ -196,6 +204,116 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             [('RETRY_WAIT','SONARR_DISCOVERY_UNAVAILABLE')])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[(1,)])
 
+
+    def make_due(self):
+        db = connect(self.database)
+        try:
+            with transaction(db): db.execute('UPDATE jobs SET available_at_ms=0 WHERE kind=?',(DISCOVER_KIND,))
+        finally: db.close()
+
+    async def test_missing_series_is_registered_then_discovery_continues(self):
+        self.source(10)
+        fake = FakeDiscovery()
+        fake.present = False
+        worker = self.worker(fake)
+        await worker.attempt()  # EVALUATE_TRIAL
+        await worker.attempt()  # series missing -> registered, deferred
+        self.assertEqual(fake.registered, [fake.calls[0][0]])
+        self.assertEqual(self.rows(
+            "SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
+            [('RETRY_WAIT','SONARR_DISCOVERY_EPISODE_NOT_FOUND')])
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(0,)])
+        self.make_due()
+        await worker.attempt()
+        self.assertEqual(len(fake.registered), 1)
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
+
+    async def test_backfill_held_by_an_older_release_resumes_automatically(self):
+        self.source(10)
+        fake = FakeDiscovery()
+        worker = self.worker(fake)
+        await worker.attempt()  # EVALUATE_TRIAL
+        db = connect(self.database)
+        try:
+            with transaction(db):
+                db.execute("UPDATE jobs SET state='ON_HOLD',attempt_count=1,"
+                    "last_reason_code='SONARR_DISCOVERY_EPISODE_NOT_FOUND' WHERE kind=?",(DISCOVER_KIND,))
+        finally: db.close()
+        await worker._recover()
+        self.assertEqual(self.rows(
+            "SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[('PENDING',None)])
+        self.assertEqual(self.rows("SELECT event_code,reason_code FROM job_history WHERE job_id="
+            "(SELECT job_id FROM jobs WHERE kind=?) ORDER BY history_id DESC LIMIT 1",(DISCOVER_KIND,)),
+            [('RETRY_SCHEDULED','SONARR_DISCOVERY_EPISODE_NOT_FOUND')])
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
+
+    async def test_other_holds_are_not_resumed(self):
+        self.source(10)
+        worker = self.worker(FakeDiscovery())
+        await worker.attempt()
+        db = connect(self.database)
+        try:
+            with transaction(db):
+                db.execute("UPDATE jobs SET state='ON_HOLD',attempt_count=1,"
+                    "last_reason_code='SONARR_DISCOVERY_REVIEW' WHERE kind=?",(DISCOVER_KIND,))
+        finally: db.close()
+        await worker._recover()
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[('ON_HOLD',)])
+
+
+class RegisterSeriesTests(unittest.TestCase):
+    """register_series reuses the Keep Sonarr client: unmonitored, no searches."""
+    def run_register(self, *, present=False, add_fails=False):
+        import io
+        from urllib.parse import urlsplit
+        from src.nextgen.jobs.discover_sonarr_backfill_job import register_series
+        from src.nextgen import sonarr
+        sent = []
+        state = {'present': present}
+        class Response(io.BytesIO):
+            def __init__(self, value): super().__init__(json.dumps(value).encode())
+            def getcode(self): return 200
+        def transport(request, timeout):
+            path = urlsplit(request.full_url).path.removeprefix('/api/v3/')
+            body = json.loads(request.data) if request.data is not None else None
+            if body is not None:
+                sent.append((request.get_method(), path, body))
+                state['present'] = True
+                if add_fails: raise sonarr.KeepReview()
+                return Response({'id': 31})
+            if path == 'series': return Response([{'id': 31, 'tvdbId': 456}] if state['present'] else [])
+            if path == 'qualityprofile': return Response([{'id': 1}])
+            if path == 'rootfolder': return Response([{'path': '/library'}])
+            if path == 'series/lookup': return Response([{'tvdbId': 456, 'title': 'Test Anime', 'id': 0}])
+            raise AssertionError(path)
+        values = {'sonarr.base_url': 'http://sonarr.invalid', 'storage.keep_root': '/keep',
+                  'sonarr.staging_root': '', 'sonarr.library_root': '/library',
+                  'sonarr.quality_profile_id': 1, 'sonarr.timeout_seconds': 30}
+        class Config:
+            def value(self, key): return values[key]
+        class Secrets:
+            def sonarr_api_key(self): return 'key'
+        register_series(Config(), Secrets(), 456,
+            client_factory=lambda options, key: sonarr.Client(options, key, transport=transport))
+        return sent
+
+    def test_missing_series_is_added_unmonitored_without_searching(self):
+        sent = self.run_register()
+        self.assertEqual(len(sent), 1)
+        method, path, body = sent[0]
+        self.assertEqual((method, path), ('POST', 'series'))
+        self.assertIs(body['monitored'], False)
+        self.assertEqual(body['addOptions'], {'searchForMissingEpisodes': False,
+                                              'searchForCutoffUnmetEpisodes': False})
+        self.assertEqual((body['tvdbId'], body['rootFolderPath'], body['qualityProfileId']),
+                         (456, '/library', 1))
+
+    def test_existing_series_is_never_modified(self):
+        self.assertEqual(self.run_register(present=True), [])
+
+    def test_concurrent_add_by_another_job_is_not_an_error(self):
+        self.assertEqual(len(self.run_register(add_fails=True)), 1)
 
 
 class BackfillSchemaTests(unittest.TestCase):

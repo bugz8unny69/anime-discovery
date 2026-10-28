@@ -420,7 +420,7 @@ class Client:
         sid = series[0]['id']
         episodes = self._get('episode', {'seriesId': sid})
         try: _, eid = resolve_episode(identity, series[0], episodes)
-        except SonarrEpisodeMismatch: raise SearchNotFound() from None
+        except SonarrEpisodeMismatch: raise SearchReview() from None
         rows = self._get('release', {'episodeId': eid})
         return SearchResult(sid, eid, self.policy.rank(
             _release(row, sid, eid, identity) for row in rows))

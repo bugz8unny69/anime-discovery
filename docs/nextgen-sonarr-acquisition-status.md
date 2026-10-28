@@ -98,3 +98,28 @@ and systemd notification tests. Preserve those tests; do not skip or weaken them
 PR #168 is now open for the NextGen CI workflow. The code and offline tests
 have not been verified by a completed CI run as of this checkpoint; any
 failures should be handled as specific regression fixes, not new scope.
+
+## Series registration for backfill (2026-10-28)
+
+Backfill needs a Sonarr series ID, but a newly discovered anime is usually not in
+Sonarr yet. Previously this parked `DISCOVER_SONARR_BACKFILL` in `ON_HOLD` with
+`SONARR_DISCOVERY_EPISODE_NOT_FOUND` until someone added the series by hand.
+
+- **Trial/backfill:** when Sonarr has no series for the verified TVDB ID, the job
+  adds it through the existing Keep client (`sonarr.Client.add_payload`) with
+  `monitored=false` and both `searchFor…` options off, then defers two minutes so
+  Sonarr can finish its post-add refresh. An existing series is never modified.
+  The discovery search client remains GET-only.
+- **Keep:** if the exact TVDB-matched series is unmonitored, Keep sends one PUT of
+  the series record it just read with only `monitored` changed to `true`, so all
+  other series settings are preserved. Already-monitored series are untouched.
+  There is no ownership tracking: Keep is the decision to follow the anime.
+- **Reject:** unchanged; an added series stays unmonitored and nothing is deleted.
+- **Recovery:** the worker's existing recovery loop returns backfill jobs held for
+  `SONARR_DISCOVERY_EPISODE_NOT_FOUND` to `PENDING` (recorded as
+  `RETRY_SCHEDULED`), unless their operation was canceled. Other holds are not touched.
+- A present series whose episode mapping does not match now stops as
+  `SONARR_DISCOVERY_REVIEW` instead of being reported as a missing series.
+
+No schema change. Offline tests cover each step; the live Sonarr → qBittorrent →
+staging flow still needs verification against the homelab services.

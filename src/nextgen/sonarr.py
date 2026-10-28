@@ -89,19 +89,21 @@ class Client:
         opener=urllib.request.build_opener(_NoRedirect(),urllib.request.ProxyHandler({}))
         self.transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
-    def request(self,path,*,query=None,body=None):
-        if path not in ('system/status','series','series/lookup','rootfolder','qualityprofile','episode','manualimport','command') and not re.fullmatch(r'(?:command|episodefile)/[1-9][0-9]*',path):raise KeepReview()
+    def request(self,path,*,query=None,body=None,put=False):
+        # PUT only updates one existing series record (Keep's monitoring change).
+        if put and (body is None or not re.fullmatch(r'series/[1-9][0-9]*',path)):raise KeepReview()
+        if not put and path not in ('system/status','series','series/lookup','rootfolder','qualityprofile','episode','manualimport','command') and not re.fullmatch(r'(?:command|episodefile)/[1-9][0-9]*',path):raise KeepReview()
         url=self.options.base_url+'/api/v3/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'X-Api-Key':self._key,'Accept':'application/json','Content-Type':'application/json'}
-        request=urllib.request.Request(url,headers=headers,method='GET' if body is None else 'POST',
+        request=urllib.request.Request(url,headers=headers,method='PUT' if put else 'GET' if body is None else 'POST',
             data=None if body is None else json.dumps(body,allow_nan=False).encode())
         try:
             with self.transport(request,self.options.timeout_seconds) as response:
                 code=response.getcode()
                 if code in (401,403):raise KeepConfiguration()
                 if code>=500 or code==429:raise KeepUnavailable()
-                if code not in (200,201):raise KeepReview()
+                if code not in (200,201,202):raise KeepReview()
                 raw=response.read(4194305)
                 if len(raw)>4194304:raise KeepReview()
                 try:
@@ -131,7 +133,7 @@ class Client:
         _,eid=selection.match_sonarr_episode(series,rows)
         return next(row for row in rows if row.get('id')==eid)
 
-    def add_payload(self,selection):
+    def add_payload(self,selection,*,monitored=True):
         if self.options.quality_profile_id<=0:raise KeepConfiguration()
         if not any(r.get('id')==self.options.quality_profile_id for r in self.request('qualityprofile')):raise KeepConfiguration()
         if not any(r.get('path')==self.options.library_root for r in self.request('rootfolder')):raise KeepConfiguration()
@@ -140,7 +142,7 @@ class Client:
         if len(matches)!=1:raise KeepReview()
         value={k:v for k,v in matches[0].items() if k not in ('id','path','qualityProfileId','addOptions')}
         value.update(rootFolderPath=self.options.library_root,qualityProfileId=self.options.quality_profile_id,
-                     monitored=True,seasonFolder=True,seriesType='anime',
+                     monitored=monitored,seasonFolder=True,seriesType='anime',
                      addOptions={'searchForMissingEpisodes':False,'searchForCutoffUnmetEpisodes':False})
         return value
 
