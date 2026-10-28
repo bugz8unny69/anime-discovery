@@ -280,6 +280,51 @@ class FallbackWiringTests(unittest.TestCase):
             self.assertEqual(enqueue.call_args.kwargs['payload'],
                              {'plan_id':1,'start':1,'exhausted_episode':2})
 
+    def test_withdrawn_release_skips_b_and_tries_c_without_download(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_backfill import (
+            BackfillBatch,FallbackTarget,FallbackMissing,
+            persist_fallback_missing)
+        from src.nextgen.sonarr_episode import VerifiedEpisode
+        third='c'*40
+        self.db.executescript("""
+            CREATE TABLE trial_plans(plan_id INTEGER,tvdb_series_id INTEGER,
+                tvdb_season INTEGER);
+            CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
+                tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
+        """)
+        self.db.execute("INSERT INTO trial_plans VALUES(1,456,1)")
+        self.db.execute(
+            "INSERT INTO sonarr_episode_selections VALUES(1,2,901,?)",(FIRST,))
+        self.db.execute(
+            "INSERT INTO sonarr_episode_candidates(plan_id,tvdb_episode,rank,info_hash) "
+            "VALUES(1,2,3,?)",(third,))
+        self.db.commit()
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            activate_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST)
+            fail_candidate(self.db,plan_id=1,episode=2,info_hash=FIRST,
+                           reason_code='ACQUISITION_METADATA_INVALID')
+        plan=BackfillBatch(1,123,456,1,4,1,(1,2,3,4),(),())
+        identity=VerifiedEpisode(456,901,1,2)
+        value=FallbackMissing(plan,2,FallbackTarget(identity,FIRST,SECOND))
+        claim=SimpleNamespace(kind='DISCOVER_SONARR_BACKFILL',
+                              event_id=9,job_id=30)
+        with patch('src.nextgen.storage.sonarr_backfill._plan',
+                   return_value=plan), patch(
+                   'src.nextgen.storage.sonarr_backfill.enqueue_job_with_receipt',
+                   return_value=(99,'receipt')) as enqueue:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.assertEqual(persist_fallback_missing(
+                    self.db,claim,value),('receipt',))
+        self.assertEqual(enqueue.call_args.kwargs['payload'],
+                         {'plan_id':1,'start':1,'fallback_episode':2})
+        self.assertEqual(self.db.execute(
+            "SELECT state FROM sonarr_episode_candidates ORDER BY rank").fetchall(),
+            [('FAILED',),('FAILED',),('READY',)])
+
     def test_fallback_reselects_next_rank_and_uses_existing_dispatch(self):
         from types import SimpleNamespace
         from unittest.mock import patch
