@@ -77,7 +77,10 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
                     return PENDING
             current=await blocking(owned.inspect,source.info_hash)
-            if current is None:return PENDING
+            if current is None:
+                if await blocking(journal.metadata_expired,context.claim,intent):
+                    return Outcome('review','TORRENT_METADATA_TIMEOUT')
+                return PENDING
             # Do not stop/restart any torrent without the exact journal tag.
             if (current.save_path.rstrip('/')!=intent.options.download_root
                     or current.category!=intent.options.category
@@ -105,6 +108,8 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 await blocking(journal.capture,context.claim,intent,source,inventory)
                 return Outcome(value=AcquisitionProposal(source,inventory,
                     configuration.desired_revision,size_limits(configuration),context.claim.job_id))
+            if await blocking(journal.metadata_expired,context.claim,intent):
+                return Outcome('review','TORRENT_METADATA_TIMEOUT')
             return PENDING
         except SearchUnavailable:
             return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
