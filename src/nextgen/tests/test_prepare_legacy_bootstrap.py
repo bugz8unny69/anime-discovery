@@ -137,6 +137,23 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('reason_code='+reason,logs.output[0])
                 self.assertNotIn('SID',logs.output[0])
 
+    async def test_metadata_failure_logs_its_location_without_resubmitting(self):
+        from src.nextgen.acquisition.metadata import MetadataInvalid
+        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe.inspect.side_effect=MetadataInvalid()
+        journal=Mock()
+        journal.existing.return_value=None
+        cb=make_bootstrap(self.secrets,client_factory=Mock(return_value=probe),
+                          journal_factory=lambda _:journal)
+        with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',return_value=None), \
+             patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET), \
+             self.assertLogs('anime-discovery.test.bootstrap','WARNING') as logs:
+            outcome=await cb(self.source,self._config())
+        self.assertEqual((outcome.kind,outcome.reason_code),('review',MetadataInvalid.reason_code))
+        self.assertIn('frame_lines=',logs.output[0])
+        self.assertIn('reason_code='+MetadataInvalid.reason_code,logs.output[0])
+        probe.add_legacy_magnet.assert_not_called()
+
     async def test_webhook_event_on_fetch_client_defers_to_metadata_reader(self):
         probe=Mock(major=5,metadata_strategy='fetch')
         journal=Mock()
