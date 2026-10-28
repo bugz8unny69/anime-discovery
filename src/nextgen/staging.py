@@ -1,7 +1,5 @@
-"""Pinned, no-overwrite viewing-copy publication. Linux only; no refresh or Keep."""
+"""Journaled viewing-copy publication with tracked partial files; no refresh or Keep."""
 from contextlib import contextmanager
-import ctypes
-import errno
 import fcntl
 import hashlib
 import json
@@ -134,17 +132,11 @@ def open_regular(folder,name,flags=os.O_RDONLY):
     return fd
 
 
-def rename_no_replace(folder,source,target,*,target_folder=None):
-    # renameat2 avoids hardlink publication (cleanup requires single-link files).
-    libc=ctypes.CDLL(None,use_errno=True)
-    rename=getattr(libc,'renameat2',None)
-    if rename is None:raise StagingConfiguration()
-    rename.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
-    rename.restype=ctypes.c_int
-    if rename(folder,os.fsencode(source),folder if target_folder is None else target_folder,os.fsencode(target),1)!=0:
-        code=ctypes.get_errno()
-        if code in (errno.EEXIST,errno.ENOSYS,errno.EINVAL,errno.EOPNOTSUPP):raise StagingReview()
-        raise OSError(code,'Staging publication failed')
+def rename_file(folder,source,target,*,target_folder=None):
+    # Cross-filesystem data is already copied into the tracked destination
+    # partial. Publishing it only needs a normal rename within that directory.
+    os.rename(source,target,src_dir_fd=folder,
+              dst_dir_fd=folder if target_folder is None else target_folder)
 
 
 class Publisher:
@@ -274,7 +266,7 @@ class Publisher:
                             if [os.fstat(source_root).st_dev,os.fstat(source_root).st_ino]!=plan['source']['root']:raise StagingReview()
                             with parent(source_root,plan['source']['path']) as (source_folder,name):
                                 if list(signature(os.stat(name,dir_fd=source_folder,follow_symlinks=False)))!=plan['source']['file']:raise StagingReview()
-                                rename_no_replace(source_folder,name,entry['temporary'],target_folder=folder)
+                                rename_file(source_folder,name,entry['temporary'],target_folder=folder)
                                 os.fsync(folder);os.fsync(source_folder)
                         fd=open_regular(folder,entry['temporary'])
                     moved=same_source
@@ -290,7 +282,7 @@ class Publisher:
                     # rename-of-parent gaps that a pinned fd alone cannot detect.
                     if root_identity(root)!=folder_sig:raise StagingReview()
                     if signature(os.stat(entry['temporary'],dir_fd=folder,follow_symlinks=False))!=before:raise StagingReview()
-                    rename_no_replace(folder,entry['temporary'],relative.name);os.fsync(folder)
+                    rename_file(folder,entry['temporary'],relative.name);os.fsync(folder)
                     after=signature(os.stat(relative.name,dir_fd=folder,follow_symlinks=False))
                     if after[:3]!=before[:3] or after[3]!=before[3]:raise StagingReview()
                     self.journal.confirm(self.claim,artifact['id'])

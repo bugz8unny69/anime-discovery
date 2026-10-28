@@ -84,13 +84,17 @@ class StageMediaJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='PREPARE_ACQUISITION'"),[(1,)])
 
     async def test_partial_staging_does_not_skip_waiters(self):
+        from unittest.mock import patch
         class FailMetadata(Publisher):
             def _copy(self,plan,entry,fd):
                 if entry['role']=='episode':raise OSError('metadata unavailable')
                 return super()._copy(plan,entry,fd)
         worker=self.worker(partial(FailMetadata,allow_root=True))
         await self.staged_ready(worker);await self.held_contender(worker);self.stage_due()
-        await worker.attempt()
+        with patch('src.nextgen.jobs.stage_trial_media_job.exception') as diagnostic:
+            await worker.attempt()
+        self.assertEqual(diagnostic.call_args.kwargs['reason_code'],'STAGING_UNAVAILABLE')
+        self.assertEqual(diagnostic.call_args.args[1],'OPERATION_FAILED')
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE state='ON_HOLD' AND last_reason_code='EPISODE_RESERVED'"),[(1,)])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE activity_code='SKIPPED_DUPLICATE'"),[(0,)])
 

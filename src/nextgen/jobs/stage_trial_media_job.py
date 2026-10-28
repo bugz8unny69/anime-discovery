@@ -1,4 +1,6 @@
 """Move verified viewing videos; Keep and library refresh remain separate."""
+import logging
+
 from src.nextgen.acquisition.media import MediaInvalid
 from src.nextgen.acquisition.metadata import AcquisitionConflict, MetadataInvalid, SourceMissing
 from src.nextgen.acquisition.settings import SizeEvidenceMissing, DownloadConfigurationError
@@ -6,6 +8,7 @@ from src.nextgen.acquisition.submission import ClientInvalid
 from src.nextgen.acquisition.transfers import TransferConflict
 from src.nextgen.async_io import blocking
 from src.nextgen.cancellation import CancellationError
+from src.nextgen.diagnostics import exception
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
@@ -32,6 +35,11 @@ def _persist(db,claim,value):
 
 def registration(*,publisher_factory=Publisher,journal_factory=Journal):
     async def execute(context):
+        def failure(exc,kind,reason):
+            exception(context.logger,'OPERATION_FAILED',exc,level=logging.WARNING,
+                      reason_code=reason,component='worker',job_id=context.claim.job_id,
+                      event_id=context.claim.event_id,attempt=context.claim.attempt)
+            return Outcome(kind,reason)
         payload=context.data()
         try:
             if set(payload)!={'verification_job_id'} or context.claim.event_id is None:raise ValueError()
@@ -47,7 +55,7 @@ def registration(*,publisher_factory=Publisher,journal_factory=Journal):
                 return {'verification_job_id':verification,'receipts':receipts,'refresh':bool(context.configuration.value('jellyfin.base_url'))}
         try:return Outcome(value=await blocking(run))
         except StagingBusy as exc:return Outcome('defer',exc.reason_code,delay_ms=1000)
-        except FileExistsError:return Outcome('review','STAGING_REVIEW')
-        except (StagingUnavailable,OSError):return Outcome('retry','STAGING_UNAVAILABLE')
-        except REVIEW as exc:return Outcome('review',exc.reason_code)
+        except FileExistsError as exc:return failure(exc,'review','STAGING_REVIEW')
+        except (StagingUnavailable,OSError) as exc:return failure(exc,'retry','STAGING_UNAVAILABLE')
+        except REVIEW as exc:return failure(exc,'review',exc.reason_code)
     return Registration(KIND,DEFINITION,execute,persist=_persist)
