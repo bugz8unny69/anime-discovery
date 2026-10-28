@@ -14,13 +14,30 @@ from src.nextgen.storage.sonarr_backfill import (
     persist_fallback, FallbackMissing, persist_fallback_missing,
 )
 from src.nextgen.worker import blocking
+from src.nextgen import sonarr
+
+REGISTERED_DELAY_MS = 120000  # Let Sonarr finish its post-add series refresh.
+
+
+def register_series(configuration, secrets, tvdb_series_id, *, client_factory=sonarr.Client):
+    """Add a missing series to Sonarr unmonitored, with no searches, via the Keep client."""
+    from types import SimpleNamespace
+    options = sonarr.Options.capture(configuration, SimpleNamespace(
+        staging_root=configuration.value('storage.keep_root')))
+    client = client_factory(options, secrets.sonarr_api_key())
+    if client.series(tvdb_series_id) is not None: return
+    selection = SimpleNamespace(tvdb_series_id=tvdb_series_id)
+    try: client.request('series', body=client.add_payload(selection, monitored=False))
+    except sonarr.KeepReview:
+        # Another job may have added it first; anything else needs review.
+        if client.series(tvdb_series_id) is None: raise
 
 KIND = 'DISCOVER_SONARR_BACKFILL'
 DEFINITION = HandlerDefinition(KIND, 'Discover missing backfill episodes in Sonarr')
 
 
 def registration(secrets, *, client_factory=Client.from_context, select_candidates=False,
-                 acquire_candidates=False):
+                 acquire_candidates=False, register=register_series):
     if (type(select_candidates) is not bool or type(acquire_candidates) is not bool
             or acquire_candidates and not select_candidates):
         raise ValueError('Sonarr acquisition requires opted-in source selection')
@@ -77,7 +94,15 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
         except SearchNotFound:
-            return Outcome('hold','SONARR_DISCOVERY_EPISODE_NOT_FOUND')
+            try:
+                await blocking(register, context.configuration, secrets, plan.tvdb_series_id)
+            except sonarr.KeepConfiguration:
+                return Outcome('review','SONARR_DISCOVERY_CONFIGURATION_INVALID')
+            except sonarr.KeepReview:
+                return Outcome('review','SONARR_DISCOVERY_REVIEW')
+            except sonarr.KeepUnavailable:
+                return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
+            return Outcome('defer','SONARR_DISCOVERY_EPISODE_NOT_FOUND', delay_ms=REGISTERED_DELAY_MS)
         except SearchUnauthorized:
             return Outcome('review','SONARR_DISCOVERY_AUTH_FAILED')
         except SearchUnsupported:

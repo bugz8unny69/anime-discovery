@@ -139,8 +139,10 @@ class SonarrDiscoveryTests(unittest.TestCase):
         ]):
             c, fake = client()
             fake.episodes = episodes
-            with self.subTest(episodes=episodes), self.assertRaises(SearchNotFound):
+            # A present series with a bad episode mapping is review, never "series missing".
+            with self.subTest(episodes=episodes), self.assertRaises(SearchReview) as raised:
                 c.search(ID)
+            self.assertNotIsInstance(raised.exception, SearchNotFound)
             self.assertEqual(len(fake.visited), 3)
 
     def test_wrong_or_ambiguous_series_rejected_without_search(self):
