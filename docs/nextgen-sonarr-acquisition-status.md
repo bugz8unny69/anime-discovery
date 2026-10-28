@@ -1,7 +1,8 @@
 # Sonarr magnet acquisition: implementation checkpoint
 
-This feature branch is **not ready for deployment or merge**. Issue #167 remains
-open in scope; the complete acquisition/failover assignment is not finished.
+This feature branch is **not ready for deployment or merge** until CI and the
+real Sonarr-to-qBittorrent staging flow are verified. Issue #167 tracks the
+feature, and PR #168 targets `NextGen` for review and automated CI.
 
 ## Implemented in this checkpoint
 
@@ -94,5 +95,6 @@ This source inspection is not a live daemon test.
 
 The local runtime denies AF_UNIX socket creation, affecting the admin socket
 and systemd notification tests. Preserve those tests; do not skip or weaken them.
-GitHub CI has deliberately not been triggered while the feature is incomplete.
-New regression tests were authored without running them, per instruction.
+PR #168 is now open for the NextGen CI workflow. The code and offline tests
+have not been verified by a completed CI run as of this checkpoint; any
+failures should be handled as specific regression fixes, not new scope.
