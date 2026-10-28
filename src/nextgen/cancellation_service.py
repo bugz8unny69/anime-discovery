@@ -66,7 +66,87 @@ class CancellationService(OwnedCleanup):
                     from src.nextgen.storage.sonarr_candidates import schedule_after_cleanup
                     records+=schedule_after_cleanup(db,op[0])
         self._log(records)
-    def _targets(self,job_id):
+    @staticmethod
+    def _empty_magnet_root(path,marker):
+        """Never authorize torrent cleanup over unknown local files."""
+        import os
+        from pathlib import PurePosixPath
+        from src.nextgen.acquisition.cleanup import directory
+        if PurePosixPath(path).name!='ad-'+marker:raise CancellationError()
+        try:
+            with directory(path) as fd:
+                with os.scandir(fd) as rows:
+                    return next(rows,None) is None
+        except FileNotFoundError:
+            return True
+
+    def _pre_manifest(self,operation_id):
+        """Resolve old magnet intents without inventing a .torrent file list.
+
+        No files: remove an exact-owned qB torrent, never local files. A missing
+        torrent must be absent past the metadata deadline and have no files in
+        its isolated root. A pre-send external torrent remains untouched.
+        """
+        from src.nextgen.storage.sonarr_magnet_intake import _prior
+        with self.store.queue.connection() as db:
+            rows=db.execute(
+                "SELECT i.event_id,i.created_at_ms FROM sonarr_magnet_intents i "
+                "JOIN job_operation_members m ON m.job_id=i.job_id "
+                "WHERE m.operation_id=? AND i.state<>'EXTERNAL' AND NOT EXISTS "
+                "(SELECT 1 FROM acquisition_plans p "
+                "JOIN torrent_submissions s USING(plan_id) "
+                "WHERE p.job_id=i.job_id AND p.submission_marker=i.marker "
+                "AND p.info_hash=i.info_hash AND s.state='OWNED_STOPPED')",
+                (operation_id,)).fetchall()
+            intents=[(_prior(db,event),created) for event,created in rows]
+        if len(intents)>32:raise CancellationError()
+        if not intents:return set(),True
+        credentials=self.secrets.qbittorrent_credentials()
+        settled=set()
+        for intent,created in intents:
+            self._fence()
+            client=self.client_factory(intent.options,credentials)
+            client.login()
+            observed=client.inspect(intent.info_hash)
+            if observed is None:
+                # An uncertain add can arrive late. Don't declare it absent
+                # just because its first HTTP read raced qBittorrent's add.
+                if self.queue.now()-created<600000:
+                    return settled,False
+                if not self._empty_magnet_root(intent.options.download_root,
+                                               intent.marker):
+                    raise CancellationError()
+                settled.add(intent.event_id)
+                continue
+            if (observed.info_hash!=intent.info_hash
+                    or observed.save_path.rstrip('/')!=intent.options.download_root
+                    or observed.category!=intent.options.category
+                    or observed.auto_tmm is not False
+                    or 'ad-'+intent.marker not in observed.tags
+                    or any(t.startswith('ad-') and t!='ad-'+intent.marker
+                           for t in observed.tags)
+                    or observed.files
+                    or not self._empty_magnet_root(intent.options.download_root,
+                                                   intent.marker)):
+                raise CancellationError()
+            # REVIEW means an earlier command was uncertain or ownership was
+            # disputed; never send a second destructive request on replay.
+            if intent.state=='REVIEW':raise CancellationError()
+            with self.store.queue.connection() as db,transaction(db):
+                self._fence(db)
+                changed=db.execute(
+                    "UPDATE sonarr_magnet_intents SET state='REVIEW',"
+                    "updated_at_ms=? WHERE event_id=? AND state=?",
+                    (self.queue.now(),intent.event_id,intent.state)).rowcount
+                if changed!=1:raise CancellationError()
+            if observed.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+                client.stop_legacy_metadata(intent)
+            if not client.remove_empty_legacy_magnet(intent):
+                return settled,False
+            settled.add(intent.event_id)
+        return settled,True
+
+    def _targets(self,job_id,*,resolved=()):
         with self.store.queue.connection() as db,transaction(db):
             self._fence(db)
             op=operation(db,job_id)
@@ -79,13 +159,13 @@ class CancellationService(OwnedCleanup):
             # Promoted admissions use the existing exact-owned cleanup below;
             # unresolved admissions must retain their reservation.
             pending=db.execute(
-                "SELECT 1 FROM sonarr_magnet_intents i "
+                "SELECT i.event_id FROM sonarr_magnet_intents i "
                 "JOIN job_operation_members m ON m.job_id=i.job_id "
                 "WHERE m.operation_id=? AND i.state<>'EXTERNAL' AND NOT EXISTS "
                 "(SELECT 1 FROM acquisition_plans p JOIN torrent_submissions s USING(plan_id) "
                 "WHERE p.job_id=i.job_id AND p.submission_marker=i.marker "
-                "AND p.info_hash=i.info_hash AND s.state='OWNED_STOPPED') LIMIT 1",(op[0],)).fetchone()
-            if pending:
+                "AND p.info_hash=i.info_hash AND s.state='OWNED_STOPPED')",(op[0],)).fetchall()
+            if any(event not in resolved for (event,) in pending):
                 raise CancellationError()
             rows=db.execute('SELECT p.job_id,j.event_id FROM acquisition_plans p JOIN jobs j ON j.job_id=p.job_id '
                 'JOIN job_operation_members m ON m.job_id=p.job_id WHERE m.operation_id=? ORDER BY p.plan_id',(op[0],)).fetchall()
@@ -127,7 +207,11 @@ class CancellationService(OwnedCleanup):
             if not status['can_cleanup']:return status
             try:
                 with OperationGate(self.database).hold(status['operation_id'],cleanup=True):
-                    op,targets,batches=self._targets(job_id)
+                    resolved,ready=self._pre_manifest(status['operation_id'])
+                    if not ready:
+                        self._state(job_id,'PENDING','CANCELLATION_PENDING')
+                        return self.store.status(job_id)
+                    op,targets,batches=self._targets(job_id,resolved=resolved)
                     complete=True;processed=0
                     for target in targets:
                         with self.store.queue.connection() as db:
