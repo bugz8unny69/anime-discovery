@@ -73,9 +73,8 @@ class InstallerSupportTests(unittest.TestCase):
         self.assertIn('http://127.0.0.1:8877',rendered['anime-discovery-api.service'])
         self.assertIn('/opt/anime-discovery/current/.venv/bin/python',rendered['anime-discovery-api.service'])
         self.assertIn('RequiresMountsFor=',rendered['anime-discovery-worker.service'])
-        # The installer renders the deployed service; the example unit is not used.
-        self.assertIn('--sonarr-acquire',rendered['anime-discovery-worker.service'])
-        self.assertNotIn('--sonarr-acquire',rendered['anime-discovery-api.service'])
+        # The worker enables its normal Sonarr pipeline without a startup flag.
+        self.assertNotIn('--sonarr-acquire',rendered['anime-discovery-worker.service'])
         self.assertIn('"/mnt/Anime Library"',rendered['anime-discovery-worker.service'])
         self.assertNotIn('/mnt/Anime Library',rendered['anime-discovery-api.service'])
         for name in ('anime-discovery-api.service','anime-discovery-worker.service'):
