@@ -34,7 +34,8 @@ def encode_details(details=None):
     if type(details) is not dict:
         raise ValueError("invalid diagnostic details")
     allowed = {"missing_fields", "invalid_fields", "attempt", "max_attempts",
-               "retry_at_ms", "cause_reason_code", "matching"}
+               "retry_at_ms", "cause_reason_code", "matching",
+               "video_mb", "limit_mb", "plan_used_mb"}
     if any(type(key) is not str or key not in allowed for key in details):
         raise ValueError("invalid diagnostic detail key")
     safe = safe_details(**{k: v for k, v in details.items() if k != "matching"})

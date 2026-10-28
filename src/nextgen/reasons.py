@@ -131,8 +131,10 @@ _ENTRIES = (
            "The submitted torrent is confirmed and stopped.", "Apply approved file selection before starting any download.", "INFO", None),
     Reason("DOWNLOAD_CONFIGURATION_INVALID", "Download endpoint, local folder or credentials are incomplete or invalid.",
            "Configure the download client and download folder before acquisition.", "Review download settings and private credentials.", "WARNING", False),
-    Reason("ACQUISITION_SIZE_LIMIT", "A selected video or combined prepared-video budget exceeds its frozen hard limit.",
-           "The selected video exceeds the episode or selection-plan size limit.", "Review video sizes and the recorded plan budget.", "WARNING", False),
+    Reason("ACQUISITION_SIZE_LIMIT", "The selected video is larger than the per-episode size limit.",
+           "The video is larger than the episode size limit.", "Raise 'Maximum video size' in Settings, or wait for a smaller release of this episode.", "WARNING", False),
+    Reason("ACQUISITION_PLAN_SIZE_LIMIT", "Adding this video would exceed the total size limit for this anime's trial episodes (selection plan).",
+           "This anime's trial episodes would exceed their total size limit.", "The selection plan is every episode picked for this anime's trial. Raise 'Maximum selection-plan size' in Settings.", "WARNING", False),
     Reason("ACQUISITION_SIZE_EVIDENCE_MISSING", "A prior prepared plan lacks independently recorded selected-byte evidence.",
            "An existing acquisition plan needs its file size reviewed.", "Reinspect the existing source before adding more work to this plan.", "WARNING", False),
     Reason("ACQUISITION_SOURCE_MISSING", "A normalized v1 torrent identity is absent or unsupported.",
@@ -285,7 +287,8 @@ def display_reason(code: str) -> dict:
             "retryable": entry.retryable}
 
 def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
-                 attempt=None, max_attempts=None, cause_reason_code=None) -> dict:
+                 attempt=None, max_attempts=None, cause_reason_code=None,
+                 video_mb=None, limit_mb=None, plan_used_mb=None) -> dict:
     """Build bounded history facts; never accept raw values or exception text.
 
     Field names identify schema locations, not missing episode coverage.
@@ -301,7 +304,8 @@ def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
         if values:
             details[key] = sorted(set(values))
     for key, value in (("retry_at_ms", retry_at_ms), ("attempt", attempt),
-                       ("max_attempts", max_attempts)):
+                       ("max_attempts", max_attempts), ("video_mb", video_mb),
+                       ("limit_mb", limit_mb), ("plan_used_mb", plan_used_mb)):
         if value is not None:
             if type(value) is not int or not 0 <= value <= _MAX_INTEGER:
                 raise ValueError("invalid diagnostic integer")

@@ -137,7 +137,7 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                       reason_code=exc.reason_code,component='worker',
                       job_id=context.claim.job_id,event_id=context.claim.event_id,
                       attempt=context.claim.attempt)
-            return Outcome('review',exc.reason_code)
+            return Outcome('review',exc.reason_code,facts=getattr(exc,'facts',None))
         except (ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,
                 DownloadConfigurationError) as exc:
             # Name the failed check (as SUBMIT_TORRENT does), not a generic conflict.

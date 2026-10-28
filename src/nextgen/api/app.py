@@ -107,6 +107,15 @@ def normalize_webhook(body):
     return json.dumps(declaration,sort_keys=True).encode()
 
 
+def size_detail(details):
+    """The actual numbers behind a size-limit stop, in plain words."""
+    video,limit,used=(details.get(k) for k in ('video_mb','limit_mb','plan_used_mb'))
+    if type(video) is not int or type(limit) is not int:return None
+    if used is None:return f'The video is {video:,} MB; the episode limit is {limit:,} MB.'
+    return (f'The video is {video:,} MB; this anime\'s trial episodes already use {used:,} MB '
+            f'of their {limit:,} MB total limit.')
+
+
 class Application:
     def __init__(self,directory,*,origin=None,secrets=None,sessions=None):
         self.store=ConfigurationStore(directory);self.startup=self.store.read()
@@ -596,7 +605,8 @@ class Application:
                     except (ValueError,TypeError):details={}
                     items.append({'history_id':row[0],'occurred_at_ms':row[1],'event':CATALOG.event(row[2]),
                         'reason':None if row[3] is None else CATALOG.reason(row[3]),'component':row[4],'details':details,
-                        'handler':None if row[6] is None else CATALOG.handler(row[6],recorded_label=row[7]),'invocation_id':row[8]})
+                        'handler':None if row[6] is None else CATALOG.handler(row[6],recorded_label=row[7]),'invocation_id':row[8],
+                        'detail':size_detail(details)})
             else:
                 newest='before_id' in query
                 cursor=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1) if newest else after
@@ -645,6 +655,10 @@ class Application:
             value=declaration.get('release_name') if type(declaration) is dict else None
             if type(value) is str and len(value.encode('utf-8'))<=1024:release=value
         except (ValueError,UnicodeError,TypeError,RecursionError):pass
+        sized=db.execute("SELECT details_json FROM job_history WHERE job_id=? AND reason_code IN "
+                         "('ACQUISITION_SIZE_LIMIT','ACQUISITION_PLAN_SIZE_LIMIT') ORDER BY history_id DESC LIMIT 1",(row[0],)).fetchone()
+        try:sized=size_detail(json.loads(sized[0])) if sized else None
+        except (ValueError,TypeError):sized=None
         titles=db.execute('SELECT CASE WHEN length(CAST(a.title AS BLOB))<=1024 THEN a.title ELSE NULL END '
                           'FROM identity_results r JOIN identified_anime a USING(anidb_id) WHERE r.event_id=? LIMIT 2',(row[1],)).fetchall()
         return {'job_id':row[0],'event_id':row[1],'created_by_job_id':row[2],'kind':row[3],'state':row[4],
@@ -653,7 +667,7 @@ class Application:
                 'release_name':release,'anime_title':titles[0][0] if len(titles)==1 else None,
                 'acquisition_status':CATALOG.state('acquisition',op[1]),
                 'status':CATALOG.job_status(row[4],row[5],kind=row[3]),'attempt_count':row[6],
-                'reason':None if row[7] is None else CATALOG.reason(row[7]),'actions':actions,
+                'reason':None if row[7] is None else CATALOG.reason(row[7]),'size_detail':sized,'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
                                  'reason':None if op[3] is None else CATALOG.reason(op[3]),
                                 'can_cancel':actions['cancel']['enabled'],'can_cleanup':actions['cleanup']['enabled']}}

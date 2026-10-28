@@ -124,7 +124,7 @@ class JobQueue:
                 invocation_id=invocation,handlers=registry.labels)
 
     def _transition(self, db, claim, outcome, now):
-        details = {"attempt":claim.attempt}
+        details = {"attempt":claim.attempt,**(outcome.facts or {})}
         if outcome.matching is not None:
             if claim.kind != "IDENTIFY_ANIME":
                 raise ValueError("matching evidence only belongs to an identity attempt")

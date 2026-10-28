@@ -81,8 +81,13 @@ class Outcome:
     activity_code: str | None = None
     value: object = field(default=None, repr=False)
     matching: str | None = field(default=None, repr=False)
+    facts: dict | None = field(default=None, repr=False)
 
     def __post_init__(self):
+        if self.facts is not None and (type(self.facts) is not dict or self.kind not in ("review", "hold", "blocked")
+                or set(self.facts) - {"video_mb", "limit_mb", "plan_used_mb"}
+                or any(type(v) is not int or v < 0 for v in self.facts.values())):
+            raise ValueError("invalid outcome facts")
         if type(self.kind) is not str or self.kind not in _STATES:
             raise ValueError("invalid handler outcome")
         if self.kind in ("complete", "skip"):

@@ -14,7 +14,12 @@ class DownloadConfigurationError(ValueError):
 
 class SizeLimitExceeded(ValueError):
     reason_code='ACQUISITION_SIZE_LIMIT'
-    def __init__(self):super().__init__('The selected video exceeds the episode or selection-plan size limit.')
+    def __init__(self,facts=None,*,plan=False):
+        # facts: video_mb, limit_mb and (for the trial total) plan_used_mb, shown to the user.
+        self.facts=facts
+        if plan:self.reason_code='ACQUISITION_PLAN_SIZE_LIMIT'
+        super().__init__('The video is over the '+('trial total' if plan else 'episode')+' size limit.'
+                         +('' if facts is None else ' '+str(facts)))
 
 
 class SizeEvidenceMissing(ValueError):
@@ -83,7 +88,12 @@ class SizeLimits:
     def admit(self,size,recorded_total=0):
         if type(size) is not int or size<=0 or type(recorded_total) is not int or recorded_total<0:
             raise SizeEvidenceMissing()
-        if size>self.episode_bytes or recorded_total+size>self.plan_bytes:raise SizeLimitExceeded()
+        video=-(-size//MB)
+        if size>self.episode_bytes:
+            raise SizeLimitExceeded({'video_mb':video,'limit_mb':self.max_episode_mb})
+        if recorded_total+size>self.plan_bytes:
+            raise SizeLimitExceeded({'video_mb':video,'plan_used_mb':-(-recorded_total//MB),
+                                     'limit_mb':self.max_plan_mb},plan=True)
 
 
 def download_options(configuration):
