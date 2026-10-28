@@ -96,8 +96,8 @@ def parser():
             command.add_argument('--database',required=True,help='New SQLite file on local storage.')
             command.add_argument('--settings-file',help='JSON settings object without credentials.')
         if name=='worker':
-            command.add_argument('--sonarr-acquire',action='store_true',
-                help='Enable Sonarr backfill, selection and qBittorrent acquisition')
+            command.add_argument('--sonarr-acquire',action='store_true',help=argparse.SUPPRESS)
+            # Kept only so existing service units remain compatible.
         if name=='check':command.add_argument('--worker',action='store_true')
         if name=='config-upgrade':command.add_argument('--fingerprint',required=True)
         if name=='database-upgrade':command.add_argument('--plan-token',required=True)
@@ -129,8 +129,8 @@ def main(argv=None):
             check_local(args.config_dir,worker=True)
             from src.nextgen.providers.configuration import run_identity_worker
             asyncio.run(run_identity_worker(
-                args.config_dir,sonarr_backfill=args.sonarr_acquire,
-                sonarr_select=args.sonarr_acquire,sonarr_acquire=args.sonarr_acquire))
+                args.config_dir,sonarr_backfill=True,
+                sonarr_select=True,sonarr_acquire=True))
             return 0
         print(json.dumps(output,sort_keys=True))
         return 0
