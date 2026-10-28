@@ -17,6 +17,7 @@ from src.nextgen.worker import blocking
 from src.nextgen import sonarr
 
 REGISTERED_DELAY_MS = 120000  # Let Sonarr finish its post-add series refresh.
+LISTING_ATTEMPTS = 10  # ~20 minutes of waiting for Sonarr to list the season.
 
 
 def register_series(configuration, secrets, tvdb_series_id, *, client_factory=sonarr.Client):
@@ -90,6 +91,12 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                 **({'select_candidates': True} if select_candidates else {}))
             if len(observed) != len(plan.numbers):
                 raise BackfillConflict()
+            # Sonarr lists none of this page yet (e.g. still refreshing a newly
+            # added series): wait and search again rather than record NOT_LISTED.
+            if (any(o.status == 'NOT_LISTED' for o in observed)
+                    and all(o.status in ('NOT_LISTED','IN_PROGRESS') for o in observed)
+                    and context.claim.attempt < LISTING_ATTEMPTS):
+                return Outcome('defer','SONARR_DISCOVERY_UNAVAILABLE',delay_ms=REGISTERED_DELAY_MS)
             return Outcome(value=BackfillCompletion(plan,observed))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
