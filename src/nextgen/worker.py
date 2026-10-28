@@ -238,6 +238,12 @@ class Worker:
                 records = await self._io(self.queue.finish,claim,outcome,spec=spec,
                                          invocation=invocation,registry=self.registry)
             except CompletionRejected as rejection:
+                # Log the exact check that refused the save (its original error).
+                # A skip (duplicate) carries no reason and is not a failure.
+                if rejection.outcome.reason_code is not None:
+                    exception(logger, "OPERATION_FAILED", rejection, level=logging.WARNING,
+                              reason_code=rejection.outcome.reason_code, component="worker",
+                              job_id=claim.job_id, event_id=claim.event_id, attempt=claim.attempt)
                 # The first transaction rolled back all facts/ending/successors.
                 # Record the expected domain decision under the same valid lease.
                 records = await self._io(self.queue.finish,claim,rejection.outcome,spec=spec,
