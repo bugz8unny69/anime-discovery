@@ -133,7 +133,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((outcome.kind,outcome.reason_code),('review',reason))
                 journal.authorize.assert_not_called()
                 # Which call failed is recorded as line numbers only, never secrets.
-                self.assertIn('frame_lines=',logs.output[0])
+                self.assertIn('error=',logs.output[0])
                 self.assertIn('reason_code='+reason,logs.output[0])
                 self.assertNotIn('SID',logs.output[0])
 
@@ -150,7 +150,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
              self.assertLogs('anime-discovery.test.bootstrap','WARNING') as logs:
             outcome=await cb(self.source,self._config())
         self.assertEqual((outcome.kind,outcome.reason_code),('review',MetadataInvalid.reason_code))
-        self.assertIn('frame_lines=',logs.output[0])
+        self.assertIn('error=',logs.output[0])
         self.assertIn('reason_code='+MetadataInvalid.reason_code,logs.output[0])
         probe.add_legacy_magnet.assert_not_called()
 

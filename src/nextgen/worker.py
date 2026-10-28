@@ -17,7 +17,7 @@ from src.nextgen.cancellation import OperationGate, CancellationRequested
 from src.nextgen.storage.cancellation import CancellationStore
 from src.nextgen.configuration import ConfigurationStore
 from src.nextgen.configuration_schema import ConfigurationError
-from src.nextgen.diagnostics import configure_logging, event, log_history
+from src.nextgen.diagnostics import configure_logging, event, exception, log_history
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Policy, Registry, payload_json
 from src.nextgen.reasons import get_reason
 from src.nextgen.maintenance import MaintenanceGate, MaintenanceBusy, MaintenancePending
@@ -123,10 +123,13 @@ class Worker:
         reason = getattr(exc, "reason_code", "JOB_HANDLER_FAILED")
         if get_reason(reason) is None:
             reason = "JOB_HANDLER_FAILED"
-        event(self.logger, logging.ERROR, "OPERATION_FAILED", reason_code=reason,component="worker",
-              job_id=None if claim is None else claim.job_id,
-              event_id=None if claim is None else claim.event_id,
-              attempt=None if claim is None else claim.attempt)
+        try:database=self.startup.value("storage.database_path")
+        except Exception:database=None
+        exception(self.logger, "OPERATION_FAILED", exc, reason_code=reason, component="worker",
+                  database=database,
+                  job_id=None if claim is None else claim.job_id,
+                  event_id=None if claim is None else claim.event_id,
+                  attempt=None if claim is None else claim.attempt)
 
     async def _heartbeat(self, claim, finished):
         while True:
