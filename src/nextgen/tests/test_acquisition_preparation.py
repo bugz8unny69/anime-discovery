@@ -109,16 +109,9 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT last_reason_code FROM jobs WHERE kind='PREPARE_ACQUISITION'"),
                          [('ACQUISITION_METADATA_INVALID',)])
 
-    async def test_declaration_must_match_both_verified_title_and_episode(self):
-        worker=self.worker()
-        event,evaluation=await self.prepare_queue(worker)
-        source=load_acquisition_input(self.database,evaluation,event)
-        for name in (b'Test Anime - 11.mkv',b'Other Anime - 10.mkv'):
-            raw,digest=metadata(name=name)
-            manifest=parse_metainfo(raw,digest)
-            with self.assertRaises(MetadataInvalid):validate_declaration(replace(source,info_hash=digest),manifest)
-
-    async def test_verified_release_title_can_differ_from_canonical_title(self):
+    async def test_acquisition_does_not_recheck_filenames_after_verification(self):
+        # Title, season and episode were verified before reservation; the info
+        # hash binds the torrent to that release. File names are not re-checked.
         self.raw,self.digest=metadata(name=b"Overgeared - S01E10 - Family's Trust.mkv")
         event,evaluation=self.source(title='Tempal: Item no Chikara',
             release_name='[Anime Time] Overgeared - S01E10 [1080p][Dual-Audio]')
@@ -127,14 +120,10 @@ class AcquisitionPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM acquisition_plans'),[('PREPARED',)])
         source=load_acquisition_input(self.database,evaluation,event)
         manifest=parse_metainfo(self.raw,self.digest)
-        # The magnet path uses the same declaration check with observed files.
         validate_declaration(source,ObservedInventory(self.digest,manifest.files,0))
-        raw,digest=metadata(name=b'Tempal Item no Chikara - S01E10.mkv')
-        validate_declaration(replace(source,info_hash=digest),parse_metainfo(raw,digest))
-        for name in (b'Overgeared - S01E11.mkv',b'Overgeared - S02E10.mkv',
-                     b'Other Anime - S01E10.mkv',b'Overgeared Extra - S01E10.mkv'):
+        for name in (b'Other Anime - 11.mkv',b'episode.mkv'):
             raw,digest=metadata(name=name)
-            with self.subTest(name=name),self.assertRaises(MetadataInvalid):
+            with self.subTest(name=name):
                 validate_declaration(replace(source,info_hash=digest),parse_metainfo(raw,digest))
 
     async def test_concurrent_duplicate_preparation_cannot_replace_intent_or_marker(self):
