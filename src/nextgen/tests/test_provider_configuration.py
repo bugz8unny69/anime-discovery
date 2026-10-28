@@ -216,7 +216,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             return verify
         with patch("src.nextgen.providers.configuration.make_resolver",side_effect=identity_factory), \
              patch("src.nextgen.providers.configuration.make_verifier",side_effect=release_factory):
-            worker=await build_identity_worker(self.root)
+            worker=await build_identity_worker(self.root,sonarr_backfill=True)
         self.addAsyncCleanup(worker.close)
         await worker.attempt()
         await worker.attempt()
@@ -234,6 +234,13 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.execute('SELECT kind,state FROM jobs ORDER BY job_id').fetchall(),
                              [('IDENTIFY_ANIME','DONE'),('VERIFY_RELEASE','DONE'),('EVALUATE_TRIAL','DONE'),('RESERVE_EPISODE','DONE'),('PREPARE_ACQUISITION','PENDING')])
             self.assertEqual(db.execute('SELECT tvdb_season,tvdb_episode FROM episode_reservations').fetchall(),[(0,1)])
+        finally:db.close()
+        await worker.attempt()  # No torrent hash: preparation needs review.
+        db=connect(self.database)
+        try:
+            self.assertEqual(db.execute("SELECT state FROM jobs WHERE kind='PREPARE_ACQUISITION'").fetchall(),
+                             [('NEEDS_REVIEW',)])
+            self.assertEqual(db.execute("SELECT count(*) FROM jobs WHERE kind='DISCOVER_SONARR_BACKFILL'").fetchone()[0],0)
         finally:db.close()
 
     async def test_default_batch_acquisition_chain(self):

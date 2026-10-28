@@ -19,20 +19,29 @@ KIND='SUBMIT_TORRENT'
 DEFINITION=HandlerDefinition(KIND,'Submit stopped torrent and reconcile ownership')
 
 
-def _persist(db,claim,value):
+def _persist(db,claim,value,*,discovery_kind=None):
     try:
         plan=_plan(db,integer(value,positive=True),claim.event_id)
         intent=_intent(db,plan)
         if intent is None or intent.state!='OWNED_STOPPED':raise AcquisitionConflict()
+        if discovery_kind is not None:
+            from src.nextgen.storage.episode_reservations import _facts
+            from src.nextgen.storage.sonarr_backfill import schedule_first
+            source=_facts(db,plan.evaluation_job_id,claim.event_id)
+            return schedule_first(db,claim,source,kind=discovery_kind)
     except (ValueError,TypeError) as exc:
         reason=getattr(exc,'reason_code','TORRENT_PROVENANCE_CONFLICT')
         raise CompletionRejected(Outcome('review',reason)) from None
 
 
-def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=SubmissionJournal,transfer_kind=None):
+def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=SubmissionJournal,transfer_kind=None,
+                 discovery_kind=None):
     if transfer_kind is not None and (type(transfer_kind) is not str or not transfer_kind.strip()
                                      or len(transfer_kind)>64 or transfer_kind==KIND):
         raise ValueError('invalid download successor')
+    if discovery_kind is not None and (type(discovery_kind) is not str or not discovery_kind.strip()
+                                      or len(discovery_kind)>64 or discovery_kind in (KIND,transfer_kind)):
+        raise ValueError('invalid backfill successor')
     if not inspect.iscoroutinefunction(read_metainfo):raise ValueError('trusted async metadata reader required')
     async def execute(context):
         payload=context.data()
@@ -86,5 +95,5 @@ def registration(read_metainfo,secrets,*,client_factory=Client,journal_factory=S
                 ClientInvalid,ClientAuthenticationFailed,ClientUnsupported) as exc:return Outcome('review',exc.reason_code)
     def route(value):
         return () if transfer_kind is None else (Successor.create(transfer_kind,{'preparation_job_id':value}),)
-    return Registration(KIND,DEFINITION,execute,persist=_persist,route=route,
+    return Registration(KIND,DEFINITION,execute,persist=lambda db,claim,value:_persist(db,claim,value,discovery_kind=discovery_kind),route=route,
                         successor_kinds=() if transfer_kind is None else (transfer_kind,))

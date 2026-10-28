@@ -74,7 +74,8 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                     journal.authorize,context.claim,source,options,probe.major,
                     before is not None)
             if intent.state in ('REVIEW','EXTERNAL'):
-                return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
+                return Outcome('review','TORRENT_ALREADY_PRESENT' if intent.state=='EXTERNAL'
+                               else 'TORRENT_PROVENANCE_CONFLICT')
             owned=client_factory(intent.options,credentials)
             await blocking(owned.login)
             if permit is not None:
@@ -111,7 +112,8 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             # OWNED_STOPPED. A single opportunistic files read cannot.
             state=await blocking(journal.reconcile,context.claim,intent,snapshot)
             if state in ('REVIEW','EXTERNAL'):
-                return Outcome('review','TORRENT_PROVENANCE_CONFLICT')
+                return Outcome('review','TORRENT_ALREADY_PRESENT' if state=='EXTERNAL'
+                               else 'TORRENT_PROVENANCE_CONFLICT')
             if state=='OWNED_STOPPED' and snapshot is not None:
                 inventory=ObservedInventory.from_observation(snapshot)
                 size_limits(configuration).admit(

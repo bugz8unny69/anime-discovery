@@ -89,7 +89,7 @@ def load_batch(database, plan_id, start):
 
 
 def schedule_first(db, claim, source, *, kind):
-    """Exactly one first page per frozen plan, in evaluation completion TX."""
+    """Exactly one first page per frozen plan, in the caller's completion TX."""
     if not db.in_transaction: raise ValueError('worker transaction required')
     row = db.execute(
         "SELECT p.plan_id,p.backfill_count FROM trial_plans p WHERE "
@@ -100,7 +100,7 @@ def schedule_first(db, claim, source, *, kind):
     if row is None: raise BackfillConflict()
     plan_id,count = row
     if not count: return ()
-    # Transaction is already a SQLite write transaction. Concurrent evaluation
+    # Transaction is already a SQLite write transaction. Concurrent worker
     # completions serialize here; later deliveries cannot schedule a replay.
     exists = db.execute(
         "SELECT 1 FROM jobs WHERE kind=? AND "

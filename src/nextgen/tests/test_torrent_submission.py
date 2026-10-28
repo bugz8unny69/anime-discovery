@@ -10,6 +10,7 @@ from src.nextgen.jobs.evaluate_trial_job import registration as evaluate
 from src.nextgen.jobs.reserve_episode_job import registration as reserve
 from src.nextgen.jobs.prepare_acquisition_job import registration as prepare
 from src.nextgen.jobs.submit_torrent_job import registration as submit
+from src.nextgen.jobs.discover_sonarr_backfill_job import registration as discover
 from src.nextgen.storage.job_queue import LeaseLost
 from src.nextgen.storage.sqlite import connect, transaction, enqueue_job
 from src.nextgen.storage.submissions import SubmissionJournal, target_options
@@ -27,7 +28,7 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
     rows=fixture.AcquisitionPreparationTests.rows
     source=fixture.AcquisitionPreparationTests.source
 
-    def worker(self,*,mode='normal',journal_factory=SubmissionJournal):
+    def worker(self,*,mode='normal',journal_factory=SubmissionJournal,backfill=False):
         test=self
         self.adds=0
         self.metainfo_reads=0
@@ -52,7 +53,9 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
             return self.raw
         worker=Worker(self.store,self.startup,Registry((evaluate(reservation_kind='RESERVE_EPISODE'),
             reserve(preparation_kind='PREPARE_ACQUISITION'),prepare(read,submission_kind='SUBMIT_TORRENT'),
-            submit(read,Secrets(),client_factory=FakeClient,journal_factory=journal_factory))),policy=Policy(lease_ms=30000))
+            submit(read,Secrets(),client_factory=FakeClient,journal_factory=journal_factory,
+                   discovery_kind='DISCOVER_SONARR_BACKFILL' if backfill else None),
+            *((discover(None),) if backfill else ()))),policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
         self.store.update({'qbittorrent':{'base_url':'https://qb.example'},'storage':{'download_root':'/srv/downloads'}},expected_revision=1)
         return worker
@@ -78,6 +81,31 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='SUBMIT_TORRENT'"),[('DONE',)])
         self.assertTrue(self.targets[0].download_root.startswith('/srv/downloads/ad-'))
         self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='TORRENT_INTENT_RECORDED'"),[(1,)])
+
+    async def test_backfill_starts_only_after_confirmed_submission(self):
+        worker=self.worker(backfill=True)
+        await self.queued(worker)
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='DISCOVER_SONARR_BACKFILL'"),[(0,)])
+        await worker.attempt()
+        self.assertEqual(self.adds,1)
+        self.assertEqual(self.rows("SELECT d.state,p.kind,p.state FROM jobs d JOIN jobs p "
+                                   "ON p.job_id=d.created_by_job_id WHERE d.kind='DISCOVER_SONARR_BACKFILL'"),
+                         [('PENDING','SUBMIT_TORRENT','DONE')])
+
+    async def test_review_submission_never_starts_backfill(self):
+        worker=self.worker(backfill=True)
+        await self.queued(worker)
+        self.observation=Observation(self.digest,'downloading','/other','other',(),False,())
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='DISCOVER_SONARR_BACKFILL'"),[(0,)])
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='SUBMIT_TORRENT'"),[('NEEDS_REVIEW',)])
+
+    async def test_uncertain_submission_never_starts_backfill(self):
+        worker=self.worker(mode='timeout_absent',backfill=True)
+        await self.queued(worker)
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind='DISCOVER_SONARR_BACKFILL'"),[(0,)])
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='SUBMIT_TORRENT'"),[('RETRY_WAIT',)])
 
     async def test_add_timeout_then_reconcile_never_repeats_add_and_pins_target(self):
         worker=self.worker(mode='timeout_present')

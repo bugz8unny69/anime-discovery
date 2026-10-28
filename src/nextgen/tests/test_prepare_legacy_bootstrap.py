@@ -154,6 +154,28 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('reason_code='+MetadataInvalid.reason_code,logs.output[0])
         probe.add_legacy_magnet.assert_not_called()
 
+    async def test_existing_torrent_reports_duplicate_without_another_add(self):
+        from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
+        from src.nextgen.reasons import get_reason
+        options=DownloadOptions('http://localhost:8080','/downloads/ad-'+'c'*32,'anime',10)
+        for recovered in (False,True):
+            with self.subTest(recovered=recovered):
+                intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'EXTERNAL',
+                                   _fingerprint(4,HASH,'c'*32,options,4))
+                probe=Mock(major=4,metadata_strategy='legacy_poll')
+                journal=Mock()
+                journal.existing.return_value=intent if recovered else None
+                journal.authorize.return_value=(intent,None,())
+                factory=Mock(return_value=probe)
+                cb=make_bootstrap(self.secrets,client_factory=factory,journal_factory=lambda _:journal)
+                with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',return_value=None), \
+                     patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET):
+                    outcome=await cb(self.source,self._config())
+                self.assertEqual((outcome.kind,outcome.reason_code),('review','TORRENT_ALREADY_PRESENT'))
+                self.assertIn('already exists in qBittorrent',get_reason(outcome.reason_code).message)
+                probe.add_legacy_magnet.assert_not_called()
+                self.assertEqual(factory.call_count,1)
+
     async def test_webhook_event_on_fetch_client_defers_to_metadata_reader(self):
         probe=Mock(major=5,metadata_strategy='fetch')
         journal=Mock()

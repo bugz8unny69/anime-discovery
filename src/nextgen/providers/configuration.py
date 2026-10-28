@@ -79,7 +79,8 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     read_metainfo=make_reader(sonarr_secrets=secrets) if default_reader else read_metainfo
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND,
                     legacy_bootstrap=make_bootstrap(secrets) if default_reader or sonarr_acquire else None),
-                                                submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND),
+                                                submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND,
+                                                    discovery_kind=SONARR_BACKFILL_KIND if sonarr_backfill else None),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
     # Batch jobs share trusted hash-only metadata and the same ownership safeguards.
     batch_handlers = (
@@ -96,8 +97,7 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     registry = Registry((registration(resolve,release_kind=RELEASE_KIND if release_kind is None else release_kind),
                          release_registration(verify,trial_kind=TRIAL_KIND,batch_kind=BATCH_KIND),
                          batch_registration(reservation_kind=BATCH_RESERVE_KIND),
-                         trial_registration(reservation_kind=RESERVE_KIND,
-                                            discovery_kind=SONARR_BACKFILL_KIND if sonarr_backfill else None),
+                         trial_registration(reservation_kind=RESERVE_KIND),
                          reserve_registration(preparation_kind=PREPARE_KIND),
                          *((sonarr_backfill_registration(secrets,select_candidates=sonarr_select,
                               acquire_candidates=sonarr_acquire),) if sonarr_backfill else ()),
