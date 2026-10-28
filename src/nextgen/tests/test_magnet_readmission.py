@@ -1,0 +1,118 @@
+"""Same-hash webhook recovery after real oversized cancellation/cleanup."""
+import sqlite3
+import unittest
+
+from src.nextgen.acquisition.legacy_magnet import make_bootstrap
+from src.nextgen.acquisition.metadata import TorrentFile
+from src.nextgen.acquisition.metainfo_source import make_reader
+from src.nextgen.cancellation_service import CancellationService
+from src.nextgen.job_contracts import Policy, Registry
+from src.nextgen.jobs.evaluate_trial_job import registration as evaluate
+from src.nextgen.jobs.reserve_episode_job import registration as reserve
+from src.nextgen.jobs.prepare_acquisition_job import registration as prepare
+from src.nextgen.jobs.submit_torrent_job import registration as submit
+from src.nextgen.jobs.cleanup_canceled_operation_job import registration as cleanup
+from src.nextgen.storage.sqlite import connect, transaction, initialize
+from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
+from src.nextgen.tests import test_autobrr_webhook_acquisition as webhook_fixture
+from src.nextgen.tests.test_autobrr_webhook_acquisition import FakeQbittorrent
+from src.nextgen.tests.test_torrent_submission import Secrets
+from src.nextgen.worker import Worker
+
+
+class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
+    asyncSetUp=webhook_fixture.AutobrrWebhookAcquisitionTests.asyncSetUp
+    rows=webhook_fixture.AutobrrWebhookAcquisitionTests.rows
+    autobrr_event=webhook_fixture.AutobrrWebhookAcquisitionTests.autobrr_event
+
+    async def test_oversized_cleanup_then_fresh_same_hash_webhook(self):
+        self.store.update({'qbittorrent':{'base_url':'https://qb.example'},
+                           'storage':{'download_root':str(self.root/'downloads')},
+                           'acquisition':{'max_episode_mb':1,'max_plan_mb':2}},expected_revision=1)
+        state={}
+        qb=FakeQbittorrent(state,(TorrentFile(0,'Test Anime - 10.mkv',1000001),))
+        def factory(options,credentials):
+            client=qb.factory(options,credentials)
+            def remove(intent,*,with_files=False):
+                self.assertTrue(with_files)
+                state['removed']=state.get('removed',0)+1
+                state['intent']=None
+                return True
+            client.remove_empty_legacy_magnet=remove
+            return client
+        secrets=Secrets()
+        read=make_reader(sonarr_secrets=secrets)
+        def service(configuration,secrets,**kwargs):
+            return CancellationService(configuration,secrets,client_factory=factory,**kwargs)
+        worker=Worker(self.store,self.store.read(),Registry((
+            evaluate(reservation_kind='RESERVE_EPISODE'),reserve(preparation_kind='PREPARE_ACQUISITION'),
+            prepare(read,submission_kind='SUBMIT_TORRENT',legacy_bootstrap=make_bootstrap(secrets,client_factory=factory)),
+            submit(read,secrets,client_factory=factory),cleanup(secrets,service_factory=service))),
+            policy=Policy(lease_ms=30000))
+        self.addAsyncCleanup(worker.close)
+        first,_=self.autobrr_event({'release_name':'Test Anime - 10','torrentHash':self.digest})
+        for _ in range(4):await worker.attempt()
+        self.assertEqual(state['removed'],1)
+        self.assertEqual(self.rows('SELECT state FROM episode_reservations'),[('RELEASED',)])
+        self.assertEqual(self.rows('SELECT state FROM sonarr_magnet_intents'),[('RELEASED',)])
+        old_marker=self.rows('SELECT marker FROM sonarr_magnet_intents')[0][0]
+        # Reproduce a cleanup completed by the old worker: its journal was retained as REVIEW.
+        db=connect(self.database)
+        try:
+            with transaction(db):db.execute("UPDATE sonarr_magnet_intents SET state='REVIEW'")
+            # Install the published v46 table shape with this nonempty journal,
+            # then exercise the real upgrade before attempting readmission.
+            before=db.execute('SELECT * FROM sonarr_magnet_intents').fetchall()
+            ddl=(SQL_DIR/'045_sonarr_magnet_intents.sql').read_text()
+            ddl=ddl[ddl.index('CREATE TABLE sonarr_magnet_intents ('):]
+            ddl=ddl[:ddl.index('\n);')+3].replace('sonarr_magnet_intents (','magnet_v46 (',1)
+            db.executescript('BEGIN IMMEDIATE;\n'+ddl+'\n'
+                'INSERT INTO magnet_v46 SELECT * FROM sonarr_magnet_intents;\n'
+                'DROP TABLE sonarr_magnet_intents;\n'
+                'ALTER TABLE magnet_v46 RENAME TO sonarr_magnet_intents;\n'
+                'PRAGMA user_version=46;\nCOMMIT;')
+            db.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
+            self.assertEqual(db.execute('SELECT * FROM sonarr_magnet_intents').fetchall(),before)
+            self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
+        finally:db.close()
+        self.store.update({'acquisition':{'max_episode_mb':2}},expected_revision=2)
+        second,_=self.autobrr_event({'release_name':'[Group] Test Anime - 10','torrentHash':self.digest})
+        for _ in range(4):await worker.attempt()
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE event_id=? AND kind='SUBMIT_TORRENT'",(second,)),[('DONE',)])
+        self.assertEqual(self.rows('SELECT event_id,state FROM sonarr_magnet_intents ORDER BY event_id'),
+                         [(first,'RELEASED'),(second,'OWNED_STOPPED')])
+        self.assertEqual(self.rows('SELECT marker FROM sonarr_magnet_intents WHERE event_id=?',(first,)),[(old_marker,)])
+        self.assertEqual(len(state['added']),2)
+        self.assertEqual(len(set(r[0] for r in self.rows('SELECT marker FROM sonarr_magnet_intents'))),2)
+        db=connect(self.database)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError),transaction(db):
+                db.execute("UPDATE sonarr_magnet_intents SET state='UNCERTAIN' WHERE event_id=?",(first,))
+        finally:db.close()
+
+
+class MagnetMigrationTests(unittest.TestCase):
+    def test_v46_upgrade_preserves_history_and_matches_fresh(self):
+        old=sqlite3.connect(':memory:');fresh=sqlite3.connect(':memory:')
+        self.addCleanup(old.close);self.addCleanup(fresh.close)
+        for name in SCRIPTS[:46]:old.executescript((SQL_DIR/name).read_text())
+        old.execute("INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES('test',X'61',1)")
+        old.commit()
+        before=old.execute('SELECT * FROM incoming_events').fetchall()
+        old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
+        initialize(fresh)
+        self.assertEqual(_structure(old),_structure(fresh))
+        self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
+        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],47)
+        self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
+
+    def test_migration_failure_rolls_back_original_journal_table(self):
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close)
+        for name in SCRIPTS[:46]:db.executescript((SQL_DIR/name).read_text())
+        before=_structure(db)
+        sql=(SQL_DIR/'047_released_magnet_intents.sql').read_text()
+        sql=sql.replace('PRAGMA user_version=47;','SELECT * FROM missing_table;\nPRAGMA user_version=47;')
+        with self.assertRaises(sqlite3.Error):db.executescript(sql)
+        db.rollback()
+        self.assertEqual(_structure(db),before)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],46)

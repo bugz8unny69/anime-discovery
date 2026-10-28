@@ -92,7 +92,7 @@ class CancellationService(OwnedCleanup):
             rows=db.execute(
                 "SELECT i.event_id,i.created_at_ms FROM sonarr_magnet_intents i "
                 "JOIN job_operation_members m ON m.job_id=i.job_id "
-                "WHERE m.operation_id=? AND i.state<>'EXTERNAL' AND NOT EXISTS "
+                "WHERE m.operation_id=? AND i.state NOT IN ('EXTERNAL','RELEASED') AND NOT EXISTS "
                 "(SELECT 1 FROM acquisition_plans p "
                 "JOIN torrent_submissions s USING(plan_id) "
                 "WHERE p.job_id=i.job_id AND p.submission_marker=i.marker "
@@ -164,7 +164,7 @@ class CancellationService(OwnedCleanup):
             pending=db.execute(
                 "SELECT i.event_id FROM sonarr_magnet_intents i "
                 "JOIN job_operation_members m ON m.job_id=i.job_id "
-                "WHERE m.operation_id=? AND i.state<>'EXTERNAL' AND NOT EXISTS "
+                "WHERE m.operation_id=? AND i.state NOT IN ('EXTERNAL','RELEASED') AND NOT EXISTS "
                 "(SELECT 1 FROM acquisition_plans p JOIN torrent_submissions s USING(plan_id) "
                 "WHERE p.job_id=i.job_id AND p.submission_marker=i.marker "
                 "AND p.info_hash=i.info_hash AND s.state='OWNED_STOPPED')",(op[0],)).fetchall()

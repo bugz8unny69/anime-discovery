@@ -1,5 +1,6 @@
 """Isolated pre-manifest magnet journal contracts; no daemon or CI required."""
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 import sqlite3
@@ -23,14 +24,22 @@ class MagnetJournalTests(unittest.TestCase):
         self.db=sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
         self.db.executescript("""
-            CREATE TABLE acquisition_plans(reservation_id INTEGER);
+            CREATE TABLE acquisition_plans(reservation_id INTEGER,job_id INTEGER,state TEXT);
+            CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
+            CREATE TABLE job_operations(operation_id INTEGER,state TEXT,cleanup_state TEXT);
+            CREATE TABLE episode_reservations(owner_job_id INTEGER,state TEXT);
+            CREATE TABLE batch_episode_reservations(owner_job_id INTEGER,state TEXT);
+            CREATE TABLE staging_publications(job_id INTEGER,state TEXT);
+            INSERT INTO job_operation_members VALUES(21,7);
+            INSERT INTO job_operations VALUES(7,'ACTIVE','NONE');
             CREATE TABLE sonarr_magnet_intents (
                 event_id INTEGER PRIMARY KEY,job_id INTEGER,plan_id INTEGER,
-                tvdb_episode INTEGER,info_hash TEXT UNIQUE,marker TEXT,
+                tvdb_episode INTEGER,info_hash TEXT,marker TEXT,
                 api_major INTEGER,base_url TEXT,save_path TEXT,
                 category TEXT,timeout_seconds INTEGER,inventory_json TEXT,state TEXT,
                 created_at_ms INTEGER,updated_at_ms INTEGER
             );
+            CREATE UNIQUE INDEX idx_magnet_active_hash ON sonarr_magnet_intents(info_hash) WHERE state<>'RELEASED';
         """)
         self.options=DownloadOptions('http://localhost:8080','/downloads','anime',10)
         self.source=AcquisitionInput(1,2,3,4,HASH,'0'*64,1,1,10,'Example')
@@ -78,6 +87,30 @@ class MagnetJournalTests(unittest.TestCase):
             self.claim,self.source,self.options,5,False)
         self.assertEqual(same,intent)
         self.assertIsNone(second)
+
+    def test_new_webhook_conflict_is_a_domain_error_until_cleanup_is_complete(self):
+        original,_,_=self.journal.authorize(self.claim,self.source,self.options,4,False)
+        source=replace(self.source,event_id=5)
+        claim=replace(self.claim,event_id=5,job_id=31)
+        for state,cleanup in (('ACTIVE','NONE'),('CANCELED','PENDING'),('CANCELED','REVIEW')):
+            self.db.execute('UPDATE job_operations SET state=?,cleanup_state=?',(state,cleanup));self.db.commit()
+            with self.subTest(state=state,cleanup=cleanup), \
+                 patch('src.nextgen.storage.sonarr_magnet_intake._source',return_value=source), \
+                 self.assertRaises(AcquisitionConflict):
+                self.journal.authorize(claim,source,self.options,4,False)
+            self.assertEqual(self.db.execute('SELECT event_id,marker FROM sonarr_magnet_intents').fetchall(),
+                             [(4,original.marker)])
+
+    def test_complete_cleanup_cannot_release_an_active_reservation(self):
+        self.journal.authorize(self.claim,self.source,self.options,4,False)
+        self.db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='COMPLETE'")
+        self.db.execute("INSERT INTO episode_reservations VALUES(21,'ACTIVE')");self.db.commit()
+        source=replace(self.source,event_id=5)
+        claim=replace(self.claim,event_id=5,job_id=31)
+        with patch('src.nextgen.storage.sonarr_magnet_intake._source',return_value=source), \
+             self.assertRaises(AcquisitionConflict):
+            self.journal.authorize(claim,source,self.options,4,False)
+        self.assertEqual(self.db.execute('SELECT state FROM sonarr_magnet_intents').fetchall(),[('UNCERTAIN',)])
 
     def test_upgrade_does_not_rearm_the_prior_42_submission(self):
         intent,permit,_=self.journal.authorize(

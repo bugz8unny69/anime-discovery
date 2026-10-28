@@ -42,7 +42,7 @@ class MagnetIntent:
                 or not re.fullmatch('[a-f0-9]{32}',self.marker)
                 or type(self.options) is not DownloadOptions
                 or self.api_major not in (4,5)
-                or self.state not in ('UNCERTAIN','OWNED_STOPPED','REVIEW','EXTERNAL')
+                or self.state not in ('UNCERTAIN','OWNED_STOPPED','REVIEW','EXTERNAL','RELEASED')
                 or type(self.fingerprint) is not str
                 or not re.fullmatch('[a-f0-9]{64}',self.fingerprint)):
             raise AcquisitionConflict()
@@ -125,6 +125,21 @@ def _matches_prior(prior,claim,source,options,api_major):
                 PurePosixPath(options.download_root)/('ad-'+prior.marker)))
 
 
+def release_cleaned(db,operation_id,now):
+    """Retain history but retire hash claims only after drained cleanup/release."""
+    if not db.in_transaction:raise ValueError('cleanup transaction required')
+    if db.execute('SELECT state,cleanup_state FROM job_operations WHERE operation_id=?',
+                  (operation_id,)).fetchone()!=('CANCELED','COMPLETE'):return
+    from src.nextgen.storage.reservation_release import active
+    if active(db,operation_id):return
+    for table,state in (('acquisition_plans','PREPARED'),('staging_publications','PUBLISHED')):
+        if db.execute('SELECT 1 FROM '+table+' p JOIN job_operation_members m ON m.job_id=p.job_id '
+                      'WHERE m.operation_id=? AND p.state=? LIMIT 1',(operation_id,state)).fetchone():return
+    db.execute("UPDATE sonarr_magnet_intents SET state='RELEASED',updated_at_ms=? "
+               "WHERE job_id IN (SELECT job_id FROM job_operation_members WHERE operation_id=?) "
+               "AND state<>'RELEASED'",(now,operation_id))
+
+
 class MagnetJournal:
     def __init__(self,database,*,clock=None):
         self.queue=JobQueue(database,clock=clock)
@@ -189,6 +204,15 @@ class MagnetJournal:
                 "SELECT 1 FROM acquisition_plans WHERE reservation_id=?",
                 (source.reservation_id,)).fetchone():
                 raise AcquisitionConflict()
+            # Older completed cleanups predate RELEASED magnet intents. Retire
+            # those claims here as well, without erasing the original journal.
+            conflict=db.execute("SELECT job_id FROM sonarr_magnet_intents "
+                                "WHERE info_hash=? AND state<>'RELEASED'",(source.info_hash,)).fetchone()
+            if conflict is not None:
+                owner=db.execute('SELECT operation_id FROM job_operation_members WHERE job_id=?',conflict).fetchone()
+                if owner is not None:release_cleaned(db,owner[0],now)
+                if db.execute("SELECT 1 FROM sonarr_magnet_intents WHERE info_hash=? AND state<>'RELEASED'",
+                              (source.info_hash,)).fetchone():raise AcquisitionConflict()
             marker=uuid.uuid4().hex
             target=DownloadOptions(options.base_url,
                 str(PurePosixPath(options.download_root)/('ad-'+marker)),
