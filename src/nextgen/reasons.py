@@ -61,6 +61,7 @@ _ENTRIES = (
     Reason('TORRENT_METADATA_UNAVAILABLE', 'The metadata source request failed or timed out before usable bytes were received.',
            'The torrent metadata source is temporarily unavailable.', 'The job can retry. Check the source connection if this continues.', 'WARNING', True),
     Reason('TORRENT_METADATA_WAITING', 'The source has no metainfo yet, is rate limited or requests a later check.',
+    Reason('TORRENT_METADATA_TIMEOUT','An admitted magnet did not provide metadata within ten minutes.','The torrent metadata timed out.','The worker will safely retire this candidate before trying the next release.','WARNING',False),
            'Waiting for torrent metadata.', 'The job will check the configured source again later.', 'INFO', None),
     Reason('TORRENT_METADATA_DENIED', 'The configured metainfo source returned an access denial.',
            'The torrent metadata source refused access.', 'Review the configured source and its access requirements.', 'WARNING', False),
