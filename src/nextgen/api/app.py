@@ -90,9 +90,21 @@ def normalize_webhook(body):
     digest=one(('torrent_infohash','info_hash','torrentHash','hash'),lower=True)
     if (len(title.encode('utf-8'))>1024 or any(ord(c)<32 or ord(c)==127 for c in title)
             or not re.fullmatch('[a-f0-9]{40}',digest)):raise ApiError(400,'API_WEBHOOK_INVALID')
-    # Persist ONLY the normalized release declaration; no credential, URL,
-    # source label, raw payload or self-declared verified identity is forwarded.
-    return json.dumps({'release_name':title,'torrent_infohash':digest},sort_keys=True).encode()
+    declaration={'release_name':title,'torrent_infohash':digest}
+    # Optional autobrr {{ .MagnetURI }}. It must bind the same hash; only
+    # xt/dn and plain public announce trackers survive sanitization.
+    # An unusable or mismatched magnet is dropped, never trusted; the
+    # acquisition then resolves the bare info hash instead.
+    from src.nextgen.acquisition.metadata import hash_magnet
+    for key in ('magnet_uri','magnet','magnetUri','MagnetURI'):
+        value=body.get(key)
+        cleaned=hash_magnet(digest,value.strip()) if type(value) is str and value.strip() else None
+        if cleaned is not None:
+            declaration['magnet_uri']=cleaned
+            break
+    # Persist ONLY the normalized release declaration; no credential, torrent
+    # URL, source label, raw payload or self-declared verified identity.
+    return json.dumps(declaration,sort_keys=True).encode()
 
 
 class Application:

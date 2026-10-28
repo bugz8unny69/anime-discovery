@@ -66,13 +66,64 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.secrets=SimpleNamespace(qbittorrent_credentials=lambda:Mock())
         self.identity=VerifiedEpisode(100,200,1,10)
 
-    async def test_unrelated_event_never_contacts_qbittorrent(self):
+    def _config(self,**extra):
+        values={'storage.database_path':'unused.sqlite',
+                'qbittorrent.base_url':'http://localhost:8080',
+                'storage.download_root':'/downloads',
+                'qbittorrent.category':'anime',
+                'qbittorrent.timeout_seconds':10,
+                'torrent_metadata.base_url':'',**extra}
+        return SimpleNamespace(claim=CLAIM,configuration=SimpleNamespace(value=values.__getitem__),
+                               cancelled=asyncio.Event())
+
+    async def test_webhook_event_with_configured_torrent_source_never_contacts_qbittorrent(self):
         factory=Mock()
         cb=make_bootstrap(self.secrets,client_factory=factory)
+        context=self._config(**{'torrent_metadata.base_url':'https://cache.example/torrents'})
         with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
                    return_value=None):
-            self.assertIsNone(await cb(self.source,self.context))
+            self.assertIsNone(await cb(self.source,context))
         factory.assert_not_called()
+
+    async def test_webhook_event_without_torrent_source_admits_its_own_magnet(self):
+        """Autobrr intake: no Sonarr search, no .torrent URL; Legacy magnet admission."""
+        root='/downloads/ad-'+'d'*32
+        options=DownloadOptions('http://localhost:8080',root,'anime',10)
+        from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
+        intent=MagnetIntent(4,21,HASH,'d'*32,options,4,'UNCERTAIN',
+                            _fingerprint(4,HASH,'d'*32,options,4))
+        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe.inspect.return_value=None
+        owned=Mock()
+        owned.inspect.return_value=None
+        journal=Mock()
+        journal.existing.return_value=None
+        journal.authorize.return_value=(intent,MagnetPermit(intent.fingerprint),())
+        journal.metadata_expired.return_value=False
+        search_factory=Mock(side_effect=AssertionError('must not search Sonarr'))
+        cb=make_bootstrap(self.secrets,client_factory=Mock(side_effect=[probe,owned]),
+                          journal_factory=lambda _:journal,sonarr_factory=search_factory)
+        with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
+                   return_value=None), \
+             patch('src.nextgen.acquisition.legacy_magnet.source_magnet',
+                   return_value=MAGNET+'&tr=udp%3A%2F%2Ftracker.example%3A1337%2Fannounce'):
+            outcome=await cb(self.source,self._config())
+        self.assertEqual((outcome.kind,outcome.reason_code),('defer','TORRENT_METADATA_WAITING'))
+        owned.add_legacy_magnet.assert_called_once()
+        self.assertTrue(owned.add_legacy_magnet.call_args.args[0].startswith(MAGNET))
+        search_factory.assert_not_called()
+
+    async def test_webhook_event_on_fetch_client_defers_to_metadata_reader(self):
+        probe=Mock(major=5,metadata_strategy='fetch')
+        journal=Mock()
+        journal.existing.return_value=None
+        cb=make_bootstrap(self.secrets,client_factory=Mock(return_value=probe),
+                          journal_factory=lambda _:journal)
+        with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
+                   return_value=None), \
+             patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET):
+            self.assertIsNone(await cb(self.source,self._config()))
+        journal.authorize.assert_not_called()
 
     async def test_restart_recovers_admitted_torrent_without_sonarr_search(self):
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint

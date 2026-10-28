@@ -11,7 +11,8 @@ _SEASON = re.compile(r'(?<![A-Za-z0-9])S(?P<season>\d{1,2})(?![A-Za-z0-9])|\bSea
 _PACK = re.compile(r'\b(?:Batch|Complete[ ._-]*Season|Season[ ._-]*Pack|Complete)\b', re.I)
 _SPECIAL = re.compile(r'\b(?:OVA|OAV|ONA|Specials?|NCOP|NCED|PV|Trailer|Recap|Movie|Extras?)\b', re.I)
 _RANGE = re.compile(r'(?<!\d)\d{1,4}\s*(?:-|~|&|\+|,|to)\s*(?:E(?:P)?\s*)?\d{1,4}(?!\d)', re.I)
-_REPEAT = re.compile(r'(?<![A-Za-z])E\d{1,4}[ ._-]*E\d{1,4}(?!\d)', re.I)
+# Concatenated episodes (S01E01E02); a dash is a range and handled by _RANGE.
+_REPEAT = re.compile(r'(?<![A-Za-z])E\d{1,4}[ ._]*E\d{1,4}(?!\d)', re.I)
 
 
 @dataclass(frozen=True)

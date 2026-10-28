@@ -23,9 +23,13 @@ class BatchHintsTests(unittest.TestCase):
         self.assertEqual(release_scope_hint('Show S02E03').episode_hint, 3)
 
     def test_ambiguous_and_special_titles_are_not_regular_episodes(self):
-        for title in ('Show S01E01 + S02E01', 'Show S01E01E02', 'Show S01E01-02'):
+        for title in ('Show S01E01 + S02E01', 'Show S01E01E02', 'Show S01E02-01'):
             with self.subTest(title=title):
                 self.assertEqual(release_scope_hint(title).kind, 'ambiguous')
+        # Season-scoped ranges route to batch verification (6eec137); the
+        # hash-verified per-file inventory decides the actual coverage.
+        hint=release_scope_hint('Show S01E01-02')
+        self.assertEqual((hint.kind,hint.season_hint,hint.episode_hint),('season_pack',1,1))
         self.assertEqual(release_scope_hint('Show S00E05 OVA').kind, 'special')
         self.assertEqual(release_scope_hint('Shiki OVA').kind, 'special')
 

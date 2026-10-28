@@ -60,9 +60,26 @@ def _fingerprint(event_id,hash_value,marker,options,api_major):
 
 
 def _verified_candidate(db,source):
-    """Only a dispatched, provider-verified Sonarr candidate may bootstrap."""
+    """The verified reservation that owns this magnet admission.
+
+    Sonarr-discovery events must match their dispatched, active candidate.
+    Ordinary webhook events (autobrr) are bound by their own ACTIVE exact
+    episode reservation, which _source() has already re-verified.
+    """
     if type(source) is not AcquisitionInput:
         raise AcquisitionConflict()
+    origin=db.execute("SELECT source FROM incoming_events WHERE event_id=?",
+                      (source.event_id,)).fetchone()
+    if origin is None:raise AcquisitionConflict()
+    if origin[0]!='sonarr-discovery':
+        rows=db.execute(
+            "SELECT plan_id,tvdb_episode FROM episode_reservations "
+            "WHERE reservation_id=? AND evaluation_job_id=? AND state='ACTIVE' "
+            "AND tvdb_season=? AND tvdb_episode=?",
+            (source.reservation_id,source.evaluation_job_id,
+             source.tvdb_season,source.tvdb_episode)).fetchall()
+        if len(rows)!=1:raise AcquisitionConflict()
+        return rows[0]
     rows=db.execute(
         "SELECT p.plan_id,c.tvdb_episode FROM incoming_events e "
         "JOIN jobs verification ON verification.event_id=e.event_id "
