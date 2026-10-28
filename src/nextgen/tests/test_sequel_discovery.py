@@ -30,6 +30,7 @@ class Delivery:
 class Provider:
     def __init__(self):
         self.queries = []
+        self.season_lookups = []
         self.candidates = {15105: ("Higurashi Sotsu",)}
         self.tvdb_titles = ("Higurashi Sotsu",)
 
@@ -38,10 +39,17 @@ class Provider:
         return self.candidates
 
     def anime(self, aid):
+        if aid == 17000:
+            return {"title": "Youjo Senki II", "titles": ("Youjo Senki II",)}
         return {"title": "Higurashi Sotsu", "titles": ("Higurashi Sotsu",)}
 
     def mapping(self, aid):
         return 12345
+
+    def season_entry(self, tid, season, episode=None):
+        self.season_lookups.append((tid, season, episode))
+        return 17000
+
 
     def series(self, tid, credentials):
         return {"titles": self.tvdb_titles, "animation": True, "live": False,
@@ -101,6 +109,48 @@ class SequelDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         provider.tvdb_titles = ("A Different Show",)
         with self.assertRaises(IdentityConflict):
             await self.identify(RELEASE, provider)
+
+    async def test_plain_s02_title_uses_anime_lists_season_entry(self):
+        # No "| Sequel" suffix: identify the base series, then take its season 2 entry.
+        provider = Provider()
+        provider.candidates = {15105: ("Saga of Tanya the Evil",)}
+        provider.anime = lambda aid: ({"title": "Youjo Senki II", "titles": ("Youjo Senki II",)}
+            if aid == 17000 else {"title": "Youjo Senki", "titles": ("Youjo Senki", "Saga of Tanya the Evil")})
+        provider.tvdb_titles = ("Saga of Tanya the Evil",)
+        result, trace = await self.identify(
+            "Saga of Tanya the Evil S02E08 Torpedo Strike 1080p CR WEB-DL DUAL AAC2.0 H.264-VARYG "
+            "(Youjo Senki II, Dual-Audio, Multi-Subs)", provider)
+        self.assertEqual(provider.queries, [("Saga of Tanya the Evil",)])
+        self.assertEqual(provider.season_lookups, [(12345, 2, 8)])
+        self.assertEqual(result["anime"], {"anidb_id": 17000, "tvdb_series_id": 12345,
+                                           "title": "Youjo Senki II"})
+        self.assertIn({"step": "season_scope", "status": "passed",
+                       "note": "base_series_season_lookup"}, trace["checks"])
+
+    async def test_season_lookup_still_requires_base_title_agreement(self):
+        provider = Provider()
+        provider.candidates = {15105: ("Saga of Tanya the Evil",)}
+        provider.anime = lambda aid: {"title": "Youjo Senki", "titles": ("Saga of Tanya the Evil",)}
+        provider.tvdb_titles = ("A Different Show",)
+        with self.assertRaises(IdentityConflict):
+            await self.identify("Saga of Tanya the Evil S02E08 1080p", provider)
+
+    def test_anime_lists_season_entry_selection(self):
+        from src.nextgen.providers.parsing import season_entry
+        payload = (b'<anime-list>'
+            b'<anime anidbid="100" tvdbid="5" defaulttvdbseason="1"/>'
+            b'<anime anidbid="200" tvdbid="5" defaulttvdbseason="2"/>'
+            b'<anime anidbid="201" tvdbid="5" defaulttvdbseason="2" episodeoffset="12"/>'
+            b'<anime anidbid="300" tvdbid="5" defaulttvdbseason="a"/>'
+            b'<anime anidbid="400" tvdbid="6" defaulttvdbseason="2"/>'
+            b'</anime-list>')
+        self.assertEqual(season_entry(payload, 5, 2, 8), 200)    # first cour
+        self.assertEqual(season_entry(payload, 5, 2, 15), 201)   # split second cour
+        self.assertEqual(season_entry(payload, 6, 2), 400)
+        with self.assertRaises(IdentityNotReady):
+            season_entry(payload, 5, 3, 1)
+        with self.assertRaises(IdentityConflict):
+            season_entry(payload.replace(b'episodeoffset="12"', b''), 5, 2, 8)
 
     def test_no_distinct_sequel_title_is_not_first_season_proof(self):
         self.assertIsNone(explicit_sequel_alias(

@@ -39,6 +39,9 @@ class AniDBFirstResolverTests(unittest.IsolatedAsyncioTestCase):
             def mapping(self,aid):
                 owner.calls.append("mapping")
                 return 456
+            def season_entry(self,tid,season,episode=None):
+                owner.calls.append("season_entry")
+                raise IdentityNotReady()  # anime-lists has no entry for that season
             def series(self,tid,credentials):
                 owner.calls.append("tvdb")
                 return {"tvdb_series_id":tid,"titles":("Test Anime",),"animation":True,"live":False,"anidb_ids":frozenset({123})}
@@ -68,8 +71,11 @@ class AniDBFirstResolverTests(unittest.IsolatedAsyncioTestCase):
                 await self.resolve(self.request,self.configuration,self.cancelled)
 
     async def test_explicit_later_season_and_cancellation_do_not_approve_first_entry(self):
+        # S02 never inherits the Season 1 entry: without an anime-lists season entry it stops.
         request = replace(self.request,raw_body=b'{"release_name":"Test Anime S02E01"}')
         with self.assertRaises(IdentityNotReady): await self.resolve(request,self.configuration,self.cancelled)
+        self.assertEqual(self.calls,["anidb_titles","anidb_http","mapping","season_entry"])
+        self.calls.clear()
         self.cancelled.set()
         with self.assertRaises(IdentityNotReady): await self.resolve(self.request,self.configuration,self.cancelled)
         self.assertEqual(self.calls,[])

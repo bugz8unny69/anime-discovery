@@ -64,11 +64,16 @@ class IdentifyAnimeJobTests(unittest.IsolatedAsyncioTestCase):
         from src.nextgen.providers.http import Credentials, Options
         name = "[Dyna] Higurashi When They Cry S02 - 01 [Dual Audio]"
         _, job = self.enqueue(raw_body=json.dumps({"release_name": name}).encode())
-        def no_provider(*args, **kwargs):
-            self.fail("Unverified Season 2 must not be guessed from Season 1 providers")
+        from src.nextgen.storage.sqlite import IdentityNotReady
+        class NoSeasonEntry:
+            # Season 1 resolves, but anime-lists records no Season 2 entry.
+            def title_candidates(self, aliases): return {15100: ("Higurashi When They Cry",)}
+            def anime(self, aid): return {"anidb_id": aid, "title": "Higurashi", "titles": ("Higurashi When They Cry",)}
+            def mapping(self, aid): return 80000
+            def season_entry(self, tid, season, episode=None): raise IdentityNotReady()
         resolver = make_resolver(Options("registeredclient", 1),
                                  lambda: Credentials("private-tvdb-test-key"),
-                                 client_factory=no_provider)
+                                 client_factory=lambda *args: NoSeasonEntry())
         worker = self.worker(registration(resolver))
         self.assertTrue(await worker.attempt())
         self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE job_id=?",(job,)),
@@ -79,10 +84,10 @@ class IdentifyAnimeJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(details["attempt"],1)
         trace = details["matching"]
         self.assertEqual(trace["season"],2)
-        self.assertIsNone(trace["selected_anidb_id"])
-        self.assertIsNone(trace["selected_tvdb_id"])
-        self.assertIn({"step":"season_scope","status":"failed","note":"unverified_sequel"},trace["checks"])
-        self.assertFalse(trace["anidb_candidates"])
+        # Season 1's entry is never approved for Season 2.
+        self.assertIn({"step":"season_scope","status":"passed","note":"base_series_season_lookup"},trace["checks"])
+        self.assertIn("anime_lists",[c["step"] for c in trace["checks"] if c["status"]=="failed"])
+        self.assertNotIn("identity_verified",[c["step"] for c in trace["checks"] if c["status"]=="passed"])
         self.assertNotIn("private-tvdb-test-key",record[0][0])
         self.assertNotIn("webhook_token",record[0][0])
 

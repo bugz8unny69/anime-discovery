@@ -118,6 +118,28 @@ def mapping_id(payload, aid):
     return positive_text(value)
 
 
+def season_entry(payload, tid, season, episode=None):
+    """AniDB entry that anime-lists records as TVDB season N of series tid.
+
+    A split season has several entries; the one whose episode offset is the
+    largest below the episode number covers it. Release verification still
+    proves the exact episode mapping before anything is downloaded.
+    """
+    root = xml(payload,"anime-list",limit=16777216)
+    rows = []
+    for node in root.findall("anime"):
+        if node.get("tvdbid")!=str(tid) or node.get("defaulttvdbseason")!=str(season): continue
+        aid, offset = node.get("anidbid") or "", node.get("episodeoffset") or "0"
+        if re.fullmatch(r"[1-9][0-9]{0,9}",aid) and re.fullmatch(r"-?[0-9]{1,5}",offset):
+            rows.append((int(offset),int(aid)))
+    if episode is not None: rows = [row for row in rows if row[0]<episode]
+    if not rows: raise IdentityNotReady()
+    best = max(offset for offset,_ in rows)
+    picked = [aid for offset,aid in rows if offset==best]
+    if len(picked)!=1: raise IdentityConflict()
+    return picked[0]
+
+
 def anime_record(payload, aid):
     root = xml(payload,"anime",limit=4194304)
     if root.get("id")!=str(aid): raise ProviderInvalidResponse()
