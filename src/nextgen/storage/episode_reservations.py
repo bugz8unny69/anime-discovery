@@ -103,6 +103,30 @@ def published(db,owner_job_id):
         "AND s.state='PUBLISHED'",(owner_job_id,)).fetchone() is not None
 
 
+def wake_waiters(db,reservation_id,now,*,component='worker'):
+    """A released episode slot lets held duplicates of that episode try again."""
+    if not db.in_transaction:raise ValueError('reservation transaction required')
+    row=db.execute("SELECT anidb_id,anidb_episode_id,tvdb_series_id,tvdb_season,tvdb_episode,"
+        "tvdb_episode_id FROM episode_reservations WHERE reservation_id=?",(reservation_id,)).fetchone()
+    if row is None:return ()
+    records=[]
+    waiters=db.execute("SELECT j.job_id,j.event_id,json_extract(j.payload_json,'$.evaluation_job_id'),j.attempt_count "
+        "FROM jobs j JOIN job_operation_members m USING(job_id) JOIN job_operations o USING(operation_id) "
+        "WHERE j.kind='RESERVE_EPISODE' AND j.state='ON_HOLD' AND j.last_reason_code='EPISODE_RESERVED' "
+        "AND o.state='ACTIVE'").fetchall()
+    for job,event,evaluation,attempt in waiters:
+        try:value=_facts(db,evaluation,event)
+        except ReservationConflict:continue
+        if not value.selected or (value.anidb_id,value.anidb_episode_id,value.tvdb_series_id,
+                value.tvdb_season,value.tvdb_episode,value.tvdb_episode_id)!=row:continue
+        db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,updated_at_ms=?,last_reason_code=NULL,"
+            "activity_code=NULL WHERE job_id=? AND state='ON_HOLD'",(now,now,job))
+        records.append(append_job_history(db,job_id=job,event_code='RETRY_SCHEDULED',
+            reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,
+            occurred_at_ms=now,details={'attempt':attempt}))
+    return tuple(records)
+
+
 def skip_staged_waiters(db,plan_id,now):
     """Close only verified, held competitors in the staging completion transaction.
 

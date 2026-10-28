@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import sqlite3
 import unittest
 
-from src.nextgen.acquisition.submission import Observation
+from src.nextgen.acquisition.submission import Observation, TorrentFile
 from src.nextgen.cancellation import CancellationError
 from src.nextgen.cancellation_service import CancellationService
 
@@ -79,6 +79,24 @@ class PreManifestCleanupTests(unittest.TestCase):
         with patch.object(CancellationService,'_empty_magnet_root',return_value=True):
             self.assertEqual(self.service._pre_manifest(7),({4},True))
         self.client.remove_empty_legacy_magnet.assert_called_once()
+
+    def test_owned_stopped_magnet_with_files_is_removed_with_its_files(self):
+        # e.g. stopped after metadata because it exceeded the size limit
+        self.db.execute("UPDATE sonarr_magnet_intents SET state='OWNED_STOPPED'")
+        self.db.commit()
+        self.client.inspect.return_value=self.observed(files=(TorrentFile(0,'episode.mkv',1000),))
+        self.client.remove_empty_legacy_magnet.return_value=True
+        with patch.object(CancellationService,'_empty_magnet_root',return_value=False):
+            self.assertEqual(self.service._pre_manifest(7),({4},True))
+        self.client.remove_empty_legacy_magnet.assert_called_once()
+        self.assertTrue(self.client.remove_empty_legacy_magnet.call_args.kwargs['with_files'])
+
+    def test_uncertain_magnet_with_files_is_never_removed(self):
+        self.client.inspect.return_value=self.observed(files=(TorrentFile(0,'episode.mkv',1000),))
+        with patch.object(CancellationService,'_empty_magnet_root',return_value=True):
+            with self.assertRaises(CancellationError):
+                self.service._pre_manifest(7)
+        self.client.remove_empty_legacy_magnet.assert_not_called()
 
     def test_foreign_torrent_never_receives_remove_command(self):
         self.client.inspect.return_value=self.observed(tags=('ad-'+'d'*32,))

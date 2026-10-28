@@ -412,7 +412,7 @@ class Client:
         return self.inspect_legacy_metadata(intent.info_hash,intent.marker,
                                             intent.options.download_root)
 
-    def remove_empty_legacy_magnet(self,intent):
+    def remove_empty_legacy_magnet(self,intent,*,with_files=False):
         """Retire only the exact owned, stopped, metadata-less admission.
 
         The cancellation service records its one-shot intent *before* calling
@@ -423,7 +423,7 @@ class Client:
                 or self.protocol is None):
             raise ClientInvalid()
         observed=self.inspect(intent.info_hash)
-        if (observed is None or observed.files
+        if (observed is None or observed.files and not with_files
                 or observed.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
                 or observed.save_path.rstrip('/')!=intent.options.download_root
                 or observed.category!=intent.options.category
@@ -433,7 +433,7 @@ class Client:
                        for t in observed.tags)):
             raise ClientInvalid()
         self._request('torrents/delete',
-                      form={'hashes':intent.info_hash,'deleteFiles':'false'},
+                      form={'hashes':intent.info_hash,'deleteFiles':'true' if with_files else 'false'},
                       limit=4096)
         return self.inspect(intent.info_hash) is None
 

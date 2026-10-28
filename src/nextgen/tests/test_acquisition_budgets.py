@@ -42,8 +42,10 @@ class AcquisitionBudgetTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):await worker.attempt()
         await asyncio.gather(worker.attempt(),worker.attempt())
         self.assertEqual(self.rows('SELECT count(*),sum(selected_size_bytes) FROM acquisition_plans'),[(1,700000)])
+        # The over-budget copy is canceled automatically so another release can take the episode.
         self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind='PREPARE_ACQUISITION' ORDER BY state"),
-                         [('DONE',None),('NEEDS_REVIEW','ACQUISITION_SIZE_LIMIT')])
+                         [('CANCELED','JOB_CANCELED'),('DONE',None)])
+        self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE reason_code='ACQUISITION_SIZE_LIMIT'"),[(1,)])
         self.assertEqual(self.rows('SELECT max_episode_bytes,max_plan_bytes FROM acquisition_budgets'),[(1000000,1000000)])
 
     async def test_existing_budget_retains_captured_limits_after_live_settings_change(self):
