@@ -95,9 +95,6 @@ def parser():
         if name=='init':
             command.add_argument('--database',required=True,help='New SQLite file on local storage.')
             command.add_argument('--settings-file',help='JSON settings object without credentials.')
-        if name=='worker':
-            command.add_argument('--sonarr-acquire',action='store_true',help=argparse.SUPPRESS)
-            # Compatibility only: Sonarr acquisition runs by default without this flag.
         if name=='check':command.add_argument('--worker',action='store_true')
         if name=='config-upgrade':command.add_argument('--fingerprint',required=True)
         if name=='database-upgrade':command.add_argument('--plan-token',required=True)

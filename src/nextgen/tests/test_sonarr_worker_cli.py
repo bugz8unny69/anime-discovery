@@ -2,27 +2,15 @@
 import unittest
 from unittest.mock import patch
 
-from src.nextgen.__main__ import main
+from src.nextgen.__main__ import main, parser
 
 
 class SonarrWorkerCliTests(unittest.TestCase):
-    def test_existing_sonarr_flag_remains_compatible(self):
-        calls = []
-
-        async def serve(config_dir, **options):
-            calls.append((config_dir, options))
-
-        with patch('src.nextgen.__main__.check_local'), patch(
-            'src.nextgen.providers.configuration.run_identity_worker', new=serve
-        ):
-            self.assertEqual(main(['worker', '--config-dir', '/test/config',
-                                   '--sonarr-acquire']), 0)
-
-        self.assertEqual(calls, [('/test/config', {
-            'sonarr_backfill': True,
-            'sonarr_select': True,
-            'sonarr_acquire': True,
-        })])
+    def test_sonarr_acquisition_flag_is_not_supported(self):
+        with self.assertRaises(SystemExit) as error:
+            parser().parse_args(['worker', '--config-dir', '/test/config',
+                                 '--sonarr-acquire'])
+        self.assertEqual(error.exception.code, 2)
 
     def test_default_worker_enables_sonarr_acquisition(self):
         calls = []
