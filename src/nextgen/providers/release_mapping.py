@@ -12,7 +12,14 @@ from src.nextgen.release_contracts import ReleaseNotReady, ReleaseConflict
 
 def declared_episode(title):
     if type(title) is not str or not 1<=len(title)<=2048: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    if re.search(r"\b(?:batch|complete|pack|ova|oav|ona|specials?|ncop|nced|pv|trailer|movie|recap|extras?)\b",title,re.I):
+    # An alternate title in parentheses can contain words like "Special"
+    # ("(A Returner's Magic Should Be Special)"); it is a name, not a release type.
+    from src.nextgen.providers.parsing import release_title
+    try:names,_=release_title(title)
+    except (ValueError,TypeError):names=[]
+    scan=title
+    for name in names:scan=scan.replace("("+name+")"," ")
+    if re.search(r"\b(?:batch|complete|pack|ova|oav|ona|specials?|ncop|nced|pv|trailer|movie|recap|extras?)\b",scan,re.I):
         raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
     if re.search(r"\d\s*(?:-|~|&|\+|,)\s*(?:E(?:P)?\s*)?\d",title,re.I):
         raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
