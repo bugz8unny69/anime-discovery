@@ -288,7 +288,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
 class RegisterSeriesTests(unittest.TestCase):
     """register_series reuses the Keep Sonarr client: unmonitored, no searches."""
-    def run_register(self, *, present=False, add_fails=False):
+    def run_register(self, *, present=False, add_fails=False, profile_id=1, profiles=({'id': 1},)):
         import io
         from urllib.parse import urlsplit
         from src.nextgen.jobs.discover_sonarr_backfill_job import register_series
@@ -307,13 +307,13 @@ class RegisterSeriesTests(unittest.TestCase):
                 if add_fails: raise sonarr.KeepReview()
                 return Response({'id': 31})
             if path == 'series': return Response([{'id': 31, 'tvdbId': 456}] if state['present'] else [])
-            if path == 'qualityprofile': return Response([{'id': 1}])
+            if path == 'qualityprofile': return Response(list(profiles))
             if path == 'rootfolder': return Response([{'path': '/library'}])
             if path == 'series/lookup': return Response([{'tvdbId': 456, 'title': 'Test Anime', 'id': 0}])
             raise AssertionError(path)
         values = {'sonarr.base_url': 'http://sonarr.invalid', 'storage.keep_root': '/keep',
                   'sonarr.staging_root': '', 'sonarr.library_root': '/library',
-                  'sonarr.quality_profile_id': 1, 'sonarr.timeout_seconds': 30}
+                  'sonarr.quality_profile_id': profile_id, 'sonarr.timeout_seconds': 30}
         class Config:
             def value(self, key): return values[key]
         class Secrets:
@@ -332,6 +332,19 @@ class RegisterSeriesTests(unittest.TestCase):
                                               'searchForCutoffUnmetEpisodes': False})
         self.assertEqual((body['tvdbId'], body['rootFolderPath'], body['qualityProfileId']),
                          (456, '/library', 1))
+
+    def test_unset_profile_uses_lowest_existing_sonarr_profile(self):
+        sent = self.run_register(profile_id=0, profiles=({'id': 6}, {'id': 2}, {'id': 4}))
+        self.assertEqual(sent[0][2]['qualityProfileId'], 2)
+
+    def test_configured_profile_still_wins(self):
+        sent = self.run_register(profile_id=4, profiles=({'id': 2}, {'id': 4}))
+        self.assertEqual(sent[0][2]['qualityProfileId'], 4)
+
+    def test_no_sonarr_profiles_is_a_configuration_review(self):
+        from src.nextgen import sonarr
+        with self.assertRaises(sonarr.KeepConfiguration):
+            self.run_register(profile_id=0, profiles=())
 
     def test_existing_series_is_never_modified(self):
         self.assertEqual(self.run_register(present=True), [])
