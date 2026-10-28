@@ -11,9 +11,11 @@ the qBittorrent adapter (including 4.2.x metadata handling), recovery without
 duplicate submission, automatic cleanup after terminal candidate failure, and
 ranked fallback after cleanup and reservation release.
 
-The existing worker supports `python -m src.nextgen worker --sonarr-acquire`,
-and its example systemd unit enables that path. The implementation checkpoint
-is `docs/nextgen-sonarr-acquisition-status.md`.
+The normal `python -m src.nextgen worker --config-dir ...` startup
+already enables Sonarr backfill, selection and acquisition. The sample systemd
+unit uses this command without a feature flag. The obsolete hidden
+`--sonarr-acquire` switch has been removed in this PR. The implementation
+checkpoint is `docs/nextgen-sonarr-acquisition-status.md`.
 
 **Implemented does not mean verified.** That checkpoint says its offline
 regression tests were written but not executed; it does not establish a
@@ -21,8 +23,9 @@ successful end-to-end acquisition.
 
 ## Complete in this PR
 
-- [ ] Confirm the deployed worker's `--sonarr-acquire` path uses the existing
-  Sonarr discovery, selection, and qBittorrent acquisition registrations.
+- [x] Static code review: normal worker startup registers Sonarr discovery,
+  selection and acquisition without a flag; sample systemd unit matches.
+  Actual deployment and runtime behavior remain unverified.
 - [ ] Run the existing **offline** Sonarr → qBittorrent tests; repair actual
   failures, without adding extra architecture.
 - [ ] Verify offline that a ranked Sonarr candidate is selected, handed to the
