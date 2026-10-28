@@ -181,3 +181,45 @@ def schedule_after_cleanup(db,operation_id):
         component='worker',event_id=parent_event,
         created_by_job_id=parent_job)
     return (receipt,)
+
+
+def auto_cleanup_failed_candidate(db,claim):
+    """Enqueue the EXISTING cancellation worker for a failed Sonarr attempt.
+
+    Called by the normal worker transition after the failing job has become
+    NEEDS_REVIEW. The rejected candidate owns its own operation; siblings and
+    the backfill discovery worker are not canceled. Ordinary jobs are untouched.
+    """
+    if not db.in_transaction or claim.event_id is None:return ()
+    row=db.execute(
+        "SELECT c.state FROM incoming_events e "
+        "JOIN jobs verify ON verify.event_id=e.event_id "
+        "AND verify.kind='VERIFY_RELEASE' "
+        "JOIN jobs parent ON parent.job_id=verify.created_by_job_id "
+        "AND parent.kind='DISCOVER_SONARR_BACKFILL' "
+        "JOIN trial_plans p ON p.plan_id=json_extract(parent.payload_json,'$.plan_id') "
+        "JOIN sonarr_episode_selections s ON s.plan_id=p.plan_id "
+        "JOIN sonarr_episode_candidates c ON c.plan_id=s.plan_id "
+        "AND c.tvdb_episode=s.tvdb_episode AND c.info_hash=s.info_hash "
+        "WHERE e.event_id=? AND e.source='sonarr-discovery' "
+        "AND s.info_hash=json_extract(CAST(e.raw_body AS TEXT),'$.torrent_infohash')",
+        (claim.event_id,)).fetchall()
+    if row!=[('ACTIVE',)]:return ()
+    from src.nextgen.storage.cancellation import CancellationStore,operation
+    from src.nextgen.storage.sqlite import enqueue_job_with_receipt
+    op=operation(db,claim.job_id)
+    if op[1]!='ACTIVE':return ()
+    if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? "
+                  "AND action='CLEANUP'",(op[0],)).fetchone():return ()
+    # This is the same cancellation transition and control job used by the
+    # manual UI. Only its *trigger* differs. No new worker/cleanup path.
+    canceled,records=CancellationStore('').request_in_transaction(
+        db,claim.job_id)
+    now=__import__('time').time_ns()//1000000
+    control,created=enqueue_job_with_receipt(
+        db,component='worker',kind='CLEANUP_CANCELED_OPERATION',
+        event_id=claim.event_id,payload={'target_job_id':claim.job_id},
+        available_at_ms=now)
+    db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',
+               (canceled,'CLEANUP',claim.job_id,control,now))
+    return (*records,created)
