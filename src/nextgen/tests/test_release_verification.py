@@ -12,6 +12,7 @@ from src.nextgen.jobs.verify_release_job import registration
 from src.nextgen.providers.errors import ProviderInvalidResponse
 from src.nextgen.providers.http import Options, Credentials
 from src.nextgen.providers.release_mapping import declared_episode, forward_mappings
+from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.providers.releases import make_verifier
 from src.nextgen.release_contracts import VerifiedRelease, ReleaseInput, ReleaseNotReady, ReleaseConflict
 from src.nextgen.storage.job_queue import LeaseLost
@@ -52,6 +53,23 @@ class ReleaseMappingTests(unittest.TestCase):
         # A missing default season is still not proof of mapping.
         no_season=b'<anime-list><anime anidbid="123" tvdbid="456"/></anime-list>'
         self.assertEqual(forward_mappings(no_season,123,456,{1:987}),{})
+
+    def test_one_piece_1157_open_ended_tvdb_range(self):
+        # Anime-Lists: AniDB 69 uses absolute numbering; TMDB rows are separate.
+        mapping=(b'<anime-list><anime anidbid="69" tvdbid="81797" defaulttvdbseason="a">'
+                 b'<mapping-list>'
+                 b'<mapping anidbseason="1" tmdbseason="22" start="1089" end="1155" offset="-1088"/>'
+                 b'<mapping anidbseason="1" tvdbseason="22" start="1086" end="1155" offset="-1085"/>'
+                 b'<mapping anidbseason="1" tvdbseason="23" start="1156" offset="-1155"/>'
+                 b'</mapping-list></anime></anime-list>')
+        self.assertEqual(forward_mappings(mapping,69,81797,{1155:501,1156:502,1157:503}),
+                         {1155:(22,70),1156:(23,1),1157:(23,2)})
+
+    def test_soul_eater_range_is_a_season_pack_hint(self):
+        hint=release_scope_hint('[figged] Soul Eater S01 E27-E51 (BluRay 720p)')
+        self.assertEqual((hint.kind,hint.season_hint,hint.episode_hint),('season_pack',1,27))
+        self.assertEqual(release_scope_hint('Show S01E27').kind,'single_episode')
+        self.assertEqual(release_scope_hint('Show S01E51-E27').kind,'ambiguous')
 
     def test_explicit_offset_remap_and_season_zero_supported_without_guessing(self):
         self.assertEqual(forward_mappings(MAPPING,123,456,{1:987,2:988}),{1:(2,13),2:(2,14)})
@@ -126,6 +144,15 @@ class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
                 self.client.episode_page=lambda *args:(((100,2,13),),False)
                 with self.assertRaises(ReleaseNotReady):
                     await self.verify(release,self.configuration,self.cancelled)
+
+    async def test_soul_eater_range_uses_batch_verifier_not_single_episode_parser(self):
+        async def existing_batch(source,configuration,cancelled):
+            return 'batch handler called'
+        verifier=make_verifier(Options('registeredclient',1),lambda:Credentials('private-key'),
+                               client_factory=lambda *args:self.client,batch_verifier=existing_batch)
+        release=replace(self.source,raw_body=b'{"release_name":"[figged] Soul Eater S01 E27-E51 (BluRay 720p)"}')
+        self.assertEqual(await verifier(release,self.configuration,self.cancelled),
+                         'batch handler called')
 
     async def test_reverse_offset_uses_exact_anidb_id_and_tvdb_record(self):
         value=await self.verify(self.source,self.configuration,self.cancelled)
