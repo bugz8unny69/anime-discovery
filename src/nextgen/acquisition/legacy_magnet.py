@@ -130,6 +130,11 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
         except (MetadataInvalid,AcquisitionConflict,SizeLimitExceeded,
                 SizeEvidenceMissing,SourceMissing) as exc:
+            # Same safe traceback (line numbers only) to locate the failed check.
+            exception(context.logger,'OPERATION_FAILED',exc,level=logging.WARNING,
+                      reason_code=exc.reason_code,component='worker',
+                      job_id=context.claim.job_id,event_id=context.claim.event_id,
+                      attempt=context.claim.attempt)
             return Outcome('review',exc.reason_code)
         except (ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,
                 DownloadConfigurationError) as exc:
