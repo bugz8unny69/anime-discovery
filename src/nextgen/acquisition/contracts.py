@@ -17,11 +17,14 @@ class AcquisitionInput:
     tvdb_season: int
     tvdb_episode: int
     title: str = field(repr=False)
+    release_titles: tuple[str,...] = field(default=(),repr=False)
     def __post_init__(self):
         for name in ('reservation_id','reservation_job_id','evaluation_job_id','event_id','anidb_episode_number','tvdb_episode'):
             integer(getattr(self,name),positive=True)
         integer(self.tvdb_season)
         if infohash(self.info_hash)!=self.info_hash:raise ValueError('noncanonical torrent identity')
+        if type(self.release_titles) is not tuple or any(type(t) is not str or not t.strip() for t in self.release_titles):
+            raise ValueError('invalid verified release titles')
 
 
 @dataclass(frozen=True)
