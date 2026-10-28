@@ -128,6 +128,37 @@ class StagingPublicationTests(unittest.TestCase):
         with self.assertRaises(StagingReview):self.publisher.publish(self.plan)
         self.assertEqual(target.stat().st_ino,inode)
 
+    def test_cleanup_retry_allows_source_permission_repair_without_recopy(self):
+        from unittest.mock import patch
+        from src.nextgen import staging
+        real_signature=staging.signature
+        source_inode=self.file.stat().st_ino
+        def other_device(info):
+            value=real_signature(info)
+            return (value[0]+1,*value[1:]) if value[1]==source_inode else value
+        self.plan['source']['file'][0]+=1
+        with patch('src.nextgen.staging.signature',side_effect=other_device):
+            with patch.object(self.publisher,'_remove_source',side_effect=PermissionError('delete denied')):
+                with self.assertRaises(PermissionError):self.publisher.publish(self.plan)
+            target_inode=self.video().stat().st_ino
+            # chmod/ACL repair changes ctime, but leaves video bytes/mtime alone.
+            self.file.chmod(0o660)
+            self.assertEqual(self.file.stat().st_mtime_ns,self.plan['source']['file'][3])
+            self.assertNotEqual(self.file.stat().st_ctime_ns,self.plan['source']['file'][4])
+            with patch.object(self.publisher,'_copy',side_effect=AssertionError('must reuse published files')):
+                receipts=self.publisher.publish(self.plan)
+        self.assertEqual(len(receipts),3)
+        self.assertEqual(self.video().stat().st_ino,target_inode)
+        self.assertFalse(self.file.exists())
+
+    def test_cleanup_still_rejects_source_modification(self):
+        self.file.write_bytes(b'y'*100)
+        self.file.chmod(0o660)
+        expected=self.plan['source']['file']
+        os.utime(self.file,ns=(expected[3]+1000000,expected[3]+1000000))
+        with self.assertRaises(StagingReview):self.publisher._remove_source(self.plan)
+        self.assertTrue(self.file.exists())
+
     def test_changed_source_and_destination_are_preserved_for_review(self):
         self.file.write_bytes(b'y'*100)
         with self.assertRaises(StagingReview):self.publisher.publish(self.plan)

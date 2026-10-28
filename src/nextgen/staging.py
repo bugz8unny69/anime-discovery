@@ -175,7 +175,9 @@ class Publisher:
             with parent(root,plan['source']['path']) as (folder,name):
                 try:info=signature(os.stat(name,dir_fd=folder,follow_symlinks=False))
                 except FileNotFoundError:return
-                if list(info)!=plan['source']['file']:raise StagingReview()
+                # Permission/ACL repairs change ctime. After publication,
+                # cleanup needs the same inode, size and content mtime.
+                if list(info[:4])!=plan['source']['file'][:4]:raise StagingReview()
                 self.guard();os.unlink(name,dir_fd=folder);os.fsync(folder)
 
     def _copy(self,plan,entry,fd):
