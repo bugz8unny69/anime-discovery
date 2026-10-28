@@ -139,6 +139,31 @@ class FallbackWiringTests(unittest.TestCase):
             "SELECT state FROM sonarr_episode_candidates ORDER BY rank").fetchall(),
             [('FAILED',),('READY',)])
 
+    def test_oversized_webhook_release_enqueues_existing_cleanup(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from src.nextgen.storage.sonarr_candidates import auto_cleanup_oversized
+        self.db.executescript("""
+            CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
+            CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,last_reason_code TEXT);
+            INSERT INTO incoming_events VALUES(25,'autobrr','{}');
+            INSERT INTO incoming_events VALUES(26,'sonarr-discovery','{}');
+            INSERT INTO jobs VALUES(12,25,'PREPARE_ACQUISITION','ACQUISITION_SIZE_LIMIT');
+            INSERT INTO jobs VALUES(13,25,'PREPARE_ACQUISITION','ACQUISITION_METADATA_INVALID');
+            INSERT INTO jobs VALUES(14,26,'PREPARE_ACQUISITION','ACQUISITION_SIZE_LIMIT');
+        """)
+        with patch('src.nextgen.storage.sonarr_candidates.request_automatic_cleanup',
+                   return_value=('cleanup',)) as cleanup:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                self.assertEqual(auto_cleanup_oversized(self.db,SimpleNamespace(
+                    job_id=12,event_id=25,kind='PREPARE_ACQUISITION')),('cleanup',))
+                # Other reviews, and Sonarr candidates (own fallback), are untouched.
+                for job,event in ((13,25),(14,26)):
+                    self.assertEqual(auto_cleanup_oversized(self.db,SimpleNamespace(
+                        job_id=job,event_id=event,kind='PREPARE_ACQUISITION')),())
+        cleanup.assert_called_once()
+
     def test_failed_sonarr_job_enqueues_existing_cleanup_automatically(self):
         from types import SimpleNamespace
         from unittest.mock import patch

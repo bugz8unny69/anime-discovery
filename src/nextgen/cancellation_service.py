@@ -118,6 +118,9 @@ class CancellationService(OwnedCleanup):
                     raise CancellationError()
                 settled.add(intent.event_id)
                 continue
+            # A journal-proven OWNED_STOPPED admission (e.g. stopped over the size
+            # limit) has its file list; its isolated root holds only its own files.
+            owned_files=bool(observed.files) and intent.state=='OWNED_STOPPED'
             if (observed.info_hash!=intent.info_hash
                     or observed.save_path.rstrip('/')!=intent.options.download_root
                     or observed.category!=intent.options.category
@@ -125,9 +128,9 @@ class CancellationService(OwnedCleanup):
                     or 'ad-'+intent.marker not in observed.tags
                     or any(t.startswith('ad-') and t!='ad-'+intent.marker
                            for t in observed.tags)
-                    or observed.files
-                    or not self._empty_magnet_root(intent.options.download_root,
-                                                   intent.marker)):
+                    or observed.files and not owned_files
+                    or not owned_files and not self._empty_magnet_root(
+                        intent.options.download_root,intent.marker)):
                 raise CancellationError()
             # REVIEW means an earlier command was uncertain or ownership was
             # disputed; never send a second destructive request on replay.
@@ -141,7 +144,7 @@ class CancellationService(OwnedCleanup):
                 if changed!=1:raise CancellationError()
             if observed.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
                 client.stop_legacy_metadata(intent)
-            if not client.remove_empty_legacy_magnet(intent):
+            if not client.remove_empty_legacy_magnet(intent,with_files=owned_files):
                 return settled,False
             settled.add(intent.event_id)
         return settled,True

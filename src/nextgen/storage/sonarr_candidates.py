@@ -223,6 +223,25 @@ def auto_cleanup_failed_candidate(db,claim):
         "AND s.info_hash=json_extract(CAST(e.raw_body AS TEXT),'$.torrent_infohash')",
         (claim.job_id,claim.event_id)).fetchall()
     if row!=[('ACTIVE',)]:return ()
+    return request_automatic_cleanup(db,claim)
+
+
+def auto_cleanup_oversized(db,claim):
+    """A webhook release over the size limit gives its episode to the next copy.
+
+    Same cancellation and cleanup as above; released reservations wake held
+    duplicates of the episode. Sonarr candidates are handled above.
+    """
+    if (not db.in_transaction or claim.event_id is None or claim.kind!='PREPARE_ACQUISITION'
+            or db.execute('SELECT last_reason_code FROM jobs WHERE job_id=?',
+                          (claim.job_id,)).fetchone()!=('ACQUISITION_SIZE_LIMIT',)
+            or db.execute("SELECT 1 FROM incoming_events WHERE event_id=? AND source='sonarr-discovery'",
+                          (claim.event_id,)).fetchone()):
+        return ()
+    return request_automatic_cleanup(db,claim)
+
+
+def request_automatic_cleanup(db,claim):
     from src.nextgen.storage.cancellation import CancellationStore,operation
     from src.nextgen.storage.sqlite import enqueue_job_with_receipt
     op=operation(db,claim.job_id)

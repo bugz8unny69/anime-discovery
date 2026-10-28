@@ -57,6 +57,7 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
     if not batch_copies_cleared(db,operation_id):
         raise CancellationError()
     rows=db.execute("SELECT r.reservation_id,r.evaluation_job_id FROM episode_reservations r JOIN job_operation_members m ON m.job_id=r.owner_job_id WHERE m.operation_id=? AND r.state='ACTIVE'",(operation_id,)).fetchall()
+    woken=()
     for reservation,evaluation in rows:
         # A historical, separately scoped consumer is still a consumer. Do not
         # free a slot beneath it, even when it is itself stopped or canceled.
@@ -69,6 +70,8 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
             if submission and db.execute('SELECT phase FROM cancellation_cleanup WHERE plan_id=?',(plan,)).fetchone()!=('COMPLETE',):raise CancellationError()
             db.execute("UPDATE acquisition_plans SET state='RELEASED' WHERE plan_id=? AND state='PREPARED'",(plan,))
         db.execute("UPDATE episode_reservations SET state='RELEASED',ended_at_ms=?,ended_by_job_id=? WHERE reservation_id=? AND state='ACTIVE'",(now,job_id,reservation))
+        from src.nextgen.storage.episode_reservations import wake_waiters
+        woken+=wake_waiters(db,reservation,now,component=component)
     batch_rows=db.execute(
         "SELECT r.reservation_id,r.owner_job_id FROM batch_episode_reservations r "
         "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
@@ -85,4 +88,4 @@ def release_cancelled(db,operation_id,job_id,now,*,component):
             (now,job_id,reservation))
     if not rows and not batch_rows:return ()
     return (append_job_history(db,job_id=job_id,event_code='EPISODE_RESERVATIONS_RELEASED',
-        reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}),)
+        reason_code='CANCELED_RESERVATIONS_RELEASED',component=component,occurred_at_ms=now,details={'attempt':job_attempt(db,job_id)}),*woken)

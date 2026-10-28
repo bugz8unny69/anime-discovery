@@ -88,6 +88,28 @@ class EpisodeReservationTests(unittest.IsolatedAsyncioTestCase):
                          [('DONE',None),('ON_HOLD','EPISODE_RESERVED')])
         self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='EPISODE_RESERVATION_CREATED'"),[(1,)])
 
+    async def test_released_reservation_lets_the_held_duplicate_take_over(self):
+        from src.nextgen.storage.episode_reservations import wake_waiters
+        self.source(10)
+        self.source(10)
+        worker=self.worker()
+        await worker.attempt()
+        await worker.attempt()
+        await asyncio.gather(worker.attempt(),worker.attempt())
+        (reservation,owner),=self.rows("SELECT reservation_id,owner_job_id FROM episode_reservations")
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                # The owner's copy was dropped (e.g. over the size limit) and cleaned up.
+                db.execute("UPDATE episode_reservations SET state='RELEASED',ended_at_ms=1,ended_by_job_id=? WHERE reservation_id=?",(owner,reservation))
+                records=wake_waiters(db,reservation,1)
+        finally:db.close()
+        self.assertEqual([r.event_code for r in records],['RETRY_SCHEDULED'])
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='RESERVE_EPISODE' AND job_id<>? ",(owner,)),[('PENDING',)])
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT count(*) FROM episode_reservations WHERE state='ACTIVE'"),[(1,)])
+        self.assertNotEqual(self.rows("SELECT owner_job_id FROM episode_reservations WHERE state='ACTIVE'"),[(owner,)])
+
     async def test_different_episodes_of_same_anime_are_independent(self):
         worker=self.worker()
         self.source(10)
