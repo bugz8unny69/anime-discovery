@@ -96,7 +96,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
             if (any(o.status == 'NOT_LISTED' for o in observed)
                     and all(o.status in ('NOT_LISTED','IN_PROGRESS') for o in observed)
                     and context.claim.attempt < LISTING_ATTEMPTS):
-                return Outcome('defer','SONARR_DISCOVERY_UNAVAILABLE',delay_ms=REGISTERED_DELAY_MS)
+                return Outcome('defer','SONARR_EPISODES_NOT_LISTED',delay_ms=REGISTERED_DELAY_MS)
             return Outcome(value=BackfillCompletion(plan,observed))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
