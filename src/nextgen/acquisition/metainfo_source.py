@@ -126,11 +126,11 @@ class Client:
         return raw
 
 
-def make_reader(*,client_factory=Client,sonarr_secrets=None):
+def make_reader(*,client_factory=Client,secrets=None):
     """One metainfo reader for preparation and exact-plan submission checks.
 
     The configured hash-addressed .torrent source is tried first. Verified
-    Sonarr sources fall back to a freshly revalidated Sonarr magnet; ordinary
+    backfill sources fall back to the magnet in their delivery; ordinary
     webhooks without a configured source fall back to their own hash-bound
     magnet. Either way qBittorrent 5.2+ fetches metadata only, and the bytes
     are re-verified against the hash.
@@ -138,7 +138,7 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
     async def read_metainfo(source,configuration,cancelled):
         if cancelled.is_set():raise asyncio.CancelledError()
         identity=None
-        if sonarr_secrets is not None:
+        if secrets is not None:
             from src.nextgen.storage.sonarr_selection import acquisition_identity
             identity=await blocking(acquisition_identity,
                 configuration.value('storage.database_path'),source)
@@ -149,17 +149,13 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
                                   source.info_hash,cancelled)
         except (MetadataSourceConfigurationError,MetadataSourceWaiting,
                 MetadataSourceUnavailable) as original_error:
-            # A verified Sonarr event may always fall back. An ordinary
+            # A verified backfill event may always fall back. An ordinary
             # webhook falls back only when no .torrent source is configured.
-            if sonarr_secrets is None or identity is None and type(
+            if secrets is None or identity is None and type(
                     original_error) is not MetadataSourceConfigurationError:raise
             fallback_error=original_error
-        # Sonarr can rotate private tracker tokens: always re-query, never
-        # persist or reconstruct credential-bearing magnets. An ordinary
-        # webhook uses its own sanitized hash-bound magnet (Legacy behavior).
-        from src.nextgen.acquisition.sonarr_search import (
-            Client as SonarrClient, SearchUnavailable, SearchReview,
-        )
+        # Both backfill and webhook deliveries carry a sanitized hash-bound
+        # magnet (credentialed trackers removed; Legacy behavior).
         from src.nextgen.acquisition.qbittorrent import Client as QbClient
         from src.nextgen.acquisition.settings import download_options
         from src.nextgen.acquisition.submission import (
@@ -167,31 +163,19 @@ def make_reader(*,client_factory=Client,sonarr_secrets=None):
         )
         try:
             qb=QbClient(download_options(configuration),
-                        await blocking(sonarr_secrets.qbittorrent_credentials))
+                        await blocking(secrets.qbittorrent_credentials))
             await blocking(qb.login)
             if qb.metadata_strategy!='fetch':
                 # Older qBittorrent needs a pre-manifest send journal;
                 # the existing .torrent source remains the safe fallback.
                 raise fallback_error
-            if identity is None:
-                from src.nextgen.storage.acquisition import source_magnet
-                magnet=await blocking(source_magnet,
-                    configuration.value('storage.database_path'),source)
-            else:
-                client=SonarrClient.from_context(configuration,sonarr_secrets)
-                result=await blocking(client.search,identity)
-                chosen=next((row for row in result.candidates
-                             if row.info_hash==source.info_hash
-                             and client.policy.accepts(row)),None)
-                if chosen is None:
-                    raise MetadataSourceWaiting()
-                magnet=chosen.magnet_url
+            from src.nextgen.storage.acquisition import source_magnet
+            magnet=await blocking(source_magnet,
+                configuration.value('storage.database_path'),source)
             resolved=await blocking(qb.fetch_metadata,magnet,source.info_hash)
             if resolved is None:raise MetadataSourceWaiting()
             if cancelled.is_set():raise asyncio.CancelledError()
             return resolved[1]
-        except SearchUnavailable:raise MetadataSourceUnavailable() from None
-        except SearchReview:raise MetadataSourceDenied() from None
         except ClientUnavailable:raise MetadataSourceUnavailable() from None
         except (ClientAuthenticationFailed,ClientInvalid,ClientUnsupported):
             raise MetadataSourceDenied() from None

@@ -1,6 +1,6 @@
-"""Ranked Sonarr candidate facts, not acquisition permits or torrent ownership."""
+"""Ranked backfill candidate facts, not acquisition permits or torrent ownership."""
 from src.nextgen.acquisition.metadata import infohash
-from src.nextgen.acquisition.sonarr_search import DiscoveryPolicy, SearchResult
+from src.nextgen.acquisition.prowlarr_search import DiscoveryPolicy, SearchResult
 
 
 class CandidateConflict(ValueError):
@@ -98,10 +98,10 @@ def fail_candidate(db, *, plan_id, episode, info_hash, reason_code):
     if result.rowcount!=1:raise CandidateConflict()
 
 def mark_published(db, *, event_id, info_hash):
-    """Complete the active choice only for a verified, staged Sonarr event.
+    """Complete the active choice only for a verified, staged backfill event.
 
     Caller has already published media and marked the operation STAGED in the
-    same worker transaction. Ordinary non-Sonarr staging is unaffected.
+    same worker transaction. Ordinary webhook staging is unaffected.
     """
     if not db.in_transaction:
         raise CandidateConflict()
@@ -127,14 +127,14 @@ def mark_published(db, *, event_id, info_hash):
 
 
 def schedule_after_cleanup(db,operation_id):
-    """Only a reviewed, fully cleaned Sonarr attempt advances the ranked list.
+    """Only a reviewed, fully cleaned backfill attempt advances the ranked list.
 
     A user cancel without a terminal review never triggers another download.
-    The next choice is re-fetched by the existing Sonarr discovery worker.
+    The next choice is re-fetched by the existing backfill discovery worker.
     """
     if not db.in_transaction:raise CandidateConflict()
     # A user-initiated Cancel stops the operation. Only a cleanup control
-    # created BY the failed Sonarr job may initiate fallback.
+    # created BY the failed backfill job may initiate fallback.
     automated=db.execute(
         "SELECT 1 FROM management_actions a "
         "JOIN jobs control ON control.job_id=a.job_id "
@@ -195,7 +195,7 @@ def schedule_after_cleanup(db,operation_id):
 
 
 def auto_cleanup_failed_candidate(db,claim):
-    """Enqueue the EXISTING cancellation worker for a failed Sonarr attempt.
+    """Enqueue the EXISTING cancellation worker for a failed backfill attempt.
 
     Called by the normal worker transition after the failing job has become
     NEEDS_REVIEW. The rejected candidate owns its own operation; siblings and
@@ -230,7 +230,7 @@ def auto_cleanup_oversized(db,claim):
     """A webhook release over the size limit gives its episode to the next copy.
 
     Same cancellation and cleanup as above; released reservations wake held
-    duplicates of the episode. Sonarr candidates are handled above.
+    duplicates of the episode. Backfill candidates are handled above.
     """
     if (not db.in_transaction or claim.event_id is None or claim.kind!='PREPARE_ACQUISITION'
             or db.execute('SELECT last_reason_code FROM jobs WHERE job_id=?',

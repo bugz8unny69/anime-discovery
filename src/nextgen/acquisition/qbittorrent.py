@@ -182,7 +182,7 @@ class Client:
         The source is an original magnet or a canonical v1 info hash. The
         returned metainfo is always independently checked against the hash.
         """
-        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        from src.nextgen.acquisition.prowlarr_search import _magnet_hash
         from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
         expected_hash=infohash(expected_hash)
         if (self.metadata_strategy!='fetch' or
@@ -315,7 +315,7 @@ class Client:
         call. Never invoke add again on an uncertain or recovered intent.
         """
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent, MagnetPermit
-        from src.nextgen.acquisition.sonarr_search import _magnet_hash
+        from src.nextgen.acquisition.prowlarr_search import _magnet_hash
         if (not self._sid or self.protocol is None):
             raise ClientAuthenticationFailed()
         if (type(intent) is not MagnetIntent or type(permit) is not MagnetPermit
@@ -445,7 +445,7 @@ class Client:
         if type(intent.plan.manifest) is ObservedInventory:raise ClientInvalid()
         if type(raw) is str:
             # Exactly the same journal permit protects both source formats.
-            from src.nextgen.acquisition.sonarr_search import _magnet_hash
+            from src.nextgen.acquisition.prowlarr_search import _magnet_hash
             if _magnet_hash(raw)!=intent.plan.manifest.info_hash:
                 raise ClientInvalid()
             fields={'urls':raw,'savepath':self.options.download_root,

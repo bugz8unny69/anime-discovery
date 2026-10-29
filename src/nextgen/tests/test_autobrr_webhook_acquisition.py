@@ -117,7 +117,7 @@ class AutobrrWebhookAcquisitionTests(unittest.IsolatedAsyncioTestCase):
         state={}
         qb=FakeQbittorrent(state,files)
         secrets=submission_fixture.Secrets()
-        read=make_reader(sonarr_secrets=secrets)
+        read=make_reader(secrets=secrets)
         worker=Worker(self.store,self.store.read(),Registry((
             evaluate(reservation_kind='RESERVE_EPISODE'),
             reserve(preparation_kind='PREPARE_ACQUISITION'),
@@ -148,7 +148,7 @@ class AutobrrWebhookAcquisitionTests(unittest.IsolatedAsyncioTestCase):
         state={}
         qb=FakeQbittorrent(state,parse_metainfo(self.raw,self.digest).files)
         secrets=submission_fixture.Secrets()
-        read=make_reader(sonarr_secrets=secrets)
+        read=make_reader(secrets=secrets)
         worker=Worker(self.store,self.store.read(),Registry((
             evaluate(reservation_kind='RESERVE_EPISODE'),
             reserve(preparation_kind='PREPARE_ACQUISITION'),

@@ -356,7 +356,7 @@ class FallbackWiringTests(unittest.TestCase):
         from src.nextgen.storage.sonarr_backfill import (
             BackfillBatch,FallbackTarget,FallbackCompletion,persist_fallback,
             BackfillConflict)
-        from src.nextgen.acquisition.sonarr_search import (
+        from src.nextgen.acquisition.prowlarr_search import (
             CandidateSelection,Release,SearchResult,DiscoveryPolicy)
         from src.nextgen.sonarr_episode import VerifiedEpisode
         self.db.executescript("""
@@ -379,10 +379,9 @@ class FallbackWiringTests(unittest.TestCase):
                            reason_code='ACQUISITION_METADATA_INVALID')
         plan=BackfillBatch(1,123,456,1,4,1,(1,2,3,4),(),())
         identity=VerifiedEpisode(456,901,1,2)
-        release=Release('Example S01E02','Nyaa','torrent','1080p',
-                        1080,0,9,0,123456789,False,(),(55,), 'exact',
+        release=Release('Example S01E02 1080p','Nyaa',1080,9,123456789,901,
                         SECOND,'magnet:?xt=urn:btih:'+SECOND,True)
-        results=SearchResult(90,55,(release,))
+        results=SearchResult(456,901,(release,))
         choice=CandidateSelection(identity,results,release,DiscoveryPolicy())
         value=FallbackCompletion(plan,2,FallbackTarget(identity,FIRST,SECOND),
                                  choice)

@@ -1,12 +1,12 @@
-"""Trusted internal Sonarr delivery, routed into the ORIGINAL acquisition pipeline.
+"""Trusted internal backfill delivery, routed into the ORIGINAL acquisition pipeline.
 
-Called only in the Sonarr backfill worker's fenced SQLite completion transaction.
+Called only in the backfill worker's fenced SQLite completion transaction.
 No download, extra torrent submission implementation, or caller-supplied event.
 """
 import json
 import time
 
-from src.nextgen.acquisition.sonarr_search import CandidateSelection
+from src.nextgen.acquisition.prowlarr_search import CandidateSelection
 from src.nextgen.history import append_event_history
 from src.nextgen.job_contracts import parse_payload
 from src.nextgen.storage.sqlite import enqueue_job_with_receipt, persist_identity
@@ -18,7 +18,7 @@ def dispatch(db, claim, plan, choice):
 
     Identity is copied from the episode's *already verified* source and
     revalidated by persist_identity. The normal VERIFY_RELEASE handler still
-    checks the Sonarr title against the recognized episode before reservation.
+    checks the release title against the recognized episode before reservation.
     """
     if (not db.in_transaction or type(choice) is not CandidateSelection
             or claim.event_id is None or claim.kind != 'DISCOVER_SONARR_BACKFILL'
@@ -61,8 +61,14 @@ def dispatch(db, claim, plan, choice):
         if (validated.get('anime',{}).get('anidb_id')!=plan.anidb_id
                 or validated['anime'].get('tvdb_series_id')!=plan.tvdb_series_id):
             raise SelectionConflict()
+        # The sanitized, hash-bound magnet travels with the delivery exactly
+        # like a webhook magnet; qBittorrent resolves it downstream.
+        from src.nextgen.acquisition.metadata import hash_magnet
+        magnet=hash_magnet(choice.release.info_hash,choice.release.magnet_url)
+        if magnet is None: raise SelectionConflict()
         body=json.dumps({'release_name':choice.release.title,
-                         'torrent_infohash':choice.release.info_hash},
+                         'torrent_infohash':choice.release.info_hash,
+                         'magnet_uri':magnet},
                         sort_keys=True,separators=(',',':')).encode('utf-8')
         if len(body)>65536: raise SelectionConflict()
     except (ValueError,TypeError,KeyError,AttributeError):

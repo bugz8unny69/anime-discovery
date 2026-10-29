@@ -28,7 +28,7 @@ class ServiceSetupTests(unittest.TestCase):
         SecretStore(self.root).update_webhook_token('w'*43,expected_revision=1)
 
     def test_explicit_init_creates_current_local_files_without_external_work(self):
-        result=self.initialize();self.assertTrue(result['initialized']);self.assertEqual(result['configuration_version'],10)
+        result=self.initialize();self.assertTrue(result['initialized']);self.assertEqual(result['configuration_version'],11)
         self.assertEqual(ConfigurationStore(self.root).read().value('storage.database_path'),str(self.database))
         self.assertEqual(self.database.stat().st_mode&0o777,0o600)
         db=connect(self.database)
@@ -77,7 +77,7 @@ class ServiceSetupTests(unittest.TestCase):
         run=AsyncMock()
         with patch('src.nextgen.__main__.check_local') as check,patch('src.nextgen.providers.configuration.run_identity_worker',run):
             self.assertEqual(main(['worker','--config-dir',str(self.root)]),0)
-        check.assert_called_once_with(str(self.root),worker=True);run.assert_awaited_once_with(str(self.root),sonarr_backfill=True,sonarr_select=True,sonarr_acquire=True)
+        check.assert_called_once_with(str(self.root),worker=True);run.assert_awaited_once_with(str(self.root),backfill=True,backfill_select=True,backfill_acquire=True)
 
     def test_check_command_does_not_start_worker(self):
         with patch('src.nextgen.__main__.check_local',return_value={'local_ready':True}) as check,redirect_stdout(io.StringIO()):

@@ -17,6 +17,12 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('PROWLARR_CONFIGURATION_INVALID','The Prowlarr address or API key is missing or invalid.','Configure Prowlarr before backfill search.','Set the Prowlarr address and API key in Settings, then retry; no download occurred.','WARNING',False),
+    Reason('PROWLARR_AUTH_FAILED','Prowlarr rejected the configured API key.','Prowlarr search authentication failed.','Check the Prowlarr API key in Settings, then retry.','WARNING',False),
+    Reason('PROWLARR_SEARCH_REVIEW','Prowlarr returned a response that could not be read safely.','Prowlarr search needs review.','Check Prowlarr and its indexers, then retry.','WARNING',False),
+    Reason('PROWLARR_SEARCH_TIMEOUT','A Prowlarr search exceeded the configured timeout.','Prowlarr search timed out.','No automatic retry was scheduled. Check Prowlarr and indexer response times or raise the timeout, then retry.','ERROR',False),
+    Reason('PROWLARR_UNAVAILABLE','Prowlarr could not be reached or could not complete the search.','Prowlarr search failed.','Check that Prowlarr and its indexers are running, then retry.','ERROR',False),
+    Reason('PROWLARR_RELEASE_WITHDRAWN','The next ranked torrent is no longer returned by Prowlarr.','Trying the next ranked release.','No action needed; the next ranked release is tried without a new torrent being sent.','WARNING',True),
     Reason('SONARR_BACKFILL_PLAN_CONFLICT','Frozen backfill scope or stored search receipt did not match the worker plan.','Backfill discovery needs review.','Check the immutable episode window and persisted discovery receipts; no download occurred.','WARNING',False),
     Reason('SONARR_DISCOVERY_EPISODE_NOT_FOUND','The requested TVDB series is absent from Sonarr; its release API requires existing catalog records.','Sonarr cannot search this series.','No series was created. Check the series mapping; this search source requires existing Sonarr records.','ERROR',False),
     Reason('SONARR_DISCOVERY_AUTH_FAILED','Sonarr rejected the configured API key.','Sonarr search authentication failed.','Check the existing Sonarr API key, then resume discovery.','WARNING',False),

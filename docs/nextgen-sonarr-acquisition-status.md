@@ -103,7 +103,6 @@ failures should be handled as specific regression fixes, not new scope.
 
 The former automatic series-registration and two-minute waiting policy was
 incorrect for the intended search-only acquisition flow and has been removed.
-See [the authoritative backfill and continue behavior](SONARR_BACKFILL_BEHAVIOR.md)
-for selection/overlap rules, GET-only Sonarr use, immediate errors, and the
-remaining limitation when Sonarr has no episode records. The separate explicit
-Keep-in-Sonarr workflow is outside this automatic acquisition change.
+Backfill search has since moved from Sonarr to Prowlarr. See
+[the authoritative backfill and continue behavior](BACKFILL_BEHAVIOR.md).
+The separate explicit Keep-in-Sonarr workflow is outside this change.
