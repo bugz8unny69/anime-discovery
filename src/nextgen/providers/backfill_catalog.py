@@ -39,6 +39,8 @@ def build_catalog(client, aid, tid, season, secret, *, today=None):
     mappings = forward_mappings(client.mapping_xml(), aid, tid, episodes)
     placements = tvdb_episode_ids(client, tid, secret)
     today = (today or datetime.date.today()).isoformat()
+    # Absolute number across regular seasons, as many groups number sequels.
+    earlier = sum(1 for (record_season, _) in placements if 1 <= record_season < season)
     targets = {}
     for (record_season, number), ids in placements.items():
         if record_season != season: continue
@@ -48,7 +50,8 @@ def build_catalog(client, aid, tid, season, secret, *, today=None):
             continue
         aired = airdates.get(anidb[0])
         status = 'SEARCHABLE' if aired is not None and aired <= today else 'NOT_AIRED'
-        targets[number] = EpisodeTarget(number, status, anidb[0], ids[0])
+        targets[number] = EpisodeTarget(number, status, anidb[0], ids[0],
+                                        earlier + number if season >= 1 else None)
     return EpisodeCatalog(titles, targets)
 
 

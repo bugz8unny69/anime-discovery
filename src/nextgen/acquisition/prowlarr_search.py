@@ -112,6 +112,9 @@ class Release:
     info_hash: str | None
     magnet_url: str | None = field(default=None, repr=False)
     eligible_for_handoff: bool = False
+    # Plain "<title> - NN" naming of the verified AniDB episode, so verification
+    # never depends on how the release group wrote its title.
+    declared_title: str = ''
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,7 @@ class EpisodeTarget:
     status: str                  # SEARCHABLE, NOT_AIRED or MAPPING_MISSING
     anidb_episode: int | None = None
     tvdb_episode_id: int | None = None
+    absolute_episode: int | None = None
 
 
 @dataclass(frozen=True)
@@ -200,32 +204,36 @@ def search_aliases(titles):
     return tuple(picked)
 
 
-def matches_episode(title, titles, target, season):
-    """Exact normalized title alias plus the declared episode, as VERIFY_RELEASE reads it."""
-    from src.nextgen.providers.parsing import norm, release_title
+def declared_title(titles, anidb_episode):
+    """A plain title that VERIFY_RELEASE reads as exactly this AniDB episode."""
     from src.nextgen.providers.release_mapping import declared_episode
     from src.nextgen.release_contracts import ReleaseNotReady
-    try:
-        names, _ = release_title(title)
-        origin, declared_season, number = declared_episode(title)
-    except (ReleaseNotReady, ValueError, TypeError):
-        return False
-    wanted = {norm(name) for name in titles} - {''}
-    if not wanted & {norm(name) for name in names}:
-        return False
-    if origin == 'tvdb':
-        return (declared_season, number) == (season, target.tvdb_episode)
-    return number == target.anidb_episode
+    for name in (*search_aliases(titles), 'Episode'):
+        candidate = '%s - %02d' % (name, anidb_episode) if name != 'Episode' else 'Episode %02d' % anidb_episode
+        try:
+            if declared_episode(candidate) == ('anidb', None, anidb_episode): return candidate
+        except (ReleaseNotReady, ValueError):
+            continue
+    return 'Episode %02d' % anidb_episode
 
 
-def _release(row, titles, target, season):
+def matches_episode(title, titles, target, season):
+    """Whether a release title is exactly the target episode of this anime."""
+    from src.nextgen.acquisition.release_titles import AnimeTitles, matches, parse_release
+    return matches(parse_release(title), AnimeTitles.build(titles, season), target, season)
+
+
+def _release(row, titles, target, season, prepared=None):
     """A matching torrent result, or None for anything else."""
+    from src.nextgen.acquisition.release_titles import AnimeTitles, matches, parse_release
     if type(row) is not dict: raise SearchReview()
     title = row.get('title')
     if (type(title) is not str or not 1 <= len(title) <= 2048
             or any(ord(c) < 32 or ord(c) == 127 for c in title)):
         return None
-    if row.get('protocol') not in ('torrent', None) or not matches_episode(title, titles, target, season):
+    prepared = prepared or AnimeTitles.build(titles, season)
+    if row.get('protocol') not in ('torrent', None) or not matches(
+            parse_release(title), prepared, target, season):
         return None
     indexer = row.get('indexer') if type(row.get('indexer')) is str else ''
     seeders = row.get('seeders')
@@ -247,7 +255,8 @@ def _release(row, titles, target, season):
         # Hash only: qBittorrent resolves it through DHT/PEX like a bare webhook hash.
         magnet = 'magnet:?xt=urn:btih:' + info_hash
     return Release(title[:2048], indexer[:256], resolution(title), seeders, size,
-                   target.tvdb_episode_id, info_hash, magnet, info_hash is not None)
+                   target.tvdb_episode_id, info_hash, magnet, info_hash is not None,
+                   declared_title(titles, target.anidb_episode))
 
 
 class Client:
@@ -316,10 +325,12 @@ class Client:
 
     def _search(self, catalog, season, target):
         """All matching releases for one searchable episode, ranked by policy."""
+        from src.nextgen.acquisition.release_titles import AnimeTitles, search_queries
+        prepared = AnimeTitles.build(catalog.titles, season)
         found, seen = [], set()
-        for alias in search_aliases(catalog.titles):
-            for row in self._get('%s %02d' % (alias, target.anidb_episode)):
-                release = _release(row, catalog.titles, target, season)
+        for query in search_queries(catalog.titles, prepared, target):
+            for row in self._get(query):
+                release = _release(row, catalog.titles, target, season, prepared)
                 if release is None: continue
                 key = release.info_hash or release.title
                 if key in seen: continue

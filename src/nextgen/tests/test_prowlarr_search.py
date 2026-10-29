@@ -216,9 +216,9 @@ class BackfillCatalogTests(unittest.TestCase):
             airdates={1: '2026-10-01', 2: '2026-10-08', 3: '2026-11-05'})
         found = build_catalog(providers, 50, 100, 1, None, today=datetime.date(2026, 10, 29))
         self.assertEqual(found.titles, TITLES)
-        self.assertEqual(found.target(13), EpisodeTarget(13, 'SEARCHABLE', 1, 9013))
-        self.assertEqual(found.target(14), EpisodeTarget(14, 'SEARCHABLE', 2, 9014))
-        self.assertEqual(found.target(15), EpisodeTarget(15, 'NOT_AIRED', 3, 9015))
+        self.assertEqual(found.target(13), EpisodeTarget(13, 'SEARCHABLE', 1, 9013, 13))
+        self.assertEqual(found.target(14), EpisodeTarget(14, 'SEARCHABLE', 2, 9014, 14))
+        self.assertEqual(found.target(15), EpisodeTarget(15, 'NOT_AIRED', 3, 9015, 15))
         self.assertEqual(found.target(16).status, 'MAPPING_MISSING')  # TVDB lists it; AniDB does not.
         self.assertEqual(found.target(20).status, 'NOT_AIRED')        # Not listed anywhere yet.
 

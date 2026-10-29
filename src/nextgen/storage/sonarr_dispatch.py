@@ -53,7 +53,7 @@ def dispatch(db, claim, plan, choice):
         # The release declaration is rechecked by VERIFY_RELEASE and then the
         # manifest filename gate before any stopped submission is authorized.
         from src.nextgen.providers.release_mapping import declared_episode
-        origin,season,episode=declared_episode(choice.release.title)
+        origin,season,episode=declared_episode(choice.release.declared_title)
         if ((origin=='tvdb' and (season,episode)!=(identity.tvdb_season,identity.tvdb_episode))
                 or (origin=='anidb' and row[1] is not None and episode!=row[1])):
             raise SelectionConflict()
@@ -66,7 +66,10 @@ def dispatch(db, claim, plan, choice):
         from src.nextgen.acquisition.metadata import hash_magnet
         magnet=hash_magnet(choice.release.info_hash,choice.release.magnet_url)
         if magnet is None: raise SelectionConflict()
-        body=json.dumps({'release_name':choice.release.title,
+        # VERIFY_RELEASE reads the plain declared title; the group's own
+        # title is kept for diagnostics only.
+        body=json.dumps({'release_name':choice.release.declared_title,
+                         'source_release_name':choice.release.title,
                          'torrent_infohash':choice.release.info_hash,
                          'magnet_uri':magnet},
                         sort_keys=True,separators=(',',':')).encode('utf-8')

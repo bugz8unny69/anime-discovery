@@ -30,22 +30,34 @@ historical job and table names are kept so existing jobs and history stay valid)
    to its AniDB episode number with the same cached AniDB record, Anime-Lists
    offsets and TVDB official episode list that VERIFY_RELEASE uses, and reads
    the AniDB air date.
-2. Prowlarr is queried with GET `/api/v1/search` for up to three Latin-script
-   AniDB titles plus the two-digit AniDB episode number
-   (for example `Kusuriya no Hitorigoto 01`).
-3. A result counts only when its title matches one of the anime's AniDB titles
-   exactly (normalized) and declares exactly that episode, either as the AniDB
-   number (`- 01`) or as the TVDB placement (`S02E13`). Batches, ranges and
-   specials never match.
+2. Prowlarr is queried with GET `/api/v1/search` (at most six queries per
+   episode): two AniDB titles plus the AniDB episode number, and for sequels the
+   franchise title plus the absolute number and `SxxEyy`.
+3. Each result title is parsed the way release groups write it
+   (`acquisition/release_titles.py`): `[Group] Title - 05 (1080p)`,
+   `Title 2nd Season - 05`, `Title S2 - 05`, `Title II - 05`, `Title - S02E05`,
+   scene-style `The.Title.S02E05.1080p`, `Romaji | English - 05`, `v2` suffixes.
+   It matches only when the title is one of the anime's AniDB titles (or its
+   franchise title with the right season marker) and the number is this
+   episode as an AniDB number, TVDB `SxxEyy`, season-relative number or
+   absolute number (`- 29` for season 2 episode 5 after a 24-episode season).
+   A bare franchise title without a season marker only matches the absolute
+   number, so season 1 episode 5 is never taken for season 2 episode 5.
+   Batches, ranges, `.5` recaps, OVAs, movies and specials never match.
+   Unclear titles are skipped, never sent for review.
 4. Resolution is read from the title (480p … 2160p, 4K/UHD). Releases without a
    resolution, above `prowlarr.max_resolution`, or below `prowlarr.min_seeders`
    are counted but not used. The rest are ranked by `prowlarr.rank_by`.
 5. The magnet comes from `magnetUrl`, a magnet `guid`, or the `infoHash`
    (bare hash). Conflicting hashes drop the result.
 6. The best release goes through the existing pipeline unchanged: an internal
-   delivery is verified by VERIFY_RELEASE, reserved, sent to qBittorrent with
+   delivery named plainly (`<AniDB title> - 05`, the group's title kept
+   alongside) is verified by VERIFY_RELEASE, reserved, sent to qBittorrent with
    its sanitized magnet, downloaded, verified and staged. Lower-ranked releases
-   are kept as fallbacks if that acquisition fails.
+   are kept as fallbacks: if any later step fails (bad metadata, size limit,
+   failed verification), the attempt is cleaned up and the next ranked release
+   is tried automatically. Only when every ranked release has failed does the
+   episode stop for review.
 
 ## Results are reported per episode
 
@@ -77,9 +89,8 @@ the Prowlarr API key; older secret files stay readable.
 
 ## Known limits
 
-- Releases numbered absolutely across seasons (for example `- 25` for a sequel
-  whose AniDB entry starts at 1) are not matched, because VERIFY_RELEASE would
-  not accept them either. Supporting them needs a matching verification change.
+- Titles only in non-Latin scripts, or groups that put the episode only in
+  brackets (`[Title][05]`), are not matched; other groups usually cover them.
 - Media that was already in the library before NextGen (no reservation) is not
   detected and may be searched again.
 - No live homelab end-to-end run has been performed.

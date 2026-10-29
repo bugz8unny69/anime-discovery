@@ -115,7 +115,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                 release = Release('[Group] Test - 01 [1080p]', 'Nyaa', 1080, 9, 123456789,
                                   111001, 'a'*40,
                                   'magnet:?xt=urn:btih:'+'a'*40+'&tr=udp%3A%2F%2Ftracker.example%3A1337%2Fannounce',
-                                  True)
+                                  True,'Test - 01')
                 result[0] = BackfillObservation(
                     1,111001,'CANDIDATES',1,1,
                     CandidateSelection(VerifiedEpisode(456,111001,1,1),
@@ -148,6 +148,9 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events[0][1],'IDENTIFIED')
             body=json.loads(events[0][0])
             self.assertEqual(body['torrent_infohash'],'a'*40)
+            # Verification reads the plain title; the group's title is kept.
+            self.assertEqual((body['release_name'],body['source_release_name']),
+                             ('Test - 01','[Group] Test - 01 [1080p]'))
             # The sanitized magnet travels with the delivery; no Sonarr re-search.
             self.assertEqual(body['magnet_uri'],'magnet:?xt=urn:btih:'+'a'*40
                              +'&tr=udp://tracker.example:1337/announce')
