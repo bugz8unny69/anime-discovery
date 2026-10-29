@@ -46,8 +46,11 @@ historical job and table names are kept so existing jobs and history stay valid)
    Batches, ranges, `.5` recaps, OVAs, movies and specials never match.
    Unclear titles are skipped, never sent for review.
 4. Resolution is read from the title (480p … 2160p, 4K/UHD). Releases without a
-   resolution, above `prowlarr.max_resolution`, or below `prowlarr.min_seeders`
-   are counted but not used. The rest are ranked by `prowlarr.rank_by`.
+   resolution, above `prowlarr.max_resolution`, below `prowlarr.min_seeders`,
+   or whose Prowlarr-reported size is over `acquisition.max_episode_mb` are
+   counted but never sent to qBittorrent. The rest are ranked by
+   `prowlarr.rank_by`. A release with no reported size is not skipped; the
+   size limit is still checked after its file list is read.
 5. The magnet comes from `magnetUrl`, a magnet `guid`, or the `infoHash`
    (bare hash). Conflicting hashes drop the result.
 6. The best release goes through the existing pipeline unchanged: an internal
@@ -92,6 +95,15 @@ responses are never retried automatically: fix Settings, then Retry.
 
 Not-aired episodes are reported, not polled. Continue still admits later
 episodes when they arrive through the webhook.
+
+## Seeing why a release was rejected
+
+Open **History** on any job of a backfill episode. "Releases tried for
+episode N" lists every ranked release in order: the group's title, whether it
+was staged, failed (with the reason and, for size stops, the actual sizes),
+is in progress or was not tried yet, and the trace ID (`AD-<n>`) of that
+attempt for the worker log:
+`journalctl -u anime-discovery-worker | grep 'trace_id=AD-<n>'`.
 
 ## Settings
 

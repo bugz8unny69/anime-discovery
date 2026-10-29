@@ -74,23 +74,34 @@ class DiscoveryPolicy:
     max_resolution: int = 1080
     min_seeders: int = 5
     rank_by: str = 'resolution'
+    # acquisition.max_episode_mb (decimal MB). None: no size check here.
+    max_episode_mb: int | None = None
 
     def __post_init__(self):
         if (type(self.max_resolution) is not int or self.max_resolution not in (720, 1080, 2160)
                 or type(self.min_seeders) is not int or not 0 <= self.min_seeders <= 1_000_000
-                or type(self.rank_by) is not str or self.rank_by not in ('resolution', 'seeders')):
+                or type(self.rank_by) is not str or self.rank_by not in ('resolution', 'seeders')
+                or self.max_episode_mb is not None and (type(self.max_episode_mb) is not int
+                                                         or self.max_episode_mb < 1)):
             raise SearchConfiguration()
 
     @classmethod
     def capture(cls, configuration):
         return cls(configuration.value('prowlarr.max_resolution'),
                    configuration.value('prowlarr.min_seeders'),
-                   configuration.value('prowlarr.rank_by'))
+                   configuration.value('prowlarr.rank_by'),
+                   configuration.value('acquisition.max_episode_mb'))
+
+    def oversized(self, release):
+        """Prowlarr reports the torrent's size; skip it before anything is sent."""
+        return (self.max_episode_mb is not None and release.size > 0
+                and release.size > self.max_episode_mb * 1_000_000)
 
     def accepts(self, release):
         return (release.eligible_for_handoff
                 and 0 < release.resolution <= self.max_resolution
-                and release.seeders is not None and release.seeders >= self.min_seeders)
+                and release.seeders is not None and release.seeders >= self.min_seeders
+                and not self.oversized(release))
 
     def rank(self, releases):
         """Accepted first, then resolution/seeders preference; ties keep input order."""
@@ -368,6 +379,10 @@ class Client:
                 if key in seen: continue
                 seen.add(key)
                 found.append(release)
+        oversized = sum(self.policy.oversized(r) for r in found)
+        if oversized and self.logger is not None:
+            self.logger.info('Backfill episode %s: skipped %s release(s) over %s MB',
+                             target.tvdb_episode, oversized, self.policy.max_episode_mb)
         return self.policy.rank(found)
 
     def backfill(self, anidb_id, tvdb_series_id, season, numbers, *, reserved=(),

@@ -654,6 +654,15 @@ class Application:
                         'reason':None if row[3] is None else CATALOG.reason(row[3]),'component':row[4],'details':details,
                         'handler':None if row[6] is None else CATALOG.handler(row[6],recorded_label=row[7]),'invocation_id':row[8],
                         'detail':size_detail(details)})
+                # Every release tried for this backfill episode, with why it stopped.
+                attempts=None
+                if after==0:
+                    from src.nextgen.storage.backfill_attempts import backfill_attempts
+                    found=backfill_attempts(db,job)
+                    if found is not None:
+                        attempts={'episode':found['episode'],'attempts':[
+                            {**item,'reason':None if item['reason_code'] is None else CATALOG.reason(item['reason_code']),
+                             'detail':size_detail(item['details'])} for item in found['attempts']]}
             else:
                 newest='before_id' in query
                 cursor=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1) if newest else after
@@ -673,7 +682,7 @@ class Application:
                 items=[self._job(queue,db,r) for r in rows[:limit]]
                 if newest:return {'items':items,'next_before_id':rows[limit-1][0] if len(rows)>limit else None}
         page={'items':items,'next_after_id':rows[limit-1][0] if len(rows)>limit else None}
-        return {**page,'job':about} if history else page
+        return {**page,'job':about,'backfill_attempts':attempts} if history else page
 
     def _intake(self,configuration,query):
         if set(query)-{'before_id','limit'}:raise ApiError(400,'API_REQUEST_INVALID')

@@ -147,6 +147,18 @@ class ProwlarrClientTests(unittest.TestCase):
         self.assertEqual(observed[0].status, 'MAPPING_MISSING')
         self.assertEqual(fake.queries, [])
 
+    def test_releases_over_the_size_limit_are_never_sent(self):
+        title = '[A] Kusuriya no Hitorigoto - 01 '
+        fake = FakeProwlarr({'Kusuriya no Hitorigoto 01': [
+            row(title + '(1080p)', A, size=1_420_000_000, seeders=900),
+            row(title + '[1080p HEVC]', B, size=380_000_000, seeders=40),
+            row(title + '(720p)', C, size=0, seeders=40)]})   # Unknown size is not skipped.
+        observed = client(fake, policy=DiscoveryPolicy(1080, 5, 'resolution', 600)).backfill(
+            50, 100, 1, (1,), select_candidates=True)
+        self.assertEqual((observed[0].candidates, observed[0].accepted), (3, 2))
+        self.assertEqual([r.info_hash for r in observed[0].selection.result.candidates], [B, C, A])
+        self.assertEqual(observed[0].selection.release.info_hash, B)
+
     def test_magnet_sources_and_conflicts(self):
         title = '[A] Kusuriya no Hitorigoto - 01 (1080p)'
         fake = FakeProwlarr({'Kusuriya no Hitorigoto 01': [
@@ -295,7 +307,7 @@ class ProwlarrSettingsTests(unittest.TestCase):
             'base_url': 'http://prowlarr.local:9696', 'timeout_seconds': 90,
             'max_resolution': 2160, 'min_seeders': 1, 'rank_by': 'seeders'}})
         self.assertEqual(Options.capture(current), Options('http://prowlarr.local:9696', 90))
-        self.assertEqual(DiscoveryPolicy.capture(current), DiscoveryPolicy(2160, 1, 'seeders'))
+        self.assertEqual(DiscoveryPolicy.capture(current), DiscoveryPolicy(2160, 1, 'seeders', 600))
 
     def test_secret_store_keeps_the_prowlarr_key_private(self):
         import tempfile, os

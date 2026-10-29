@@ -375,3 +375,28 @@ test('selected jobs remain selected across filtered pages until explicitly clear
   h.elements.get('bulk-clear').listeners.click();
   assert.equal(h.run('state.selected.size'), 0);
 });
+
+test('History lists every release tried for a backfill episode and why it stopped', async () => {
+  const h = await harness();
+  h.ctx.fetch = async () => response({
+    items: [], next_after_id: null,
+    job: {job_id: 151, kind: 'VERIFY_MEDIA', label: {message: 'Verify media'}, module: 'verify_media_job'},
+    backfill_attempts: {episode: 2, attempts: [
+      {rank: 1, state: 'FAILED', release_name: '[SubsPlease] Show - 02 (1080p)', trace_id: 'AD-131',
+       reason: {message: 'The video is over the episode size limit.'},
+       detail: 'The video is 1,420 MB; the episode limit is 600 MB.'},
+      {rank: 2, state: 'STAGED', release_name: '<b>[ASW] Show - 02</b>', trace_id: 'AD-139', reason: null, detail: null},
+      {rank: 3, state: 'NOT_TRIED', release_name: null, trace_id: null, reason: null, detail: null},
+    ]},
+  });
+  await h.run('openHistory(151)');
+  const text = element => [element.textContent || '', ...element.children.map(text)].join(' ');
+  const shown = text(h.elements.get('history-rows'));
+  assert.match(shown, /Releases tried for episode 2/);
+  assert.match(shown, /1\. \[SubsPlease\] Show - 02 \(1080p\)/);
+  assert.match(shown, /Failed · The video is over the episode size limit\. · AD-131/);
+  assert.match(shown, /1,420 MB; the episode limit is 600 MB/);
+  assert.match(shown, /2\. <b>\[ASW\] Show - 02<\/b>/);   // Rendered as text.
+  assert.match(shown, /Staged · AD-139/);
+  assert.match(shown, /3\. Ranked release #3 \(not sent yet\)/);
+});
