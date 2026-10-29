@@ -153,6 +153,13 @@ class AnimeTitles:
             base, number = season_marker(title)
             if number is not None and norm(base):
                 marked.add((norm(base), number))
+            elif tvdb_season > 1 and YEAR.search(title):
+                # A catalog title may contain a year that torrent releases omit.
+                # Treat the yearless name as a franchise alias: require a season
+                # marker (or absolute episode number), not a bare sequel episode.
+                plain = norm(YEAR.sub(' ', title))
+                if plain:
+                    marked.add((plain, tvdb_season))
         seasons = {number for _, number in marked}
         if type(tvdb_season) is int and tvdb_season > 1: seasons.add(tvdb_season)
         exact.discard('')
@@ -203,8 +210,17 @@ def matches(parsed, titles, target, tvdb_season):
 def search_queries(catalog_titles, titles, target):
     """A few indexer queries that together reach the common naming styles."""
     from src.nextgen.acquisition.prowlarr_search import search_aliases
-    queries = ['%s %02d' % (alias, target.anidb_episode)
-               for alias in search_aliases(catalog_titles)[:2]]
+    # The catalog's publication year is not reliably present in indexer titles.
+    aliases = tuple(re.sub(r'\s+', ' ', YEAR.sub(' ', alias)).strip()
+                    for alias in search_aliases(catalog_titles)[:2])
+    queries = ['%s %02d' % (alias, target.anidb_episode) for alias in aliases]
+    # Also reach scene-style releases such as "The Ramparts of Ice S02E02".
+    # The existing exact-title/episode matcher still checks every result.
+    for alias in aliases:
+        if season_marker(alias)[1] is None:
+            for season in sorted(titles.seasons)[:1]:
+                if season > 1:
+                    queries.append('%s S%02dE%02d' % (alias, season, target.tvdb_episode))
     bases = sorted({base for base, _ in season_bases(catalog_titles)})
     for base in bases[:1]:
         queries.append('%s %02d' % (base, target.anidb_episode))

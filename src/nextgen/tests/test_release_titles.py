@@ -85,6 +85,31 @@ class ReleaseTitleTests(unittest.TestCase):
         self.assertEqual(season_marker('Title II'), ('Title', 2))
         self.assertEqual(season_marker('Title (2025)'), ('Title (2025)', None))
 
+    def test_year_qualified_anime_matches_explicit_season_without_accepting_wrong_season(self):
+        titles = ('Koori no Jouheki (2026)', 'The Ramparts of Ice (2026)')
+        target = EpisodeTarget(2, 'SEARCHABLE', 2, 9002, 14)
+        prepared = AnimeTitles.build(titles, 2)
+        self.assertTrue(matches(parse_release('The Ramparts of Ice S02E02 1080p WEB'),
+                                prepared, target, 2))
+        self.assertTrue(matches(parse_release('[Group] Koori no Jouheki S02E02 (1080p)'),
+                                prepared, target, 2))
+        self.assertFalse(matches(parse_release('The Ramparts of Ice S01E02 1080p WEB'),
+                                 prepared, target, 2))
+        self.assertFalse(matches(parse_release('The Ramparts of Ice - 02 [1080p]'),
+                                 prepared, target, 2))
+        self.assertFalse(matches(parse_release('Other Anime S02E02 1080p WEB'),
+                                 prepared, target, 2))
+
+    def test_yearless_queries_cover_the_official_season_episode(self):
+        titles = ('Koori no Jouheki (2026)', 'The Ramparts of Ice (2026)')
+        target = EpisodeTarget(2, 'SEARCHABLE', 2, 9002, 14)
+        queries = search_queries(titles, AnimeTitles.build(titles, 2), target)
+        self.assertIn('Koori no Jouheki 02', queries)
+        self.assertIn('The Ramparts of Ice 02', queries)
+        self.assertIn('The Ramparts of Ice S02E02', queries)
+        self.assertTrue(all('(2026)' not in q for q in queries))
+        self.assertLessEqual(len(queries), 6)
+
     def test_verification_title_is_always_readable(self):
         for titles in (SEASON_ONE, SEQUEL, ('Mob Psycho 100',), ('Re:Zero kara Hajimeru Isekai Seikatsu',)):
             with self.subTest(titles=titles):
