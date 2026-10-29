@@ -185,8 +185,9 @@ def exact_error(exc, *, database=None):
         seen.add(id(current))
         is_sqlite = is_sqlite or isinstance(current, sqlite3.Error)
         frames = traceback.extract_tb(current.__traceback__)
-        where = (" at " + frames[-1].filename.rsplit("/src/", 1)[-1] + ":" + str(frames[-1].lineno)
-                 + " in " + frames[-1].name) if frames else ""
+        # The raising line and the line that called it (e.g. which _check call).
+        where = (" at " + " <- ".join(f.filename.rsplit("/src/", 1)[-1] + ":" + str(f.lineno) + " in " + f.name
+                                      for f in reversed(frames[-2:]))) if frames else ""
         parts.append(type(current).__name__ + ": " + str(current) + where)
         current = current.__cause__ or current.__context__
     text = " <- ".join(parts)
