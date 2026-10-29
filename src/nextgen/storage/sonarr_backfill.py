@@ -92,6 +92,26 @@ def _plan(db, plan_id, start):
     return BackfillBatch(plan_id,aid,tid,season,len(episodes),start,numbers,reserved,known)
 
 
+AUTOMATIC_RETRY_MS = 30 * 60 * 1000
+SEARCH_FAILURES = ('PROWLARR_SEARCH_TIMEOUT', 'PROWLARR_UNAVAILABLE')
+
+
+def automatic_retry_used(database, job_id):
+    """Whether this job already had its one delayed retry since the last manual Retry."""
+    db = None
+    try:
+        db = _open(database, readonly=True, timeout_ms=5000)
+        return db.execute(
+            "SELECT 1 FROM job_history WHERE job_id=? AND event_code='DEFERRED' "
+            "AND reason_code IN (?,?) AND history_id>COALESCE((SELECT max(history_id) "
+            "FROM job_history WHERE job_id=? AND event_code='RETRY_REQUESTED'),0) LIMIT 1",
+            (job_id, *SEARCH_FAILURES, job_id)).fetchone() is not None
+    except (sqlite3.Error, OSError, MigrationError):
+        raise QueueUnavailable() from None
+    finally:
+        if db is not None: db.close()
+
+
 def load_batch(database, plan_id, start):
     db = None
     try:

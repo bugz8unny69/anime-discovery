@@ -4,7 +4,7 @@ The job kind keeps its historical name so existing jobs and history stay valid.
 """
 from src.nextgen.acquisition.prowlarr_search import (
     Client, CandidateSelection, SearchConfiguration, SearchUnauthorized, SearchReview,
-    SearchUnavailable, SearchTimeout, _magnet_hash,
+    SearchUnavailable, _magnet_hash,
 )
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
@@ -19,6 +19,7 @@ from src.nextgen.storage.sonarr_backfill import (
     PAGE_SIZE, BackfillConflict, BackfillCompletion,
     load_batch, persist_observations, FallbackCompletion, load_fallback,
     persist_fallback, FallbackMissing, persist_fallback_missing,
+    AUTOMATIC_RETRY_MS, automatic_retry_used,
 )
 from src.nextgen.worker import blocking
 
@@ -97,10 +98,16 @@ def registration(secrets, *, catalog_factory=None, client_factory=None,
             return Outcome(value=BackfillCompletion(plan,observed))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
-        except SearchTimeout:
-            return Outcome('blocked','PROWLARR_SEARCH_TIMEOUT')
-        except SearchUnavailable:
-            return Outcome('blocked','PROWLARR_UNAVAILABLE')
+        except SearchUnavailable as exc:   # includes SearchTimeout
+            # The client already tried three times. Wait 30 minutes once, then
+            # stop for a manual Retry; nothing is published for this page.
+            reason = exc.reason_code
+            used = await blocking(automatic_retry_used,
+                context.configuration.value('storage.database_path'),context.claim.job_id)
+            if used: return Outcome('blocked',reason)
+            log.warning('Backfill search will run again in %s minutes: %s',
+                        AUTOMATIC_RETRY_MS//60000, reason)
+            return Outcome('defer',reason,delay_ms=AUTOMATIC_RETRY_MS)
         except SearchUnauthorized:
             return Outcome('review','PROWLARR_AUTH_FAILED')
         except SearchConfiguration:

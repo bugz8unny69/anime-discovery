@@ -69,13 +69,21 @@ historical job and table names are kept so existing jobs and history stay valid)
 | `MAPPING_MISSING` | TVDB lists the episode but the AniDB/TVDB mapping is missing or ambiguous |
 | `IN_PROGRESS` | Already reserved, staged or kept |
 
-One episode without releases never holds back the others on the page. A
-Prowlarr failure stops the page at once, without publishing partial results and
-without an automatic retry or idle loop:
+One episode without releases never holds back the others on the page.
 
-- `PROWLARR_SEARCH_TIMEOUT` — a search exceeded `prowlarr.timeout_seconds` (BLOCKED, Retry available);
-- `PROWLARR_UNAVAILABLE` — Prowlarr or an indexer failed (BLOCKED, Retry available);
-- `PROWLARR_AUTH_FAILED`, `PROWLARR_CONFIGURATION_INVALID` — fix Settings, then Retry.
+A slow or busy Prowlarr is retried, not reported straight away:
+
+1. Each search waits up to `prowlarr.timeout_seconds` (default 60). A
+   timeout, 429 or 5xx gets two more tries, 15 s and then 60 s later; a 429
+   `Retry-After` replaces the wait, capped at two minutes.
+2. If all three tries fail, nothing from that page is published and the job
+   runs again once, 30 minutes later.
+3. If that also fails, it stops as BLOCKED with Retry available:
+   `PROWLARR_SEARCH_TIMEOUT` or `PROWLARR_UNAVAILABLE`. A manual Retry gets
+   the same allowance again.
+
+`PROWLARR_AUTH_FAILED`, `PROWLARR_CONFIGURATION_INVALID` and unreadable
+responses are never retried automatically: fix Settings, then Retry.
 
 Not-aired episodes are reported, not polled. Continue still admits later
 episodes when they arrive through the webhook.

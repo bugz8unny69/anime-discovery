@@ -62,11 +62,12 @@ def catalog(*targets):
 SEARCHABLE = (EpisodeTarget(1, 'SEARCHABLE', 1, 9001), EpisodeTarget(2, 'SEARCHABLE', 2, 9002))
 
 
-def client(fake, *targets, policy=None):
+def client(fake, *targets, policy=None, sleeps=None):
     found = catalog(*(targets or SEARCHABLE))
     return Client(Options('http://prowlarr.local:9696', 45), 'private-prowlarr-key',
                   catalog=lambda aid, tid, season: found, transport=fake,
-                  policy=policy or DiscoveryPolicy())
+                  policy=policy or DiscoveryPolicy(),
+                  sleep=(sleeps.append if sleeps is not None else lambda seconds: None))
 
 
 class ReleaseMatchingTests(unittest.TestCase):
@@ -153,17 +154,37 @@ class ProwlarrClientTests(unittest.TestCase):
         self.assertEqual((observed[0].status, observed[0].candidates, observed[0].accepted),
                          ('CANDIDATES', 3, 0))
 
-    def test_transport_failures_are_reported_immediately(self):
+    def test_slow_or_busy_prowlarr_gets_two_more_tries(self):
         for error, expected in ((TimeoutError(), SearchTimeout),
                                 (urllib.error.URLError(TimeoutError()), SearchTimeout),
                                 (urllib.error.URLError('refused'), SearchUnavailable),
-                                (urllib.error.HTTPError('u', 401, 'x', {}, io.BytesIO()), SearchUnauthorized),
                                 (urllib.error.HTTPError('u', 503, 'x', {}, io.BytesIO()), SearchUnavailable)):
-            fake = FakeProwlarr()
+            fake, sleeps = FakeProwlarr(), []
             fake.error = error
             with self.subTest(error=error), self.assertRaises(expected):
-                client(fake).backfill(50, 100, 1, (1, 2))
-            self.assertEqual(len(fake.queries), 1)  # No repeat of a failed request.
+                client(fake, sleeps=sleeps).backfill(50, 100, 1, (1, 2))
+            self.assertEqual(len(fake.queries), 3)
+            self.assertEqual(sleeps, [15, 60])
+
+    def test_authentication_failure_is_not_retried(self):
+        fake, sleeps = FakeProwlarr(), []
+        fake.error = urllib.error.HTTPError('u', 401, 'x', {}, io.BytesIO())
+        with self.assertRaises(SearchUnauthorized):
+            client(fake, sleeps=sleeps).backfill(50, 100, 1, (1,))
+        self.assertEqual((len(fake.queries), sleeps), (1, []))
+
+    def test_rate_limit_honors_retry_after_and_recovers(self):
+        class Busy(FakeProwlarr):
+            def __call__(self, request, timeout):
+                if len(self.queries) < 2:
+                    self.queries.append('busy')
+                    raise urllib.error.HTTPError('u', 429, 'busy', {'Retry-After': '500' if self.queries == ['busy'] else '7'},
+                                                 io.BytesIO())
+                return super().__call__(request, timeout)
+        fake, sleeps = Busy({'Kusuriya no Hitorigoto 01': [row('[A] Kusuriya no Hitorigoto - 01 (1080p)', A)]}), []
+        observed = client(fake, sleeps=sleeps).backfill(50, 100, 1, (1,))
+        self.assertEqual(sleeps, [120, 7])       # Retry-After, capped at two minutes.
+        self.assertEqual(observed[0].status, 'CANDIDATES')
 
     def test_invalid_response_needs_review(self):
         class Bad(FakeProwlarr):

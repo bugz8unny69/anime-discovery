@@ -20,6 +20,9 @@ from src.nextgen.sonarr_episode import VerifiedEpisode
 MAX_RESPONSE = 4 * 1024 * 1024
 MAX_RELEASES = 1000
 MAX_ALIASES = 3
+# A slow or busy Prowlarr gets two more tries before the search stops.
+RETRY_DELAYS_SECONDS = (15, 60)
+MAX_RETRY_AFTER_SECONDS = 120
 
 
 class SearchReview(ValueError):
@@ -39,6 +42,7 @@ class SearchUnauthorized(SearchConfiguration):
 
 class SearchUnavailable(RuntimeError):
     reason_code = 'PROWLARR_UNAVAILABLE'
+    retry_after = None      # seconds Prowlarr asked us to wait (429), if any
     def __init__(self): super().__init__('Prowlarr search is unavailable.')
 
 
@@ -259,9 +263,18 @@ def _release(row, titles, target, season, prepared=None):
                    declared_title(titles, target.anidb_episode))
 
 
+def _unavailable(headers):
+    error = SearchUnavailable()
+    try: value = headers.get('Retry-After') if headers is not None else None
+    except AttributeError: value = None
+    if type(value) is str and re.fullmatch(r'[0-9]{1,6}', value.strip()):
+        error.retry_after = max(1, int(value.strip()))
+    return error
+
+
 class Client:
     """GET-only Prowlarr transport plus a provider-backed episode catalog."""
-    def __init__(self, options, api_key, *, catalog, transport=None, policy=None):
+    def __init__(self, options, api_key, *, catalog, transport=None, policy=None, sleep=time.sleep):
         if (type(options) is not Options or type(api_key) is not str or not api_key
                 or len(api_key) > 1024 or any(ord(c) < 33 or ord(c) > 126 for c in api_key)
                 or not callable(catalog)):
@@ -271,6 +284,7 @@ class Client:
         self.catalog = catalog
         self.logger = None
         self.policy = policy or DiscoveryPolicy()
+        self._sleep = sleep
         opener = urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
         self._transport = transport or (lambda request, timeout: opener.open(request, timeout=timeout))
 
@@ -282,6 +296,24 @@ class Client:
                    policy=DiscoveryPolicy.capture(configuration))
 
     def _get(self, query):
+        """One search; timeouts, 429 and 5xx get two more tries (15 s, then 60 s).
+
+        A 429 Retry-After header replaces the wait, capped at two minutes.
+        Authentication and invalid responses are never retried.
+        """
+        for attempt, delay in enumerate((*RETRY_DELAYS_SECONDS, None), 1):
+            try:
+                return self._get_once(query)
+            except SearchUnavailable as exc:      # includes SearchTimeout
+                if delay is None: raise
+                if exc.retry_after is not None: delay = min(exc.retry_after, MAX_RETRY_AFTER_SECONDS)
+                if self.logger is not None:
+                    self.logger.warning('Prowlarr search failed (%s); try %s of %s in %s s',
+                                        exc.reason_code, attempt + 1,
+                                        len(RETRY_DELAYS_SECONDS) + 1, delay)
+                self._sleep(delay)
+
+    def _get_once(self, query):
         if type(query) is not str or not 1 <= len(query) <= 256:
             raise SearchReview()
         url = (self.options.base_url + '/api/v1/search?'
@@ -297,17 +329,17 @@ class Client:
             with self._transport(request, self.options.timeout_seconds) as response:
                 code = response.getcode()
                 if code in (401, 403): raise SearchUnauthorized()
-                if code == 429 or code >= 500: raise SearchUnavailable()
+                if code == 429 or code >= 500: raise _unavailable(getattr(response, 'headers', None))
                 if code != 200: raise SearchReview()
                 raw = response.read(MAX_RESPONSE + 1)
                 if type(raw) is not bytes or len(raw) > MAX_RESPONSE: raise SearchReview()
                 try: payload = _json(raw)
                 except ValueError: raise SearchReview() from None
         except urllib.error.HTTPError as exc:
-            code = exc.code
+            code, headers = exc.code, exc.headers
             exc.close()
             if code in (401, 403): raise SearchUnauthorized() from None
-            if code == 429 or code >= 500: raise SearchUnavailable() from None
+            if code == 429 or code >= 500: raise _unavailable(headers) from None
             raise SearchReview() from None
         except TimeoutError:
             raise SearchTimeout() from None

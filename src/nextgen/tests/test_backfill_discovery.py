@@ -232,18 +232,43 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT tvdb_episode,status FROM sonarr_backfill_results ORDER BY tvdb_episode"),
                          [(1,'NOT_AIRED'),(2,'NO_RESULTS'),(3,'MAPPING_MISSING'),(4,'CANDIDATES')])
 
+    async def fail_twice(self, fake):
+        """First failure waits 30 minutes; the second one stops for a manual Retry."""
+        worker = self.worker(fake)
+        await worker.attempt()   # EVALUATE_TRIAL
+        await worker.attempt()   # search fails -> one delayed automatic retry
+        state, available = self.rows(
+            "SELECT state,available_at_ms-updated_at_ms FROM jobs WHERE kind=?",(DISCOVER_KIND,))[0]
+        self.assertEqual((state, available), ('RETRY_WAIT', 30*60*1000))
+        self.assertFalse(await worker.attempt())   # not due yet
+        self.make_due()
+        await worker.attempt()   # fails again -> BLOCKED
+        return worker
+
     async def test_unavailable_prowlarr_stops_without_persisting_a_partial_page(self):
+        self.source(10)
+        fake = FakeDiscovery()
+        fake.error = True
+        await self.fail_twice(fake)
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(0,)])
+        self.assertEqual(self.rows(
+            "SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
+            [('BLOCKED','PROWLARR_UNAVAILABLE')])
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[(1,)])
+        self.assertEqual(len(fake.calls),2)
+
+    async def test_a_slow_prowlarr_recovers_on_the_delayed_retry(self):
         self.source(10)
         fake = FakeDiscovery()
         fake.error = True
         worker = self.worker(fake)
         await worker.attempt()
         await worker.attempt()
-        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(0,)])
-        self.assertEqual(self.rows(
-            "SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
-            [('BLOCKED','PROWLARR_UNAVAILABLE')])
-        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[(1,)])
+        fake.error = False
+        self.make_due()
+        await worker.attempt()
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind=? ORDER BY job_id",(DISCOVER_KIND,))[0],('DONE',))
+        self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
 
 
     def make_due(self):
@@ -252,19 +277,17 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
             with transaction(db): db.execute('UPDATE jobs SET available_at_ms=0 WHERE kind=?',(DISCOVER_KIND,))
         finally: db.close()
 
-    async def test_timeout_stops_immediately_without_retry_or_successor(self):
+    async def test_timeout_waits_once_then_stops_without_successor(self):
         from src.nextgen.acquisition.prowlarr_search import SearchTimeout
         self.source(10)
         fake = FakeDiscovery()
         def timeout(*args, **kwargs): raise SearchTimeout()
         fake.backfill = timeout
-        worker = self.worker(fake)
-        await worker.attempt()
-        await worker.attempt()
+        worker = await self.fail_twice(fake)
         self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind=?",(DISCOVER_KIND,)),
                          [('BLOCKED','PROWLARR_SEARCH_TIMEOUT')])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=?",(DISCOVER_KIND,)),[(1,)])
-        self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code IN ('DEFERRED','RETRY_SCHEDULED')"),[(0,)])
+        self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='DEFERRED'"),[(1,)])
         self.make_due()
         self.assertFalse(await worker.attempt())
 
@@ -273,9 +296,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.source(10)
         fake = FakeDiscovery()
         fake.error = True
-        worker = self.worker(fake)
-        await worker.attempt()
-        await worker.attempt()
+        worker = await self.fail_twice(fake)
         job, attempt = self.rows("SELECT job_id,attempt_count FROM jobs WHERE kind=?",(DISCOVER_KIND,))[0]
         db = connect(self.database)
         try: self.assertTrue(capability(db, job)['enabled'])
@@ -284,7 +305,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
                              expected_reason='PROWLARR_UNAVAILABLE')
         fake.error = False
         await worker.attempt()
-        self.assertEqual(self.rows("SELECT state,attempt_count FROM jobs WHERE job_id=?",(job,)),[('DONE',2)])
+        self.assertEqual(self.rows("SELECT state,attempt_count FROM jobs WHERE job_id=?",(job,)),[('DONE',3)])
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(4,)])
 
     async def test_old_missing_series_hold_is_not_automatically_restarted(self):
