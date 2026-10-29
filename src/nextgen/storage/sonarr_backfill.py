@@ -107,15 +107,11 @@ def schedule_first(db, claim, source, *, kind):
         "json_extract(payload_json,'$.plan_id')=? LIMIT 1",(kind,plan_id)
     ).fetchone()
     if exists: return ()
-    op = db.execute(
-        "SELECT operation_id FROM job_operation_members WHERE job_id=?",
-        (claim.job_id,)
-    ).fetchone()
-    if op is None: raise BackfillConflict()
+    # Backfill is its own operation: the episode that triggered it must be able
+    # to finish staging (operation STAGED) while backfill is still searching.
     _,receipt = enqueue_job_with_receipt(
         db,component='worker',kind=kind,payload={'plan_id':plan_id,'start':1},
-        event_id=claim.event_id,created_by_job_id=claim.job_id,
-        operation_id=op[0]
+        event_id=claim.event_id,created_by_job_id=claim.job_id
     )
     return (receipt,)
 
