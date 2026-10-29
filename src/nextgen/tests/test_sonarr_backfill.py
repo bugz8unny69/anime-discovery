@@ -402,10 +402,11 @@ class BackfillSchemaTests(unittest.TestCase):
             old.executescript((SQL_DIR/'044_sonarr_candidates.sql').read_text())
             old.executescript((SQL_DIR/'045_sonarr_magnet_intents.sql').read_text())
             old.executescript((SQL_DIR/'046_observed_acquisition.sql').read_text())
+            old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],46)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],47)
         finally:
             old.close()
             fresh.close()
