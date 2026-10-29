@@ -11,39 +11,21 @@ from src.nextgen.release_contracts import ReleaseNotReady, ReleaseConflict
 
 
 def declared_episode(title):
-    if type(title) is not str or not 1<=len(title)<=2048: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    # An alternate title in parentheses can contain words like "Special"
-    # ("(A Returner's Magic Should Be Special)"); it is a name, not a release type.
-    from src.nextgen.providers.parsing import release_title
-    try:names,_=release_title(title)
-    except (ValueError,TypeError):names=[]
-    scan=title
-    for name in names:scan=scan.replace("("+name+")"," ")
-    if re.search(r"\b(?:batch|complete|pack|ova|oav|ona|specials?|ncop|nced|pv|trailer|movie|recap|extras?)\b",scan,re.I):
-        raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
-    if re.search(r"\d\s*(?:-|~|&|\+|,)\s*(?:E(?:P)?\s*)?\d",title,re.I):
-        raise ReleaseNotReady("RELEASE_TYPE_UNSUPPORTED")
-    boundary=r"(?=$|[\s\[\]()_.-]|v[0-9]+\b)"
-    explicit_pattern=r"(?<![A-Za-z0-9])S(\d{1,2})[ ._-]*E(\d{1,4})"+boundary
-    explicit=list(re.finditer(explicit_pattern,title,re.I))
-    rest=re.sub(explicit_pattern," ",title,flags=re.I)
-    ordinary=list(re.finditer(r"(?<![A-Za-z0-9])(?:Episode\s*|EP\.?\s*|E\s*|-\s*)(\d{1,4})"+boundary,rest,re.I))
-    if re.search(r"(?:\b(?:EP(?:ISODE)?|E)\s*-|--|-[ \t]+-)\s*[0-9]",title,re.I):
-        raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    if re.search(r"(?:EP(?:ISODE)?|E)\s*[0-9]{1,4}(?:EP(?:ISODE)?|E)\s*[0-9]",title,re.I) or re.search(r"(?:Episode\s*|EP\.?\s*|E\s*|-\s*)[0-9]+\.[0-9]",title,re.I):
-        raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    if len(explicit)+len(ordinary)!=1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    if explicit:
-        season,number = map(int,explicit[0].groups())
-        # An added "Season N" (e.g. "| Sasaki to Pii-chan Season 2") must agree.
-        others={int(a or b) for a,b in re.findall(r"\b(?:Season\s*(\d+)|S(\d{1,2}))\b",rest,re.I)}
-        if others-{season}: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-        if number<1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-        return "tvdb",season,number
-    if re.search(r"\b(?:Season\s*\d+|S\d{1,2})\b",rest,re.I): raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    number=int(ordinary[0].group(1))
-    if number<1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
-    return "anidb",None,number
+    """('tvdb', season, number) for SxxEyy, ('anidb', None, number) otherwise.
+
+    Shares the release-group title reader with backfill search
+    (acquisition.release_titles), so intake and backfill read titles alike.
+    """
+    from src.nextgen.acquisition.release_titles import EXPLICIT, marker_seasons, read_release
+    parsed, reason = read_release(title)
+    if parsed is None: raise ReleaseNotReady(reason)
+    if parsed.season is not None:
+        # An added "Season N" or "S3" anywhere (e.g. "| Sasaki to Pii-chan Season 2") must agree.
+        if marker_seasons(EXPLICIT.sub(' ', parsed.text)) - {parsed.season}:
+            raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
+        return "tvdb", parsed.season, parsed.episode
+    if len(marker_seasons(parsed.text)) > 1: raise ReleaseNotReady("RELEASE_TITLE_UNCLEAR")
+    return "anidb", None, parsed.episode
 
 
 def forward_mappings(payload, aid, tid, catalog):
