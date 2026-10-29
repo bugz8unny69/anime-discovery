@@ -113,6 +113,17 @@ class StageMediaJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE state='ON_HOLD' AND last_reason_code='EPISODE_RESERVED'"),[(1,)])
         self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE activity_code='SKIPPED_DUPLICATE'"),[(0,)])
 
+    async def test_reservation_conflict_at_commit_stops_for_review_instead_of_crash_looping(self):
+        from unittest.mock import patch
+        from src.nextgen.episode_reservations import ReservationConflict
+        worker=self.worker();await self.staged_ready(worker)
+        with patch('src.nextgen.storage.episode_reservations.skip_staged_waiters',side_effect=ReservationConflict()):
+            self.assertTrue(await worker.attempt())
+        self.assertEqual(self.rows("SELECT state,last_reason_code FROM jobs WHERE kind='STAGE_TRIAL_MEDIA'"),
+                         [('NEEDS_REVIEW','EPISODE_RESERVATION_CONFLICT')])
+        # The refused save rolled back; nothing was marked published.
+        self.assertEqual(self.rows('SELECT state FROM staging_publications'),[('PLANNED',)])
+
     async def test_staging_does_not_complete_canceled_competitor(self):
         worker=self.worker();await self.staged_ready(worker)
         await self.held_contender(worker)

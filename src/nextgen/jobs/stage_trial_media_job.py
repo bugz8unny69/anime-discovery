@@ -14,11 +14,13 @@ from src.nextgen.history import integer
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration
 from src.nextgen.staging import Publisher, StagingReview, StagingUnavailable, StagingBusy
 from src.nextgen.storage.staging import Journal, persist
+from src.nextgen.episode_reservations import ReservationConflict
 
 KIND='STAGE_TRIAL_MEDIA'
 DEFINITION=HandlerDefinition(KIND,'Move verified video into staging with episode metadata')
 REVIEW=(StagingReview,MediaInvalid,AcquisitionConflict,MetadataInvalid,SourceMissing,
-        SizeEvidenceMissing,DownloadConfigurationError,ClientInvalid,TransferConflict,CancellationError)
+        SizeEvidenceMissing,DownloadConfigurationError,ClientInvalid,TransferConflict,CancellationError,
+        ReservationConflict)  # e.g. the reservation was released by an earlier Cancel
 
 
 def _persist(db,claim,value):
