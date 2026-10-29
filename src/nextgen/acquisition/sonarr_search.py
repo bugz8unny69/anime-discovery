@@ -6,6 +6,7 @@ Sonarr's order; acquisition ownership remains outside this module.
 from dataclasses import dataclass, field
 import http.client
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +48,11 @@ class SearchNotFound(SearchReview):
 class SearchUnavailable(RuntimeError):
     reason_code = 'SONARR_DISCOVERY_UNAVAILABLE'
     def __init__(self): super().__init__('Sonarr discovery is temporarily unavailable.')
+
+
+class SearchTimeout(SearchUnavailable):
+    reason_code = 'SONARR_DISCOVERY_TIMEOUT'
+    def __init__(self): RuntimeError.__init__(self, 'Sonarr discovery request timed out.')
 
 
 @dataclass(frozen=True)
@@ -278,6 +284,7 @@ class Client:
             raise SearchConfiguration()
         if policy is not None and type(policy) is not DiscoveryPolicy: raise SearchConfiguration()
         self.options, self._key = options, api_key
+        self.logger = None
         self.policy = policy or DiscoveryPolicy()
         opener = urllib.request.build_opener(_NoRedirect(), urllib.request.ProxyHandler({}))
         self._transport = transport or (lambda request, timeout: opener.open(request, timeout=timeout))
@@ -307,8 +314,13 @@ class Client:
             'X-Api-Key': self._key, 'Accept': 'application/json',
             'User-Agent': 'AnimeDiscoveryNextGen/1'
         })
+        timeout = INTERACTIVE_SEARCH_TIMEOUT_SECONDS if path == 'release' else self.options.timeout_seconds
+        started = time.monotonic()
+        if self.logger is not None:
+            self.logger.info('Sonarr GET started: endpoint=%s ids=%s timeout_seconds=%s',
+                             path, query or {}, timeout)
         try:
-            with self._transport(request, max(self.options.timeout_seconds, INTERACTIVE_SEARCH_TIMEOUT_SECONDS) if path == 'release' else self.options.timeout_seconds) as response:
+            with self._transport(request, timeout) as response:
                 code = response.getcode()
                 if code in (401, 403): raise SearchUnauthorized()
                 if code == 429 or code >= 500: raise SearchUnavailable()
@@ -323,8 +335,17 @@ class Client:
             if code in (401, 403): raise SearchUnauthorized() from None
             if code == 429 or code >= 500: raise SearchUnavailable() from None
             raise SearchReview() from None
-        except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+        except TimeoutError:
+            raise SearchTimeout() from None
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise SearchTimeout() from None
             raise SearchUnavailable() from None
+        except (OSError, http.client.HTTPException):
+            raise SearchUnavailable() from None
+        if self.logger is not None:
+            self.logger.info('Sonarr GET answered: endpoint=%s elapsed_seconds=%.3f',
+                             path, time.monotonic() - started)
         if path == 'system/status':
             if type(payload) is not dict: raise SearchReview()
         elif (type(payload) is not list or len(payload) > (MAX_RELEASES if path == 'release' else 10000)

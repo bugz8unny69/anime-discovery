@@ -1,5 +1,8 @@
 # Sonarr → qBittorrent handoff: completion checklist
 
+Current automatic acquisition behavior: [Backfill and continue](SONARR_BACKFILL_BEHAVIOR.md).
+The historical checklist below does not authorize automatic series registration.
+
 This document is the scope and progress record for **one** follow-up pull request
 against `NextGen`. Keep it simple: use existing NextGen workers, jobs, tables,
 and adapters. Do not create a separate framework or split this work across PRs.

@@ -99,34 +99,11 @@ PR #168 is now open for the NextGen CI workflow. The code and offline tests
 have not been verified by a completed CI run as of this checkpoint; any
 failures should be handled as specific regression fixes, not new scope.
 
-## Series registration for backfill (2026-10-28)
+## Backfill policy correction (2026-10-29)
 
-Backfill needs a Sonarr series ID, but a newly discovered anime is usually not in
-Sonarr yet. Previously this parked `DISCOVER_SONARR_BACKFILL` in `ON_HOLD` with
-`SONARR_DISCOVERY_EPISODE_NOT_FOUND` until someone added the series by hand.
-
-- **Trial/backfill:** when Sonarr has no series for the verified TVDB ID, the job
-  adds it through the existing Keep client (`sonarr.Client.add_payload`) with
-  `monitored=false`, `addOptions.monitor: "all"` and both `searchFor…` options off,
-  then defers two minutes so
-  Sonarr can finish its post-add refresh. An existing series is never modified.
-  The discovery search client remains GET-only.
-- **Episode monitoring:** without `addOptions.monitor` Sonarr falls back to its
-  legacy path, where episode monitoring depends on the lookup's season flags. An
-  explicit `all` gives a defined state. It is inert during the trial because Sonarr
-  never grabs for an unmonitored series, and Keep's PUT resends seasons unchanged,
-  so Sonarr does not re-apply episode monitoring.
-- **Keep:** after the existing library-path check passes, if the exact TVDB-matched
-  series is unmonitored, Keep sends one PUT of
-  the series record it just read with only `monitored` changed to `true`, so all
-  other series settings are preserved. Already-monitored series are untouched.
-  There is no ownership tracking: Keep is the decision to follow the anime.
-- **Reject:** unchanged; an added series stays unmonitored and nothing is deleted.
-- **Recovery:** the worker's existing recovery loop returns backfill jobs held for
-  `SONARR_DISCOVERY_EPISODE_NOT_FOUND` to `PENDING` (recorded as
-  `RETRY_SCHEDULED`), unless their operation was canceled. Other holds are not touched.
-- A present series whose episode mapping does not match now stops as
-  `SONARR_DISCOVERY_REVIEW` instead of being reported as a missing series.
-
-No schema change. Offline tests cover each step; the live Sonarr → qBittorrent →
-staging flow still needs verification against the homelab services.
+The former automatic series-registration and two-minute waiting policy was
+incorrect for the intended search-only acquisition flow and has been removed.
+See [the authoritative backfill and continue behavior](SONARR_BACKFILL_BEHAVIOR.md)
+for selection/overlap rules, GET-only Sonarr use, immediate errors, and the
+remaining limitation when Sonarr has no episode records. The separate explicit
+Keep-in-Sonarr workflow is outside this automatic acquisition change.

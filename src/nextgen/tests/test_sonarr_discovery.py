@@ -311,6 +311,42 @@ class SonarrDiscoveryTests(unittest.TestCase):
         fake.error = urllib.error.URLError('connection refused')
         with self.assertRaises(SearchUnavailable): c.search(ID)
 
+    def test_empty_episode_catalog_does_not_search_or_write_to_sonarr(self):
+        c, fake = client()
+        fake.episodes = []
+        observations = c.backfill(100, 2, (5,6), reserved=(5,))
+        self.assertEqual([o.status for o in observations], ['IN_PROGRESS','NOT_LISTED'])
+        self.assertEqual([urlsplit(u).path for u in fake.visited],
+                         ['/api/v3/system/status','/api/v3/series','/api/v3/episode'])
+
+    def test_request_logs_show_work_without_credentials_or_magnets(self):
+        import logging
+        c, fake = client()
+        c.logger = logging.getLogger('sonarr-discovery-test')
+        with self.assertLogs(c.logger, level='INFO') as logs:
+            c.search(ID)
+        messages = '\n'.join(logs.output)
+        self.assertIn('endpoint=release', messages)
+        self.assertIn('timeout_seconds=180', messages)
+        self.assertIn('elapsed_seconds=', messages)
+        self.assertNotIn('private-sonarr-key', messages)
+        self.assertNotIn('magnet:', messages)
+
+    def test_release_timeout_is_distinct_and_does_not_repeat_request(self):
+        from src.nextgen.acquisition.sonarr_search import SearchTimeout
+        for error in (TimeoutError(), urllib.error.URLError(TimeoutError())):
+            c, fake = client()
+            def transport(request, timeout):
+                if urlsplit(request.full_url).path == '/api/v3/release':
+                    fake.visited.append(request.full_url)
+                    self.assertEqual(timeout, 180)
+                    raise error
+                return fake(request, timeout)
+            c._transport = transport
+            with self.subTest(error=type(error)), self.assertRaises(SearchTimeout):
+                c.search(ID)
+            self.assertEqual(len(fake.visited), 4)
+
     def test_bounded_bad_json_and_duplicate_keys(self):
         for raw in (b'{bad json', b'{"version":"4.0.16.1","version":"4.0.16.1"}',
                     b'x' * (MAX_RESPONSE + 1)):

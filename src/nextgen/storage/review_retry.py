@@ -40,9 +40,16 @@ class RetryReceipt:
     history_id: int
 
 
+def _retryable_state(kind, state, reason):
+    return state == 'NEEDS_REVIEW' or (
+        kind == 'DISCOVER_SONARR_BACKFILL' and state == 'BLOCKED'
+        and reason in ('SONARR_DISCOVERY_EPISODE_NOT_FOUND', 'SONARR_EPISODES_NOT_LISTED',
+                       'SONARR_DISCOVERY_TIMEOUT', 'SONARR_DISCOVERY_UNAVAILABLE'))
+
+
 def _allowed(db, job_id, row):
     kind, state, attempt, reason, token, expiry = row
-    if (kind not in RETRY_KINDS or state != 'NEEDS_REVIEW' or attempt <= 0
+    if (kind not in RETRY_KINDS or not _retryable_state(kind, state, reason) or attempt <= 0
             or get_reason(reason) is None or token is not None or expiry is not None):
         return False
     if db.execute('SELECT 1 FROM management_actions WHERE job_id=?', (job_id,)).fetchone():
@@ -100,7 +107,7 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
                 details = json.loads(previous[1])
                 if details.get('attempt') == attempt and details.get('cause_reason_code') == expected_reason:
                     return RetryReceipt(job_id, attempt, 'ALREADY_QUEUED', previous[0])
-        if state != 'NEEDS_REVIEW':
+        if not _retryable_state(kind, state, reason):
             raise RetryNotAllowed('job is not stopped for review')
         if reason != expected_reason:
             raise RetryStale('job review reason changed')
@@ -109,9 +116,9 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
         updated = db.execute(
             "UPDATE jobs SET state='PENDING',available_at_ms=?,updated_at_ms=?,"
             "last_reason_code=NULL,activity_code=NULL WHERE job_id=? "
-            "AND state='NEEDS_REVIEW' AND attempt_count=? AND last_reason_code=? "
+            "AND state=? AND attempt_count=? AND last_reason_code=? "
             "AND lease_token IS NULL AND lease_expires_at_ms IS NULL",
-            (now, now, job_id, attempt, reason))
+            (now, now, job_id, state, attempt, reason))
         if updated.rowcount != 1:
             raise RetryStale('job changed while requesting retry')
         audit = append_job_history(db, job_id=job_id, event_code='RETRY_REQUESTED',
