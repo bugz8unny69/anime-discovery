@@ -117,6 +117,24 @@ class ProwlarrClientTests(unittest.TestCase):
         self.assertEqual(fake.queries, ['Kusuriya no Hitorigoto 01', 'The Apothecary Diaries 01',
                                         'Kusuriya no Hitorigoto 02', 'The Apothecary Diaries 02'])
 
+    def test_yearless_s02e02_indexer_release_is_returned_by_prowlarr(self):
+        titles = ('Koori no Jouheki (2026)', 'The Ramparts of Ice (2026)')
+        target = EpisodeTarget(2, 'SEARCHABLE', 2, 9002, 14)
+        fake = FakeProwlarr({
+            'The Ramparts of Ice S02E02': [
+                row('[ToonsHub] The Ramparts of Ice S02E02 1080p WEB', A)
+            ],
+        })
+        test_client = Client(Options('http://prowlarr.local:9696', 45),
+                             'private-prowlarr-key',
+                             catalog=lambda aid, tid, season: EpisodeCatalog(titles, {2: target}),
+                             transport=fake)
+        observed = test_client.backfill(20168, 459627, 2, (2,), select_candidates=True)
+        self.assertEqual([(v.status, v.candidates, v.accepted) for v in observed],
+                         [('CANDIDATES', 1, 1)])
+        self.assertEqual(observed[0].selection.release.info_hash, A)
+        self.assertIn('The Ramparts of Ice S02E02', fake.queries)
+
     def test_reserved_episode_is_not_searched(self):
         fake = FakeProwlarr()
         observed = client(fake).backfill(50, 100, 1, (1, 2), reserved=(1, 2))
