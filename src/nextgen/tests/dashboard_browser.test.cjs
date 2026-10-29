@@ -151,7 +151,7 @@ function descendants(element) {
 }
 test('one save button per integration and credential inputs use an embedded eye', async () => {
   const h = await harness();
-  const services = ['shoko', 'jellyfin', 'sonarr', 'tvdb', 'qbittorrent', 'access'];
+  const services = ['prowlarr', 'shoko', 'jellyfin', 'sonarr', 'tvdb', 'qbittorrent', 'access'];
   h.run("state.credentials = {revision: 1}; renderCredentials();");
   const container = h.elements.get('settings-fields');
   assert.deepEqual(container.children.map(panel => panel.dataset.section), services);

@@ -55,7 +55,7 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
             reserve(preparation_kind='PREPARE_ACQUISITION'),prepare(read,submission_kind='SUBMIT_TORRENT'),
             submit(read,Secrets(),client_factory=FakeClient,journal_factory=journal_factory,
                    discovery_kind='DISCOVER_SONARR_BACKFILL' if backfill else None),
-            *((discover(None),) if backfill else ()))),policy=Policy(lease_ms=30000))
+            *((discover(None,catalog_factory=lambda configuration:None),) if backfill else ()))),policy=Policy(lease_ms=30000))
         self.addAsyncCleanup(worker.close)
         self.store.update({'qbittorrent':{'base_url':'https://qb.example'},'storage':{'download_root':'/srv/downloads'}},expected_revision=1)
         return worker

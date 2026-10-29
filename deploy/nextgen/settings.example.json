@@ -9,6 +9,7 @@
   "anidb": {"client_name": "", "client_version": 1},
   "torrent_metadata": {"base_url": ""},
   "qbittorrent": {"base_url": "", "category": "anime-discovery"},
+  "prowlarr": {"base_url": ""},
   "sonarr": {"base_url": "", "quality_profile_id": 0},
   "jellyfin": {"base_url": ""},
   "shoko": {"base_url": ""}

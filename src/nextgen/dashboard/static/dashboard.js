@@ -524,6 +524,7 @@ function settingInput(path, definition, value) {
 // Credentials are loaded when their integration is opened. Until then, no
 // stored API key, token or download-client password is sent to the browser.
 const CREDENTIAL_SPECS = [
+  ['prowlarr', 'Prowlarr', [['api_key', 'API key']]],
   ['shoko', 'Shoko (optional)', [['api_key', 'API key']]],
   ['jellyfin', 'Jellyfin', [['api_key', 'API key']]],
   ['sonarr', 'Sonarr', [['api_key', 'API key']]],

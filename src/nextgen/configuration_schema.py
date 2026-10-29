@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 10
+CONFIGURATION_VERSION = 11
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -73,11 +73,13 @@ FIELDS = MappingProxyType({
     "shoko.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Shoko timeout"),
     "jellyfin.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Jellyfin address", help_text="HTTP(S) address without a subpath. Blank disables automatic library refresh. Configure both staging and permanent folders in Jellyfin first."),
     "jellyfin.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Jellyfin timeout"),
+    "prowlarr.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Prowlarr address", help_text="HTTP(S) server address for Prowlarr, used to search torrents for backfill and continue episodes. Blank disables the search."),
+    "prowlarr.timeout_seconds": FieldDefinition(60, "integer", "next_operation", minimum=1, maximum=300, label="Prowlarr search timeout", help_text="Maximum seconds for one Prowlarr search. A timeout stops the search immediately; retry it from the job."),
+    "prowlarr.max_resolution": FieldDefinition(1080, "resolution", "next_operation", label="Maximum resolution", help_text="Upper limit for backfill torrents, read from the release title. 1080 keeps 720p and 1080p; 2160 also permits 4K. Titles without a resolution are skipped."),
+    "prowlarr.min_seeders": FieldDefinition(5, "integer", "next_operation", minimum=0, maximum=1000000, label="Minimum seeders", help_text="Releases with fewer seeders, or no seeder count, are skipped."),
+    "prowlarr.rank_by": FieldDefinition("resolution", "ranking", "next_operation", label="Ranking", help_text="Pick the best release by resolution then seeders, or seeders then resolution."),
     "sonarr.base_url": FieldDefinition("", "download_endpoint", "next_operation", label="Sonarr address", help_text="HTTP(S) server address for Sonarr v4."),
     "sonarr.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60, label="Sonarr timeout"),
-    "sonarr.discovery_max_resolution": FieldDefinition(1080, "resolution", "next_operation", label="Discovery maximum resolution", help_text="Upper limit for torrent discovery. 1080 keeps 720p and 1080p; 2160 also permits 4K."),
-    "sonarr.discovery_min_seeders": FieldDefinition(5, "integer", "next_operation", minimum=0, maximum=1000000, label="Discovery minimum seeders", help_text="Minimum required seeders for candidate ranking. Missing counts do not satisfy the minimum."),
-    "sonarr.discovery_rank_by": FieldDefinition("resolution", "ranking", "next_operation", label="Discovery ranking", help_text="Rank usable torrent candidates by resolution then seeders, or seeders then resolution."),
     "sonarr.quality_profile_id": FieldDefinition(0, "integer", "next_operation", minimum=0, maximum=2147483647, label="Sonarr quality profile ID", help_text="Required for new series. Zero means unconfigured."),
     "sonarr.staging_root": FieldDefinition("", "directory", "next_operation", label="Staging folder as seen by Sonarr", help_text="Blank uses the recorded local staging root."),
     "sonarr.library_root": FieldDefinition("", "directory", "next_operation", label="Permanent folder as seen by Sonarr", help_text="Blank uses the local Keep folder. Local and Sonarr folders must refer to the same storage."),
@@ -492,7 +494,7 @@ def _v8_to_v9(document):
 
 def _v9_values(values):
     if type(values) is not dict or 'shoko' in values:raise ConfigurationError()
-    historical=validate_values(values)
+    historical=_v10_values(values)
     del historical['shoko']
     return historical
 
@@ -501,12 +503,40 @@ def _v9_to_v10(document):
     if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=9):raise ConfigurationError()
     current=revision(document['revision'])
     if current==MAX_REVISION:raise ConfigurationError()
-    return {'schema_version':10,'revision':current+1,'settings':validate_values(_v9_values(document['settings']))}
+    return {'schema_version':10,'revision':current+1,'settings':_v10_values(_v9_values(document['settings']))}
+
+
+V10_DISCOVERY = (('discovery_max_resolution','max_resolution'),('discovery_min_seeders','min_seeders'),
+                 ('discovery_rank_by','rank_by'))
+
+
+def _v10_values(values):
+    """Published v10: search preferences under sonarr.discovery_*, no prowlarr section."""
+    if type(values) is not dict or 'prowlarr' in values:raise ConfigurationError()
+    current=copy.deepcopy(values)
+    sonarr=current.get('sonarr',{})
+    if type(sonarr) is not dict:raise ConfigurationError()
+    moved={new:sonarr.pop(old) for old,new in V10_DISCOVERY if old in sonarr}
+    if moved:current['prowlarr']=moved
+    historical=validate_values(current)
+    search=historical.pop('prowlarr')
+    for old,new in V10_DISCOVERY:historical['sonarr'][old]=search[new]
+    return historical
+
+
+def _v10_to_v11(document):
+    """Move the discovery preferences from sonarr.* to the new prowlarr section."""
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'} or document['schema_version']!=10):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    values=_v10_values(document['settings'])
+    values['prowlarr']={new:values['sonarr'].pop(old) for old,new in V10_DISCOVERY}
+    return {'schema_version':11,'revision':current+1,'settings':validate_values(values)}
 
 
 # Explicit ordered conversion steps; future renames/type conversions go in a
 # new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10})
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10, 10: _v10_to_v11})
 
 
 def convert_document(document):

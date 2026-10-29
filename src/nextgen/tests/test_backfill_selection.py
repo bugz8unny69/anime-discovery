@@ -1,8 +1,8 @@
-"""Small SQLite tests for Sonarr's immutable discovery selection receipt."""
+"""Small SQLite tests for the immutable backfill selection receipt."""
 import sqlite3
 import unittest
 
-from src.nextgen.acquisition.sonarr_search import DiscoveryPolicy, Release, SearchResult
+from src.nextgen.acquisition.prowlarr_search import DiscoveryPolicy, Release, SearchResult
 from src.nextgen.sonarr_episode import VerifiedEpisode
 from src.nextgen.storage.sonarr_selection import SelectionConflict, select
 
@@ -11,11 +11,9 @@ OTHER = 'b' * 40
 EP = VerifiedEpisode(100, 200, 1, 10)
 
 
-def release(digest=HASH, *, approved=False, scope='exact', seeders=10):
-    return Release('Example S01E10', 'Nyaa', 'torrent', '1080p', 1080, 0,
-                   seeders, 0, 123456789, approved, ('Sonarr rejected',),
-                   (22,), scope, digest, 'magnet:?xt=urn:btih:' + digest,
-                   scope == 'exact')
+def release(digest=HASH, *, usable=True, seeders=10, episode_id=200):
+    return Release('Example S01E10 1080p', 'Nyaa', 1080, seeders, 123456789,
+                   episode_id, digest, 'magnet:?xt=urn:btih:' + digest, usable)
 
 
 class SelectionTests(unittest.TestCase):
@@ -45,11 +43,11 @@ class SelectionTests(unittest.TestCase):
 
     def choose(self, selected=None, *, result=None, identity=EP):
         chosen = selected or release()
-        results = result or SearchResult(11, 22, (chosen,))
+        results = result or SearchResult(100, 200, (chosen,))
         return select(self.db,plan_id=1,identity=identity,result=results,
                       release=chosen,policy=DiscoveryPolicy())
 
-    def test_unapproved_candidate_allowed_and_idempotent(self):
+    def test_selection_is_idempotent(self):
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             self.assertTrue(self.choose())
@@ -81,10 +79,11 @@ class SelectionTests(unittest.TestCase):
             self.choose()
 
     def test_unbound_wrong_scope_and_low_seeders_rejected(self):
-        for item in (release(scope='pack'), release(seeders=0), release(OTHER)):
-            with self.subTest(item=item.scope), self.db, self.assertRaises(SelectionConflict):
+        for item in (release(usable=False), release(seeders=0), release(OTHER),
+                     release(episode_id=201)):
+            with self.subTest(item=item), self.db, self.assertRaises(SelectionConflict):
                 self.db.execute('BEGIN IMMEDIATE')
-                self.choose(selected=item, result=SearchResult(11,22,(release(),)))
+                self.choose(selected=item, result=SearchResult(100,200,(release(),)))
 
     def test_requires_transaction(self):
         with self.assertRaises(SelectionConflict):

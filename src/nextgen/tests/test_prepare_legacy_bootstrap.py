@@ -88,7 +88,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         factory.assert_not_called()
 
     async def test_webhook_event_without_torrent_source_admits_its_own_magnet(self):
-        """Autobrr intake: no Sonarr search, no .torrent URL; Legacy magnet admission."""
+        """Autobrr intake: no .torrent URL; Legacy magnet admission."""
         root='/downloads/ad-'+'d'*32
         options=DownloadOptions('http://localhost:8080',root,'anime',10)
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
@@ -102,9 +102,8 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         journal.existing.return_value=None
         journal.authorize.return_value=(intent,MagnetPermit(intent.fingerprint),())
         journal.metadata_expired.return_value=False
-        search_factory=Mock(side_effect=AssertionError('must not search Sonarr'))
         cb=make_bootstrap(self.secrets,client_factory=Mock(side_effect=[probe,owned]),
-                          journal_factory=lambda _:journal,sonarr_factory=search_factory)
+                          journal_factory=lambda _:journal)
         with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
                    return_value=None), \
              patch('src.nextgen.acquisition.legacy_magnet.source_magnet',
@@ -113,7 +112,6 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((outcome.kind,outcome.reason_code),('defer','TORRENT_METADATA_WAITING'))
         owned.add_legacy_magnet.assert_called_once()
         self.assertTrue(owned.add_legacy_magnet.call_args.args[0].startswith(MAGNET))
-        search_factory.assert_not_called()
 
     async def test_qbittorrent_failures_report_the_failed_check(self):
         from src.nextgen.acquisition.submission import ClientInvalid, ClientAuthenticationFailed
@@ -188,7 +186,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await cb(self.source,self._config()))
         journal.authorize.assert_not_called()
 
-    async def test_restart_recovers_admitted_torrent_without_sonarr_search(self):
+    async def test_restart_recovers_admitted_torrent_without_new_search(self):
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
         root='/downloads/ad-'+'c'*32
         options=DownloadOptions('http://localhost:8080',root,'anime',10)
@@ -204,15 +202,12 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         journal.existing.return_value=intent
         journal.reconcile.return_value='UNCERTAIN'
         factory=Mock(side_effect=[probe,owned])
-        search_factory=Mock(side_effect=AssertionError('must not search'))
         cb=make_bootstrap(self.secrets,client_factory=factory,
-                          journal_factory=lambda db:journal,
-                          sonarr_factory=search_factory)
+                          journal_factory=lambda db:journal)
         with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
                    return_value=self.identity):
             result=await cb(self.source,self.context)
         self.assertEqual(result.kind,'defer')
-        search_factory.assert_not_called()
         journal.authorize.assert_not_called()
         owned.add_legacy_magnet.assert_not_called()
         owned.poll_legacy_metadata.assert_called_once()
@@ -233,10 +228,8 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         journal.existing.return_value=intent
         journal.reconcile.return_value='UNCERTAIN'
         factory=Mock(side_effect=[probe,owned])
-        search=Mock(side_effect=AssertionError('no second Sonarr search'))
         cb=make_bootstrap(self.secrets,client_factory=factory,
-                          journal_factory=lambda db:journal,
-                          sonarr_factory=search)
+                          journal_factory=lambda db:journal)
         with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
                    return_value=self.identity):
             result=await cb(self.source,self.context)
@@ -244,7 +237,6 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         owned.poll_legacy_metadata.assert_called_once()
         journal.authorize.assert_not_called()
         owned.add_legacy_magnet.assert_not_called()
-        search.assert_not_called()
 
     async def test_42_owned_metadata_defers_without_false_manifest(self):
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
@@ -264,16 +256,12 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         journal.existing.return_value=None
         journal.authorize.return_value=(intent,MagnetPermit(intent.fingerprint),())
         journal.reconcile.return_value='UNCERTAIN'
-        release=SimpleNamespace(info_hash=HASH,magnet_url=MAGNET)
-        search=SimpleNamespace(
-            search=lambda identity:SimpleNamespace(candidates=(release,)),
-            policy=SimpleNamespace(accepts=lambda row:True))
         factory=Mock(side_effect=[probe,owned])
         cb=make_bootstrap(self.secrets,client_factory=factory,
-                          journal_factory=lambda db:journal,
-                          sonarr_factory=lambda config,secrets:search)
+                          journal_factory=lambda db:journal)
         with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
-                   return_value=self.identity):
+                   return_value=self.identity), \
+             patch('src.nextgen.acquisition.legacy_magnet.source_magnet',return_value=MAGNET):
             result=await cb(self.source,self.context)
         self.assertEqual((result.kind,result.reason_code),
                          ('defer','TORRENT_METADATA_WAITING'))

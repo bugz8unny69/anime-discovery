@@ -211,6 +211,22 @@ def episode_catalog(payload, aid):
     return episodes
 
 
+def episode_airdates(payload, aid):
+    """Regular AniDB episode air dates (ISO date text, or None when unknown)."""
+    root = xml(payload,"anime",limit=4194304)
+    if root.get("id")!=str(aid): raise ProviderInvalidResponse()
+    container = root.find("episodes")
+    if container is None: raise ProviderInvalidResponse()
+    dates = {}
+    for node in container.findall("episode"):
+        number = node.find("epno")
+        if number is None or number.get("type")!="1": continue
+        epno = positive_text((number.text or "").strip())
+        text = (node.findtext("airdate") or "").strip()
+        dates[epno] = text if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",text) else None
+    return dates
+
+
 def tvdb_episode_page(document, tid):
     if type(document) is not dict: raise ProviderInvalidResponse()
     data=document.get("data")

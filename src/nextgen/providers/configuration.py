@@ -7,7 +7,7 @@ from src.nextgen.job_contracts import Policy, Registry
 from src.nextgen.jobs.identify_anime_job import registration
 from src.nextgen.jobs.verify_release_job import KIND as RELEASE_KIND, registration as release_registration
 from src.nextgen.jobs.evaluate_trial_job import KIND as TRIAL_KIND, registration as trial_registration
-from src.nextgen.jobs.discover_sonarr_backfill_job import KIND as SONARR_BACKFILL_KIND, registration as sonarr_backfill_registration
+from src.nextgen.jobs.discover_sonarr_backfill_job import KIND as BACKFILL_KIND, registration as backfill_registration
 from src.nextgen.jobs.evaluate_batch_job import KIND as BATCH_KIND, registration as batch_registration
 from src.nextgen.jobs.reserve_batch_job import KIND as BATCH_RESERVE_KIND, registration as batch_reserve_registration
 from src.nextgen.jobs.submit_batch_job import KIND as BATCH_SUBMIT_KIND, registration as batch_submit_registration
@@ -26,6 +26,7 @@ from src.nextgen.jobs.management import registrations as management_registration
 from src.nextgen.acquisition.metainfo_source import make_reader, make_batch_reader
 from src.nextgen.acquisition.legacy_magnet import make_bootstrap
 from src.nextgen.batch.provider_worker import make_batch_verifier
+from src.nextgen.providers.backfill_catalog import make_catalog_factory
 from src.nextgen.providers.errors import ProviderConfigurationError
 from src.nextgen.providers.http import Options
 from src.nextgen.providers.identity import ClientPool, make_resolver
@@ -50,17 +51,17 @@ def validate_provider_configuration(configuration, *, secrets):
 
 async def build_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
                                 policy=Policy(), logger=None, read_metainfo=None, read_batch_metainfo=None,
-                                sonarr_backfill=False, sonarr_select=False, sonarr_acquire=False):
+                                backfill=False, backfill_select=False, backfill_acquire=False):
     """Validate required local settings, then return an unstarted worker.
 
     Call close() if not serving it. Both providers are mandatory for this
     composition. Generic Worker still supports unrelated explicitly installed
     jobs without requiring identity-provider credentials.
     """
-    if (type(sonarr_select) is not bool or type(sonarr_acquire) is not bool
-            or sonarr_select and not sonarr_backfill
-            or sonarr_acquire and not sonarr_select):
-        raise ValueError('Sonarr source selection requires opt-in backfill discovery')
+    if (type(backfill_select) is not bool or type(backfill_acquire) is not bool
+            or backfill_select and not backfill
+            or backfill_acquire and not backfill_select):
+        raise ValueError('Backfill source selection requires opt-in backfill discovery')
     store = ConfigurationStore(config_directory)
     secrets = SecretStore(config_directory)
     startup = await blocking(store.read)
@@ -74,13 +75,13 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool,
                            batch_verifier=verify_batch)
     # The hash-bound magnet path is the normal webhook acquisition route, not
-    # a Sonarr opt-in: it is installed with the default metadata reader.
+    # a backfill opt-in: it is installed with the default metadata reader.
     default_reader=read_metainfo is None
-    read_metainfo=make_reader(sonarr_secrets=secrets) if default_reader else read_metainfo
+    read_metainfo=make_reader(secrets=secrets) if default_reader else read_metainfo
     preparation=(prepare_registration(read_metainfo,submission_kind=SUBMIT_KIND,
-                    legacy_bootstrap=make_bootstrap(secrets) if default_reader or sonarr_acquire else None),
+                    legacy_bootstrap=make_bootstrap(secrets) if default_reader or backfill_acquire else None),
                                                 submit_registration(read_metainfo,secrets,transfer_kind=DOWNLOAD_KIND,
-                                                    discovery_kind=SONARR_BACKFILL_KIND if sonarr_backfill else None),
+                                                    discovery_kind=BACKFILL_KIND if backfill else None),
                                                 download_registration(secrets,verification_kind=MEDIA_KIND),media_registration(staging_kind=STAGE_KIND),stage_registration())
     # Batch jobs share trusted hash-only metadata and the same ownership safeguards.
     batch_handlers = (
@@ -99,8 +100,11 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
                          batch_registration(reservation_kind=BATCH_RESERVE_KIND),
                          trial_registration(reservation_kind=RESERVE_KIND),
                          reserve_registration(preparation_kind=PREPARE_KIND),
-                         *((sonarr_backfill_registration(secrets,select_candidates=sonarr_select,
-                              acquire_candidates=sonarr_acquire),) if sonarr_backfill else ()),
+                         *((backfill_registration(secrets,
+                              catalog_factory=make_catalog_factory(options_from_configuration,
+                                  secrets.tvdb_credentials,client_pool=pool),
+                              select_candidates=backfill_select,
+                              acquire_candidates=backfill_acquire),) if backfill else ()),
                          *batch_handlers,*preparation,
                          *management_registrations(secrets),*additional_registrations))
     return Worker(store,startup,registry,policy=policy,logger=logger,prepare=prepare)
@@ -108,10 +112,10 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
 
 async def run_identity_worker(config_directory, *, additional_registrations=(), release_kind=None,
                               policy=Policy(), read_metainfo=None, read_batch_metainfo=None,
-                              sonarr_backfill=False, sonarr_select=False, sonarr_acquire=False):
+                              backfill=False, backfill_select=False, backfill_acquire=False):
     worker = await build_identity_worker(config_directory,additional_registrations=additional_registrations,
                                          release_kind=release_kind,policy=policy,read_metainfo=read_metainfo,
                                          read_batch_metainfo=read_batch_metainfo,
-                                         sonarr_backfill=sonarr_backfill,sonarr_select=sonarr_select,
-                                         sonarr_acquire=sonarr_acquire)
+                                         backfill=backfill,backfill_select=backfill_select,
+                                         backfill_acquire=backfill_acquire)
     await serve_worker(worker)

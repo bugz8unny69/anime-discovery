@@ -223,6 +223,9 @@ class Clients:
         # missing regular number remains missing until the 24-hour refresh.
         return parsing.episode_catalog(self._anime_payload(aid),aid)
 
+    def airdates(self, aid):
+        return parsing.episode_airdates(self._anime_payload(aid),aid)
+
     def _tvdb(self, tid, credentials, key_parts, path, parse, ttl):
         parsing.positive_text(str(tid))
         if type(credentials) is not Credentials: raise ProviderAuthenticationFailed()

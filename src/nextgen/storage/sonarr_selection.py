@@ -1,4 +1,4 @@
-"""Initial Sonarr source choice and current candidate pointer, no torrent sends.
+"""Initial backfill source choice and current candidate pointer, no torrent sends.
 
 An initial choice is immutable while active. After proven cancellation cleanup,
 the existing discovery worker can advance the pointer to the next ranked
@@ -6,7 +6,7 @@ candidate. Selection never grants a torrent submission permit.
 """
 import time
 
-from src.nextgen.acquisition.sonarr_search import DiscoveryPolicy, Release, SearchResult, _magnet_hash
+from src.nextgen.acquisition.prowlarr_search import DiscoveryPolicy, Release, SearchResult, _magnet_hash
 from src.nextgen.acquisition.metadata import infohash
 from src.nextgen.sonarr_episode import VerifiedEpisode
 
@@ -14,7 +14,7 @@ from src.nextgen.sonarr_episode import VerifiedEpisode
 class SelectionConflict(ValueError):
     reason_code = 'SONARR_SELECTION_CONFLICT'
     def __init__(self):
-        super().__init__('Sonarr candidate selection needs review.')
+        super().__init__('Backfill candidate selection needs review.')
 
 
 def select(db, *, plan_id, identity, result, release, policy):
@@ -28,8 +28,9 @@ def select(db, *, plan_id, identity, result, release, policy):
             or type(result) is not SearchResult or type(release) is not Release
             or type(policy) is not DiscoveryPolicy
             or not any(candidate is release for candidate in result.candidates)
-            or result.series_id <= 0 or result.episode_id <= 0
-            or release.mapped_episode_ids != (result.episode_id,)
+            or result.tvdb_series_id != identity.tvdb_series_id
+            or result.tvdb_episode_id != identity.tvdb_episode_id
+            or release.tvdb_episode_id != result.tvdb_episode_id
             or not policy.accepts(release)
             or not release.info_hash
             or _magnet_hash(release.magnet_url) != release.info_hash):
@@ -95,10 +96,10 @@ def select(db, *, plan_id, identity, result, release, policy):
 
 
 def require_verified_delivery(db, verified):
-    """Cross-check an internal Sonarr event against provider-verified placement.
+    """Cross-check an internal backfill event against provider-verified placement.
 
     This is called by the normal VERIFY_RELEASE persistence BEFORE its release
-    verification is saved. A Sonarr catalog match cannot bypass AniDB/TVDB.
+    verification is saved. A search match cannot bypass AniDB/TVDB.
     """
     from src.nextgen.release_contracts import ReleaseConflict, VerifiedRelease
     from src.nextgen.job_contracts import parse_payload
@@ -125,7 +126,7 @@ def require_verified_delivery(db, verified):
         raise ReleaseConflict()
 
 def acquisition_identity(database, source):
-    """Return exact Sonarr identity only for an active, verified source.
+    """Return the selected episode identity only for an active, verified source.
 
     Hash-only and episode-scoped. No magnet URL or provider credentials are
     stored in SQLite. The acquisition reservation remains authoritative.

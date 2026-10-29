@@ -661,7 +661,7 @@ CREATE TABLE IF NOT EXISTS sonarr_backfill_results (
  job_id INTEGER NOT NULL REFERENCES jobs(job_id),
  sonarr_episode_id INTEGER CHECK(sonarr_episode_id>0),
  tvdb_episode_id INTEGER CHECK(tvdb_episode_id>0),
- status TEXT NOT NULL CHECK(status IN ('IN_PROGRESS','NOT_LISTED','IDENTITY_UNKNOWN','IDENTITY_CONFLICT','HAS_FILE','CANDIDATES','NO_RESULTS')),
+ status TEXT NOT NULL CHECK(status IN ('IN_PROGRESS','NOT_LISTED','IDENTITY_UNKNOWN','IDENTITY_CONFLICT','HAS_FILE','CANDIDATES','NO_RESULTS','NOT_AIRED','MAPPING_MISSING')),
  candidates INTEGER NOT NULL CHECK(candidates BETWEEN 0 AND 1000),
  approved INTEGER NOT NULL CHECK(approved BETWEEN 0 AND candidates),
  exact INTEGER NOT NULL CHECK(exact BETWEEN 0 AND candidates),
@@ -747,13 +747,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v47; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v48; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v47 storage.
+    before accessing v48 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 47:
+    if version == 48:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -763,7 +763,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=47;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=48;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

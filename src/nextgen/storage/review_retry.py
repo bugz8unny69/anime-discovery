@@ -43,7 +43,9 @@ class RetryReceipt:
 def _retryable_state(kind, state, reason):
     return state == 'NEEDS_REVIEW' or (
         kind == 'DISCOVER_SONARR_BACKFILL' and state == 'BLOCKED'
-        and reason in ('SONARR_DISCOVERY_EPISODE_NOT_FOUND', 'SONARR_EPISODES_NOT_LISTED',
+        and reason in ('PROWLARR_SEARCH_TIMEOUT', 'PROWLARR_UNAVAILABLE',
+                       # Jobs stopped before the Prowlarr search existed.
+                       'SONARR_DISCOVERY_EPISODE_NOT_FOUND', 'SONARR_EPISODES_NOT_LISTED',
                        'SONARR_DISCOVERY_TIMEOUT', 'SONARR_DISCOVERY_UNAVAILABLE'))
 
 
