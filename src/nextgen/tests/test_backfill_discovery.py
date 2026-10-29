@@ -215,6 +215,38 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([v[2] for v in fake.calls],[(1,2,3,4),(6,7)])
         self.assertEqual(self.rows("SELECT count(*) FROM sonarr_backfill_results"),[(6,)])
 
+    async def test_missing_episode_can_be_searched_again_without_resending_others(self):
+        from src.nextgen.storage.series_intake import retry_episode
+        self.source(10)
+        fake = FakeDiscovery()
+        original = fake.backfill
+
+        def first_pass(*args, **kwargs):
+            result = list(original(*args, **kwargs))
+            return tuple(BackfillObservation(2, 2002, 'NO_RESULTS')
+                         if item.number == 2 else item for item in result)
+
+        fake.backfill = first_pass
+        worker = self.worker(fake)
+        await worker.attempt()
+        await worker.attempt()
+        await worker.attempt()
+        self.assertEqual(self.rows(
+            "SELECT status FROM sonarr_backfill_results WHERE tvdb_episode=2"),
+            [('NO_RESULTS',)])
+        fake.backfill = original
+        receipt = retry_episode(self.database, 123, 1, 2)
+        self.assertFalse(receipt['reused'])
+        repeated = retry_episode(self.database, 123, 1, 2)
+        self.assertEqual(repeated, {'job_id': receipt['job_id'], 'reused': True})
+        await worker.attempt()
+        self.assertEqual(fake.calls[-1][2], (2,))
+        self.assertEqual(self.rows(
+            "SELECT status FROM sonarr_backfill_results WHERE tvdb_episode=2"),
+            [('CANDIDATES',)])
+        self.assertEqual(self.rows(
+            "SELECT count(*) FROM sonarr_backfill_results"), [(6,)])
+
     async def test_unavailable_episodes_do_not_block_episodes_with_releases(self):
         self.source(10)
         fake = FakeDiscovery()

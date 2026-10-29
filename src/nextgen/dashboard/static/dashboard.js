@@ -21,7 +21,7 @@ const COPY = Object.freeze({
   'dashboard.invalid_value': 'Check the setting value before saving.',
   'dashboard.no_history': 'No history has been recorded yet.',
   'dashboard.staged': 'Staged for viewing. Choose Keep when it is available.',
-  'dashboard.scope': 'Intake shows each acquisition separately. Several releases may belong to the same anime.',
+  'dashboard.scope': 'Intake groups releases by anime. Open a series to review staged and missing episodes.',
   'dashboard.page_filter': 'The status filter applies to this page.',
   'dashboard.bulk_limit': 'Select at most 100 jobs at a time.',
   'dashboard.discard': 'Discard unsaved changes and refresh settings?',
@@ -41,6 +41,7 @@ const state = {
   settings: null, credentials: null, dirty: false, settingsVersion: 0,
   historyJob: null, historyCursor: 0, historyNext: null, historyVersion: 0,
   matchingJob: null, matchingVersion: 0,
+  seriesBusy: false,
 };
 function notice(message = '', error = false) {
   $('notice').textContent = message;
@@ -65,6 +66,7 @@ function clearPrivate(message = '') {
   $('access-key').value = '';
   if ($('history-dialog').open) $('history-dialog').close();
   if ($('matching-dialog').open) $('matching-dialog').close();
+  if ($('series-dialog').open) $('series-dialog').close();
   $('workspace').hidden = true; $('sign-out').hidden = true; $('login-panel').hidden = false;
   notice(message);
 }
@@ -144,6 +146,7 @@ async function submitAction(job, action) {
   if (state.csrf) await loadActivity();
 }
 function renderJobs() {
+  if (state.page === 'intake') { renderSeries(); return; }
   const tbody = $('job-rows'); tbody.replaceChildren();
   const filter = $('status-filter').value;
   const jobs = state.jobs.filter(job => state.page === 'jobs' || !filter || job.state === filter);
@@ -292,12 +295,99 @@ async function submitSelected() {
     if (state.csrf) await loadActivity();
   }
 }
+function renderSeries() {
+  const tbody = $('job-rows'); tbody.replaceChildren();
+  $('no-jobs').hidden = state.jobs.length !== 0;
+  for (const series of state.jobs) {
+    const tr = node('tr');
+    const td = value => { const cell = node('td', value); tr.appendChild(cell); return cell; };
+    td('—');
+    td().appendChild(node('strong', series.title));
+    td(series.staged_count + ' staged');
+    td().appendChild(node('span', series.staged_count ? 'Ready to Keep' :
+      series.kept_count ? 'Kept' : 'Tracking',
+      'status ' + (series.staged_count || series.kept_count ? 'completed' : 'waiting')));
+    td(series.missing_count + ' missing / retryable');
+    const actions = td();
+    const open = node('button', 'View series', 'secondary');
+    open.type = 'button';
+    open.addEventListener('click', () => openSeries(series.anidb_id));
+    actions.appendChild(open);
+    tbody.appendChild(tr);
+  }
+  $('previous-page').disabled = state.previous.length === 0;
+  $('next-page').disabled = state.next === null;
+}
+async function openSeries(anidbId) {
+  if (state.seriesBusy) return;
+  try {
+    const series = await request(API + '/intake/series/' + anidbId);
+    const dialog = $('series-dialog');
+    $('series-title').textContent = series.title;
+    const description = [series.english_title, series.type, series.year].filter(Boolean).join(' · ');
+    $('series-description').textContent = description ||
+      'No series synopsis is stored in the verified metadata yet.';
+    const list = $('series-episodes'); list.replaceChildren();
+    for (const item of series.episodes) {
+      const tr = node('tr');
+      tr.appendChild(node('td', 'S' + String(item.season).padStart(2, '0') +
+        'E' + String(item.episode).padStart(2, '0')));
+      tr.appendChild(node('td', item.status));
+      list.appendChild(tr);
+    }
+    $('series-episodes-empty').hidden = series.episodes.length !== 0;
+    const missing = $('series-missing'); missing.replaceChildren();
+    for (const item of series.missing) {
+      const tr = node('tr');
+      tr.appendChild(node('td', 'S' + String(item.season).padStart(2, '0') +
+        'E' + String(item.episode).padStart(2, '0')));
+      tr.appendChild(node('td', item.status.replaceAll('_', ' ').toLowerCase()));
+      const action = node('td');
+      if (item.can_retry) {
+        const retry = node('button', item.status === 'NOT_SEARCHED' ? 'Search' : 'Retry search', 'secondary');
+        retry.type = 'button';
+        retry.addEventListener('click', async () => {
+          if (state.seriesBusy) return;
+          state.seriesBusy = true; retry.disabled = true;
+          try {
+            const data = await request(API + '/intake/series/' + anidbId +
+              '/backfill/' + item.season + '/' + item.episode + '/retry',
+              {method: 'POST', body: {}});
+            notice('Backfill search ' + (data.reused ? 'already queued' : 'submitted') + '.');
+            dialog.close(); await loadActivity();
+          } catch (error) { displayError(error); }
+          finally { state.seriesBusy = false; retry.disabled = false; }
+        });
+        action.appendChild(retry);
+      }
+      tr.appendChild(action); missing.appendChild(tr);
+    }
+    $('series-missing-empty').hidden = series.missing.length !== 0;
+    const keep = $('series-keep');
+    keep.disabled = series.keep_operations.length === 0;
+    keep.textContent = 'Keep all staged (' + series.keep_operations.length + ' acquisition' +
+      (series.keep_operations.length === 1 ? '' : 's') + ')';
+    keep.onclick = async () => {
+      if (state.seriesBusy || !series.keep_operations.length) return;
+      state.seriesBusy = true; keep.disabled = true;
+      try {
+        const result = await request(API + '/intake/series/' + anidbId + '/keep',
+          {method: 'POST', body: {operation_ids: series.keep_operations}});
+        notice(result.message + (result.failed.length ?
+          ' ' + result.failed.length + ' acquisition(s) require another attempt.' : ''));
+        dialog.close(); await loadActivity();
+      } catch (error) { displayError(error); }
+      finally { state.seriesBusy = false; }
+    };
+    if (!dialog.open) dialog.showModal();
+  } catch (error) { displayError(error); }
+}
 async function loadActivity() {
   if (state.loading) return state.loading;
   const generation = state.generation;
   state.loading = (async () => {
     try {
-      let path = `${API}/${state.page === 'intake' ? 'intake' : 'jobs'}?before_id=${state.cursor}&limit=30`;
+      let path = `${API}/${state.page === 'intake' ? 'intake/series' : 'jobs'}?before_id=${state.cursor}&limit=30`;
       if (state.page === 'jobs') {
         const filter = $('status-filter').value;
         if (filter) path += '&state=' + encodeURIComponent(filter);
@@ -797,11 +887,17 @@ async function showWorkspace() {
   $('activity-title').textContent = state.page === 'intake' ? 'Incoming anime' : 'Job activity';
   $('page-description').textContent = state.page === 'intake' ? 'Follow incoming anime through processing and staging.' : 'Track jobs and their recorded history. Status updates every five seconds.';
   $('page-note').textContent = state.page === 'intake' ?
-    COPY['dashboard.scope'] + ' ' + COPY['dashboard.page_filter'] :
+    COPY['dashboard.scope'] :
     'Filters apply across all jobs. Up to 100 jobs can be selected across pages; up to five use individual actions, larger selections use a queued batch.';
   $('bulk-heading').hidden = state.page !== 'jobs';
   $('completed-toggle-label').hidden = state.page !== 'jobs';
   $('canceled-toggle-label').hidden = state.page !== 'jobs';
+  $('status-filter-label').hidden = state.page === 'intake';
+  if (state.page === 'intake') {
+    const titles = ['Received', 'Series', 'Staged', 'Status', 'Backfill', 'Actions'];
+    const names = ['received', 'series', 'staged', 'status', 'backfill', 'actions'];
+    for (let index = 0; index < titles.length; index++) $('activity-col-' + names[index]).textContent = titles[index];
+  }
   await loadActivity(); clearTimeout(state.timer); if (state.csrf) state.timer = setTimeout(tick, 5000);
 }
 $('login-form').addEventListener('submit', async event => {
@@ -876,6 +972,7 @@ $('previous-page').addEventListener('click', async () => {
 });
 $('history-close').addEventListener('click', () => $('history-dialog').close());
 $('matching-close').addEventListener('click', () => $('matching-dialog').close());
+$('series-close').addEventListener('click', () => $('series-dialog').close());
 $('matching-dialog').addEventListener('close', () => {
   state.matchingJob = null; state.matchingVersion += 1;
   $('matching-body').replaceChildren();

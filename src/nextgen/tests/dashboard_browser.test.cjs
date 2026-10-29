@@ -65,6 +65,18 @@ function target() {
       cancel: {enabled: true, disabled_reason: null}, cleanup: {enabled: false}},
     release_name: '<img src=x onerror=alert(1)>', is_management_action: false};
 }
+test('Intake groups acquisitions in one series row', async () => {
+  const h = await harness();
+  h.ctx.series = {anidb_id: 123, title: 'Example Anime', staged_count: 2,
+    kept_count: 0, missing_count: 1};
+  h.run('state.jobs=[series]; renderJobs();');
+  const rows = h.elements.get('job-rows').children;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].children[1].children[0].textContent, 'Example Anime');
+  assert.equal(rows[0].children[2].textContent, '2 staged');
+  assert.equal(rows[0].children[5].children[0].textContent, 'View series');
+});
+
 test('disabled buttons explain the running job before unavailable Keep execution', async () => {
   const h = await harness(); h.ctx.fixture = target();
   h.ctx.fixture.actions.keep.disabled_reason = {message: 'A job is already in progress.'};
@@ -93,7 +105,7 @@ test('double clicks send one CSRF-protected cancellation and reconcile with GET'
   assert.deepEqual(JSON.parse(calls[0].options.body), {});
   release(); await first;
   assert.equal(calls.filter(c => c.options.method === 'POST').length, 1);
-  assert.ok(calls.some(c => c.url.startsWith('/api/v1/intake?')));
+  assert.ok(calls.some(c => c.url.startsWith('/api/v1/intake/series?')));
   assert.equal(h.elements.get('notice').textContent, 'Job submitted.');
 });
 test('uncertain mutation is never automatically replayed', async () => {
@@ -109,7 +121,7 @@ test('uncertain mutation is never automatically replayed', async () => {
 });
 test('release text is rendered as text and Keep never submits while execution is unavailable', async () => {
   const h = await harness(); h.ctx.fixture = target();
-  h.run('state.jobs=[fixture]; renderJobs();');
+  h.run("state.page='jobs'; state.jobs=[fixture]; renderJobs();");
   const text = element => [element.textContent || '', ...element.children.map(text)].join(' ');
   assert.ok(text(h.elements.get('job-rows')).includes(h.ctx.fixture.release_name));
   h.ctx.fetch = async () => { throw new Error('Keep must not send a request'); };
@@ -117,7 +129,7 @@ test('release text is rendered as text and Keep never submits while execution is
 });
 test('session expiry clears private rows and in-memory session state', async () => {
   const h = await harness(); h.ctx.fixture = target();
-  h.run('state.jobs=[fixture]; renderJobs();');
+  h.run("state.page='jobs'; state.jobs=[fixture]; renderJobs();");
   h.ctx.fetch = async () => response('Authentication is required.', 401);
   await h.run('loadActivity()');
   assert.equal(h.run('state.csrf'), null);
@@ -225,7 +237,7 @@ test('Matching details stays separate from History and renders recorded season c
   job.state = 'NEEDS_REVIEW';
   job.reason = {message: 'Anime identification is incomplete.'};
   h.ctx.fixture = job;
-  h.run('state.jobs = [fixture]; renderJobs();');
+  h.run("state.page='jobs'; state.jobs = [fixture]; renderJobs();");
   const tr = h.elements.get('job-rows').children[0];
   const buttons = descendants(tr).filter(el => el.tagName === 'button');
   const matching = buttons.find(el => el.textContent === 'Matching details');
@@ -283,7 +295,7 @@ test('checkpoint Retry posts the same reviewed job snapshot without restarting a
   h.ctx.fixture.attempt_count = 4;
   h.ctx.fixture.reason = {code: 'JOB_RETRY_EXHAUSTED', message: 'Retry limit reached.'};
   h.ctx.fixture.actions.retry = {enabled: true, disabled_reason: null};
-  h.run('state.jobs=[fixture]; renderJobs();');
+  h.run("state.page='jobs'; state.jobs=[fixture]; renderJobs();");
   const rows = h.elements.get('job-rows');
   const text = element => [element.textContent || '', ...element.children.map(text)].join(' ');
   assert.ok(text(rows).includes('Retry'));

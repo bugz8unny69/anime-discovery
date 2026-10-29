@@ -54,9 +54,10 @@ class BackfillBatch:
 class BackfillCompletion:
     plan: BackfillBatch
     observations: tuple[BackfillObservation, ...]
+    retry_episode: int | None = None
 
 
-def _plan(db, plan_id, start):
+def _plan(db, plan_id, start, retry_episode=None):
     """start is a 1-based position in the plan's combined episode window."""
     integer(plan_id, positive=True)
     integer(start, positive=True)
@@ -74,6 +75,9 @@ def _plan(db, plan_id, start):
     if not episodes or start > len(episodes) or (start - 1) % PAGE_SIZE:
         raise BackfillConflict()
     numbers = episodes[start-1:start-1+PAGE_SIZE]
+    if retry_episode is not None:
+        if retry_episode not in numbers: raise BackfillConflict()
+        numbers = (retry_episode,)
     reserved = tuple(sorted(set(r[0] for r in db.execute(
         "SELECT tvdb_episode FROM episode_reservations WHERE "
         "tvdb_series_id=? AND tvdb_season=? AND state='ACTIVE' "
@@ -112,14 +116,14 @@ def automatic_retry_used(database, job_id):
         if db is not None: db.close()
 
 
-def load_batch(database, plan_id, start):
+def load_batch(database, plan_id, start, retry_episode=None):
     db = None
     try:
         db = _open(database,readonly=True,timeout_ms=5000)
         db.execute('BEGIN')
         if db.execute('PRAGMA user_version').fetchone()[0] != LATEST_VERSION:
             raise QueueUnavailable()
-        return _plan(db,plan_id,start)
+        return _plan(db,plan_id,start,retry_episode)
     except (sqlite3.Error,OSError,MigrationError):
         raise QueueUnavailable() from None
     finally:
@@ -340,7 +344,7 @@ def persist_observations(db, claim, value, *, dispatch=False):
     # Recheck immutable scope. Reservation state is intentionally not re-queried
     # here: it may change after a read-only search; this is observation, not
     # authorization.
-    current = _plan(db,plan.plan_id,plan.start)
+    current = _plan(db,plan.plan_id,plan.start,value.retry_episode)
     if (current.plan_id,current.anidb_id,current.tvdb_series_id,
         current.season,current.window_size,current.numbers) != (
         plan.plan_id,plan.anidb_id,plan.tvdb_series_id,plan.season,
@@ -354,10 +358,12 @@ def persist_observations(db, claim, value, *, dispatch=False):
                 or item.status != 'CANDIDATES' and (item.candidates or item.accepted)):
             raise BackfillConflict()
         previous = db.execute(
-            'SELECT 1 FROM sonarr_backfill_results WHERE plan_id=? AND tvdb_episode=?',
+            'SELECT status FROM sonarr_backfill_results WHERE plan_id=? AND tvdb_episode=?',
             (plan.plan_id,number)
         ).fetchone()
-        if previous: raise BackfillConflict()
+        if previous and (value.retry_episode != number or
+                         previous[0] not in ('NO_RESULTS','NOT_AIRED','MAPPING_MISSING')):
+            raise BackfillConflict()
     now = integer(time.time_ns() // 1000000)
     # Selection is an opt-in side effect of the same fenced worker completion.
     # Keep source URLs out of SQLite and reject stale/unverified identity facts.
@@ -390,7 +396,12 @@ def persist_observations(db, claim, value, *, dispatch=False):
         db.execute(
             "INSERT INTO sonarr_backfill_results("
             "plan_id,tvdb_episode,job_id,sonarr_episode_id,tvdb_episode_id,status,"
-            "candidates,approved,exact,observed_at_ms) VALUES(?,?,?,NULL,?,?,?,?,?,?)",
+            "candidates,approved,exact,observed_at_ms) VALUES(?,?,?,NULL,?,?,?,?,?,?) "
+            "ON CONFLICT(plan_id,tvdb_episode) DO UPDATE SET "
+            "job_id=excluded.job_id,tvdb_episode_id=excluded.tvdb_episode_id,"
+            "status=excluded.status,candidates=excluded.candidates,"
+            "approved=excluded.approved,exact=excluded.exact,"
+            "observed_at_ms=excluded.observed_at_ms",
             (plan.plan_id,item.number,claim.job_id,item.tvdb_episode_id,item.status,
              item.candidates,item.accepted,item.accepted,now)
         )
