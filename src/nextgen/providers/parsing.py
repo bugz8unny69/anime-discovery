@@ -35,6 +35,18 @@ def release_title(raw):
     """
     if not isinstance(raw, str) or not raw.strip():
         return [], None
+    # A single episode is read by the shared release-group title reader; its
+    # title alternatives, without season markers, are the search aliases.
+    from src.nextgen.acquisition.release_titles import parse_release, season_marker
+    parsed = parse_release(raw)
+    if parsed is not None:
+        aliases = []
+        for written in parsed.titles:
+            base, number = season_marker(written, roman=False)
+            for alias in (base if number is not None else written,):
+                if alias and alias not in aliases: aliases.append(alias)
+        if aliases:
+            return aliases, parsed.episode
     value = PREFIX.sub('', raw).strip()
     episode_match = EP.search(value)
     episode = (next((int(x) for x in (
@@ -209,6 +221,22 @@ def episode_catalog(payload, aid):
         ids.add(eid)
         if len(episodes)>10000: raise ProviderInvalidResponse()
     return episodes
+
+
+def episode_airdates(payload, aid):
+    """Regular AniDB episode air dates (ISO date text, or None when unknown)."""
+    root = xml(payload,"anime",limit=4194304)
+    if root.get("id")!=str(aid): raise ProviderInvalidResponse()
+    container = root.find("episodes")
+    if container is None: raise ProviderInvalidResponse()
+    dates = {}
+    for node in container.findall("episode"):
+        number = node.find("epno")
+        if number is None or number.get("type")!="1": continue
+        epno = positive_text((number.text or "").strip())
+        text = (node.findtext("airdate") or "").strip()
+        dates[epno] = text if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",text) else None
+    return dates
 
 
 def tvdb_episode_page(document, tid):

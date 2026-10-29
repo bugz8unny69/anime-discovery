@@ -1,4 +1,4 @@
-"""Hash-bound magnet bootstrap (Sonarr-selected or ordinary webhook) using the negotiated qBittorrent adapter in the existing PREPARE job.
+"""Hash-bound magnet bootstrap (backfill-selected or ordinary webhook) using the negotiated qBittorrent adapter in the existing PREPARE job.
 
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
 Observed inventories enter the existing transfer pipeline without another add.
@@ -16,9 +16,6 @@ from src.nextgen.acquisition.metadata import (ObservedInventory, MetadataInvalid
 from src.nextgen.acquisition.submission import (
     ClientInvalid, ClientUnavailable, ClientAuthenticationFailed, ClientUnsupported,
 )
-from src.nextgen.acquisition.sonarr_search import (
-    Client as SonarrClient, SearchReview, SearchUnavailable, _magnet_hash,
-)
 from src.nextgen.job_contracts import Outcome
 from src.nextgen.storage.sonarr_magnet_intake import MagnetJournal
 from src.nextgen.storage.sonarr_selection import acquisition_identity, SelectionConflict
@@ -27,8 +24,7 @@ from src.nextgen.storage.acquisition import source_magnet
 PENDING=Outcome('defer','TORRENT_METADATA_WAITING',delay_ms=60000)
 
 
-def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJournal,
-                   sonarr_factory=SonarrClient.from_context):
+def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJournal):
     """Only trusted worker composition supplies this callback; no webhook input."""
     async def bootstrap(source,context):
         configuration=context.configuration
@@ -56,18 +52,9 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                 return None
             permit=None
             if intent is None:
-                # Only a NEW Sonarr submission needs a fresh Sonarr search.
-                # Recovery works even when Sonarr no longer lists the release.
                 if identity is not None:
-                    search=sonarr_factory(configuration,secrets)
-                    result=await blocking(search.search,identity)
-                    candidate=next((release for release in result.candidates
-                                    if release.info_hash==source.info_hash
-                                    and search.policy.accepts(release)
-                                    and _magnet_hash(release.magnet_url)==source.info_hash),
-                                   None)
-                    if candidate is None:return PENDING
-                    magnet=candidate.magnet_url
+                    # A backfill delivery carries its own sanitized magnet.
+                    magnet=await blocking(source_magnet,database,source)
                 before=await blocking(probe.inspect,source.info_hash)
                 if context.cancelled.is_set():return PENDING
                 intent,permit,_=await blocking(
@@ -124,10 +111,6 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             if await blocking(journal.metadata_expired,context.claim,intent):
                 return Outcome('review','TORRENT_METADATA_TIMEOUT')
             return PENDING
-        except SearchUnavailable:
-            return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
-        except SearchReview:
-            return Outcome('review','SONARR_DISCOVERY_REVIEW')
         except ClientUnavailable:
             return Outcome('retry','DOWNLOAD_CLIENT_UNAVAILABLE')
         except (MetadataInvalid,AcquisitionConflict,SizeLimitExceeded,

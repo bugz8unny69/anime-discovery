@@ -215,8 +215,8 @@ class SonarrSettingsTests(unittest.TestCase):
             self.assertNotIn('sonarr',doc['settings'])
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
-        self.assertEqual(upgraded.schema_version,10)
-        self.assertEqual(upgraded.revision,doc['revision']+3)
+        self.assertEqual(upgraded.schema_version,11)
+        self.assertEqual(upgraded.revision,doc['revision']+4)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
         for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
 
@@ -232,10 +232,17 @@ class SonarrCredentialApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,200);self.assertTrue(data['data']['status']['sonarr_configured'])
         self.assertNotIn('private-sonarr-key',json.dumps(data))
         self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
-        self.assertEqual(json.loads((self.root/'secrets.json').read_text())['schema_version'],7)
+        self.assertEqual(json.loads((self.root/'secrets.json').read_text())['schema_version'],8)
         self.assertEqual(self.secrets.access_credentials().webhook_token,WEB)
         self.secrets.update_tvdb_api_key('tvdb-key',expected_revision=2)
         self.assertEqual(self.secrets.sonarr_api_key(),'private-sonarr-key')
+
+    async def test_prowlarr_api_key_is_managed_like_other_integrations(self):
+        status,data,_=await self.request('PATCH','/api/v1/credentials/prowlarr',{'expected_revision':1,'api_key':'private-prowlarr-key'},token=ADMIN)
+        self.assertEqual(status,200);self.assertTrue(data['data']['status']['prowlarr_configured'])
+        self.assertNotIn('private-prowlarr-key',json.dumps(data))
+        self.assertEqual(self.secrets.prowlarr_api_key(),'private-prowlarr-key')
+        self.assertEqual(self.secrets.reveal_integration('prowlarr'),{'api_key':'private-prowlarr-key'})
 
 
 class KeepMigrationTests(unittest.TestCase):

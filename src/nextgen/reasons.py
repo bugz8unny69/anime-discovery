@@ -17,6 +17,12 @@ class Reason:
     retryable: bool | None
 
 _ENTRIES = (
+    Reason('PROWLARR_CONFIGURATION_INVALID','The Prowlarr address or API key is missing or invalid.','Configure Prowlarr before backfill search.','Set the Prowlarr address and API key in Settings, then retry; no download occurred.','WARNING',False),
+    Reason('PROWLARR_AUTH_FAILED','Prowlarr rejected the configured API key.','Prowlarr search authentication failed.','Check the Prowlarr API key in Settings, then retry.','WARNING',False),
+    Reason('PROWLARR_SEARCH_REVIEW','Prowlarr returned a response that could not be read safely.','Prowlarr search needs review.','Check Prowlarr and its indexers, then retry.','WARNING',False),
+    Reason('PROWLARR_SEARCH_TIMEOUT','A Prowlarr search exceeded the configured timeout three times in a row.','Prowlarr search timed out.','The search runs again once after 30 minutes. If it still times out, check Prowlarr and indexer response times or raise the timeout, then retry.','ERROR',True),
+    Reason('PROWLARR_UNAVAILABLE','Prowlarr could not be reached, was busy, or failed the search three times in a row.','Prowlarr search failed.','The search runs again once after 30 minutes. If it still fails, check that Prowlarr and its indexers are running, then retry.','ERROR',True),
+    Reason('PROWLARR_RELEASE_WITHDRAWN','The next ranked torrent is no longer returned by Prowlarr.','Trying the next ranked release.','No action needed; the next ranked release is tried without a new torrent being sent.','WARNING',True),
     Reason('SONARR_BACKFILL_PLAN_CONFLICT','Frozen backfill scope or stored search receipt did not match the worker plan.','Backfill discovery needs review.','Check the immutable episode window and persisted discovery receipts; no download occurred.','WARNING',False),
     Reason('SONARR_DISCOVERY_EPISODE_NOT_FOUND','The requested TVDB series is absent from Sonarr; its release API requires existing catalog records.','Sonarr cannot search this series.','No series was created. Check the series mapping; this search source requires existing Sonarr records.','ERROR',False),
     Reason('SONARR_DISCOVERY_AUTH_FAILED','Sonarr rejected the configured API key.','Sonarr search authentication failed.','Check the existing Sonarr API key, then resume discovery.','WARNING',False),
@@ -27,7 +33,7 @@ _ENTRIES = (
     Reason('SONARR_DISCOVERY_UNAVAILABLE','Sonarr or its interactive search could not complete the request.','Sonarr discovery failed.','Check Sonarr and indexer availability, then retry manually.','ERROR',False),
     Reason('SONARR_EPISODES_NOT_LISTED','Sonarr returned no matching episode record for one or more requested backfill episodes.','Sonarr cannot search the requested episodes.','Check the worker log for the TVDB series, season and missing episode numbers. No refresh or automatic retry was scheduled.','ERROR',False),
     Reason('SONARR_DISCOVERY_NO_RESULTS','The previously ranked fallback torrent is not currently offered by Sonarr.','Waiting for the next ranked Sonarr release.','Check the next candidate in Sonarr; the worker will try again without submitting a torrent.','WARNING',True),
-    Reason('SONARR_CANDIDATES_EXHAUSTED','All ranked eligible Sonarr releases failed or could not be acquired.','All available releases have failed; review this episode.','Review the episode in Sonarr before starting a new search.','WARNING',False),
+    Reason('SONARR_CANDIDATES_EXHAUSTED','Every ranked release found for this episode failed or could not be acquired.','All available releases have failed; review this episode.','Check the episode on your indexers, then retry to search again.','WARNING',False),
     Reason('SHOKO_CONFIGURATION_INVALID','Optional Shoko address or API key is missing or rejected.','Configure optional Shoko metadata.','Update Shoko settings/credentials, then retry Shoko metadata. The episode remains kept.','WARNING',False),
     Reason('SHOKO_UNAVAILABLE','Optional Shoko metadata could not be read.','Optional Shoko metadata will retry.','Check Shoko availability. Keep and cleanup remain independent.','WARNING',True),
     Reason('SHOKO_METADATA_REVIEW','Shoko did not return the expected AniDB anime and episode records.','Optional Shoko metadata needs review.','Check the Shoko catalog and saved AniDB IDs, then retry Shoko metadata. The Sonarr mapping is unchanged.','WARNING',False),

@@ -42,7 +42,7 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
             'batch_submission_inventories','batch_cancellation_cleanup',
             'sonarr_backfill_results','sonarr_episode_selections',
             'sonarr_episode_candidates','sonarr_magnet_intents','acquisition_plans_next',
-            'sonarr_magnet_intents_next')
+            'sonarr_magnet_intents_next','sonarr_backfill_results_v48')
         self.assertEqual(len(new_tables),migrations.LATEST_VERSION-30)
         for version,table in zip(range(31,migrations.LATEST_VERSION+1),new_tables):
             with self.subTest(version=version):

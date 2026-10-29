@@ -30,6 +30,21 @@ def delivery_title(request):
 
 
 
+def _release_seasons(title):
+    """Season numbers a release declares: SxxEyy, S2, Season 2, 2nd/Second Season.
+
+    A single episode is read by the shared title reader, so "Season - 05" is
+    never taken for season 5. Other titles (packs) keep the original pattern.
+    """
+    from src.nextgen.acquisition.release_titles import EXPLICIT, marker_seasons, parse_release
+    parsed = parse_release(title)
+    if parsed is None:
+        return re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])", title)
+    found = marker_seasons(EXPLICIT.sub(' ', parsed.text))
+    if parsed.season is not None: found.add(parsed.season)
+    return [str(number) for number in sorted(found)]
+
+
 def explicit_sequel_alias(title, base_aliases):
     """Extract a distinct pipe-delimited sequel title as a search hint only."""
     if type(title) is not str or title.count(" | ") != 1 or not base_aliases:
@@ -104,7 +119,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             title = title_extractor(request)
             if type(title) is not str or len(title) > 2048:
                 incomplete("invalid_release_title")
-            seasons = re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])", title)
+            seasons = _release_seasons(title)
             aliases, episode = release_title(title)
             if matching is not None:
                 matching.queries(aliases, episode, int(seasons[0]) if len(seasons) == 1 else None)

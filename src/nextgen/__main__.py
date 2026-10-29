@@ -126,8 +126,8 @@ def main(argv=None):
             check_local(args.config_dir,worker=True)
             from src.nextgen.providers.configuration import run_identity_worker
             asyncio.run(run_identity_worker(
-                args.config_dir,sonarr_backfill=True,
-                sonarr_select=True,sonarr_acquire=True))
+                args.config_dir,backfill=True,
+                backfill_select=True,backfill_acquire=True))
             return 0
         print(json.dumps(output,sort_keys=True))
         return 0

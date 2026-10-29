@@ -22,3 +22,17 @@ class KeepSelectionTests(unittest.TestCase):
         for rows in ([{**valid,'seasonNumber':1}],[valid,valid],[{**valid,'tvdbId':999}]):
             with self.subTest(rows=rows),self.assertRaises(KeepSelectionInvalid):
                 self.selection().match_sonarr_episode({'id':300,'tvdbId':200},rows)
+
+
+class KeepEpisodeMappingTests(unittest.TestCase):
+    def test_keep_reuses_identical_verified_episode_mapping(self):
+        from src.nextgen.sonarr_episode import VerifiedEpisode, resolve_episode
+        identity = VerifiedEpisode(100, 200, 1, 10)
+        selection = KeepSelection(1, 2, 100, 200, 1, 10, 1, '/tmp/staging', 'episode.mkv')
+        series = {'id': 11, 'tvdbId': 100}
+        episodes = [{'id': 22, 'seriesId': 11, 'seasonNumber': 1,
+                     'episodeNumber': 10, 'tvdbId': 200}]
+        self.assertEqual(resolve_episode(identity, series, episodes),
+                         selection.match_sonarr_episode(series, episodes))
+        with self.assertRaises(KeepSelectionInvalid):
+            selection.match_sonarr_episode(series, [])

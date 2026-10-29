@@ -1,29 +1,43 @@
-"""Search-only Sonarr backfill; no registration, grabs or automatic waiting."""
-from src.nextgen.acquisition.sonarr_search import (
-    Client, SearchConfiguration, SearchUnauthorized, SearchUnsupported,
-    SearchNotFound, SearchReview, SearchUnavailable, SearchTimeout,
+"""Backfill/continue discovery through Prowlarr; no Sonarr, grabs or automatic waiting.
+
+The job kind keeps its historical name so existing jobs and history stay valid.
+"""
+from src.nextgen.acquisition.prowlarr_search import (
+    Client, CandidateSelection, SearchConfiguration, SearchUnauthorized, SearchReview,
+    SearchUnavailable, _magnet_hash,
 )
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
 from src.nextgen.job_contracts import (
     CompletionRejected, Outcome, Registration, Successor,
 )
+from src.nextgen.providers.errors import (
+    ProviderAuthenticationFailed, ProviderDeferred, ProviderInvalidResponse, ProviderUnavailable,
+)
+from src.nextgen.release_contracts import ReleaseConflict, ReleaseNotReady
 from src.nextgen.storage.sonarr_backfill import (
     PAGE_SIZE, BackfillConflict, BackfillCompletion,
     load_batch, persist_observations, FallbackCompletion, load_fallback,
     persist_fallback, FallbackMissing, persist_fallback_missing,
+    AUTOMATIC_RETRY_MS, automatic_retry_used,
 )
 from src.nextgen.worker import blocking
 
 KIND = 'DISCOVER_SONARR_BACKFILL'
-DEFINITION = HandlerDefinition(KIND, 'Discover missing backfill episodes in Sonarr')
+DEFINITION = HandlerDefinition(KIND, 'Search Prowlarr for backfill and continue episodes')
 
 
-def registration(secrets, *, client_factory=Client.from_context, select_candidates=False,
-                 acquire_candidates=False):
+def registration(secrets, *, catalog_factory=None, client_factory=None,
+                 select_candidates=False, acquire_candidates=False):
     if (type(select_candidates) is not bool or type(acquire_candidates) is not bool
             or acquire_candidates and not select_candidates):
-        raise ValueError('Sonarr acquisition requires opted-in source selection')
+        raise ValueError('acquisition requires opted-in source selection')
+    if client_factory is None:
+        if catalog_factory is None: raise ValueError('episode catalog required')
+        def client_factory(configuration, secrets):
+            return Client.from_context(configuration, secrets,
+                                       catalog=catalog_factory(configuration))
+
     async def execute(context):
         payload = context.data()
         try:
@@ -41,6 +55,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                                  if 'exhausted_episode' in payload else None)
         except (ValueError, TypeError):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
+        log = context.logger
         try:
             plan = await blocking(load_batch,
                 context.configuration.value('storage.database_path'),plan_id,start)
@@ -48,23 +63,21 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                 if not acquire_candidates or exhausted_episode not in plan.numbers:
                     raise BackfillConflict()
                 return Outcome('review','SONARR_CANDIDATES_EXHAUSTED')
-            context.logger.info(
-                'Sonarr backfill lookup: tvdb_series_id=%s season=%s episodes=%s reserved=%s',
-                plan.tvdb_series_id, plan.season, plan.numbers, plan.reserved)
+            log.info('Backfill search: anidb_id=%s tvdb_series_id=%s season=%s episodes=%s reserved=%s',
+                     plan.anidb_id, plan.tvdb_series_id, plan.season, plan.numbers, plan.reserved)
             client = client_factory(context.configuration,secrets)
-            if isinstance(client, Client): client.logger = context.logger
+            if isinstance(client, Client): client.logger = log
             if fallback_episode is not None:
                 if not acquire_candidates or fallback_episode not in plan.numbers:
                     raise BackfillConflict()
                 target=await blocking(load_fallback,
                     context.configuration.value('storage.database_path'),
                     plan_id,fallback_episode)
-                result=await blocking(client.search,target.identity)
-                from src.nextgen.acquisition.sonarr_search import CandidateSelection, _magnet_hash
+                result=await blocking(client.search,plan.anidb_id,target.identity)
                 release=next((row for row in result.candidates
                     if row.info_hash==target.next_hash
                     and client.policy.accepts(row)
-                    and row.mapped_episode_ids==(result.episode_id,)
+                    and row.tvdb_episode_id==result.tvdb_episode_id
                     and _magnet_hash(row.magnet_url)==target.next_hash),None)
                 if release is None:
                     return Outcome(value=FallbackMissing(plan,fallback_episode,target))
@@ -72,34 +85,43 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                     plan,fallback_episode,target,
                     CandidateSelection(target.identity,result,release,client.policy)))
             observed = await blocking(
-                client.backfill,plan.tvdb_series_id,plan.season,plan.numbers,
+                client.backfill,plan.anidb_id,plan.tvdb_series_id,plan.season,plan.numbers,
                 reserved=plan.reserved,verified_ids=dict(plan.verified),
                 **({'select_candidates': True} if select_candidates else {}))
             if len(observed) != len(plan.numbers):
                 raise BackfillConflict()
-            missing = tuple(o.number for o in observed if o.status == 'NOT_LISTED')
-            if missing:
-                context.logger.error(
-                    'Sonarr backfill cannot search: tvdb_series_id=%s season=%s missing_episodes=%s',
-                    plan.tvdb_series_id, plan.season, missing)
-                return Outcome('blocked','SONARR_EPISODES_NOT_LISTED')
+            # Report each episode's actual result; unavailable episodes never
+            # hold back the ones that have releases.
+            for item in observed:
+                log.info('Backfill episode %s: status=%s matching=%s accepted=%s',
+                         item.number, item.status, item.candidates, item.accepted)
             return Outcome(value=BackfillCompletion(plan,observed))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
-        except SearchNotFound:
-            return Outcome('blocked','SONARR_DISCOVERY_EPISODE_NOT_FOUND')
-        except SearchTimeout:
-            return Outcome('blocked','SONARR_DISCOVERY_TIMEOUT')
+        except SearchUnavailable as exc:   # includes SearchTimeout
+            # The client already tried three times. Wait 30 minutes once, then
+            # stop for a manual Retry; nothing is published for this page.
+            reason = exc.reason_code
+            used = await blocking(automatic_retry_used,
+                context.configuration.value('storage.database_path'),context.claim.job_id)
+            if used: return Outcome('blocked',reason)
+            log.warning('Backfill search will run again in %s minutes: %s',
+                        AUTOMATIC_RETRY_MS//60000, reason)
+            return Outcome('defer',reason,delay_ms=AUTOMATIC_RETRY_MS)
         except SearchUnauthorized:
-            return Outcome('review','SONARR_DISCOVERY_AUTH_FAILED')
-        except SearchUnsupported:
-            return Outcome('review','SONARR_DISCOVERY_UNSUPPORTED')
+            return Outcome('review','PROWLARR_AUTH_FAILED')
         except SearchConfiguration:
-            return Outcome('review','SONARR_DISCOVERY_CONFIGURATION_INVALID')
+            return Outcome('review','PROWLARR_CONFIGURATION_INVALID')
         except SearchReview:
-            return Outcome('review','SONARR_DISCOVERY_REVIEW')
-        except SearchUnavailable:
-            return Outcome('blocked','SONARR_DISCOVERY_UNAVAILABLE')
+            return Outcome('review','PROWLARR_SEARCH_REVIEW')
+        except ProviderDeferred as exc:
+            return Outcome('defer','JOB_WAITING',delay_ms=exc.delay_ms)
+        except (ProviderUnavailable,ProviderInvalidResponse) as exc:
+            return Outcome('retry',exc.reason_code)
+        except ProviderAuthenticationFailed:
+            return Outcome('review','PROVIDER_AUTH_FAILED')
+        except (ReleaseNotReady,ReleaseConflict) as exc:
+            return Outcome('review',exc.reason_code)
 
     def persist(db,claim,value):
         try:
@@ -115,7 +137,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
         if type(value) in (FallbackCompletion,FallbackMissing): return ()
         if type(value) is not BackfillCompletion: raise ValueError('typed backfill result required')
         next_start=value.plan.start+len(value.plan.numbers)
-        if next_start>value.plan.backfill_count: return ()
+        if next_start>value.plan.window_size: return ()
         return (Successor.create(KIND,{'plan_id':value.plan.plan_id,'start':next_start}),)
 
     return Registration(KIND,DEFINITION,execute,persist=persist,route=route,

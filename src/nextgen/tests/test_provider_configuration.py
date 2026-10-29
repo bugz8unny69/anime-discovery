@@ -45,7 +45,7 @@ class ProviderConfigurationTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 convert_document({**document,"settings":{**document["settings"],"anidb":{"client_name":"new"}}})
         current = convert_document(third)
-        self.assertEqual((current.schema_version,current.revision),(10,10))
+        self.assertEqual((current.schema_version,current.revision),(11,11))
         self.assertEqual(current.value("anidb.client_name"),"")
         self.assertEqual(current.value("providers.timeout_seconds"),30)
 
@@ -216,7 +216,7 @@ class IdentityWorkerConfigurationTests(unittest.IsolatedAsyncioTestCase):
             return verify
         with patch("src.nextgen.providers.configuration.make_resolver",side_effect=identity_factory), \
              patch("src.nextgen.providers.configuration.make_verifier",side_effect=release_factory):
-            worker=await build_identity_worker(self.root,sonarr_backfill=True)
+            worker=await build_identity_worker(self.root,backfill=True)
         self.addAsyncCleanup(worker.close)
         await worker.attempt()
         await worker.attempt()
