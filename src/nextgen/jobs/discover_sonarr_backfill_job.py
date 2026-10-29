@@ -1,7 +1,7 @@
-"""Read-only, opt-in frozen-window Sonarr backfill discovery worker."""
+"""Search-only Sonarr backfill; no registration, grabs or automatic waiting."""
 from src.nextgen.acquisition.sonarr_search import (
     Client, SearchConfiguration, SearchUnauthorized, SearchUnsupported,
-    SearchNotFound, SearchReview, SearchUnavailable,
+    SearchNotFound, SearchReview, SearchUnavailable, SearchTimeout,
 )
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
@@ -14,31 +14,13 @@ from src.nextgen.storage.sonarr_backfill import (
     persist_fallback, FallbackMissing, persist_fallback_missing,
 )
 from src.nextgen.worker import blocking
-from src.nextgen import sonarr
-
-REGISTERED_DELAY_MS = 120000  # Let Sonarr finish its post-add series refresh.
-LISTING_ATTEMPTS = 10  # ~20 minutes of waiting for Sonarr to list the season.
-
-
-def register_series(configuration, secrets, tvdb_series_id, *, client_factory=sonarr.Client):
-    """Add a missing series to Sonarr unmonitored, with no searches, via the Keep client."""
-    from types import SimpleNamespace
-    options = sonarr.Options.capture(configuration, SimpleNamespace(
-        staging_root=configuration.value('storage.keep_root')))
-    client = client_factory(options, secrets.sonarr_api_key())
-    if client.series(tvdb_series_id) is not None: return
-    selection = SimpleNamespace(tvdb_series_id=tvdb_series_id)
-    try: client.request('series', body=client.add_payload(selection, monitored=False))
-    except sonarr.KeepReview:
-        # Another job may have added it first; anything else needs review.
-        if client.series(tvdb_series_id) is None: raise
 
 KIND = 'DISCOVER_SONARR_BACKFILL'
 DEFINITION = HandlerDefinition(KIND, 'Discover missing backfill episodes in Sonarr')
 
 
 def registration(secrets, *, client_factory=Client.from_context, select_candidates=False,
-                 acquire_candidates=False, register=register_series):
+                 acquire_candidates=False):
     if (type(select_candidates) is not bool or type(acquire_candidates) is not bool
             or acquire_candidates and not select_candidates):
         raise ValueError('Sonarr acquisition requires opted-in source selection')
@@ -66,7 +48,11 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                 if not acquire_candidates or exhausted_episode not in plan.numbers:
                     raise BackfillConflict()
                 return Outcome('review','SONARR_CANDIDATES_EXHAUSTED')
+            context.logger.info(
+                'Sonarr backfill lookup: tvdb_series_id=%s season=%s episodes=%s reserved=%s',
+                plan.tvdb_series_id, plan.season, plan.numbers, plan.reserved)
             client = client_factory(context.configuration,secrets)
+            if isinstance(client, Client): client.logger = context.logger
             if fallback_episode is not None:
                 if not acquire_candidates or fallback_episode not in plan.numbers:
                     raise BackfillConflict()
@@ -91,25 +77,19 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
                 **({'select_candidates': True} if select_candidates else {}))
             if len(observed) != len(plan.numbers):
                 raise BackfillConflict()
-            # Sonarr lists none of this page yet (e.g. still refreshing a newly
-            # added series): wait and search again rather than record NOT_LISTED.
-            if (any(o.status == 'NOT_LISTED' for o in observed)
-                    and all(o.status in ('NOT_LISTED','IN_PROGRESS') for o in observed)
-                    and context.claim.attempt < LISTING_ATTEMPTS):
-                return Outcome('defer','SONARR_EPISODES_NOT_LISTED',delay_ms=REGISTERED_DELAY_MS)
+            missing = tuple(o.number for o in observed if o.status == 'NOT_LISTED')
+            if missing:
+                context.logger.error(
+                    'Sonarr backfill cannot search: tvdb_series_id=%s season=%s missing_episodes=%s',
+                    plan.tvdb_series_id, plan.season, missing)
+                return Outcome('blocked','SONARR_EPISODES_NOT_LISTED')
             return Outcome(value=BackfillCompletion(plan,observed))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
         except SearchNotFound:
-            try:
-                await blocking(register, context.configuration, secrets, plan.tvdb_series_id)
-            except sonarr.KeepConfiguration:
-                return Outcome('review','SONARR_DISCOVERY_CONFIGURATION_INVALID')
-            except sonarr.KeepReview:
-                return Outcome('review','SONARR_DISCOVERY_REVIEW')
-            except sonarr.KeepUnavailable:
-                return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
-            return Outcome('defer','SONARR_DISCOVERY_EPISODE_NOT_FOUND', delay_ms=REGISTERED_DELAY_MS)
+            return Outcome('blocked','SONARR_DISCOVERY_EPISODE_NOT_FOUND')
+        except SearchTimeout:
+            return Outcome('blocked','SONARR_DISCOVERY_TIMEOUT')
         except SearchUnauthorized:
             return Outcome('review','SONARR_DISCOVERY_AUTH_FAILED')
         except SearchUnsupported:
@@ -119,7 +99,7 @@ def registration(secrets, *, client_factory=Client.from_context, select_candidat
         except SearchReview:
             return Outcome('review','SONARR_DISCOVERY_REVIEW')
         except SearchUnavailable:
-            return Outcome('retry','SONARR_DISCOVERY_UNAVAILABLE')
+            return Outcome('blocked','SONARR_DISCOVERY_UNAVAILABLE')
 
     def persist(db,claim,value):
         try:

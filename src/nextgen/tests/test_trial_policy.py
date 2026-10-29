@@ -24,6 +24,7 @@ class TrialWindowTests(unittest.TestCase):
         self.assertEqual(Window(0,2).episodes(10),(10,11))
         self.assertEqual(Window(0,6).episodes(10),(10,11,12,13,14,15))
         self.assertEqual(Window(6,2).episodes(3),(1,2,3,4,5,6))
+        self.assertEqual(Window(6,3).episodes(5),(1,2,3,4,5,6,7))
         self.assertEqual(Window(6,0).episodes(10),(1,2,3,4,5,6))
         with self.assertRaises(InvalidEpisodeCounts):Window(0,0)
         for value in (-1,True,1.5,1001):

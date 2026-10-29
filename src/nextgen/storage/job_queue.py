@@ -244,16 +244,4 @@ class JobQueue:
                 records.append(append_job_history(db,job_id=claim.job_id,event_code="LEASE_EXPIRED",
                     reason_code="JOB_LEASE_EXPIRED",component="worker",occurred_at_ms=now,details={"attempt":claim.attempt}))
                 records.append(self._transition(db,claim,Outcome("retry","JOB_LEASE_EXPIRED"),now))
-            # Backfills held by older releases for a missing Sonarr series now
-            # register it themselves: resume them unless their work was canceled.
-            held = db.execute("SELECT job_id,attempt_count FROM jobs WHERE kind='DISCOVER_SONARR_BACKFILL' "
-                "AND state='ON_HOLD' AND last_reason_code='SONARR_DISCOVERY_EPISODE_NOT_FOUND' "
-                "AND NOT EXISTS(SELECT 1 FROM job_operation_members m JOIN job_operations o USING(operation_id) "
-                "WHERE m.job_id=jobs.job_id AND o.state IN ('CANCEL_REQUESTED','CANCELED')) LIMIT ?",(limit,)).fetchall()
-            for job_id,attempt in held:
-                db.execute("UPDATE jobs SET state='PENDING',available_at_ms=?,updated_at_ms=?,activity_code=NULL,last_reason_code=NULL "
-                           "WHERE job_id=? AND state='ON_HOLD'",(now,now,job_id))
-                records.append(append_job_history(db,job_id=job_id,event_code="RETRY_SCHEDULED",
-                    reason_code="SONARR_DISCOVERY_EPISODE_NOT_FOUND",component="worker",
-                    occurred_at_ms=now,details={"attempt":attempt}))
             return tuple(records)
