@@ -54,13 +54,13 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
     async def download_ready(self,action='keep',mode='normal'):
         if action=='keep':
             worker,fake,actions,target,decision,staging_cleanup=await self.cleanup_ready()
-            self.assertEqual(self.rows('SELECT count(*) FROM jobs WHERE kind=?',(KIND,)),[(0,)])
+            self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,)),[(0,)])
             await worker.attempt()
         else:
             worker,_,target=await self.staged();fake=None
             actions=ManagementActions(self.database);_,receipt,_=actions.submit(target,'reject')
             decision=receipt['job_id'];await worker.attempt()
-        job=self.rows('SELECT job_id FROM jobs WHERE kind=?',(KIND,))[0][0]
+        job=self.rows("SELECT job_id FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,))[0][0]
         self.payload_root=Path(self.snapshot.observation.save_path)
         self.remainder=self.payload_root/self.snapshot.observation.files[0].path
         self.remainder.parent.mkdir(parents=True,exist_ok=True)
@@ -80,7 +80,7 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
         _,receipt,_=actions.submit(target,'keep')
         self.assertTrue(receipt['download_cleanup']['completed'])
-        self.assertEqual(self.rows('SELECT count(*) FROM jobs WHERE kind=?',(KIND,)),[(1,)])
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,)),[(1,)])
 
     async def test_reject_retains_rejection_and_shared_series_metadata(self):
         worker,_,actions,target,decision,job=await self.download_ready('reject')
@@ -90,6 +90,33 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(list((self.root/'staging').rglob('tvshow.nfo'))),1)
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
         _,receipt,_=actions.submit(target,'reject');self.assertTrue(receipt['download_cleanup']['completed'])
+
+    async def test_staging_removes_the_torrent_at_once_and_reject_later_finds_it_done(self):
+        worker,staging,stage_job=await self.staged()
+        job=self.rows("SELECT job_id FROM jobs WHERE kind=? AND "
+                      "json_extract(payload_json,'$.staging_job_id')=?",(KIND,stage_job))[0][0]
+        # Not claimed the instant staging completes; due shortly after.
+        self.assertFalse(await worker.attempt())
+        self.payload_root=Path(self.snapshot.observation.save_path)
+        self.remainder=self.payload_root/self.snapshot.observation.files[0].path
+        self.remainder.parent.mkdir(parents=True,exist_ok=True)
+        self.remainder.write_bytes(b'partial')
+        self.attach(worker)
+        await self.make_due(job);await worker.attempt()
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertIsNone(self.snapshot)                       # Gone from qBittorrent.
+        self.assertFalse(self.remainder.exists())              # Leftover files removed.
+        self.assertEqual(len(list(staging.rglob('*.mkv'))),1)  # The staged video stays.
+        self.assertEqual(self.rows('SELECT phase FROM cancellation_cleanup'),[('COMPLETE',)])
+        # A later Reject still completes; there is nothing left to stop or remove.
+        actions=ManagementActions(self.database);_,receipt,_=actions.submit(stage_job,'reject')
+        for _ in range(4):await worker.attempt()
+        decision_cleanup=self.rows("SELECT state FROM jobs WHERE kind=? AND "
+            "json_extract(payload_json,'$.decision_job_id')=?",(KIND,receipt['job_id']))
+        self.assertEqual(decision_cleanup,[('DONE',)])
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertEqual(list(staging.rglob('*.mkv')),[])
 
     async def test_lost_remove_response_reconciles_without_another_delete(self):
         worker,_,_,_,_,job=await self.download_ready(mode='remove_lost')

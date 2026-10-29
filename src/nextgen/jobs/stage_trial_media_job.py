@@ -28,6 +28,10 @@ def _persist(db,claim,value):
         value=dict(value)
         refresh=value.pop('refresh',False)
         records=persist(db,claim,value)
+        # The video was moved out of the torrent's folder: remove the torrent
+        # and any leftover files now, in their own cleanup operation.
+        from src.nextgen.decision_download_cleanup import enqueue_after_staging
+        enqueue_after_staging(db,claim)
         if refresh:
             from src.nextgen.jobs.refresh_jellyfin_job import enqueue
             enqueue(db,claim)
