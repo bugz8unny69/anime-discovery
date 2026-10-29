@@ -127,6 +127,25 @@ class SequelDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn({"step": "season_scope", "status": "passed",
                        "note": "base_series_season_lookup"}, trace["checks"])
 
+    async def test_unknown_sequel_title_falls_back_to_base_series_season(self):
+        # AniDB has no exact entry for the release's "| Sequel II" title.
+        provider = Provider()
+        provider.title_candidates = lambda aliases: (provider.queries.append(tuple(aliases)) or
+            ({15105: ("The Iceblade Sorcerer Shall Rule the World",)}
+             if aliases == ["The Iceblade Sorcerer Shall Rule the World"] else {}))
+        provider.anime = lambda aid: {"title": "Hyouken II" if aid == 17000 else "Hyouken",
+            "titles": ("The Iceblade Sorcerer Shall Rule the World",)}
+        provider.tvdb_titles = ("The Iceblade Sorcerer Shall Rule the World",)
+        result, trace = await self.identify(
+            "[AnoZu] The Iceblade Sorcerer Shall Rule the World S02E02 1080p CR WEB-DL Dual-Audio "
+            "DDP 2.0 H.264 | Hyouken no Majutsushi ga Sekai wo Suberu II", provider)
+        self.assertEqual(provider.queries, [("Hyouken no Majutsushi ga Sekai wo Suberu II",),
+                                            ("The Iceblade Sorcerer Shall Rule the World",)])
+        self.assertEqual(provider.season_lookups, [(12345, 2, 2)])
+        self.assertEqual(result["anime"]["anidb_id"], 17000)
+        self.assertIn({"step": "season_scope", "status": "passed",
+                       "note": "base_series_season_lookup"}, trace["checks"])
+
     async def test_season_lookup_still_requires_base_title_agreement(self):
         provider = Provider()
         provider.candidates = {15105: ("Saga of Tanya the Evil",)}

@@ -140,6 +140,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             # sequel work over the generic season-one title for lookup.
             stage = "season_scope"
             season_lookup = None
+            base_aliases = None
             if any(int(value) > 1 for value in seasons):
                 sequel = explicit_sequel_alias(title, aliases)
                 if sequel is None:
@@ -148,7 +149,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
                     season_lookup = int(seasons[0])
                     check(stage, "passed", "base_series_season_lookup")
                 else:
-                    aliases = [sequel]
+                    base_aliases, aliases = aliases, [sequel]
                     if matching is not None:
                         matching.queries(aliases, episode, int(seasons[0]))
                     check(stage, "passed", "sequel_alias_selected")
@@ -158,6 +159,14 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             stage = "anidb_candidates"
             client = pool.get(database, actual_options)
             candidates = client.title_candidates(aliases)
+            if not candidates and base_aliases is not None:
+                # AniDB does not list the release's sequel title: identify the
+                # base series instead and take its anime-lists season entry.
+                aliases, season_lookup = base_aliases, int(seasons[0])
+                if matching is not None:
+                    matching.queries(aliases, episode, season_lookup)
+                check("season_scope", "passed", "base_series_season_lookup")
+                candidates = client.title_candidates(aliases)
             if matching is not None:
                 matching.candidates(candidates)
             if len(candidates) != 1:
