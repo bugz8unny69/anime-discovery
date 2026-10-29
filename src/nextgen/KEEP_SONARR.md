@@ -1,7 +1,9 @@
 # Keep through Sonarr
 
-Keep now submits a background Sonarr v4 import for the single staged episode
-selected by the management request. It reuses the existing staged path and both
+Series-first Intake submits the existing background Sonarr v4 Keep jobs for
+all staged acquisitions explicitly selected with one Keep action. Individual
+per-file and batch journals remain independently retryable. New arrivals are
+not silently included. Each underlying service call retains its exact scope. It reuses the existing staged path and both
 provider identities. Sonarr matching uses the verified TVDB series, season,
 episode and available episode ID. AniDB IDs remain available for optional Shoko;
 there is no Shoko dependency or second staging/NFO implementation.
@@ -12,9 +14,9 @@ Optional staging/library roots describe the same folders as Sonarr sees them in
 a container or another service. Blank uses the recorded staging root/local Keep
 root. Both processes must actually have the corresponding storage mounted.
 
-The job finds the exact TVDB series, or looks it up and adds it with the configured
-root and profile. New series are monitored, without triggering a missing-episode
-or cutoff search. Existing series roots/profiles/monitoring are not rewritten.
+The job requires an existing registered Sonarr series with the exact TVDB ID.
+It never adds a series, changes monitoring or starts a missing-episode search.
+Missing/mismatched series stop for review and leave staged files intact.
 An existing series outside the configured permanent root needs review.
 
 The job scans the staged parent folder, selects only the exact approved file,
@@ -45,9 +47,9 @@ video and episode NFO after rechecking the permanent result. Shared series
 metadata and the kept episode reservation remain. Torrent/download cleanup,
 cancellation reservation release and optional Shoko remain separate work. Configured Jellyfin refresh is now an
 independent follow-up; see JELLYFIN_REFRESH.md. This job does not
-delete staged videos, torrent data or permanent media. It imports the selected
-episode, not every staged episode for the anime. Subsequent selected episodes
-retain their own explicit acquisition/Keep scope.
+delete staged videos, torrent data or permanent media. Each worker imports the
+exact selected episode; the series-level action requests all currently staged
+scopes in one user action.
 
 The dashboard enables Keep for eligible staged work and uses existing job
 receipts, polling and disabled-button explanations. It displays the catalog

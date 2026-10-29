@@ -29,6 +29,8 @@ from src.nextgen.secrets import SecretStore
 from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
 from src.nextgen.storage.review_retry import request_review_retry, capability as retry_capability, RetryNotAllowed, RetryStale
 from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable, ActionNotFound
+from src.nextgen.storage.series_intake import (detail as series_detail, list_items as series_items,
+    keep_targets as series_keep_targets, retry_episode as retry_missing_episode, IntakeUnavailable)
 from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import accept_event_and_job
 
@@ -256,6 +258,7 @@ class Application:
         except ApiError:raise
         except ActionNotFound as exc:raise ApiError(404,exc.reason_code) from None
         except ActionUnavailable as exc:raise ApiError(409,exc.reason_code) from None
+        except IntakeUnavailable as exc:raise ApiError(409,exc.reason_code) from None
         except (RetryNotAllowed,RetryStale) as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationConflict as exc:raise ApiError(409,exc.reason_code) from None
         except ConfigurationError as exc:raise ApiError(503,exc.reason_code) from None
@@ -519,6 +522,50 @@ class Application:
                 return 200,{'items':[{'tvdb_series_id':tid,'season':season,
                     'anidb_id':aid,'title':title,'alias_count':alias_count,
                     'verified_episode_count':ep_count} for tid,season,aid,title,alias_count,ep_count in rows]},[]
+            # Series-first Intake reuses existing jobs and staging evidence.
+            if path==PREFIX+'/intake/series':
+                if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
+                if set(query)-{'before_id','limit'}:raise ApiError(400,'API_REQUEST_INVALID')
+                before=page_number(query,'before_id',(1<<63)-1,1,(1<<63)-1)
+                limit=page_number(query,'limit',30,1,100)
+                with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                    db.execute('BEGIN')
+                    return 200,series_items(db,before,limit),[]
+            series_match=re.fullmatch(PREFIX+r'/intake/series/([1-9][0-9]{0,18})(?:/(keep))?',path)
+            if series_match:
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                aid=int(series_match[1])
+                if aid>(1<<63)-1:raise ApiError(400,'API_REQUEST_INVALID')
+                if series_match[2] is None and method=='GET':
+                    with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                        db.execute('BEGIN')
+                        item=series_detail(db,aid)
+                    if item is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
+                    return 200,item,[]
+                if series_match[2]=='keep' and method=='POST':
+                    exact(body,('operation_ids',))
+                    with JobQueue(configuration.value('storage.database_path')).connection() as db:
+                        db.execute('BEGIN')
+                        targets=series_keep_targets(db,aid,body['operation_ids'])
+                    actions=ManagementActions(configuration.value('storage.database_path'))
+                    submitted=[];failed=[]
+                    # Each existing Keep is durable; report partial submissions.
+                    for job in targets:
+                        try:
+                            _,receipt,_=actions.submit(job,'keep')
+                            submitted.append(receipt['job_id'])
+                        except ActionUnavailable:
+                            failed.append(job)
+                    return 202,{'submitted':submitted,'failed':failed,
+                                'message':f'Keep requested for {len(submitted)} staged acquisitions.'},[]
+                raise ApiError(405,'API_METHOD_INVALID')
+            retry_match=re.fullmatch(PREFIX+r'/intake/series/([1-9][0-9]{0,18})/backfill/([0-9]{1,4})/([1-9][0-9]{0,3})/retry',path)
+            if retry_match:
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
+                exact(body,())
+                aid,season,episode=map(int,retry_match.groups())
+                return 202,retry_missing_episode(configuration.value('storage.database_path'),aid,season,episode),[]
             if path==PREFIX+'/intake':
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')
                 return 200,self._intake(configuration,query),[]
