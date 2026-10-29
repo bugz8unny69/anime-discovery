@@ -91,6 +91,10 @@ class TorrentSubmissionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows("SELECT d.state,p.kind,p.state FROM jobs d JOIN jobs p "
                                    "ON p.job_id=d.created_by_job_id WHERE d.kind='DISCOVER_SONARR_BACKFILL'"),
                          [('PENDING','SUBMIT_TORRENT','DONE')])
+        # Backfill runs in its own operation, so the episode can be marked STAGED
+        # while backfill is still searching (and backfill is not frozen by it).
+        self.assertEqual(self.rows("SELECT count(DISTINCT m.operation_id) FROM jobs j JOIN job_operation_members m USING(job_id) "
+                                   "WHERE j.kind IN ('DISCOVER_SONARR_BACKFILL','SUBMIT_TORRENT')"),[(2,)])
 
     async def test_review_submission_never_starts_backfill(self):
         worker=self.worker(backfill=True)
