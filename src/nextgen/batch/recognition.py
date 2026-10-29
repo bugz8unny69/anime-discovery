@@ -29,6 +29,15 @@ def release_scope_hint(release_name):
         return unknown
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in release_name):
         return unknown
+    # One clear episode, as the shared release-group title reader sees it
+    # ("Title S2 - 05", "Mob Psycho 100 - 05"), is never a pack or a range.
+    from src.nextgen.acquisition.release_titles import marker_seasons, parse_release
+    parsed = parse_release(release_name)
+    if parsed is not None and parsed.season != 0:
+        seasons = ({parsed.season} if parsed.season is not None
+                   else marker_seasons(parsed.text, roman=False))
+        if len(seasons) <= 1:
+            return ReleaseScope('single_episode', next(iter(seasons), None), parsed.episode)
     episodes = list(_SEASON_EP.finditer(release_name))
     seasons = {int(m.group('season') or m.group('word')) for m in _SEASON.finditer(release_name)}
     seasons.update(int(m.group('season')) for m in episodes)

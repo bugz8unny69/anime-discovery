@@ -21,10 +21,12 @@ from src.nextgen.providers.parsing import norm
 
 LEADING_TAGS = re.compile(r'^\s*(?:[\[【][^\]】]*[\]】]\s*)+')
 EXTENSION = re.compile(r'\.(?:mkv|mp4|avi|webm)$', re.I)
-EXPLICIT = re.compile(r'(?<![A-Za-z0-9])S(\d{1,2})\s?E(\d{1,4})(?:v\d{1,2})?(?![0-9])', re.I)
+EXPLICIT = re.compile(r'(?<![A-Za-z0-9])S(\d{1,2})\s?E(\d{1,4})(?:v\d{1,2})?(?![0-9A-Za-z])', re.I)
 DASHED = re.compile(r'\s[-–—]\s+(?:(?:Episode|Ep\.?|E)\s*)?(\d{1,4})(?:v\d{1,2})?(?=$|[\s\[\(【])', re.I)
-WORDED = re.compile(r'(?<![A-Za-z0-9])(?:Episode|Ep\.?)\s*(\d{1,4})(?:v\d{1,2})?(?![0-9A-Za-z])', re.I)
-TRAILING = re.compile(r'\s(\d{1,4})(?:v\d{1,2})?\s*(?=[\[\(【]|$)')
+WORDED = re.compile(r'(?<![A-Za-z0-9])(?:Episode|Ep\.?|E)\s*(\d{1,4})(?:v\d{1,2})?(?![0-9A-Za-z])', re.I)
+SEASON_ONLY = re.compile(r'(?<![A-Za-z0-9])S\d{1,2}(?![0-9A-Za-z])|Season\s*\d', re.I)
+# Bare numbers only when zero-padded ("Title 05 [1080p]"); "Mob Psycho 100" is a name.
+TRAILING = re.compile(r'\s(\d{2})(?:v\d{1,2})?\s*(?=[\[\(【]|$)')
 MULTI = re.compile(r'^\s*(?:v\d+\s*)?(?:[-~&+,]|to)\s*(?:S\d+\s?)?(?:E|EP)?\s*\d', re.I)
 NOT_ONE_EPISODE = re.compile(
     r'(?<![A-Za-z])(?:batch|complete|ova|oad|ona|movie|specials?|sp\d*|ncop|nced|pv|cm|'
@@ -41,9 +43,13 @@ MARKERS = (
 ROMAN = {'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6}
 
 
-def season_marker(text):
-    """(text without its season marker, season number or None)."""
-    for pattern in MARKERS:
+def season_marker(text, *, roman=True):
+    """(text without its season marker, season number or None).
+
+    Roman numerals ("II") are only read when roman=True: in identity lookup
+    they are usually part of the AniDB title itself.
+    """
+    for pattern in (MARKERS if roman else MARKERS[:-1]):
         match = pattern.search(text)
         if match is None: continue
         token = match.group(1)
@@ -61,11 +67,24 @@ class ParsedRelease:
     titles: tuple[str, ...]          # title alternatives, as written
     season: int | None               # explicit SxxEyy season
     episode: int
+    text: str = ''                   # the normalized title that was read
 
 
-def parse_release(title):
-    """One-episode release, or None when it is a batch, range, special or unclear."""
-    if type(title) is not str or not 1 <= len(title) <= 2048: return None
+UNCLEAR, UNSUPPORTED = 'RELEASE_TITLE_UNCLEAR', 'RELEASE_TYPE_UNSUPPORTED'
+
+
+def _type_words(text):
+    """Batch/special words in tags and short parentheses; long ones are alternate names."""
+    tags = re.findall(r'\[([^\]]*)\]', text)
+    tags += [inner for inner in re.findall(r'\(([^()]*)\)', text) if len(inner.split()) <= 3]
+    bare = re.sub(r'\([^()]*\)', ' ', text)
+    return bool(NOT_ONE_EPISODE.search(' '.join(tags)) or NOT_ONE_EPISODE.search(bare))
+
+
+def read_release(title):
+    """(ParsedRelease, None) for exactly one episode, else (None, reason code)."""
+    if type(title) is not str or not 1 <= len(title) <= 2048: return None, UNCLEAR
+    if any(ord(c) < 32 or ord(c) == 127 for c in title): return None, UNCLEAR
     text = EXTENSION.sub('', title.strip()).replace('_', ' ')
     if text.count(' ') < 2 and text.count('.') >= 3:
         text = re.sub(r'\.(?!\d)', ' ', text)    # scene style: dots between words
@@ -76,18 +95,17 @@ def parse_release(title):
         season, episode = int(match.group(1)), int(match.group(2))
     else:
         match = DASHED.search(text) or WORDED.search(text) or TRAILING.search(text)
-        if match is None: return None
+        if match is None:
+            return None, UNSUPPORTED if _type_words(text) or SEASON_ONLY.search(text) else UNCLEAR
         episode = int(match.group(1))
     base, tail = text[:match.start()], text[match.end():]
-    if MULTI.match(tail) or re.match(r'^\.\d{1,2}(?![0-9pP])', tail) or episode < 1: return None
-    if EXPLICIT.search(tail) or re.match(r'^\s*-?\s*E\d', tail, re.I):
-        return None                                    # S01E01E02 / two episodes
-    tags = ' '.join(re.findall(r'[\[\(]([^\]\)]*)[\]\)]', base)) + ' ' + tail
-    if NOT_ONE_EPISODE.search(tags) or NOT_ONE_EPISODE.search(base.split(' - ')[-1]):
-        return None
+    if MULTI.match(tail) or EXPLICIT.search(tail) or re.match(r'^\s*-?\s*(?:EP|E)\d', tail, re.I):
+        return None, UNSUPPORTED                        # ranges and S01E01E02
+    if re.match(r'^\.\d{1,2}(?![0-9pP])', tail) or episode < 1: return None, UNCLEAR
+    if _type_words(base + ' ' + tail): return None, UNSUPPORTED
     base = re.sub(r'[\[【][^\]】]*[\]】]', ' ', base)
     base = re.sub(r'\s+', ' ', base).strip(' -–—:')
-    if not base: return None
+    if not base: return None, UNCLEAR
     alternatives = [part.strip(' -:') for part in re.split(r'\s+[|/]\s+', base)]
     for inner in re.findall(r'\(([^()]+)\)', base):
         if not YEAR.fullmatch('(' + inner + ')') and season_marker(inner)[1] is None:
@@ -97,7 +115,25 @@ def parse_release(title):
     for alt in alternatives + stripped:
         alt = re.sub(r'\s+', ' ', alt).strip(' -:')
         if alt and alt not in found: found.append(alt)
-    return ParsedRelease(tuple(found), season, episode)
+    return ParsedRelease(tuple(found), season, episode, text), None
+
+
+def parse_release(title):
+    """One-episode release, or None when it is a batch, range, special or unclear."""
+    return read_release(title)[0]
+
+
+def marker_seasons(text, *, roman=False):
+    """Every season number written as a marker (S2, Season 2, 2nd Season...)."""
+    found = set()
+    patterns = MARKERS if roman else MARKERS[:-1]
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            token = match.group(1)
+            number = (int(token) if token.isdigit() else ORDINAL_WORDS.get(token.lower())
+                      or ROMAN.get(token))
+            if number: found.add(number)
+    return found
 
 
 @dataclass(frozen=True)

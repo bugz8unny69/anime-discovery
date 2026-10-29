@@ -59,6 +59,11 @@ historical job and table names are kept so existing jobs and history stay valid)
    is tried automatically. Only when every ranked release has failed does the
    episode stop for review.
 
+Webhook intake uses the same reader: `declared_episode()`, the identity
+aliases and season hints, and the batch router (`release_scope_hint`) all call
+`release_titles.read_release()`, so a title readable for backfill is readable
+at intake too. Season packs keep the existing batch path.
+
 ## Results are reported per episode
 
 | Status | Meaning |

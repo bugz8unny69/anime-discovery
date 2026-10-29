@@ -35,6 +35,18 @@ def release_title(raw):
     """
     if not isinstance(raw, str) or not raw.strip():
         return [], None
+    # A single episode is read by the shared release-group title reader; its
+    # title alternatives, without season markers, are the search aliases.
+    from src.nextgen.acquisition.release_titles import parse_release, season_marker
+    parsed = parse_release(raw)
+    if parsed is not None:
+        aliases = []
+        for written in parsed.titles:
+            base, number = season_marker(written, roman=False)
+            for alias in (base if number is not None else written,):
+                if alias and alias not in aliases: aliases.append(alias)
+        if aliases:
+            return aliases, parsed.episode
     value = PREFIX.sub('', raw).strip()
     episode_match = EP.search(value)
     episode = (next((int(x) for x in (
