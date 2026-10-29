@@ -51,14 +51,14 @@ class CandidateStateTests(unittest.TestCase):
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT);
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                               created_by_job_id INTEGER,payload_json TEXT);
-            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE trial_plans(plan_id INTEGER,anchor_episode INTEGER,backfill_count INTEGER,following_count INTEGER);
             CREATE TABLE sonarr_episode_selections(
                 plan_id INTEGER,tvdb_episode INTEGER,info_hash TEXT);
             INSERT INTO incoming_events VALUES(25,'sonarr-discovery');
             INSERT INTO incoming_events VALUES(26,'other');
             INSERT INTO jobs VALUES(2,25,'DISCOVER_SONARR_BACKFILL',NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(3,25,'VERIFY_RELEASE',2,'{}');
-            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO trial_plans VALUES(1,5,6,3);
         """)
         self.db.execute(
             "INSERT INTO sonarr_episode_selections VALUES(1,2,?)",(FIRST,))
@@ -99,14 +99,14 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
-            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE trial_plans(plan_id INTEGER,anchor_episode INTEGER,backfill_count INTEGER,following_count INTEGER);
             CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
                 tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
             CREATE TABLE episode_reservations(reservation_id INTEGER,
                 state TEXT);
             CREATE TABLE acquisition_plans(reservation_id INTEGER,
                 info_hash TEXT);
-            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO trial_plans VALUES(1,5,6,3);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
@@ -172,7 +172,7 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
-            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE trial_plans(plan_id INTEGER,anchor_episode INTEGER,backfill_count INTEGER,following_count INTEGER);
             CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
                 tvdb_episode INTEGER,info_hash TEXT);
             CREATE TABLE job_operation_members(job_id INTEGER,operation_id INTEGER);
@@ -188,7 +188,7 @@ class FallbackWiringTests(unittest.TestCase):
             INSERT INTO job_operation_members VALUES(11,7);
             INSERT INTO job_operation_members VALUES(12,7);
             INSERT INTO job_operations(operation_id,state) VALUES(7,'ACTIVE');
-            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO trial_plans VALUES(1,5,6,3);
         """)
         self.db.execute(
             "INSERT INTO sonarr_episode_selections VALUES(1,2,?)",(FIRST,))
@@ -229,12 +229,12 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
-            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE trial_plans(plan_id INTEGER,anchor_episode INTEGER,backfill_count INTEGER,following_count INTEGER);
             CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
                 tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
             CREATE TABLE episode_reservations(reservation_id INTEGER,state TEXT);
             CREATE TABLE acquisition_plans(reservation_id INTEGER,info_hash TEXT);
-            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO trial_plans VALUES(1,5,6,3);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
@@ -271,12 +271,12 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE jobs(job_id INTEGER,event_id INTEGER,kind TEXT,
                 created_by_job_id INTEGER,payload_json TEXT);
             CREATE TABLE incoming_events(event_id INTEGER,source TEXT,raw_body TEXT);
-            CREATE TABLE trial_plans(plan_id INTEGER);
+            CREATE TABLE trial_plans(plan_id INTEGER,anchor_episode INTEGER,backfill_count INTEGER,following_count INTEGER);
             CREATE TABLE sonarr_episode_selections(plan_id INTEGER,
                 tvdb_episode INTEGER,tvdb_episode_id INTEGER,info_hash TEXT);
             CREATE TABLE episode_reservations(reservation_id INTEGER,state TEXT);
             CREATE TABLE acquisition_plans(reservation_id INTEGER,info_hash TEXT);
-            INSERT INTO trial_plans VALUES(1);
+            INSERT INTO trial_plans VALUES(1,5,6,3);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');

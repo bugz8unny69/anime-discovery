@@ -43,7 +43,8 @@ def registration(secrets, *, catalog_factory=None, client_factory=None,
         try:
             if (set(payload) not in ({'plan_id','start'},
                                     {'plan_id','start','fallback_episode'},
-                                    {'plan_id','start','exhausted_episode'})
+                                    {'plan_id','start','exhausted_episode'},
+                                    {'plan_id','start','retry_episode'})
                     or context.claim.event_id is None):
                 raise ValueError()
             plan_id = integer(payload['plan_id'], positive=True)
@@ -53,12 +54,14 @@ def registration(secrets, *, catalog_factory=None, client_factory=None,
                                 if 'fallback_episode' in payload else None)
             exhausted_episode = (integer(payload['exhausted_episode'],positive=True)
                                  if 'exhausted_episode' in payload else None)
+            retry_episode = (integer(payload['retry_episode'],positive=True)
+                             if 'retry_episode' in payload else None)
         except (ValueError, TypeError):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
         log = context.logger
         try:
             plan = await blocking(load_batch,
-                context.configuration.value('storage.database_path'),plan_id,start)
+                context.configuration.value('storage.database_path'),plan_id,start,retry_episode)
             if exhausted_episode is not None:
                 if not acquire_candidates or exhausted_episode not in plan.numbers:
                     raise BackfillConflict()
@@ -95,7 +98,7 @@ def registration(secrets, *, catalog_factory=None, client_factory=None,
             for item in observed:
                 log.info('Backfill episode %s: status=%s matching=%s accepted=%s',
                          item.number, item.status, item.candidates, item.accepted)
-            return Outcome(value=BackfillCompletion(plan,observed))
+            return Outcome(value=BackfillCompletion(plan,observed,retry_episode))
         except BackfillConflict:
             return Outcome('review','SONARR_BACKFILL_PLAN_CONFLICT')
         except SearchUnavailable as exc:   # includes SearchTimeout
@@ -136,6 +139,7 @@ def registration(secrets, *, catalog_factory=None, client_factory=None,
     def route(value):
         if type(value) in (FallbackCompletion,FallbackMissing): return ()
         if type(value) is not BackfillCompletion: raise ValueError('typed backfill result required')
+        if value.retry_episode is not None: return ()
         next_start=value.plan.start+len(value.plan.numbers)
         if next_start>value.plan.window_size: return ()
         return (Successor.create(KIND,{'plan_id':value.plan.plan_id,'start':next_start}),)

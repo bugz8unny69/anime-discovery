@@ -143,21 +143,20 @@ class KeepSonarrTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
         self.assertEqual(fake.posts.count('command'),1)
 
-    async def test_lost_new_series_reply_reconciles_tvdb_before_import(self):
-        worker,fake,actions,target,job=await self.prepared(present=False,lose_add=True)
+    async def test_missing_sonarr_series_stops_without_creating_it(self):
+        worker,fake,actions,target,job=await self.prepared(present=False)
         await worker.attempt()
-        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('ADD_UNCERTAIN',)])
-        await self.make_due(job);await worker.attempt()
-        self.assertEqual(fake.posts.count('series'),1);self.assertEqual(fake.posts.count('command'),1)
-        self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
+        self.assertEqual(fake.posts,[])
+        self.assertEqual(fake.puts,[])
+        self.assertEqual(self.rows('SELECT state,last_reason_code FROM jobs WHERE job_id=?',(job,)),
+                         [('NEEDS_REVIEW','KEEP_IMPORT_REVIEW')])
+        self.assertTrue(Path(fake.selection.media_path).is_file())
 
-    async def test_keep_enables_monitoring_on_unmonitored_series_preserving_settings(self):
+    async def test_keep_preserves_unmonitored_series_settings(self):
         worker,fake,actions,target,job=await self.prepared(monitored=False)
         await worker.attempt()
         self.assertEqual(self.rows('SELECT phase FROM keep_imports'),[('COMPLETE',)])
-        self.assertEqual(len(fake.puts),1)
-        self.assertEqual(fake.puts[0],{'id':31,'tvdbId':fake.selection.tvdb_series_id,
-            'path':str(fake.root/'Series'),'monitored':True,'qualityProfileId':7,'tags':[3]})
+        self.assertEqual(fake.puts,[])
         self.assertNotIn('series',fake.posts)
 
     async def test_keep_never_monitors_a_series_outside_the_library(self):
