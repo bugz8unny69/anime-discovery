@@ -20,6 +20,11 @@ class ConfigurationSchemaTests(unittest.TestCase):
         self.assertEqual(snapshot.schema_version, CONFIGURATION_VERSION)
         self.assertEqual(snapshot.logging_settings().logging.level, "INFO")
         self.assertEqual(snapshot.value("worker.concurrency"), 4)
+        self.assertEqual(snapshot.value("qbittorrent.metadata_poll_seconds"), 5)
+        self.assertEqual(snapshot.value("qbittorrent.metadata_poll_attempts"), 24)
+        definitions = field_definitions()
+        self.assertEqual(definitions["qbittorrent.metadata_poll_seconds"]["minimum"], 1)
+        self.assertEqual(definitions["qbittorrent.metadata_poll_attempts"]["maximum"], 24)
         for definition in FIELDS.values():
             self.assertIn(definition.apply_mode, {"next_operation", "restart"})
             self.assertEqual(bool(definition.restart_components), definition.apply_mode == "restart")
@@ -89,6 +94,10 @@ class ConfigurationSchemaTests(unittest.TestCase):
         bad = (
             {"api": {"port": True}}, {"api": {"port": 0}}, {"api": {"port": 65536}},
             {"worker": {"concurrency": 33}}, {"worker": {"concurrency": 1.5}},
+            {"qbittorrent": {"metadata_poll_seconds": 0}},
+            {"qbittorrent": {"metadata_poll_seconds": 11}},
+            {"qbittorrent": {"metadata_poll_attempts": 25}},
+            {"qbittorrent": {"metadata_poll_attempts": True}},
             {"api": {"host": "http://example.invalid/private-token"}},
             {"api": {"host": ":::invalid"}}, {"storage": {"database_path": "relative"}},
             {"storage": {"database_path": "/"}}, {"storage": {"database_path": "/x\nprivate"}},

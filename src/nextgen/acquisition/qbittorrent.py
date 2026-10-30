@@ -1,4 +1,4 @@
-"""Bounded session-local qBittorrent 4.2+ and 5.x transport. No automatic retries."""
+"""Bounded session-local qBittorrent 4.5+ and 5.x transport. No automatic retries."""
 from http.cookies import SimpleCookie
 import json
 import re
@@ -38,7 +38,7 @@ class _Protocol:
     """Small version-specific API contract; no transport or acquisition policy."""
     def __init__(self,major,api_version):
         if (major not in (4,5) or type(api_version) is not tuple
-                or not (2,3,0) <= api_version < (3,0,0)):
+                or len(api_version)!=3 or not (2,8,14) <= api_version < (3,0,0)):
             raise ClientUnsupported()
         self.major,self.api_version=major,api_version
 
@@ -46,17 +46,7 @@ class _Protocol:
     def metadata_strategy(self):
         if self.major == 5 and self.api_version >= (2,11,9):
             return 'fetch'
-        if self.api_version >= (2,8,14):
-            return 'guarded_export'
-        return 'legacy_poll'
-
-    @property
-    def inline_tags(self):
-        return self.api_version >= (2,6,2)
-
-    @property
-    def indexed_files(self):
-        return self.api_version >= (2,8,2)
+        return 'guarded_export'
 
     @property
     def stopped_parameter(self):
@@ -73,21 +63,12 @@ class _Protocol:
     def add_fields(self,stopped):
         fields={self.stopped_parameter:'true' if stopped else 'false',
                 'autoTMM':'false'}
-        if self.api_version >= (2,7,0):
-            fields['contentLayout']='Original'
-        if self.api_version >= (2,8,4):
-            fields['useDownloadPath']='false'
+        fields['contentLayout']='Original'
+        fields['useDownloadPath']='false'
         return fields
 
     def label_fields(self,marker):
-        return {'tags':'ad-'+marker} if self.inline_tags else {}
-
-    def file_index(self,row,position):
-        if self.indexed_files:
-            return row.get('index')
-        # Early Web API file lists have no index field; per-file priority
-        # uses their zero-based response positions. Readback verifies order.
-        return position
+        return {'tags':'ad-'+marker}
 
 
 class Client:
@@ -102,7 +83,7 @@ class Client:
         self._transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
 
     def _request(self,path,*,query=None,form=None,body=None,content_type=None,limit=3145728):
-        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete','torrents/addTags','torrents/fetchMetadata','torrents/saveMetadata','torrents/export'):raise ValueError('unsupported client operation')
+        if path not in ('auth/login','app/version','app/webapiVersion','torrents/info','torrents/files','torrents/add','torrents/properties','torrents/filePrio','torrents/start','torrents/resume','torrents/stop','torrents/pause','torrents/delete','torrents/fetchMetadata','torrents/saveMetadata','torrents/export'):raise ValueError('unsupported client operation')
         url=self.options.base_url+'/api/v2/'+path
         if query:url+='?'+urllib.parse.urlencode(query)
         headers={'User-Agent':'AnimeDiscoveryNextGen/1','Referer':self.options.base_url+'/','Accept':'application/json'}
@@ -120,11 +101,11 @@ class Client:
                     raise ClientUnavailable()
                 if code==204 and path not in ('torrents/add','torrents/filePrio',
                         'torrents/start','torrents/resume','torrents/stop',
-                        'torrents/pause','torrents/delete','torrents/addTags'):
+                        'torrents/pause','torrents/delete'):
                     raise ClientInvalid()
                 raw=response.read(limit+1)
                 if type(raw) is not bytes or len(raw)>limit:raise ClientInvalid()
-                if path in ('torrents/add','torrents/addTags') and raw.strip()==b'Fails.':
+                if path=='torrents/add' and raw.strip()==b'Fails.':
                     raise ClientInvalid()
                 return raw,response.headers
         except urllib.error.HTTPError as exc:
@@ -162,7 +143,7 @@ class Client:
             match=re.fullmatch(r'v?(4|5)\.([0-9]+)\.[0-9]+',version.decode().strip())
             api_match=re.fullmatch(r'2\.([0-9]+)(?:\.[0-9]+)?',api.decode().strip())
             if not match or not api_match:raise ClientUnsupported()
-            if match[1]=='4' and int(match[2])<2:raise ClientUnsupported()
+            if match[1]=='4' and int(match[2])<5:raise ClientUnsupported()
             self.major=int(match[1])
             api_parts=api.decode().strip().split('.')
             self.api_version=tuple(int(part) for part in api_parts[:3])
@@ -210,13 +191,13 @@ class Client:
         multi-video inventory instead of a single-episode manifest.
         """
         from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash, parse_batch_metainfo
-        if self.protocol is None or self.api_version < (2,8,14) or type(batch) is not bool:
+        if self.protocol is None or type(batch) is not bool:
             raise ClientUnsupported()
         expected_hash=infohash(expected_hash)
         raw,_=self._request('torrents/export',query={'hash':expected_hash},limit=MAX_METAINFO)
         return (parse_batch_metainfo if batch else parse_metainfo)(raw,expected_hash),raw
 
-    def inspect(self,expected_hash):
+    def inspect(self,expected_hash,*,include_files=True):
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
         from src.nextgen.acquisition.metadata import infohash
         expected_hash=infohash(expected_hash)
@@ -232,6 +213,11 @@ class Client:
         state=_text(row.get('state'),64)
         save_path=_text(row.get('save_path'),4096)
         category=_text(row.get('category'),256)
+        if type(include_files) is not bool:raise ClientInvalid()
+        # Metadata polling normally checks only status; periodically read files
+        # while metaDL, and always read files once the torrent changes state.
+        if not include_files and state=='metaDL':
+            return Observation(expected_hash,state,save_path,category,tags,row['auto_tmm'],())
         raw,_=self._request('torrents/files',query={'hash':expected_hash})
         files=_json(raw)
         if type(files) is not list or len(files)>10000:raise ClientInvalid()
@@ -239,43 +225,11 @@ class Client:
         try:
             for position,item in enumerate(files):
                 if type(item) is not dict:raise ClientInvalid()
-                result.append(TorrentFile(self.protocol.file_index(item,position),item.get('name'),item.get('size')))
+                result.append(TorrentFile(item.get('index'),item.get('name'),item.get('size')))
             result.sort(key=lambda f:f.index)
             if [f.index for f in result]!=list(range(len(result))):raise ClientInvalid()
         except ValueError:raise ClientInvalid() from None
         return Observation(expected_hash,state,save_path,category,tags,row['auto_tmm'],tuple(result))
-
-    def _tag_legacy_submission(self,digest,marker):
-        """Label only an isolated stopped admission; never repeat the add.
-
-        Old APIs may acknowledge add before exposing the torrent. Only the
-        fresh send's caller may poll and tag it; replay cannot adopt a torrent.
-        """
-        import time
-        if not self.options.download_root.endswith('/ad-'+marker):
-            raise ClientInvalid()
-        row=None
-        for attempt in range(10):
-            raw,_=self._request('torrents/info',query={'hashes':digest,'limit':2})
-            rows=_json(raw)
-            if type(rows) is not list or len(rows)>1:raise ClientInvalid()
-            if rows:
-                if type(rows[0]) is not dict or rows[0].get('hash')!=digest:
-                    raise ClientInvalid()
-                if rows[0].get('save_path'):
-                    row=rows[0]
-                    break
-            if attempt<9:time.sleep(0.2)
-        if row is None:raise ClientUnavailable()
-        if (type(row.get('save_path')) is not str
-                or row['save_path'].rstrip('/')!=self.options.download_root
-                or row.get('category')!=self.options.category
-                or row.get('auto_tmm') is not False
-                or row.get('state') not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
-                or row.get('tags') not in ('',None)):
-            raise ClientInvalid()
-        self._request('torrents/addTags',form={
-            'hashes':digest,'tags':'ad-'+marker},limit=4096)
 
     def inspect_legacy_metadata(self,expected_hash,marker,download_root):
         """Read-only pre-manifest observation for a journaled magnet intake.
@@ -312,7 +266,7 @@ class Client:
         return snapshot
 
     def add_legacy_magnet(self,magnet,intent,permit):
-        """One bounded pre-manifest admission for the 4.2.x protocol.
+        """One bounded pre-manifest admission for the 4.5+ API.
 
         A durable Sonarr magnet journal must issue the permit before this
         call. Never invoke add again on an uncertain or recovered intent.
@@ -324,7 +278,7 @@ class Client:
         if (type(intent) is not MagnetIntent or type(permit) is not MagnetPermit
                 or intent.options!=self.options or intent.api_major!=self.major
                 or intent.state!='UNCERTAIN'
-                or self.metadata_strategy not in ('legacy_poll','guarded_export')
+                or self.metadata_strategy!='guarded_export'
                 or _magnet_hash(magnet)!=intent.info_hash
                 or not self.options.download_root.endswith('/ad-'+intent.marker)):
             raise ClientInvalid()
@@ -336,12 +290,10 @@ class Client:
         # The first add is PAUSED. No discovery window opens before marker
         # readback and a separately bounded resume.
         self._request('torrents/add',form=fields,limit=4096)
-        if not self.protocol.inline_tags:
-            self._tag_legacy_submission(intent.info_hash,intent.marker)
 
-    def poll_legacy_metadata(self,intent,cancelled,*,attempts=20,
-                             interval=1,sleep=None):
-        """Bounded, exact-owned 4.2.x metadata window with unconditional stop.
+    def poll_legacy_metadata(self,intent,cancelled,*,attempts=24,
+                             interval=5,sleep=None):
+        """Bounded 4.5+ metadata discovery window with unconditional stop.
 
         Never resumes when the file list already exists. A restart may run a
         NEW bounded metadata window, but cannot re-submit the magnet.
@@ -352,8 +304,8 @@ class Client:
         if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.state!='UNCERTAIN'
                 or intent.options!=self.options
                 or self.protocol is None
-                or type(attempts) is not int or not 1<=attempts<=20
-                or type(interval) not in (int,float) or not 0<=interval<=2):
+                or type(attempts) is not int or not 1<=attempts<=24
+                or type(interval) not in (int,float) or not 0<=interval<=10):
             raise ClientInvalid()
         sleep=time.sleep if sleep is None else sleep
         if not callable(sleep):raise ClientInvalid()
@@ -381,7 +333,7 @@ class Client:
                           form={'hashes':intent.info_hash},limit=4096)
             for index in range(attempts):
                 if cancelled.is_set():break
-                current=self.inspect(intent.info_hash)
+                current=self.inspect(intent.info_hash,include_files=(index%3==0))
                 if not matches(current):raise ClientInvalid()
                 if current.files:break
                 if index+1<attempts:sleep(interval)
@@ -459,8 +411,6 @@ class Client:
                     **self.protocol.add_fields(True),'skip_checking':'false'}
             permit.take(intent)
             self._request('torrents/add',form=fields,limit=4096)
-            if not self.protocol.inline_tags:
-                self._tag_legacy_submission(intent.plan.manifest.info_hash,intent.plan.marker)
             return
         manifest=parse_metainfo(raw,intent.plan.manifest.info_hash)
         if manifest!=intent.plan.manifest:raise ClientInvalid()
@@ -477,11 +427,6 @@ class Client:
         # Consume before the single transport call. Never retry, even on HTTP error.
         permit.take(intent)
         self._request('torrents/add',body=b''.join(chunks),content_type='multipart/form-data; boundary='+boundary,limit=4096)
-        if not self.protocol.inline_tags:
-            # qBittorrent 4.2.x requires a second API call to attach the
-            # marker. Never re-add after an ambiguous first call. If tagging
-            # fails, the existing journal keeps submission UNCERTAIN.
-            self._tag_legacy_submission(intent.plan.manifest.info_hash,intent.plan.marker)
 
     def inspect_transfer(self,expected_hash):
         from src.nextgen.acquisition.transfers import TransferSnapshot, SnapshotChanged
