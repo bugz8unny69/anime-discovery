@@ -277,44 +277,6 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows(
             "SELECT count(*) FROM jobs WHERE kind='CLEANUP_BATCH_KEPT_MEDIA'"),[(1,)])
 
-    async def test_batch_reject_download_retry_uses_shared_action_and_status(self):
-        """An interrupted owned-torrent cleanup reuses the same job."""
-        from src.nextgen.storage.decision_cleanup_status import download_status
-        target=self.staged()
-        db=connect(self.database)
-        try:
-            with transaction(db):
-                op=db.execute(
-                    'SELECT operation_id FROM job_operation_members WHERE job_id=?',
-                    (target,)).fetchone()[0]
-                reject=enqueue_job(
-                    db,kind='REJECT_BATCH',component='api',
-                    payload={'target_job_id':target},created_by_job_id=target)
-                db.execute("UPDATE jobs SET state='DONE' WHERE job_id=?",(reject,))
-                db.execute('INSERT INTO management_actions VALUES(?,?,?,?,?)',
-                           (op,'REJECT',target,reject,0))
-                cleanup=enqueue_job(
-                    db,kind='CLEANUP_BATCH_DOWNLOAD',component='worker',
-                    payload={'decision_job_id':reject},created_by_job_id=reject)
-                db.execute(
-                    "UPDATE jobs SET state='NEEDS_REVIEW',"
-                    "last_reason_code='DECISION_DOWNLOAD_CLEANUP_REVIEW' "
-                    "WHERE job_id=?",(cleanup,))
-            shown=download_status(db,reject)
-            self.assertEqual(shown['job_id'],cleanup)
-            self.assertEqual(shown['state'],'NEEDS_REVIEW')
-            self.assertFalse(shown['completed'])
-            self.assertTrue(self.actions().capabilities(db,target)['reject']['enabled'])
-        finally:db.close()
-        status,receipt,_=self.actions().submit(target,'reject')
-        self.assertEqual(status,202)
-        self.assertTrue(receipt['download_cleanup_resumed'])
-        self.assertEqual(receipt['job_id'],reject)
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(cleanup,)),
-                         [('PENDING',)])
-        self.assertEqual(self.rows(
-            "SELECT count(*) FROM jobs WHERE kind='CLEANUP_BATCH_DOWNLOAD'"),[(1,)])
-
     async def test_idle_database_state_does_not_bypass_a_stale_handlers_drain_lock(self):
         target=self.add();queue=JobQueue(self.database);claim,_=queue.claim()
         with OperationGate(self.database).hold(queue.operation_id(claim)):

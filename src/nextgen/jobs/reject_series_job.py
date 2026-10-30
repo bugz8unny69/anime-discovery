@@ -14,7 +14,7 @@ from src.nextgen.sonarr import KeepReview
 from src.nextgen.storage.batch_keep_imports import batch_publications
 from src.nextgen.storage.cancellation import operation
 from src.nextgen.storage.job_queue import JobQueue
-from src.nextgen.storage.review_decisions import staged, remove_selected
+from src.nextgen.storage.review_decisions import staged, remove_series
 from src.nextgen.storage.sqlite import enqueue_job, transaction
 from src.nextgen.storage.staging import Journal as StageJournal
 
@@ -87,6 +87,7 @@ def _enqueue_cleanup(db, queue, claim, sources):
                 raise StagingReview()
             cleanup_job = existing[0][0]
         else:
+            from src.nextgen.jobs.cleanup_batch_download_job import staged_cleanup
             rows = db.execute(
                 "SELECT job_id FROM jobs WHERE kind='CLEANUP_BATCH_DOWNLOAD' "
                 "AND json_extract(payload_json,'$.decision_job_id')=? "
@@ -94,7 +95,10 @@ def _enqueue_cleanup(db, queue, claim, sources):
                 (claim.job_id, plan)).fetchall()
             if len(rows) > 1:
                 raise StagingReview()
-            if rows:
+            staging = staged_cleanup(db, plan)
+            if staging is not None and not rows:
+                cleanup_job = staging
+            elif rows:
                 cleanup_job = rows[0][0]
             else:
                 cleanup_job = enqueue_job(
@@ -145,12 +149,10 @@ def _run(context, aid, operations, remove):
                 if phase != 'PENDING' or checked != sources:
                     raise StagingReview()
 
-        # Existing receipt-based remover is idempotent for missing selected
-        # files. Never recursively delete the shared staging series directory.
-        for op, kind, plan, publications, stage in sources:
-            for manifest, receipts in publications:
-                remove(manifest, receipts, guard,
-                       context.configuration.value('storage.keep_root'))
+        # One call removes every staged episode plus the then-empty series
+        # folders. Idempotent and never recursive (see remove_series).
+        remove(tuple(pub for *_, pubs, _ in sources for pub in pubs), guard,
+               context.configuration.value('storage.keep_root'))
 
         with queue.connection() as db, transaction(db):
             phase, checked = _targets(db, queue, context.claim, aid, operations)
@@ -177,7 +179,7 @@ def _persist(db, claim, value):
         raise CompletionRejected(Outcome('review', 'REJECT_CLEANUP_REVIEW'))
 
 
-def registration(*, remove=remove_selected):
+def registration(*, remove=remove_series):
     async def execute(context):
         try:
             data = context.data()

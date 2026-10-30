@@ -12,7 +12,6 @@ from src.nextgen.storage.sqlite import connect, enqueue_job, transaction
 from src.nextgen.tests.test_acquisition_preparation import AcquisitionPreparationTests
 from src.nextgen.tests.test_keep_sonarr import KeepSonarrTests
 from src.nextgen.tests.test_post_keep_cleanup import PostKeepCleanupTests
-from src.nextgen.tests.test_reject_media import RejectMediaTests
 from src.nextgen.tests.test_stage_media_job import StageMediaJobTests
 from src.nextgen.tests.test_torrent_submission import Secrets
 from src.nextgen.tests.test_torrent_transfer import TorrentTransferTests
@@ -30,7 +29,13 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
     prepared=KeepSonarrTests.prepared
     make_due=KeepSonarrTests.make_due
     cleanup_ready=PostKeepCleanupTests.cleanup_ready
-    staged=RejectMediaTests.staged
+
+    async def staged(self):
+        worker=StageMediaJobTests.worker(self)
+        target,source=await self.staged_ready(worker)
+        await worker.attempt()
+        job=self.rows("SELECT job_id FROM jobs WHERE kind='STAGE_TRIAL_MEDIA'")[0][0]
+        return worker,target,job
 
     def attach(self,worker,mode='normal'):
         test=self;self.controls=[]
@@ -52,14 +57,9 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         worker.registry=Registry((*worker.registry.entries.values(),registration(Secrets(),service_factory=factory)))
 
     async def download_ready(self,action='keep',mode='normal'):
-        if action=='keep':
-            worker,fake,actions,target,decision,staging_cleanup=await self.cleanup_ready()
-            self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,)),[(0,)])
-            await worker.attempt()
-        else:
-            worker,_,target=await self.staged();fake=None
-            actions=ManagementActions(self.database);_,receipt,_=actions.submit(target,'reject')
-            decision=receipt['job_id'];await worker.attempt()
+        worker,fake,actions,target,decision,staging_cleanup=await self.cleanup_ready()
+        self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,)),[(0,)])
+        await worker.attempt()
         job=self.rows("SELECT job_id FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,))[0][0]
         self.payload_root=Path(self.snapshot.observation.save_path)
         self.remainder=self.payload_root/self.snapshot.observation.files[0].path
@@ -74,7 +74,7 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         permanent=fake.root/'Series'/'episode.mkv';before=permanent.read_bytes()
         await worker.attempt()
         self.assertEqual(self.controls,['stop','remove'])
-        self.assertFalse(self.remainder.exists());self.assertTrue(self.payload_root.is_dir())
+        self.assertFalse(self.remainder.exists());self.assertFalse(self.payload_root.exists())  # empty ad-* folder removed
         self.assertEqual(permanent.read_bytes(),before);self.assertEqual(fake.posts.count('command'),1)
         self.assertEqual(self.rows('SELECT state FROM episode_reservations'),[('ACTIVE',)])
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
@@ -82,16 +82,7 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(receipt['download_cleanup']['completed'])
         self.assertEqual(self.rows("SELECT count(*) FROM jobs WHERE kind=? AND json_extract(payload_json,'$.decision_job_id') IS NOT NULL",(KIND,)),[(1,)])
 
-    async def test_reject_retains_rejection_and_shared_series_metadata(self):
-        worker,_,actions,target,decision,job=await self.download_ready('reject')
-        await worker.attempt()
-        self.assertFalse(self.remainder.exists())
-        self.assertEqual(self.rows('SELECT decision,cleanup_state FROM anime_review_decisions'),[('REJECT','COMPLETE')])
-        self.assertEqual(len(list((self.root/'staging').rglob('tvshow.nfo'))),1)
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
-        _,receipt,_=actions.submit(target,'reject');self.assertTrue(receipt['download_cleanup']['completed'])
-
-    async def test_staging_removes_the_torrent_at_once_and_reject_later_finds_it_done(self):
+    async def test_staging_removes_the_torrent_and_its_empty_download_folder_at_once(self):
         worker,staging,stage_job=await self.staged()
         job=self.rows("SELECT job_id FROM jobs WHERE kind=? AND "
                       "json_extract(payload_json,'$.staging_job_id')=?",(KIND,stage_job))[0][0]
@@ -109,14 +100,7 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.remainder.exists())              # Leftover files removed.
         self.assertEqual(len(list(staging.rglob('*.mkv'))),1)  # The staged video stays.
         self.assertEqual(self.rows('SELECT phase FROM cancellation_cleanup'),[('COMPLETE',)])
-        # A later Reject still completes; there is nothing left to stop or remove.
-        actions=ManagementActions(self.database);_,receipt,_=actions.submit(stage_job,'reject')
-        for _ in range(4):await worker.attempt()
-        decision_cleanup=self.rows("SELECT state FROM jobs WHERE kind=? AND "
-            "json_extract(payload_json,'$.decision_job_id')=?",(KIND,receipt['job_id']))
-        self.assertEqual(decision_cleanup,[('DONE',)])
-        self.assertEqual(self.controls,['stop','remove'])
-        self.assertEqual(list(staging.rglob('*.mkv')),[])
+        self.assertFalse(self.payload_root.exists())           # Empty ad-* folder removed.
 
     async def finish_staging_cleanup_after_decision(self,action):
         worker,_,_,_,_,job=await self.download_ready(action)
@@ -132,9 +116,6 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_keep_before_staging_cleanup_leaves_it_nothing_to_do(self):
         await self.finish_staging_cleanup_after_decision('keep')
-
-    async def test_reject_before_staging_cleanup_leaves_it_nothing_to_do(self):
-        await self.finish_staging_cleanup_after_decision('reject')
 
     async def test_lost_remove_response_reconciles_without_another_delete(self):
         worker,_,_,_,_,job=await self.download_ready(mode='remove_lost')
@@ -155,22 +136,32 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controls,['stop','remove']);self.assertTrue(self.remainder.exists())
         self.assertEqual(self.rows('SELECT phase FROM cancellation_cleanup'),[('REMOVE_UNCERTAIN',)])
 
-    async def test_changed_captured_file_survives_after_lost_remove(self):
+    async def test_changed_file_after_lost_remove_is_purged_with_the_folder(self):
+        # Staging confirmed + torrent gone: the owned ad-* folder goes whatever is in it.
         worker,_,_,_,_,job=await self.download_ready(mode='changed_after_remove')
         await worker.attempt();await self.make_due(job);await worker.attempt()
-        self.assertEqual(self.remainder.read_bytes(),b'changed')
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+        self.assertFalse(self.payload_root.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
 
-    async def test_unknown_file_preserved_and_explicit_retry_resumes_cleanup_only(self):
+    async def test_unknown_file_is_purged_once_torrent_is_gone(self):
         worker,fake,actions,target,decision,job=await self.download_ready()
-        unknown=self.payload_root/'unowned.txt';unknown.write_text('preserve')
+        unknown=self.payload_root/'unowned.txt';unknown.write_text('leftover')
+        (self.payload_root/'sub').mkdir();(self.payload_root/'sub'/'x.part').write_text('x')
         await worker.attempt()
-        self.assertEqual(self.controls,['stop']);self.assertTrue(unknown.exists())
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(decision,)),[('DONE',)])
-        unknown.unlink();_,receipt,_=actions.submit(target,'keep')
-        self.assertTrue(receipt['download_cleanup_resumed'])
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertFalse(self.payload_root.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(fake.posts.count('command'),1)
+
+    async def test_purge_never_follows_a_swapped_folder(self):
+        worker,_,_,_,_,job=await self.download_ready()
+        import shutil
+        moved=self.payload_root.with_name(self.payload_root.name+'.other')
+        self.payload_root.rename(moved);self.payload_root.mkdir()
         await worker.attempt()
-        self.assertEqual(self.controls,['stop','remove']);self.assertEqual(fake.posts.count('command'),1)
+        self.assertTrue(moved.exists())                  # Not ours any more: untouched.
+        self.assertNotEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        shutil.rmtree(moved)
 
     async def test_other_consumer_blocks_all_external_controls(self):
         worker,_,_,_,_,job=await self.download_ready()

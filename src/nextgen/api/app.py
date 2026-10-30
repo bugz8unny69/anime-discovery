@@ -350,7 +350,7 @@ class Application:
                 return 202,{'job_id':batch,'state':'PENDING','status_url':location,
                     'history_url':location+'/history','count':len(ids),
                     'notification':CATALOG.reason('MANAGEMENT_JOB_SUBMITTED')},[(b'location',location.encode())]
-            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|reject|cancel|cleanup|cancellation|retry)',path)
+            match=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/(keep|cancel|cleanup|cancellation|retry)',path)
             if match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 job=int(match[1]);action=match[2]
@@ -371,7 +371,7 @@ class Application:
                         if row is None:raise ApiError(404,'API_ROUTE_NOT_FOUND')
                         data=self._job(actions.queue,db,row)
                         return 200,{**data['cancellation'],'actions':data['actions']},[]
-                if action in ('keep','reject','cancel','cleanup') and method=='POST':
+                if action in ('keep','cancel','cleanup') and method=='POST':
                     exact(body,())
                     status,data,records=actions.submit(job,action)
                     for record in records:log_history(self.logger,record)

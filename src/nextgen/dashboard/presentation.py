@@ -12,7 +12,6 @@ from src.nextgen.jobs.unlock_batch_job import DEFINITION as unlock_batch
 from src.nextgen.jobs.verify_batch_episode_job import DEFINITION as verify_batch_episode
 from src.nextgen.jobs.stage_batch_episode_job import DEFINITION as stage_batch_episode
 from src.nextgen.jobs.keep_batch_job import DEFINITION as keep_batch
-from src.nextgen.jobs.reject_batch_job import DEFINITION as reject_batch
 from src.nextgen.jobs.cleanup_batch_download_job import DEFINITION as cleanup_batch_download
 from src.nextgen.jobs.cleanup_batch_kept_media_job import DEFINITION as cleanup_batch_kept_media
 from src.nextgen.jobs.reserve_episode_job import DEFINITION as reserve
@@ -22,7 +21,6 @@ from src.nextgen.jobs.submit_torrent_job import DEFINITION as submit
 from src.nextgen.jobs.download_torrent_job import DEFINITION as download
 from src.nextgen.jobs.verify_media_job import DEFINITION as media
 from src.nextgen.jobs.stage_trial_media_job import DEFINITION as stage
-from src.nextgen.jobs.reject_media_job import DEFINITION as reject
 from src.nextgen.jobs.reject_series_job import DEFINITION as reject_series
 from src.nextgen.jobs.keep_media_job import DEFINITION as keep
 from src.nextgen.jobs.cleanup_canceled_operation_job import DEFINITION as cleanup
@@ -36,4 +34,4 @@ from src.nextgen.decision_download_cleanup import DEFINITION as cleanup_download
 
 from src.nextgen.jobs.enrich_shoko_job import DEFINITION as shoko
 
-HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,reject_batch,cleanup_batch_download,cleanup_batch_kept_media,bulk,backfill,prepare,submit,download,media,stage,keep,reject,reject_series,cleanup,refresh,cleanup_kept,cleanup_download,shoko))
+HANDLERS=HandlerCatalog((identify,verify,evaluate,evaluate_batch,reserve,reserve_batch,submit_batch,transfer_batch,verify_batch_probe,unlock_batch,verify_batch_episode,stage_batch_episode,keep_batch,cleanup_batch_download,cleanup_batch_kept_media,bulk,backfill,prepare,submit,download,media,stage,keep,reject_series,cleanup,refresh,cleanup_kept,cleanup_download,shoko))

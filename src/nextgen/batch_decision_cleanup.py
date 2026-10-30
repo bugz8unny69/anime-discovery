@@ -54,6 +54,7 @@ class BatchDecisionCleanup(OwnedCleanup):
     cleanup_event='DECISION_DOWNLOAD_CONTROL_RECORDED'
     complete_reason='DECISION_DOWNLOAD_CLEANUP_COMPLETE'
     pending_reason='DECISION_DOWNLOAD_CLEANUP_WAITING'
+    purge=True
 
     def __init__(self,configuration,secrets,*,client_factory=Client,
                  files_factory=FileCleanup):
@@ -78,7 +79,7 @@ class BatchDecisionCleanup(OwnedCleanup):
             "SELECT a.operation_id,a.target_job_id,a.action,j.state,j.event_id "
             "FROM management_actions a JOIN jobs j USING(job_id) "
             "WHERE a.job_id=?",(self.decision,)).fetchone()
-        if row is None or row[2] not in ('KEEP','REJECT') or row[3]!='DONE':
+        if row is None or row[2]!='KEEP' or row[3]!='DONE':
             raise CancellationError()
         op,target,action,_,event=row
         parent=db.execute(
@@ -86,30 +87,20 @@ class BatchDecisionCleanup(OwnedCleanup):
             (self.claim.job_id,)).fetchone()
         if event!=self.claim.event_id or parent[1:]!=(event,'CLEANUP_BATCH_DOWNLOAD'):
             raise CancellationError()
-        if action=='KEEP':
-            prior=db.execute(
-                "SELECT b.phase,j.kind,j.state,b.decision_job_id "
-                "FROM batch_keep_cleanup b JOIN jobs j ON j.job_id=b.job_id "
-                "WHERE b.job_id=?",(parent[0],)).fetchone()
-            if prior!=('COMPLETE','CLEANUP_BATCH_KEPT_MEDIA','DONE',self.decision):
-                raise CancellationError()
-        elif parent[0]!=self.decision:
+        prior=db.execute(
+            "SELECT b.phase,j.kind,j.state,b.decision_job_id "
+            "FROM batch_keep_cleanup b JOIN jobs j ON j.job_id=b.job_id "
+            "WHERE b.job_id=?",(parent[0],)).fetchone()
+        if prior!=('COMPLETE','CLEANUP_BATCH_KEPT_MEDIA','DONE',self.decision):
             raise CancellationError()
         if operation(db,target)[:2]!=(op,'STAGED'):
             raise CancellationError()
         staged=batch_publications(db,op)
-        if action=='KEEP':
-            states=db.execute(
-                'SELECT file_index,phase FROM batch_keep_imports '
-                'WHERE job_id=? ORDER BY file_index',(self.decision,)).fetchall()
-            if states!=[(item[1],'COMPLETE') for item in staged]:
-                raise CancellationError()
-        else:
-            decided=db.execute(
-                "SELECT cleanup_state FROM anime_review_decisions "
-                "WHERE job_id=? AND operation_id=? AND decision='REJECT'",
-                (self.decision,op)).fetchone()
-            if decided!=('COMPLETE',):raise CancellationError()
+        states=db.execute(
+            'SELECT file_index,phase FROM batch_keep_imports '
+            'WHERE job_id=? ORDER BY file_index',(self.decision,)).fetchall()
+        if states!=[(item[1],'COMPLETE') for item in staged]:
+            raise CancellationError()
         protected=protected_staging_roots(staged)
         plan=staged[0][0]
         source=db.execute(
@@ -125,7 +116,9 @@ class BatchDecisionCleanup(OwnedCleanup):
             "SELECT d.anidb_id,d.cleanup_state,j.kind "
             "FROM anime_review_decisions d JOIN jobs j ON j.job_id=d.job_id "
             "WHERE d.job_id=? AND d.decision='REJECT'", (self.decision,)).fetchone()
-        if decision is None or decision[1:] != ('PENDING', 'REJECT_SERIES'):
+        if decision is None:
+            return self._staged_facts(db)
+        if decision[1:] != ('PENDING', 'REJECT_SERIES'):
             raise CancellationError()
         source = db.execute(
             "SELECT s.job_id,m.operation_id FROM batch_staging_publications s "
@@ -162,6 +155,40 @@ class BatchDecisionCleanup(OwnedCleanup):
             raise CancellationError()
         return (op, self.series_plan_id, source_receipt[0], source_receipt[1],
                 source_receipt[2], protected)
+
+    def _staged_facts(self, db):
+        """Pack fully staged: decision is the last STAGE_BATCH_EPISODE job."""
+        job = db.execute('SELECT kind,state FROM jobs WHERE job_id=?',
+                         (self.decision,)).fetchone()
+        if job != ('STAGE_BATCH_EPISODE', 'DONE'):
+            raise CancellationError()
+        source = db.execute(
+            "SELECT s.job_id,m.operation_id,s.state FROM batch_staging_publications s "
+            "JOIN job_operation_members m ON m.job_id=s.job_id WHERE s.plan_id=?",
+            (self.series_plan_id,)).fetchall()
+        selected = db.execute('SELECT count(*) FROM batch_trial_files WHERE plan_id=?',
+                              (self.series_plan_id,)).fetchone()[0]
+        operations = {op for _, op, _ in source}
+        if (len(operations) != 1 or len(source) != selected
+                or any(state != 'PUBLISHED' for *_, state in source)
+                or self.decision not in {job for job, _, _ in source}):
+            raise CancellationError()
+        op = operations.pop()
+        if operation(db, self.decision)[:2] != (op, 'STAGED'):
+            raise CancellationError()
+        parent = db.execute('SELECT created_by_job_id,kind FROM jobs WHERE job_id=?',
+                            (self.claim.job_id,)).fetchone()
+        if parent != (self.decision, 'CLEANUP_BATCH_DOWNLOAD'):
+            raise CancellationError()
+        staged = batch_publications(db, op)
+        source_receipt = db.execute(
+            "SELECT reservation_job_id,info_hash,info_sha256,state "
+            "FROM batch_torrent_submissions WHERE plan_id=?",
+            (self.series_plan_id,)).fetchone()
+        if source_receipt is None or source_receipt[3] != 'OWNED_STOPPED':
+            raise CancellationError()
+        return (op, self.series_plan_id, source_receipt[0], source_receipt[1],
+                source_receipt[2], protected_staging_roots(staged))
 
     def _fence(self,db=None):
         if self.cancelled is not None and self.cancelled.is_set():

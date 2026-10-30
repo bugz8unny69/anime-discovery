@@ -11,7 +11,6 @@ const COPY = Object.freeze({
   'dashboard.uncertain': 'The response could not be confirmed. Refresh the job status before trying again.',
   'dashboard.submitting': 'Submitting the job.',
   'dashboard.confirm_cancel': 'Cancel this unfinished acquisition and clean up its owned download files?',
-  'dashboard.confirm_reject': 'Reject this anime, stop future automatic acquisition for this AniDB anime, and remove this staged video and its episode NFO?',
   'dashboard.confirm_cleanup': 'Continue cleanup for this canceled acquisition?',
   'dashboard.not_available': 'This action is not available.',
   'dashboard.settings_saved': 'Settings saved. New operations will use these values.',
@@ -129,7 +128,6 @@ async function submitAction(job, action) {
   const capability = job.actions?.[action];
   if (!capability?.enabled || capability.execution_available === false) return;
   if (action === 'cancel' && !confirm(COPY['dashboard.confirm_cancel'])) return;
-  if (action === 'reject' && !confirm(COPY['dashboard.confirm_reject'])) return;
   if (action === 'cleanup' && !confirm(COPY['dashboard.confirm_cleanup'])) return;
   state.pending.add(job.cancellation.operation_id); renderJobs();
   try {
@@ -183,7 +181,7 @@ function renderJobs() {
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
     } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
     if (job.size_detail) details.appendChild(node('p', job.size_detail));
-    const activeAction = ['cleanup', 'keep', 'reject'].map(name => job.actions?.[name]?.job).find(Boolean);
+    const activeAction = ['cleanup', 'keep'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
       details.appendChild(node('p', `Job #${activeAction.job_id}: ${activeAction.status.message}`));
       if (activeAction.reason) details.appendChild(node('small', activeAction.reason.message, 'muted'));
@@ -212,7 +210,6 @@ function renderJobs() {
       const retryDownload = name => ['NEEDS_REVIEW', 'BLOCKED'].includes(job.actions?.[name]?.job?.download_cleanup?.state);
       const retryShoko = ['NEEDS_REVIEW', 'BLOCKED'].includes(job.actions?.keep?.job?.optional_shoko?.state);
       actions.appendChild(actionButton(job, 'keep', retryDownload('keep') ? 'Retry download cleanup' : retryCleanup ? 'Retry staging cleanup' : retryShoko ? 'Retry Shoko metadata' : 'Keep'));
-      if (job.actions?.reject) actions.appendChild(actionButton(job, 'reject', retryDownload('reject') ? 'Retry download cleanup' : 'Reject'));
       if (job.cancellation.state !== 'STAGED') actions.appendChild(actionButton(job, 'cancel', 'Cancel'));
       if (job.cancellation.state === 'CANCELED' || job.cancellation.state === 'CANCEL_REQUESTED') actions.appendChild(actionButton(job, 'cleanup', 'Cleanup'));
     }

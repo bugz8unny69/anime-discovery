@@ -11,8 +11,12 @@ class OwnedCleanup:
     cleanup_event='CANCELLATION_CONTROL_RECORDED'
     complete_reason='CANCELLATION_COMPLETE'
     pending_reason='CANCELLATION_PENDING'
+    # Post-staging cleanups delete the whole owned ad-<marker> folder once the
+    # torrent is confirmed gone; cancellations keep the exact-file removal.
+    purge=False
 
     def _capture(self,cleaner):return cleaner.capture()
+    def _pin(self,cleaner):return cleaner.root_only()
 
     def _journal(self,op,intent):
         with self.queue.connection() as db,transaction(db):
@@ -62,7 +66,7 @@ class OwnedCleanup:
                 found=client.inspect(intent.plan.manifest.info_hash)
                 current=owned(intent,found)
                 if current.state not in STOPPED:return False
-            files=self._capture(cleaner)
+            files=self._pin(cleaner) if self.purge else self._capture(cleaner)
             self._advance(intent,phase,'REMOVE_UNCERTAIN',files);phase='REMOVE_UNCERTAIN'
             self._fence()
             client.cleanup_control(intent,intent.fingerprint,CleanupPermit(intent.fingerprint,'remove'),'remove')
@@ -77,7 +81,8 @@ class OwnedCleanup:
             # Reappearance prevents file deletion, even after an earlier absence.
             if found is not None:raise CancellationError()
             self._fence()
-            if self.guard is None:cleaner.remove(files)
+            if self.purge:cleaner.purge(files)
+            elif self.guard is None:cleaner.remove(files)
             else:cleaner.remove(files,guard=self._fence)
             self._advance(intent,phase,'COMPLETE')
         return True

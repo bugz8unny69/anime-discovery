@@ -54,7 +54,7 @@ class CancellationCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['cleanup_state'],'COMPLETE')
         self.assertEqual((self.stops,self.removals),(1,1))
         self.assertFalse(self.video.exists())
-        self.assertTrue(self.payload_root.is_dir())  # No broad directory removal.
+        self.assertFalse(self.payload_root.exists())  # Empty ad-* folder removed; rmdir only.
         self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='DOWNLOAD_TORRENT'"),[('CANCELED',)])
         self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'COMPLETE')
         self.assertEqual((self.stops,self.removals),(1,1))

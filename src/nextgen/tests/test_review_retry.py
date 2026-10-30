@@ -146,7 +146,7 @@ class ReviewRetryTests(unittest.TestCase):
                      'DOWNLOAD_TORRENT','STAGE_TRIAL_MEDIA','SUBMIT_BATCH',
                      'TRANSFER_BATCH','VERIFY_BATCH_EPISODE','STAGE_BATCH_EPISODE'):
             self.assertIn(kind,RETRY_KINDS)
-        for kind in ('KEEP_MEDIA','KEEP_BATCH','REJECT_MEDIA','REJECT_BATCH',
+        for kind in ('KEEP_MEDIA','KEEP_BATCH','REJECT_SERIES',
                      'CLEANUP_CANCELED_OPERATION','CLEANUP_BATCH_DOWNLOAD'):
             self.assertNotIn(kind,RETRY_KINDS)
         db=connect(self.database)
