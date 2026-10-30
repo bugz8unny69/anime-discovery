@@ -3,13 +3,14 @@ import asyncio
 import copy
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 
 from src.nextgen.acquisition.metainfo_source import (
     MetadataSourceWaiting, MetadataClientUnsupported, make_batch_reader,
     make_reader, source_url, MetadataSourceConfigurationError,
 )
-from src.nextgen.acquisition.metadata import parse_batch_metainfo
+from src.nextgen.acquisition.metadata import parse_batch_metainfo, ObservedBatchInventory
 from src.nextgen.configuration_schema import (
     CONVERSIONS, CONFIGURATION_VERSION, ConfigurationSnapshot,
     ConfigurationError, ConfigurationMigrationRequired, convert_document,
@@ -66,26 +67,16 @@ class MetadataReaderTests(unittest.IsolatedAsyncioTestCase):
             await reader(self.digest,self.configuration,asyncio.Event())
         self.assertIn(('fetch',self.digest,self.digest,True),self.calls)
 
-    async def test_guarded_export_requires_existing_stopped_torrent(self):
-        reader = make_batch_reader(secrets=self.secrets,
-                                   client_factory=self.factory('guarded_export'))
-        self.assertEqual(await reader(self.digest,self.configuration,asyncio.Event()),
-                         self.raw)
-        self.assertIn(('inspect',self.digest),self.calls)
-        self.assertIn(('export',self.digest,True),self.calls)
-        self.calls.clear()
-        reader = make_batch_reader(secrets=self.secrets,
-                                   client_factory=self.factory('guarded_export',stopped=False))
-        with self.assertRaises(MetadataClientUnsupported):
-            await reader(self.digest,self.configuration,asyncio.Event())
+    async def test_older_qb_does_not_adopt_unjournaled_torrents(self):
+        for strategy in ('guarded_export','legacy_poll'):
+            with self.subTest(strategy=strategy):
+                reader=make_batch_reader(secrets=self.secrets,
+                                         client_factory=self.factory(strategy))
+                with patch('src.nextgen.storage.batch_metadata_admission.lookup',
+                           return_value=(None,None)):
+                    with self.assertRaises(MetadataClientUnsupported):
+                        await reader(self.digest,self.configuration,asyncio.Event())
         self.assertFalse(any(call[0]=='export' for call in self.calls))
-
-    async def test_old_no_export_api_does_not_fake_hash_verified_metainfo(self):
-        reader = make_batch_reader(secrets=self.secrets,
-                                   client_factory=self.factory('legacy_poll'))
-        with self.assertRaises(MetadataClientUnsupported):
-            await reader(self.digest,self.configuration,asyncio.Event())
-        self.assertFalse(any(call[0] in ('fetch','export') for call in self.calls))
 
     async def test_cancelled_batch_makes_no_client_requests(self):
         cancelled=asyncio.Event()
