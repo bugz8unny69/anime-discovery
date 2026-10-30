@@ -6,7 +6,7 @@ it never submits a torrent or makes a trial/Keep decision.
 from dataclasses import dataclass, field
 import inspect
 
-from src.nextgen.acquisition.metadata import BatchInventory, infohash, parse_batch_metainfo
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, infohash, read_batch_inventory
 from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.batch.verification import VerifiedBatch, verify_batch_files
 from src.nextgen.providers.errors import ProviderAuthenticationFailed
@@ -23,7 +23,7 @@ class BatchVerificationCompletion:
     verified: VerifiedBatch
 
     def __post_init__(self):
-        if type(self.source) is not ReleaseInput or type(self.inventory) is not BatchInventory:
+        if type(self.source) is not ReleaseInput or type(self.inventory) not in (BatchInventory,ObservedBatchInventory):
             raise ValueError('Typed release and batch metadata required')
         if type(self.verified) is not VerifiedBatch:
             raise ValueError('Batch provider proof required')
@@ -62,7 +62,7 @@ def make_batch_verifier(options, credentials, read_batch_metainfo, *,
         except ValueError:
             raise ReleaseNotReady('RELEASE_UNRESOLVED') from None
         raw=await read_batch_metainfo(digest,configuration,cancelled)
-        inventory=await blocking(parse_batch_metainfo,raw,digest)
+        inventory=await blocking(read_batch_inventory,raw,digest)
         actual=options(configuration) if callable(options) else options
         secret=credentials()
         if type(secret) is not Credentials:
