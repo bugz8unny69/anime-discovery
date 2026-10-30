@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 import re
 
-from src.nextgen.acquisition.metadata import BatchInventory, safe_path
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, safe_path
 
 VIDEO = frozenset(('.mkv', '.mp4', '.m4v', '.avi'))
 _SPECIAL = re.compile(r'(?<![A-Za-z0-9])(?:OVA|OAV|ONA|SPECIALS?|NCOP|NCED|PV|TRAILER|RECAP|EXTRAS?|MOVIE)(?![A-Za-z0-9])', re.I)
@@ -100,7 +100,7 @@ def plan_verified_batch(inventory, *, season, episode_map, start_episode=1):
     episode_map maps filename episode numbers to unique canonical TVDB episode
     numbers; its trusted provider provenance MUST be checked upstream.
     """
-    if type(inventory) is not BatchInventory:
+    if type(inventory) not in (BatchInventory,ObservedBatchInventory):
         raise ValueError('Hash-verified batch inventory required')
     if type(season) is not int or not 1 <= season <= 100:
         raise ValueError('Confirmed positive season required')
