@@ -52,18 +52,19 @@ CREATE INDEX idx_batch_submission_job ON batch_torrent_submissions(reservation_j
 CREATE TABLE batch_metadata_admissions (
  event_id INTEGER PRIMARY KEY REFERENCES incoming_events(event_id),
  verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
- info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
  ownership_marker TEXT NOT NULL UNIQUE CHECK(length(ownership_marker)=32 AND ownership_marker NOT GLOB '*[^a-f0-9]*'),
  base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
  save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 2 AND 4096),
  category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 64),
  timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
  api_major INTEGER NOT NULL CHECK(api_major IN (4,5)),
- state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED','ADOPTED')),
+ state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED','ADOPTED','RELEASED')),
  inventory_json TEXT CHECK(inventory_json IS NULL OR json_valid(inventory_json)),
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
 );
+CREATE UNIQUE INDEX idx_batch_metadata_live_hash ON batch_metadata_admissions(info_hash) WHERE state NOT IN ('RELEASED','EXTERNAL');
 INSERT OR ROLLBACK INTO nextgen_v51_guard SELECT count(*)=0 FROM pragma_foreign_key_check;
 DROP TABLE nextgen_v51_guard;
 PRAGMA user_version=51;
