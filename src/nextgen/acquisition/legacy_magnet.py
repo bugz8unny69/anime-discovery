@@ -33,10 +33,8 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
             identity=await blocking(acquisition_identity,database,source)
             magnet=None
             if identity is None:
-                # Ordinary webhook (autobrr). An operator-configured .torrent
-                # source keeps its existing path; otherwise qBittorrent
-                # resolves the event's own hash-bound magnet, as Legacy did.
-                if configuration.value('torrent_metadata.base_url'):return None
+                # Ordinary webhooks resolve the same sanitized hash-bound
+                # magnet as backfill; there is no separate HTTP source setting.
                 magnet=await blocking(source_magnet,database,source)
             options=download_options(configuration)
             credentials=await blocking(secrets.qbittorrent_credentials)
