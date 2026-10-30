@@ -524,7 +524,6 @@ async function openCoverage(jobId) {
     if (version !== state.matchingVersion || state.matchingJob !== jobId || !state.csrf) return;
     summary.textContent = `Attempt ${result.attempts} · ${result.state.replaceAll('_', ' ').toLowerCase()}`;
     if (result.reason?.message) summary.textContent += ` · ${result.reason.message}`;
-    manualMatchForm(body, result);
     if (!result.available || !result.evidence) {
       body.appendChild(node('p', 'No verified episode coverage was saved for this job.', 'muted'));
       return;
@@ -616,6 +615,7 @@ async function openMatching(jobId) {
     if (version !== state.matchingVersion || state.matchingJob !== jobId || !state.csrf) return;
     summary.textContent = `Attempt ${result.attempts} · ${result.state.replaceAll('_',' ').toLowerCase()}`;
     if (result.reason?.message) summary.textContent += ` · ${result.reason.message}`;
+    manualMatchForm(body, result);
     if (!result.available || !result.evidence) {
       body.appendChild(node('p',
         result.attempts === 0 ? 'Identification has not started yet.' :
