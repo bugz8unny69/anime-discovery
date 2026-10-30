@@ -69,7 +69,7 @@ async def build_identity_worker(config_directory, *, additional_registrations=()
     await blocking(prepare,startup)  # Missing configuration fails before claims.
     pool=ClientPool()
     resolve = make_resolver(options_from_configuration,secrets.tvdb_credentials,client_pool=pool)
-    read_batch_metainfo=make_batch_reader() if read_batch_metainfo is None else read_batch_metainfo
+    read_batch_metainfo=make_batch_reader(secrets=secrets) if read_batch_metainfo is None else read_batch_metainfo
     verify_batch=make_batch_verifier(options_from_configuration,secrets.tvdb_credentials,
                                      read_batch_metainfo,client_pool=pool)
     verify = make_verifier(options_from_configuration,secrets.tvdb_credentials,client_pool=pool,
