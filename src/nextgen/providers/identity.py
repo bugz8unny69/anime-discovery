@@ -37,9 +37,12 @@ def _release_seasons(title):
     never taken for season 5. Other titles (packs) keep the original pattern.
     """
     from src.nextgen.acquisition.release_titles import EXPLICIT, marker_seasons, parse_release
-    parsed = parse_release(title)
+    # Only the primary title may declare the release's actual season. A
+    # pipe-delimited alternative may mention another episode (e.g. S01E25).
+    primary = title.split(" | ", 1)[0]
+    parsed = parse_release(primary)
     if parsed is None:
-        return re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])", title)
+        return re.findall(r"(?i)(?:\bS|\bSeason[ ._-]*S?)([0-9]{1,2})(?![0-9])", primary)
     found = marker_seasons(EXPLICIT.sub(' ', parsed.text))
     if parsed.season is not None: found.add(parsed.season)
     return [str(number) for number in sorted(found)]
@@ -50,6 +53,12 @@ def explicit_sequel_alias(title, base_aliases):
     if type(title) is not str or title.count(" | ") != 1 or not base_aliases:
         return None
     suffix = title.split(" | ", 1)[1].strip()
+    # Some releases append packaging tokens to the alternate anime name.
+    # Strip only known trailing tokens; title commas remain intact.
+    suffix = re.sub(
+        r"(?i)(?:,\s*(?:dual[- ]audio|multi[- ]subs|multi[- ]audio|batch|complete(?: season)?))+\s*[)\]]*\s*$",
+        "", suffix,
+    )
     if not suffix or len(suffix.encode("utf-8")) > 256:
         return None
     titles, _ = release_title(suffix)
@@ -166,6 +175,7 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
             stage = "season_scope"
             season_lookup = None
             base_aliases = None
+            alternate_alias = None
             if any(int(value) > 1 for value in seasons):
                 sequel = explicit_sequel_alias(title, aliases)
                 if sequel is None:
@@ -179,6 +189,9 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
                         matching.queries(aliases, episode, int(seasons[0]))
                     check(stage, "passed", "sequel_alias_selected")
             else:
+                # For S01, prefer the primary title but try the distinct pipe
+                # alternate when the catalog has no exact primary match.
+                alternate_alias = explicit_sequel_alias(title, aliases)
                 check(stage, "passed" if seasons else "skipped")
 
             stage = "anidb_candidates"
@@ -189,8 +202,14 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
                 # base series instead and take its anime-lists season entry.
                 aliases, season_lookup = base_aliases, int(seasons[0])
                 if matching is not None:
-                    matching.queries(aliases, episode, season_lookup)
+                    matching.queries([*matching.data["queries"], *aliases], episode, season_lookup)
                 check("season_scope", "passed", "base_series_season_lookup")
+                candidates = client.title_candidates(aliases)
+            elif not candidates and alternate_alias is not None:
+                aliases = [alternate_alias]
+                if matching is not None:
+                    matching.queries([*matching.data["queries"], *aliases],
+                                     episode, int(seasons[0]) if seasons else None)
                 candidates = client.title_candidates(aliases)
             if matching is not None:
                 matching.candidates(candidates)

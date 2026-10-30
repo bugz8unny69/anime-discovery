@@ -164,6 +164,9 @@ class IntakeSharesTheReaderTests(unittest.TestCase):
         self.assertEqual(_release_seasons('[Erai-raws] Kusuriya no Hitorigoto 2nd Season - 05 [1080p]'), ['2'])
         self.assertEqual(_release_seasons('[Group] Title Second Season - 05'), ['2'])
         self.assertEqual(_release_seasons('[Group] Title - 05'), [])
+        self.assertEqual(_release_seasons(
+            '[Fuechslein] KILL la KILL - S00E01 (BD 1080p AV1 Opus 2.0) '
+            '[Dual-Audio] | Goodbye Once Again (S01E25) (OVA)'), ['0'])
 
     def test_single_episodes_are_not_routed_as_packs(self):
         from src.nextgen.batch.recognition import release_scope_hint
