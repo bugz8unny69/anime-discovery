@@ -45,3 +45,28 @@ Only rows without an active reservation or saved candidate/selection are
 removed. Protected rows are reported and left unchanged. A second application
 does nothing. The script requires the NextGen v48 database layout. If it
 refuses, inspect the reported reason rather than forcing changes.
+
+
+## One-time removal of torrents for already staged episodes
+
+Since PR #204, staging removes the episode's torrent from qBittorrent (the
+video was already moved into staging). Episodes staged before that still have
+their torrent until Keep or Reject. This queues the same cleanup for them.
+Episodes with a Keep/Reject decision, or whose cleanup already started, are
+left alone. Staged videos and the library are never touched.
+
+After merging #204 and running anime-discovery-install --upgrade, preview
+(read-only):
+
+```sh
+sudo -u anime-discovery python3 /opt/anime-discovery/current/fixes/remove_staged_torrents.py
+```
+
+Then queue the cleanups (backs up the database first; services can stay running):
+
+```sh
+sudo -u anime-discovery python3 /opt/anime-discovery/current/fixes/remove_staged_torrents.py --apply
+```
+
+Each queued job appears in the dashboard as "Remove the finished download from
+qBittorrent". A second run does nothing. Do not remove these torrents by hand.

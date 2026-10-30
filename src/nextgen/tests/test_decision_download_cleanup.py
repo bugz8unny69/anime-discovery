@@ -118,6 +118,24 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controls,['stop','remove'])
         self.assertEqual(list(staging.rglob('*.mkv')),[])
 
+    async def finish_staging_cleanup_after_decision(self,action):
+        worker,_,_,_,_,job=await self.download_ready(action)
+        await worker.attempt()                      # Keep/Reject cleanup does the work first.
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(self.controls,['stop','remove'])
+        staging=self.rows("SELECT job_id FROM jobs WHERE kind=? AND "
+                          "json_extract(payload_json,'$.staging_job_id') IS NOT NULL",(KIND,))[0][0]
+        await self.make_due(staging);await worker.attempt()
+        # The staging cleanup that was still waiting finds nothing left to do.
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(staging,)),[('DONE',)])
+        self.assertEqual(self.controls,['stop','remove'])
+
+    async def test_keep_before_staging_cleanup_leaves_it_nothing_to_do(self):
+        await self.finish_staging_cleanup_after_decision('keep')
+
+    async def test_reject_before_staging_cleanup_leaves_it_nothing_to_do(self):
+        await self.finish_staging_cleanup_after_decision('reject')
+
     async def test_lost_remove_response_reconciles_without_another_delete(self):
         worker,_,_,_,_,job=await self.download_ready(mode='remove_lost')
         await worker.attempt();self.assertTrue(self.remainder.exists())
