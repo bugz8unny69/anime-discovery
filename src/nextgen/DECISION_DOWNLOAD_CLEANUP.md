@@ -1,4 +1,14 @@
-# Download cleanup after Keep or Reject
+# Download cleanup after staging, Keep or Reject
+
+**Since 2026-10-29:** staging moves the verified video out of the torrent's
+folder, so the torrent has nothing left to seed. Each completed
+STAGE_TRIAL_MEDIA job now queues one CLEANUP_DECIDED_DOWNLOAD job
+(`{"staging_job_id": N}`), due one minute later in its own operation. It uses
+the same owned-cleanup journal described below: stop, remove the exact owned
+torrent from qBittorrent, then remove leftover manifest files. The staging and
+permanent folders are protected. The later Keep/Reject cleanup finds the
+journal COMPLETE and does nothing more. Batch staging is unchanged.
+
 
 New successful Reject completions enqueue one CLEANUP_DECIDED_DOWNLOAD job in
 an independent control operation. Keep queues it only when the post-Keep selected
