@@ -266,6 +266,19 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(control,)),[('PENDING',)])
         self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='MANAGEMENT_ACTION_RESUMED'"),[(1,)])
 
+    def test_report_save_writes_text_or_targz_with_default_name(self):
+        import tarfile, tempfile
+        from pathlib import Path
+        from src.nextgen.job_report import save
+        with tempfile.TemporaryDirectory() as folder:
+            archive=save('hello\n','job-report-7',dest=folder,compress=True)
+            self.assertEqual(archive,Path(folder)/'job-report-7.tar.gz')
+            with tarfile.open(archive) as t:
+                self.assertEqual(t.extractfile('job-report-7.txt').read(),b'hello\n')
+            plain=save('hi\n','job-report-7',dest=str(Path(folder)/'x.txt'))
+            self.assertEqual(plain.read_text(),'hi\n')
+            self.assertEqual(plain.stat().st_mode&0o777,0o600)
+
     def test_failure_location_names_the_original_check_and_file(self):
         from src.nextgen.cancellation import CancellationError, failure_location
         from src.nextgen.reasons import safe_details

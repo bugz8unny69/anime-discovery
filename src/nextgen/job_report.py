@@ -1,4 +1,4 @@
-"""`adm report job --id N`: one read-only, plain-text report of everything about a job.
+"""`adm report [--compress] [--dest PATH] job --id N`: one read-only, plain-text report of everything about a job.
 
 Reads the database in read-only mode; never changes state or calls a service.
 Covers the job, the work it controls (or is controlled by), every job in that
@@ -199,18 +199,56 @@ def connect(config_dir):
     return db
 
 
+def save(text, name, *, dest=None, compress=False):
+    """Write a report as NAME.txt or NAME.tar.gz; a directory dest keeps the name.
+
+    Owner-only (0600). Under sudo the file is handed to the invoking user so it
+    can be copied or attached without root.
+    """
+    import io, tarfile, time
+    target = Path(dest or '/tmp').expanduser()
+    if dest is None or target.is_dir():
+        target = target / (name + ('.tar.gz' if compress else '.txt'))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = text.encode('utf-8')
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as handle:
+        if compress:
+            with tarfile.open(fileobj=handle, mode='w:gz') as archive:
+                info = tarfile.TarInfo(name + '.txt'); info.size = len(data)
+                info.mtime = int(time.time()); info.mode = 0o600
+                archive.addfile(info, io.BytesIO(data))
+        else:
+            handle.write(data)
+    uid, gid = os.environ.get('SUDO_UID'), os.environ.get('SUDO_GID')
+    if os.geteuid() == 0 and uid and gid:
+        try: os.chown(target, int(uid), int(gid))
+        except (OSError, ValueError): pass
+    return target
+
+
 def main(argv):
     import argparse
     parser = argparse.ArgumentParser(prog='adm report', description='Read-only reports')
+    parser.add_argument('--compress', action='store_true',
+                        help='Save as a .tar.gz (default /tmp/<kind>-report-<id>.tar.gz)')
+    parser.add_argument('--dest', help='File or directory to save the report to')
+    parser.add_argument('--config-dir', default='/etc/anime-discovery')
     kinds = parser.add_subparsers(dest='what', required=True, metavar='{job}')
     job = kinds.add_parser('job', help='Everything about one job: history, failed check, paths')
     job.add_argument('--id', dest='job_id', type=int, required=True, help='Job number, e.g. 2593')
-    job.add_argument('--config-dir', default='/etc/anime-discovery')
     args = parser.parse_args(argv)
     try:
         db = connect(args.config_dir)
     except Exception as exc:  # Explain plainly; the usual cause is permissions.
         parser.exit(2, f'Cannot open the database read-only ({exc.__class__.__name__}: {exc}). '
                        'Run with sudo, or as the anime-discovery service account.\n')
+    lines = []
+    printing = not (args.compress or args.dest)
     with db:
-        return report(db, args.job_id)
+        status = report(db, args.job_id, out=print if printing else lines.append)
+    if not printing:
+        saved = save('\n'.join(lines) + '\n', f'{args.what}-report-{args.job_id}',
+                     dest=args.dest, compress=args.compress)
+        print(f'Report saved to {saved}')
+    return status
