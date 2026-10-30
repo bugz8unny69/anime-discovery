@@ -71,6 +71,7 @@ class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
                 'DROP TABLE sonarr_magnet_intents;\n'
                 'ALTER TABLE magnet_v46 RENAME TO sonarr_magnet_intents;\n'
                 'DROP TABLE manual_identity_matches;\n'
+                'ALTER TABLE anime_review_decisions DROP COLUMN reason_text;\n'
                 'PRAGMA user_version=46;\nCOMMIT;')
             db.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             db.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
