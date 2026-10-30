@@ -68,6 +68,26 @@ def source_url(value):
         raise MetadataSourceConfigurationError() from None
 
 
+def _event_magnet(database,event_id,digest):
+    """Use only the original event's hash-bound, sanitized magnet trackers."""
+    from src.nextgen.storage.migrations import _open
+    from src.nextgen.job_contracts import parse_payload
+    from src.nextgen.acquisition.metadata import hash_magnet
+    with _open(database,readonly=True,timeout_ms=5000) as db:
+        row=db.execute('SELECT raw_body FROM incoming_events WHERE event_id=?',
+                       (event_id,)).fetchone()
+    if row is None:
+        raise MetadataSourceDenied()
+    try:
+        declared=parse_payload(bytes(row[0]).decode('utf-8')).get('magnet_uri')
+        magnet=hash_magnet(digest,declared)
+    except (ValueError,TypeError,UnicodeError,AttributeError):
+        magnet=None
+    if magnet is None:
+        raise MetadataSourceDenied()
+    return magnet
+
+
 async def _qb_metadata(source, digest, configuration, cancelled, *,
                        secrets, client_factory, batch, claim=None, event_id=None):
     """Version-gated metadata access; legacy batch sends require a durable lease.
@@ -123,8 +143,9 @@ async def _qb_metadata(source, digest, configuration, cancelled, *,
             if permit is not None:
                 await blocking(journal.guard,claim,owned)
                 try:
+                    magnet=await blocking(_event_magnet,database,event_id,digest)
                     await blocking(target.add_early_batch_magnet,
-                                   hash_magnet(digest),owned,permit)
+                                   magnet,owned,permit)
                 except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
                     # The network send is uncertain; never issue it again.
                     raise MetadataSourceWaiting() from None
@@ -148,6 +169,8 @@ async def _qb_metadata(source, digest, configuration, cancelled, *,
                 observed=await blocking(target.poll_legacy_metadata,
                                          owned,cancelled)
             updated=await blocking(journal.observe,claim,owned,observed)
+            if updated.state in ('REVIEW','EXTERNAL'):
+                raise MetadataSourceDenied()
             if updated.state!='OWNED_STOPPED':
                 raise MetadataSourceWaiting()
             owned,stored=await blocking(lookup,database,digest)
@@ -180,6 +203,11 @@ async def _qb_metadata(source, digest, configuration, cancelled, *,
         raise MetadataSourceUnavailable() from None
     except (ClientAuthenticationFailed,ClientInvalid):
         raise MetadataSourceDenied() from None
+    except Exception as exc:
+        from src.nextgen.acquisition.metadata import AcquisitionConflict
+        if isinstance(exc,AcquisitionConflict):
+            raise MetadataSourceDenied() from None
+        raise
 
 def make_reader(*, client_factory=QbClient, secrets=None):
     """Single-episode metadata reader. Older clients use PREPARE bootstrap."""
