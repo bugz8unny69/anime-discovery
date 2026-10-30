@@ -10,4 +10,4 @@ This feature does not query AniDB or TVDB when accepting a manual match: the ope
 
 ## Specials and OVAs
 
-Season and episode are optional identification hints. Leave season blank for an unnumbered special or OVA; the match is stored in a separate unnumbered scope (-1 internally), not incorrectly assigned to Season 1 or Season 0. An explicit S00 maps to season 0. Automatic reuse is restricted to the same normalized title and the same scope (numbered season or unnumbered); per-episode mapping remains unverified until checked separately.
+The existing `batch.recognition.release_scope_hint()` classifies regular episodes, season packs, S00 specials, unnumbered OVAs/ONAs, and ambiguous releases. The manual identity lookup uses that classification rather than defining a second parser. An explicit S00 uses season 0; unnumbered special/OVA/ONA uses a distinct internal scope (-1). Ambiguous releases are not automatically reused. The form does not require an episode or season number. Episode mapping is always verified separately.
