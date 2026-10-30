@@ -14,6 +14,34 @@ from src.nextgen.storage.batch_submission_journal import (
 
 
 class BatchClient(Client):
+    def add_early_batch_magnet(self, magnet, intent, permit):
+        """Only the journal's one-shot preverification send, always stopped.
+
+        The same ad-<marker> ownership tag is recovered by the later
+        submission stage; this method never creates an acquisition permit.
+        """
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent, EarlyBatchPermit
+        from src.nextgen.acquisition.prowlarr_search import _magnet_hash
+        from src.nextgen.acquisition.submission import ClientAuthenticationFailed
+        if not self._sid or self.protocol is None:
+            raise ClientAuthenticationFailed()
+        if (type(intent) is not EarlyBatchIntent or type(permit) is not EarlyBatchPermit
+                or intent.state!='UNCERTAIN'
+                or self.options!=intent.options or self.major!=intent.api_major
+                or self.metadata_strategy not in ('guarded_export','legacy_poll')
+                or _magnet_hash(magnet)!=intent.info_hash
+                or not self.options.download_root.endswith('/ad-'+intent.marker)):
+            raise ClientInvalid()
+        payload={'urls':magnet,'savepath':self.options.download_root,
+                 'category':self.options.category,
+                 **self.protocol.label_fields(intent.marker),
+                 **self.protocol.add_fields(True)}
+        permit.take(intent)
+        self._request('torrents/add',form=payload,limit=4096)
+        if not self.protocol.inline_tags:
+            self._tag_legacy_submission(intent.info_hash,intent.marker)
+
+
     def inspect_owned_batch_metadata(self, expected_hash, marker, download_root):
         """Double-check a journal-owned, stopped qB file list without mutation.
 
