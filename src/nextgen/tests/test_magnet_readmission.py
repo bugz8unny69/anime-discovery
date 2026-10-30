@@ -102,10 +102,11 @@ class MagnetMigrationTests(unittest.TestCase):
         before=old.execute('SELECT * FROM incoming_events').fetchall()
         old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
         old.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
+        old.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
         initialize(fresh)
         self.assertEqual(_structure(old),_structure(fresh))
         self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],48)
+        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],49)
         self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
 
     def test_migration_failure_rolls_back_original_journal_table(self):
