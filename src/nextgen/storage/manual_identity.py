@@ -67,7 +67,7 @@ def save(database, job_id, *, anidb_id, tvdb_series_id, title, season):
             raise ManualMatchError("Release name unavailable") from None
         prior = db.execute(
             "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
-            "WHERE alias_key=? AND tvdb_season=?", (key, season)).fetchone()
+            "WHERE alias_key=? AND tvdb_season=?", (key, -1 if season is None else season)).fetchone()
         wanted = (anidb_id, tvdb_series_id, title.strip())
         if prior is not None and prior != wanted:
             raise ManualMatchError("An existing manual match differs; edit the existing match first")
