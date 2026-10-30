@@ -119,7 +119,8 @@ class IdentityProviderTests(unittest.TestCase):
         with self.assertRaises(ProviderInvalidResponse): episode_catalog(ANIME.replace(b'987',b'0'),123)
         with self.assertRaises(IdentityConflict): mapping_id(MAPPING.replace(b'</anime-list>',b'<anime anidbid="123" tvdbid="789"/></anime-list>'),123)
         with self.assertRaises(ProviderInvalidResponse): tvdb_record({"data":{"id":999}},456)
-        with self.assertRaises(IdentityNotReady): title_matches(TITLES,["No match"])
+        self.assertEqual(title_matches(TITLES, ["No match"]), {})
+        self.assertEqual(set(title_matches(TITLES, ["Test Anime"])), {123})
 
 
     def test_memory_expiry_clock_rollback_and_authorization_scope(self):

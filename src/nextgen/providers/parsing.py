@@ -116,7 +116,8 @@ def title_matches(payload, aliases):
             if aid in found: raise ProviderInvalidResponse()
             found[aid] = titles
             if len(found)>10: raise IdentityNotReady()
-    if not found: raise IdentityNotReady()
+    # No exact catalog title is a search miss, not a provider failure.
+    # Let the resolver try an explicit alternate title when one exists.
     return found
 
 

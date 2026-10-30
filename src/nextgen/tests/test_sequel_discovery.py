@@ -154,6 +154,53 @@ class SequelDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(IdentityConflict):
             await self.identify("Saga of Tanya the Evil S02E08 1080p", provider)
 
+    async def test_s01_pipe_alternative_after_primary_miss(self):
+        provider = Provider()
+        def lookup(aliases):
+            provider.queries.append(tuple(aliases))
+            return ({15105: ("Higurashi Gou",)}
+                    if aliases == ["Higurashi Gou"] else {})
+        provider.title_candidates = lookup
+        provider.anime = lambda aid: {"title": "Higurashi Gou",
+                                      "titles": ("Higurashi Gou",)}
+        provider.tvdb_titles = ("Higurashi Gou",)
+        result, trace = await self.identify(
+            "[Dyna] Higurashi When They Cry S01 (BD 1080p AVC Opus 2.0) "
+            "[Dual Audio] | Higurashi Gou", provider)
+        self.assertEqual(provider.queries,
+                         [("Higurashi When They Cry",), ("Higurashi Gou",)])
+        self.assertEqual(trace["queries"],
+                         ["Higurashi When They Cry", "Higurashi Gou"])
+        self.assertEqual(result["anime"]["anidb_id"], 15105)
+
+    async def test_s03_noisy_sequel_falls_back_to_base(self):
+        provider = Provider()
+        def lookup(aliases):
+            provider.queries.append(tuple(aliases))
+            return ({15105: ("Mushoku Tensei: Jobless Reincarnation",)}
+                    if aliases == ["Mushoku Tensei Jobless Reincarnation"] else {})
+        provider.title_candidates = lookup
+        provider.anime = lambda aid: (
+            {"title": "Mushoku Tensei III", "titles": ("Mushoku Tensei III",)}
+            if aid == 17000 else
+            {"title": "Mushoku Tensei: Jobless Reincarnation",
+             "titles": ("Mushoku Tensei: Jobless Reincarnation",)})
+        provider.tvdb_titles = ("Mushoku Tensei: Jobless Reincarnation",)
+        result, trace = await self.identify(
+            "[Sokudo] Mushoku Tensei Jobless Reincarnation S03 P1 v2 "
+            "[1080p Dual Audio AV1] | Mushoku Tensei III: Isekai Ittara "
+            "Honki Dasu, Dual-Audio, Multi-Subs, Batch)", provider)
+        self.assertEqual(provider.queries, [
+            ("Mushoku Tensei III: Isekai Ittara Honki Dasu",),
+            ("Mushoku Tensei Jobless Reincarnation",),
+        ])
+        self.assertEqual(provider.season_lookups, [(12345, 3, None)])
+        self.assertEqual(result["anime"]["anidb_id"], 17000)
+        self.assertEqual(trace["queries"], [
+            "Mushoku Tensei III: Isekai Ittara Honki Dasu",
+            "Mushoku Tensei Jobless Reincarnation",
+        ])
+
     def test_anime_lists_season_entry_selection(self):
         from src.nextgen.providers.parsing import season_entry
         payload = (b'<anime-list>'
