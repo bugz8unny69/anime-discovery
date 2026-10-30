@@ -180,3 +180,9 @@ class IntakeSharesTheReaderTests(unittest.TestCase):
         self.assertEqual(release_scope_hint('[Group] Kusuriya no Hitorigoto - 01~12 [1080p]').kind, 'ambiguous')
         self.assertEqual(release_scope_hint('[Trix] Cyberpunk Edgerunners S02 (Season S2) (Batch)').kind,
                          'season_pack')
+        self.assertEqual(release_scope_hint(
+            '[ToonsHub] A Returners Magic Should Be Special S02E04 1080p CR WEB-DL'
+        ).kind, 'single_episode')
+        self.assertEqual(release_scope_hint(
+            '[ToonsHub] My Happy Marriage S00E02 Special Part 1'
+        ).kind, 'special')

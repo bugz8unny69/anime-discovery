@@ -43,6 +43,35 @@ class ReleaseMappingTests(unittest.TestCase):
             with self.subTest(title=title),self.assertRaises(ReleaseNotReady) as raised:declared_episode(title)
             self.assertEqual(raised.exception.reason_code,'RELEASE_TYPE_UNSUPPORTED')
 
+    def test_special_title_and_actual_season_zero_are_distinct(self):
+        for title, episode in (
+            ("[ToonsHub] A Returners Magic Should Be Special S02E04 1080p CR WEB-DL DUAL AAC2.0 H.264", 4),
+            ("A Returners Magic Should Be Special S02E16 1080p CR WEB-DL DUAL", 16),
+        ):
+            with self.subTest(title=title):
+                self.assertEqual(declared_episode(title), ("tvdb", 2, episode))
+                self.assertEqual(release_scope_hint(title).kind, "single_episode")
+        for name in ("[Group] Show S00E01 [Special]",
+                     "[Group] Show S00E01 OVA"):
+            with self.subTest(name=name):
+                self.assertEqual(declared_episode(name), ("tvdb", 0, 1))
+                self.assertEqual(release_scope_hint(name).kind, "special")
+        for title, episode in (
+            ("[ToonsHub] My Happy Marriage S00E02 Special Part 1 1080p", 2),
+            ("My Happy Marriage S00E03 Special Part 2", 3),
+            ("My Happy Marriage S00E04 Special Part 3", 4),
+        ):
+            with self.subTest(title=title):
+                # A "Part N" label can describe an official S00 episode.
+                # Only the provider mapping can verify its identity.
+                self.assertEqual(declared_episode(title), ("tvdb", 0, episode))
+                self.assertEqual(release_scope_hint(title).kind, "special")
+        for title in ("[Group] Show S01E04 [Special]",
+                      "[Group] Show S01E04 OVA",
+                      "[Group] Show - Special 01"):
+            with self.subTest(title=title), self.assertRaises(ReleaseNotReady):
+                declared_episode(title)
+
     def test_single_declarations_do_not_apply_legacy_trial_window_or_season_one_rule(self):
         self.assertEqual(declared_episode('[Group] Test - 12 [1080p]'),('anidb',None,12))
         self.assertEqual(declared_episode('Test S02E13'),('tvdb',2,13))
@@ -143,6 +172,27 @@ class ReleaseVerifierTests(unittest.IsolatedAsyncioTestCase):
         self.pages=[]
         self.verify=make_verifier(Options('registeredclient',1),lambda:Credentials('private-key'),
                                   client_factory=lambda *args:self.client)
+
+    async def test_s00_special_requires_anidb_regular_episode_and_tvdb_proof(self):
+        release = replace(self.source,
+            raw_body=b'{"release_name":"Test S00E05 Special Part 1"}')
+        mapping = (
+            b'<anime-list><anime anidbid="123" tvdbid="456">'
+            b'<mapping-list><mapping anidbseason="1" tvdbseason="0">'
+            b'1-5;</mapping></mapping-list></anime></anime-list>'
+        )
+        self.client.mapping_xml = lambda: mapping
+        self.client.episode_page = lambda *args: (((999, 0, 5),), False)
+        proven = await self.verify(release, self.configuration, self.cancelled)
+        self.assertEqual((proven.anidb_episode_number, proven.anidb_episode_id,
+                          proven.tvdb_season, proven.tvdb_episode, proven.tvdb_episode_id),
+                         (1, 987, 0, 5, 999))
+        # The same release with no explicit regular AniDB -> TVDB S00
+        # rule must not guess a special episode number.
+        self.client.mapping_xml = lambda: MAPPING
+        with self.assertRaises(ReleaseNotReady) as caught:
+            await self.verify(release, self.configuration, self.cancelled)
+        self.assertEqual(caught.exception.reason_code, "RELEASE_SPECIAL_UNSUPPORTED")
 
     async def test_no_episodeoffset_verifies_only_with_matching_tvdb_episode(self):
         release=replace(self.source,raw_body=b'{"release_name":"Test S02E01"}')

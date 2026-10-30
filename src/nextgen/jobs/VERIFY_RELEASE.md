@@ -14,11 +14,19 @@ The initial normalized input remains JSON release_name. The parser recognizes
 one supported declared episode: a regular AniDB-number hint such as " - 12" or
 "EP12", or explicit TVDB season/episode such as "S02E13". These are declarations
 to verify against providers, not facts taken on faith or proof of media contents.
-Batch/ranges, multiple identifiers, fractional/special episode forms and missing
-or ambiguous declarations go to review. This stage imposes no trial-window count
-or season-one limit. Season zero is accepted when an explicit supported mapping
-from a verified regular AniDB episode points there; nonregular AniDB episode
-catalog support is still future work.
+Batch/ranges, multiple identifiers, fractional episodes and missing or
+ambiguous declarations go to review. A word such as “Special” inside the
+anime's actual title is not by itself a special-release declaration. An
+explicit S00Eyy release may verify when an AniDB **regular** episode has an
+explicit Anime-Lists mapping to that TVDB Season 0 episode and TVDB independently
+confirms the episode record. Separate AniDB special-numbering types are not
+interchangeable with regular episode numbers, and have no automated support.
+The phrase `S00E02 Special Part 1` may describe a complete TVDB S00
+episode, so a "Part" label alone does not prove a split torrent. The declared
+S00 episode still requires exact AniDB → Anime-Lists → TVDB corroboration.
+Without that explicit mapping it receives `RELEASE_SPECIAL_UNSUPPORTED`;
+the verifier does not invent episode IDs or offsets. There is no trial-window
+or season-one limit.
 
 The verifier checks the full-anime AniDB regular-episode catalog (exact episode
 number→AniDB episode ID), then supported explicit/default Anime-Lists mapping.
