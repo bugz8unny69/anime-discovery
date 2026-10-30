@@ -58,6 +58,26 @@ class BatchQbClientTests(unittest.TestCase):
         self.assertEqual(self.client.inspect.call_count,2)
         self.assertEqual(self.calls,[])  # No mutations
 
+    def test_adopted_active_batch_supports_read_only_inventory_rechecks(self):
+        from unittest.mock import Mock
+        from src.nextgen.acquisition.qbittorrent import _Protocol
+        from src.nextgen.acquisition.metadata import ObservedBatchInventory
+        self.client.protocol=_Protocol(4,(2,5,1))
+        self.client.major=4
+        active=Observation(self.intent.inventory.info_hash,'downloading',
+            self.options.download_root,self.options.category,
+            ('ad-'+self.intent.marker,),False,self.intent.inventory.files)
+        self.client.inspect=Mock(return_value=active)
+        self.assertIsNone(self.client.inspect_owned_batch_metadata(
+            self.intent.inventory.info_hash,self.intent.marker,
+            self.options.download_root))
+        actual=self.client.inspect_owned_batch_metadata(
+            self.intent.inventory.info_hash,self.intent.marker,
+            self.options.download_root,require_stopped=False)
+        self.assertIs(type(actual),ObservedBatchInventory)
+        self.assertEqual(actual.files,self.intent.inventory.files)
+        self.assertIsNone(actual.info_sha256)
+
     def test_observed_batch_never_adopts_foreign_or_changed_torrent(self):
         from src.nextgen.acquisition.qbittorrent import _Protocol
         from unittest.mock import Mock
