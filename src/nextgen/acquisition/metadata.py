@@ -141,6 +141,55 @@ class BatchInventory:
 
 
 @dataclass(frozen=True)
+class ObservedBatchInventory:
+    """Read-only observed files from an owned, stopped qBittorrent batch.
+
+    Deliberately has NO info_sha256: the old Web API does not expose the
+    original bencoded info dictionary or its cryptographic digest. This is
+    not a BatchInventory and cannot be used in existing BEP3-proof contracts.
+    """
+    info_hash: str
+    files: tuple[TorrentFile, ...] = field(repr=False)
+
+    def __post_init__(self):
+        if infohash(self.info_hash)!=self.info_hash:raise MetadataInvalid()
+        if type(self.files) is not tuple or not 1<=len(self.files)<=10000:raise MetadataInvalid()
+        if any(type(f) is not TorrentFile or f.index!=i for i,f in enumerate(self.files)):
+            raise MetadataInvalid()
+        paths=[f.path.casefold() for f in self.files]
+        if len(set(paths))!=len(paths):raise MetadataInvalid()
+        names=set(paths)
+        if any('/'.join(p.split('/')[:n]) in names for p in paths
+               for n in range(1,len(p.split('/')))):raise MetadataInvalid()
+        if sum(f.size for f in self.files)>MAX_INTEGER:raise MetadataInvalid()
+        allowed={'.mkv','.mp4','.m4v','.avi','.nfo','.srt','.ass','.ssa','.txt'}
+        if any(PurePosixPath(f.path).suffix.lower() not in allowed
+               for f in self.files):raise MetadataInvalid()
+        videos=[f for f in self.files
+                if PurePosixPath(f.path).suffix.lower() in ('.mkv','.mp4','.m4v','.avi')]
+        if not videos or any(f.size<=0 for f in videos):raise MetadataInvalid()
+        if len(self.json().encode('utf-8'))>1048576:raise MetadataInvalid()
+
+    @property
+    def info_sha256(self):
+        # Deliberately NOT a BEP3 hash. Absence is persisted as SQL NULL.
+        return None
+
+    def json(self):
+        return json.dumps({'files':[{'index':f.index,'path':f.path,'size':f.size}
+                                    for f in self.files]},sort_keys=True,separators=(',',':'))
+
+
+def read_batch_inventory(raw,expected_hash):
+    """Typed observed batch evidence or independently hash-verified BEP3 bytes."""
+    digest=infohash(expected_hash)
+    if type(raw) is ObservedBatchInventory:
+        if raw.info_hash!=digest:raise MetadataInvalid()
+        return raw
+    return parse_batch_metainfo(raw,digest)
+
+
+@dataclass(frozen=True)
 class ObservedInventory:
     """Stable, stopped qB file list; deliberately NOT BEP3 metainfo evidence.
 

@@ -1,70 +1,70 @@
-# Hash-addressed torrent metadata source
+# Torrent metadata — qBittorrent protocol adapter
 
-The composed identity worker now installs preparation, stopped submission and
-download monitoring by default, using a real HTTP(S) metadata reader. Trusted
-custom async readers remain supported. Startup performs no metadata fetch or
-download-client request; generic workers still need explicit registrations.
+No external torrent metadata HTTP server is required. **Configuration schema v12**
+retires both `torrent_metadata.base_url` and `torrent_metadata.timeout_seconds`.
+The explicit v11 → v12 migration validates the historical settings and removes
+that section. qBittorrent address, credentials and download folder remain
+under the existing qBittorrent configuration.
 
-Configure `torrent_metadata.base_url` in Settings to a trusted source serving
-`<lowercase-v1-infohash>.torrent` under that folder. The placeholder base
-`https://cache.example/torrents` yields
-`https://cache.example/torrents/<hash>.torrent`. No third-party source is selected
-by default. This is not a DHT/magnet resolver, indexer search or authenticated
-cache client. A compatible source must actually provide the requested metainfo.
+## Supported qBittorrent metadata methods
 
-This follows NextGen's metadata-first design. Legacy `qb_trial_add_adapter.py`
-vets and adds a magnet before the client learns its file list. NextGen inspects
-exact metainfo, inventory, selected-byte budget and episode declaration before
-the separate submission journal can authorize a stopped add. Retrieval creates
-no temporary download-client entry and proves no torrent ownership.
+| qBittorrent Web API | Method | Evidence |
+| --- | --- | --- |
+| 2.11.9+ (typically 5.2+) | Metadata-only fetch, no torrent add | Hash-verified BEP3 `.torrent` and `BatchInventory` |
+| 2.8.14+ (older 4.x and 5.x) | Journaled stopped magnet, then `torrents/export` | Hash-verified BEP3 `.torrent` and `BatchInventory` |
+| Earlier supported 4.2-era API | Journaled stopped magnet, bounded metadata discovery, double-checked `torrents/files` | `ObservedBatchInventory` tied to a journal-owned stopped torrent; **no invented BEP3 SHA** |
 
-## Network and validation boundaries
+Use Web API capabilities, not the application version number alone.
 
-- Only validated operation configuration chooses a base address. Delivery data
-  supplies a normalized v1 hash, never a URL, host, path, credential or template.
-  Simple ASCII base-folder segments are permitted; traversal, percent encoding,
-  user information, query tokens and fragments are rejected.
-- HTTP(S) is supported for operator-authorized destinations. HTTPS uses normal
-  certificate verification. Redirects and ambient proxy variables are disabled.
-- Identity-encoded bodies are capped at four MiB even without Content-Length.
-  Invalid lengths, compressed/malformed bytes, wrong hashes and unsupported
-  inventories enter review. Preparation independently revalidates metadata and
-  checks the filename declaration against verified episode evidence.
-- The timeout is 1–60 seconds, default 30. It controls connection/socket reads
-  and deadline checks between read1 chunks. It is not an interruptible DNS
-  deadline; a socket read may finish after the between-chunk deadline. Cancellation
-  is checked before requests and between chunks, and blocking work is drained
-  before maintenance/operation protection is released.
-- 404/429/503 defer with TORRENT_METADATA_WAITING. Numeric Retry-After is bounded
-  to one second through one day; otherwise use 60 seconds. Normal waiting does
-  not consume failure retries. There is one request per attempt, without fallback
-  origins or automatic HTTP retries.
-- Network/read failures and supported transient responses use the worker's bounded
-  retry policy with TORRENT_METADATA_UNAVAILABLE. Missing configuration or access
-  denial enters readable review. Unsupported replies, including redirects, require
-  metadata review. Cancel remains available.
+## Legacy early batch admission and one-torrent lifecycle
 
-Raw metainfo, tracker URLs and passkeys are not persisted or logged. Before a first
-submission intent, submission refetches metainfo and requires the exact prepared
-hash-bound manifest. Existing uncertain submission intents reconcile without
-another metadata fetch or send permit. Source-setting changes affect new attempts
-but cannot bypass exact manifest checks or retarget saved download-client options.
+1. Only a leased `VERIFY_RELEASE` job may request an early admission. A
+   unique random `ad-<marker>`, destination `download_root/ad-<marker>`,
+   category, client, job and exact infohash are recorded in
+   `batch_metadata_admissions` **before the first add**.
+2. Only that new journal row yields a process-local, one-use permit. The qB
+   protocol adapter sends the event's sanitized, hash-bound magnet **paused or
+   stopped**. Older APIs receive the tag immediately after the permitted add.
+   Crash/retry may inspect and recover the intent but **cannot send again**.
+3. qBittorrent may briefly resume an *owned* stopped magnet to discover its
+   metadata, using the existing bounded legacy adapter and unconditional stop.
+   Stable double-read, infohash, unique tag, isolated save path, category,
+   autoTMM=false and stopped state are required before the inventory is saved.
+4. For API 2.8.14+, `torrents/export` adds cryptographic BEP3 evidence
+   (SHA-1 infohash and SHA-256 of the original info dictionary). On the
+   oldest APIs, the original bencoded info is unavailable. Preserve the
+   observed file-list evidence as a distinct type, with SQL `info_sha256=NULL`.
+5. Every batch file still needs individual AniDB → Anime-Lists → TVDB episode
+   corroboration, planning and reservations. Neither form of metadata
+   authorizes a download by itself.
+6. At `SUBMIT_BATCH`, the journal atomically **adopts the same stopped torrent**
+   into the regular batch submission ledger, using the same marker and
+   download root. The worker does **not add it again**. It rechecks ownership
+   and file inventory before proceeding to the existing controlled E01 probe,
+   media verification, unlock, transfer and staging steps.
+7. After adoption the torrent may legitimately be active. Later metadata
+   checks remain read-only, validate the unique owner tag and immutable files,
+   but do not stop/restart an active download. The transfer journals separately
+   authorize and verify all state-changing operations.
+8. Cancellation of a *non-adopted* early magnet uses the existing exclusive
+   operation-drain gate and a one-shot cleanup intent, guarding the same
+   isolated root. Uncertain destructive commands are never blindly repeated.
+   After release, a future job can reuse that infohash; the database's
+   partial unique index applies only to live admissions. Adopted torrents
+   use the existing batch cancellation/cleanup journal.
 
-## Configuration and completion boundary
+Existing unrelated torrents are **never adopted or deleted**, even if their
+hashes match. A marker by itself is not proof of ownership. Crash/retry and
+foreign/changed-state cases fail closed rather than issuing duplicate adds.
 
-Configuration v7 explicitly upgrades v6, preserving all values and adding a blank
-source/default timeout. v0–v6 conversion outputs retain their historical shapes
-and reject the new section. Use the existing explicit preview/backup/migration
-contract; startup never upgrades settings silently. SQLite remains v18; secrets v3.
+## Deployment and verification
 
-Without a configured source, selected work reaches PREPARE_ACQUISITION and
-NEEDS_REVIEW with TORRENT_METADATA_CONFIGURATION_INVALID, instead of silently
-ending at a completed reservation. A compatible configured source extends the
-existing preparation → stopped submission → selected download flow. Video/audio
-verification and staging are still next; a completed transfer is not a verified
-staged video and does not authorize Keep.
-
-Offline cases cover fixed requests, strict source validation, hash/size/encoding
-checks, status outcomes, cancellation/deadline closure, explicit upgrades and
-historical shapes, snapshot behavior and preparation handoff. Tests and CI remain
-unexecuted. No live sources/clients, migrations, media operations or deployment.
+- Preview and apply the **database v50 → v51** migration under maintenance
+  with a backup, and migrate the settings document from v11 to v12 before
+  restarting an updated worker. Keep the database and worker versions aligned.
+- Offline tests cover the qB API capability matrix, single-send admission and
+  replay, observed-vs-BEP3 inventory distinction, foreign torrent checks,
+  active-adopted readback, provider episode proof, and both migrations.
+- The full installed-system integration tests and GitHub CI must complete
+  before merging or deploying this change. No production torrent behavior
+  should be claimed verified until exercised against real supported clients.

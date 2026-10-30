@@ -6,6 +6,7 @@ from src.nextgen.providers.release_mapping import declared_episode, forward_mapp
 from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.release_contracts import VerifiedRelease, ReleaseNotReady, ReleaseConflict
 from src.nextgen.worker import blocking
+import inspect
 from contextlib import closing
 from src.nextgen.storage.recognition import recognized_episode
 from src.nextgen.storage.migrations import _open, LATEST_VERSION
@@ -79,11 +80,13 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
         if cancelled.is_set(): raise ReleaseNotReady()
         return VerifiedRelease(source,number,catalog[number],target[0],target[1],matches[0])
 
-    async def call(source,configuration,cancelled):
+    async def call(source,configuration,cancelled,*,claim=None):
         if batch_verifier is not None:
             try:title=delivery_title(source)
             except ValueError:raise ReleaseNotReady('RELEASE_TITLE_UNCLEAR') from None
             if release_scope_hint(title).kind in ('season_pack','mixed_pack'):
+                if claim is not None and 'claim' in inspect.signature(batch_verifier).parameters:
+                    return await batch_verifier(source,configuration,cancelled,claim=claim)
                 return await batch_verifier(source,configuration,cancelled)
         return await blocking(verify,source,configuration,cancelled)
     return call

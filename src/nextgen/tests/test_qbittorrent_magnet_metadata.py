@@ -371,6 +371,58 @@ class MagnetMetadataTests(unittest.TestCase):
                 client.remove_empty_legacy_magnet(intent)
         client._request.assert_not_called()
 
+    def test_protocol_adapter_accepts_hash_verified_multifile_batch(self):
+        from src.nextgen.tests.test_acquisition_metadata import metadata
+        from src.nextgen.acquisition.metadata import BatchInventory
+        files = [
+            {b'length': 100, b'path': [b'S01E01.mkv']},
+            {b'length': 120, b'path': [b'S01E02.mkv']},
+        ]
+        raw, digest = metadata(name=b'Season One', files=files)
+        client = self.client((2,11,9))
+        client._request.side_effect = [
+            (b'{"infohash_v1":"' + digest.encode() + b'","info":{}}', {}),
+            (raw, {}),
+        ]
+        inventory, received = client.fetch_metadata(digest, digest, batch=True)
+        self.assertIs(type(inventory), BatchInventory)
+        self.assertEqual(received, raw)
+        self.assertEqual(len(inventory.files), 2)
+        self.assertEqual(client._request.call_count, 2)
+        client._request.reset_mock()
+        client._request.side_effect = [
+            (b'{"infohash_v1":"' + digest.encode() + b'","info":{}}', {}),
+            (raw, {}),
+        ]
+        from src.nextgen.acquisition.metadata import MetadataInvalid
+        with self.assertRaises(MetadataInvalid):
+            client.fetch_metadata(digest, digest)
+        self.assertEqual(client._request.call_count, 2)
+
+    def test_export_adapter_supports_batch_on_older_api_when_present(self):
+        from src.nextgen.tests.test_acquisition_metadata import metadata
+        from src.nextgen.acquisition.metadata import BatchInventory
+        files = [
+            {b'length': 100, b'path': [b'S01E01.mkv']},
+            {b'length': 120, b'path': [b'S01E02.mkv']},
+        ]
+        raw, digest = metadata(name=b'Season One', files=files)
+        for major, version in ((4, (2,8,15)), (5, (2,10,0))):
+            with self.subTest(major=major, api=version):
+                client = self.client(version, major)
+                client._request.return_value = (raw, {})
+                inventory, content = client.export_metainfo(digest, batch=True)
+                self.assertIs(type(inventory), BatchInventory)
+                self.assertEqual(content, raw)
+                client._request.assert_called_once_with(
+                    'torrents/export', query={'hash':digest}, limit=4194304)
+
+    def test_oldest_api_cannot_claim_bep3_metainfo_from_a_file_list(self):
+        client = self.client((2,5,1), 4)
+        with self.assertRaises(ClientUnsupported):
+            client.export_metainfo(HASH, batch=True)
+        client._request.assert_not_called()
+
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))
         client._request.return_value=(b'{}',{})

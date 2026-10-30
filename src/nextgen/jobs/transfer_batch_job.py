@@ -2,7 +2,7 @@
 import inspect
 
 from src.nextgen.acquisition.metadata import (
-    parse_batch_metainfo, AcquisitionConflict, MetadataInvalid,
+    read_batch_inventory, AcquisitionConflict, MetadataInvalid,
 )
 from src.nextgen.acquisition.submission import (
     ClientUnavailable, ClientInvalid, ClientAuthenticationFailed, ClientUnsupported,
@@ -83,7 +83,7 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
         try:
             digest=await blocking(journal.source_hash,context.claim,submission)
             raw=await read_batch_metainfo(digest,context.configuration,context.cancelled)
-            inventory=await blocking(parse_batch_metainfo,raw,digest)
+            inventory=await blocking(read_batch_inventory,raw,digest)
             intent,record=await blocking(
                 journal.load,context.claim,submission,inventory)
             if record is not None and record.phase=='REVIEW':

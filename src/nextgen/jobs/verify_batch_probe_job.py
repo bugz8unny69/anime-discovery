@@ -2,7 +2,7 @@
 import inspect
 
 from src.nextgen.acquisition.metadata import (
-    parse_batch_metainfo, AcquisitionConflict, MetadataInvalid, SourceMissing,
+    read_batch_inventory, AcquisitionConflict, MetadataInvalid, SourceMissing,
 )
 from src.nextgen.acquisition.media import (
     VerifiedMedia, MediaInvalid, MediaUnavailable, ProbeUnavailable,
@@ -58,7 +58,7 @@ def registration(read_batch_metainfo,*,source_factory=BatchProbeSource,
         try:
             digest=await blocking(source.source_hash,context.claim,transfer)
             raw=await read_batch_metainfo(digest,context.configuration,context.cancelled)
-            inventory=await blocking(parse_batch_metainfo,raw,digest)
+            inventory=await blocking(read_batch_inventory,raw,digest)
             intent,record=await blocking(
                 source.load,context.claim,transfer,inventory)
             protected=(

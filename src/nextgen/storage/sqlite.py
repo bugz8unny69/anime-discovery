@@ -423,6 +423,24 @@ CREATE TABLE IF NOT EXISTS keep_imports (
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=0)
 );
 
+CREATE TABLE IF NOT EXISTS batch_metadata_admissions (
+ event_id INTEGER PRIMARY KEY REFERENCES incoming_events(event_id),
+ verification_job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
+ info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
+ ownership_marker TEXT NOT NULL UNIQUE CHECK(length(ownership_marker)=32 AND ownership_marker NOT GLOB '*[^a-f0-9]*'),
+ base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
+ save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 2 AND 4096),
+ category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 64),
+ timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 1 AND 60),
+ api_major INTEGER NOT NULL CHECK(api_major IN (4,5)),
+ state TEXT NOT NULL CHECK(state IN ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED','ADOPTED','RELEASED')),
+ inventory_json TEXT CHECK(inventory_json IS NULL OR json_valid(inventory_json)),
+ created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
+ updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_metadata_live_hash
+ ON batch_metadata_admissions(info_hash) WHERE state NOT IN ('RELEASED','EXTERNAL');
+
 CREATE TABLE IF NOT EXISTS batch_verifications (
  batch_id INTEGER PRIMARY KEY,
  job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(job_id),
@@ -432,7 +450,7 @@ CREATE TABLE IF NOT EXISTS batch_verifications (
  tvdb_season INTEGER NOT NULL CHECK(tvdb_season>0),
  release_sha256 TEXT NOT NULL CHECK(length(release_sha256)=64 AND release_sha256 NOT GLOB '*[^a-f0-9]*'),
  info_hash TEXT NOT NULL CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
- info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
  verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
  FOREIGN KEY(identity_result_id,anidb_id) REFERENCES identity_results(result_id,anidb_id)
 );
@@ -509,7 +527,7 @@ CREATE TABLE IF NOT EXISTS batch_torrent_submissions (
  first_job_id INTEGER NOT NULL REFERENCES jobs(job_id),
  first_attempt INTEGER NOT NULL CHECK(first_attempt>0),
  info_hash TEXT NOT NULL UNIQUE CHECK(length(info_hash)=40 AND info_hash NOT GLOB '*[^a-f0-9]*'),
- info_sha256 TEXT NOT NULL CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
+ info_sha256 TEXT CHECK(length(info_sha256)=64 AND info_sha256 NOT GLOB '*[^a-f0-9]*'),
  ownership_marker TEXT NOT NULL UNIQUE CHECK(length(ownership_marker)=32 AND ownership_marker NOT GLOB '*[^a-f0-9]*'),
  base_url TEXT NOT NULL CHECK(length(base_url) BETWEEN 1 AND 2048),
  save_path TEXT NOT NULL CHECK(length(save_path) BETWEEN 2 AND 4096),
@@ -757,13 +775,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v50; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v51; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
     before accessing v50 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 50:
+    if version == 51:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")
@@ -773,7 +791,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=50;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=51;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

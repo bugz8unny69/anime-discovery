@@ -28,6 +28,7 @@ class BatchCancellationReleaseTests(unittest.TestCase):
                 ended_at_ms INTEGER,ended_by_job_id INTEGER);
             CREATE TABLE batch_trial_plans(plan_id INTEGER,evaluation_job_id INTEGER);
             CREATE TABLE batch_torrent_submissions(plan_id INTEGER);
+            CREATE TABLE batch_metadata_admissions(verification_job_id INTEGER,state TEXT);
             CREATE TABLE batch_cancellation_cleanup(
                 plan_id INTEGER,operation_id INTEGER,phase TEXT);
             CREATE TABLE staging_publications(job_id INTEGER,state TEXT);

@@ -1,46 +1,56 @@
-"""Hash-addressed metainfo reads from an operator-configured HTTP(S) source.
+"""qBittorrent-native torrent metadata access.
 
-No download-client writes, arbitrary delivery URLs, redirects, ambient proxies,
-or persistent copies of tracker/passkey-bearing metainfo are used here.
+No separately configured HTTP source is used. A legacy URL validator remains
+only to verify v7-v11 settings *before* dropping them during v12 migration.
 """
-from dataclasses import dataclass, field
 import asyncio
-import http.client
 import re
-import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
 from src.nextgen.async_io import blocking
-from src.nextgen.acquisition.metadata import MAX_METAINFO, MetadataInvalid, infohash, parse_metainfo, parse_batch_metainfo
-from src.nextgen.acquisition.settings import endpoint
+from src.nextgen.acquisition.metadata import infohash, MetadataInvalid
+from src.nextgen.acquisition.settings import (
+    endpoint, download_options, DownloadConfigurationError,
+)
+from src.nextgen.acquisition.submission import (
+    ClientAuthenticationFailed, ClientInvalid, ClientUnavailable, ClientUnsupported,
+)
+from src.nextgen.acquisition.qbittorrent import Client as QbClient
 
 
 class MetadataSourceConfigurationError(ValueError):
-    reason_code='TORRENT_METADATA_CONFIGURATION_INVALID'
-    def __init__(self):super().__init__('Configure the torrent metadata source before downloading.')
+    reason_code = 'TORRENT_METADATA_CONFIGURATION_INVALID'
+    def __init__(self):
+        super().__init__('Configure qBittorrent credentials and download folder.')
 
 
 class MetadataSourceUnavailable(RuntimeError):
-    reason_code='TORRENT_METADATA_UNAVAILABLE'
-    def __init__(self):super().__init__('The torrent metadata source is temporarily unavailable.')
+    reason_code = 'TORRENT_METADATA_UNAVAILABLE'
+    def __init__(self):
+        super().__init__('qBittorrent could not provide torrent metadata.')
 
 
 class MetadataSourceDenied(ValueError):
-    reason_code='TORRENT_METADATA_DENIED'
-    def __init__(self):super().__init__('The torrent metadata source refused access.')
+    reason_code = 'TORRENT_METADATA_DENIED'
+    def __init__(self):
+        super().__init__('qBittorrent rejected the metadata request.')
+
+
+class MetadataClientUnsupported(MetadataSourceDenied):
+    reason_code = 'TORRENT_METADATA_CLIENT_UNSUPPORTED'
+    def __init__(self):
+        ValueError.__init__(self, 'The batch requires a safely owned stopped torrent before older qBittorrent can export metadata.')
 
 
 class MetadataSourceWaiting(RuntimeError):
-    reason_code='TORRENT_METADATA_WAITING'
-    def __init__(self,delay_ms=60000):
-        self.delay_ms=delay_ms
-        super().__init__('Waiting for the torrent metadata source.')
+    reason_code = 'TORRENT_METADATA_WAITING'
+    def __init__(self, delay_ms=60000):
+        self.delay_ms = delay_ms
+        super().__init__('qBittorrent is still retrieving torrent metadata.')
 
 
 def source_url(value):
-    """An operator supplies a base folder, never a format string or a query token."""
+    """Historical v7-v11 URL validation; never used to fetch current metadata."""
     try:
         if type(value) is not str or not value or len(value)>2048:raise ValueError()
         parsed=urllib.parse.urlsplit(value)
@@ -49,151 +59,179 @@ def source_url(value):
                 or '\\' in value or not value.isascii() or any(ord(c)<=32 or ord(c)==127 for c in value)):
             raise ValueError()
         path=parsed.path.rstrip('/')
-        if path and (not path.startswith('/') or any(not re.fullmatch('[A-Za-z0-9_-]+',p) for p in path[1:].split('/'))):
+        if path and (not path.startswith('/')
+                     or any(not re.fullmatch('[A-Za-z0-9_-]+',p)
+                            for p in path[1:].split('/'))):
             raise ValueError()
         return authority+path
-    except (ValueError,TypeError,AttributeError):raise MetadataSourceConfigurationError() from None
+    except (ValueError, TypeError, AttributeError):
+        raise MetadataSourceConfigurationError() from None
 
 
-@dataclass(frozen=True)
-class SourceOptions:
-    base_url: str = field(repr=False)
-    timeout_seconds: int
-    def __post_init__(self):
-        object.__setattr__(self,'base_url',source_url(self.base_url))
-        if type(self.timeout_seconds) is not int or not 1<=self.timeout_seconds<=60:raise MetadataSourceConfigurationError()
+def _event_magnet(database,event_id,digest):
+    """Use only the original event's hash-bound, sanitized magnet trackers."""
+    from src.nextgen.storage.migrations import _open
+    from src.nextgen.job_contracts import parse_payload
+    from src.nextgen.acquisition.metadata import hash_magnet
+    with _open(database,readonly=True,timeout_ms=5000) as db:
+        row=db.execute('SELECT raw_body FROM incoming_events WHERE event_id=?',
+                       (event_id,)).fetchone()
+    if row is None:
+        raise MetadataSourceDenied()
+    try:
+        declared=parse_payload(bytes(row[0]).decode('utf-8')).get('magnet_uri')
+        magnet=hash_magnet(digest,declared)
+    except (ValueError,TypeError,UnicodeError,AttributeError):
+        magnet=None
+    if magnet is None:
+        raise MetadataSourceDenied()
+    return magnet
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self,req,fp,code,msg,headers,newurl):return None
+async def _qb_metadata(source, digest, configuration, cancelled, *,
+                       secrets, client_factory, batch, claim=None, event_id=None):
+    """Version-gated metadata access; legacy batch sends require a durable lease.
 
-
-def _status(code,headers):
-    if code==200:return
-    if code in (401,403):raise MetadataSourceDenied()
-    if code in (404,429,503):
-        retry=headers.get('Retry-After','')
-        delay=int(retry)*1000 if type(retry) is str and re.fullmatch('[0-9]{1,5}',retry) else 60000
-        raise MetadataSourceWaiting(max(1000,min(delay,86400000)))
-    if code in (408,425,500,502,504):raise MetadataSourceUnavailable()
-    raise MetadataInvalid()
-
-
-class Client:
-    def __init__(self,options,*,transport=None,clock=time.monotonic):
-        if type(options) is not SourceOptions:raise MetadataSourceConfigurationError()
-        self.options,self.clock=options,clock
-        opener=urllib.request.build_opener(_NoRedirect(),urllib.request.ProxyHandler({}))
-        self.transport=transport or (lambda request,timeout:opener.open(request,timeout=timeout))
-
-    def fetch(self,expected_hash,cancelled,*,batch=False):
-        if type(batch) is not bool:raise ValueError('invalid metadata inspection mode')
-        digest=infohash(expected_hash)
-        if cancelled.is_set():raise asyncio.CancelledError()
-        # Only a normalized 40-character digest can influence the request path.
-        request=urllib.request.Request(self.options.base_url+'/'+digest+'.torrent',headers={
-            'User-Agent':'AnimeDiscoveryNextGen/1','Accept':'application/x-bittorrent, application/octet-stream',
-            'Accept-Encoding':'identity'},method='GET')
-        deadline=self.clock()+self.options.timeout_seconds
-        try:
-            with self.transport(request,self.options.timeout_seconds) as response:
-                _status(response.getcode(),response.headers)
-                if response.headers.get('Content-Encoding','identity').lower()!='identity':raise MetadataInvalid()
-                declared=response.headers.get('Content-Length')
-                if declared is not None and (not re.fullmatch('[0-9]{1,10}',declared) or int(declared)>MAX_METAINFO):raise MetadataInvalid()
-                chunks=[];size=0
-                while True:
-                    if cancelled.is_set():raise asyncio.CancelledError()
-                    if self.clock()>=deadline:raise MetadataSourceUnavailable()
-                    # read1 avoids accumulating a whole chunk across unlimited
-                    # slow partial reads before checking the deadline/cancellation.
-                    chunk=response.read1(min(65536,MAX_METAINFO+1-size))
-                    if type(chunk) is not bytes:raise MetadataInvalid()
-                    if not chunk:break
-                    size+=len(chunk)
-                    if size>MAX_METAINFO:raise MetadataInvalid()
-                    chunks.append(chunk)
-                if declared is not None and int(declared)!=size:raise MetadataInvalid()
-                raw=b''.join(chunks)
-        except urllib.error.HTTPError as exc:
-            try:_status(exc.code,exc.headers)
-            finally:exc.close()
-            raise MetadataInvalid() from None
-        except (OSError,TimeoutError,urllib.error.URLError,http.client.HTTPException):
-            raise MetadataSourceUnavailable() from None
-        if cancelled.is_set():raise asyncio.CancelledError()
-        (parse_batch_metainfo if batch else parse_metainfo)(raw,digest)
-        return raw
-
-
-def make_reader(*,client_factory=Client,secrets=None):
-    """One metainfo reader for preparation and exact-plan submission checks.
-
-    The configured hash-addressed .torrent source is tried first. Verified
-    backfill sources fall back to the magnet in their delivery; ordinary
-    webhooks without a configured source fall back to their own hash-bound
-    magnet. Either way qBittorrent 5.2+ fetches metadata only, and the bytes
-    are re-verified against the hash.
+    Web API fetch returns BEP3 bytes without adding a torrent. Older clients
+    use one journaled paused/stopped magnet, which later batch jobs reuse.
     """
-    async def read_metainfo(source,configuration,cancelled):
-        if cancelled.is_set():raise asyncio.CancelledError()
-        identity=None
-        if secrets is not None:
-            from src.nextgen.storage.sonarr_selection import acquisition_identity
-            identity=await blocking(acquisition_identity,
-                configuration.value('storage.database_path'),source)
-        try:
-            options=SourceOptions(configuration.value('torrent_metadata.base_url'),
-                                  configuration.value('torrent_metadata.timeout_seconds'))
-            return await blocking(client_factory(options).fetch,
-                                  source.info_hash,cancelled)
-        except (MetadataSourceConfigurationError,MetadataSourceWaiting,
-                MetadataSourceUnavailable) as original_error:
-            # A verified backfill event may always fall back. An ordinary
-            # webhook falls back only when no .torrent source is configured.
-            if secrets is None or identity is None and type(
-                    original_error) is not MetadataSourceConfigurationError:raise
-            fallback_error=original_error
-        # Both backfill and webhook deliveries carry a sanitized hash-bound
-        # magnet (credentialed trackers removed; Legacy behavior).
-        from src.nextgen.acquisition.qbittorrent import Client as QbClient
-        from src.nextgen.acquisition.settings import download_options
-        from src.nextgen.acquisition.submission import (
-            ClientUnavailable,ClientAuthenticationFailed,ClientInvalid,ClientUnsupported,
+    if cancelled.is_set():
+        raise asyncio.CancelledError()
+    if secrets is None:
+        raise MetadataSourceConfigurationError()
+    try:
+        options=download_options(configuration)
+        credentials=await blocking(secrets.qbittorrent_credentials)
+        qb=client_factory(options,credentials)
+        await blocking(qb.login)
+        if cancelled.is_set():
+            raise asyncio.CancelledError()
+        if qb.metadata_strategy=='fetch':
+            result=await blocking(qb.fetch_metadata,source,digest,batch=batch)
+            if result is None:
+                raise MetadataSourceWaiting()
+            return result[1]
+
+        if not batch:
+            # PREPARE_ACQUISITION handles old single torrents through its
+            # existing fenced magnet bootstrap, not this batch admission.
+            raise MetadataClientUnsupported()
+
+        from src.nextgen.storage.batch_metadata_admission import (
+            BatchMetadataJournal, lookup, _inventory,
         )
-        try:
-            qb=QbClient(download_options(configuration),
-                        await blocking(secrets.qbittorrent_credentials))
-            await blocking(qb.login)
-            if qb.metadata_strategy!='fetch':
-                # Older qBittorrent needs a pre-manifest send journal;
-                # the existing .torrent source remains the safe fallback.
-                raise fallback_error
-            from src.nextgen.storage.acquisition import source_magnet
-            magnet=await blocking(source_magnet,
-                configuration.value('storage.database_path'),source)
-            resolved=await blocking(qb.fetch_metadata,magnet,source.info_hash)
-            if resolved is None:raise MetadataSourceWaiting()
-            if cancelled.is_set():raise asyncio.CancelledError()
-            return resolved[1]
-        except ClientUnavailable:raise MetadataSourceUnavailable() from None
-        except (ClientAuthenticationFailed,ClientInvalid,ClientUnsupported):
+        from src.nextgen.batch.qb_client import BatchClient
+        from src.nextgen.acquisition.metadata import hash_magnet, ObservedBatchInventory
+        from src.nextgen.storage.batch_metadata_admission import STOPPED
+
+        database=configuration.value('storage.database_path')
+        owned,stored=await blocking(lookup,database,digest)
+        if owned is None:
+            if claim is None or event_id is None:
+                raise MetadataClientUnsupported()
+            journal=BatchMetadataJournal(database)
+            # Never adopt an existing matching hash, even if it carries
+            # another application's "ad-" tag.
+            before=await blocking(qb.inspect,digest)
+            owned,permit=await blocking(
+                journal.authorize,claim,event_id,digest,options,qb.major,
+                before is not None)
+            if owned.state in ('EXTERNAL','REVIEW'):
+                raise MetadataSourceDenied()
+            target=BatchClient(owned.options,credentials)
+            await blocking(target.login)
+            if permit is not None:
+                await blocking(journal.guard,claim,owned)
+                try:
+                    magnet=await blocking(_event_magnet,database,event_id,digest)
+                    await blocking(target.add_early_batch_magnet,
+                                   magnet,owned,permit)
+                except (ClientUnavailable,ClientInvalid,ClientAuthenticationFailed):
+                    # The network send is uncertain; never issue it again.
+                    raise MetadataSourceWaiting() from None
+            current=await blocking(target.inspect,digest)
+            if current is None:
+                raise MetadataSourceWaiting()
+            if (current.save_path.rstrip('/')!=owned.options.download_root
+                    or current.category!=owned.options.category
+                    or current.auto_tmm is not False
+                    or 'ad-'+owned.marker not in current.tags
+                    or any(t.startswith('ad-') and t!='ad-'+owned.marker
+                           for t in current.tags)):
+                await blocking(journal.observe,claim,owned,current)
+                raise MetadataSourceDenied()
+            if current.state not in STOPPED:
+                observed=await blocking(target.stop_legacy_metadata,owned)
+            elif current.files:
+                observed=await blocking(target.inspect_legacy_metadata,
+                    digest,owned.marker,owned.options.download_root)
+            else:
+                observed=await blocking(target.poll_legacy_metadata,
+                                         owned,cancelled)
+            updated=await blocking(journal.observe,claim,owned,observed)
+            if updated.state in ('REVIEW','EXTERNAL'):
+                raise MetadataSourceDenied()
+            if updated.state!='OWNED_STOPPED':
+                raise MetadataSourceWaiting()
+            owned,stored=await blocking(lookup,database,digest)
+
+        # Never trust just the marker: recheck the complete journal-owned
+        # snapshot before returning metadata to any downstream batch stage.
+        target=BatchClient(owned.options,credentials)
+        await blocking(target.login)
+        # After SUBMIT_BATCH adopts the exact journal-owned magnet, transfer
+        # jobs may legitimately be downloading. Keep verifying identity and
+        # immutable files without falsely requiring a stopped torrent.
+        observed=await blocking(target.inspect_owned_batch_metadata,
+                                digest,owned.marker,owned.options.download_root,
+                                require_stopped=owned.state!='ADOPTED')
+        if observed is None or stored is None or observed.files!=stored.files:
+            raise MetadataSourceDenied()
+        if cancelled.is_set():
+            raise asyncio.CancelledError()
+        if target.metadata_strategy=='guarded_export':
+            _,raw=await blocking(target.export_metainfo,digest,batch=True)
+            # The qB observation and the BEP3 parser must describe the same
+            # inventory before the pipeline switches to cryptographic proof.
+            from src.nextgen.acquisition.metadata import parse_batch_metainfo
+            verified=parse_batch_metainfo(raw,digest)
+            if verified.files!=stored.files:
+                raise MetadataSourceDenied()
+            return raw
+        return observed
+    except DownloadConfigurationError:
+        raise MetadataSourceConfigurationError() from None
+    except ClientUnsupported:
+        raise MetadataClientUnsupported() from None
+    except ClientUnavailable:
+        raise MetadataSourceUnavailable() from None
+    except (ClientAuthenticationFailed,ClientInvalid):
+        raise MetadataSourceDenied() from None
+    except Exception as exc:
+        from src.nextgen.acquisition.metadata import AcquisitionConflict
+        if isinstance(exc,AcquisitionConflict):
             raise MetadataSourceDenied() from None
+        raise
+
+def make_reader(*, client_factory=QbClient, secrets=None):
+    """Single-episode metadata reader. Older clients use PREPARE bootstrap."""
+    async def read_metainfo(source, configuration, cancelled):
+        if cancelled.is_set():
+            raise asyncio.CancelledError()
+        from src.nextgen.storage.acquisition import source_magnet
+        magnet = await blocking(
+            source_magnet,configuration.value('storage.database_path'),source)
+        return await _qb_metadata(magnet, infohash(source.info_hash), configuration,
+                                  cancelled,secrets=secrets,
+                                  client_factory=client_factory,batch=False)
     return read_metainfo
 
 
-def make_batch_reader(*,client_factory=Client):
-    """Trusted hash-only reader for VERIFY_RELEASE batch inspection.
-
-    Never used by the strict single-video preparation or submission paths.
-    The caller must supply a verified, normalized torrent infohash rather
-    than a URL from an incoming notification.
-    """
-    async def read_batch_metainfo(expected_hash,configuration,cancelled):
-        if cancelled.is_set():raise asyncio.CancelledError()
-        digest=infohash(expected_hash)
-        options=SourceOptions(configuration.value('torrent_metadata.base_url'),
-                              configuration.value('torrent_metadata.timeout_seconds'))
-        client=client_factory(options)
-        return await blocking(client.fetch,digest,cancelled,batch=True)
+def make_batch_reader(*, client_factory=QbClient, secrets=None):
+    """Only a normalized hash is supplied to the batch verifier."""
+    async def read_batch_metainfo(expected_hash, configuration, cancelled, *, claim=None, event_id=None):
+        digest = infohash(expected_hash)
+        return await _qb_metadata(digest,digest,configuration,cancelled,
+                                  secrets=secrets,client_factory=client_factory,
+                                  batch=True,claim=claim,event_id=event_id)
     return read_batch_metainfo

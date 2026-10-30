@@ -19,6 +19,10 @@ def unfinished_resources(db,operation_id):
                        'WHERE m.operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None
             or db.execute('SELECT 1 FROM sonarr_magnet_intents i JOIN job_operation_members m '
                           "ON m.job_id=i.job_id WHERE m.operation_id=? AND i.state<>'RELEASED' LIMIT 1",(operation_id,)).fetchone() is not None
+            or db.execute('SELECT 1 FROM batch_metadata_admissions i JOIN job_operation_members m '
+                          'ON m.job_id=i.verification_job_id WHERE m.operation_id=? '
+                          "AND i.state NOT IN ('RELEASED','EXTERNAL') LIMIT 1",
+                          (operation_id,)).fetchone() is not None
             or db.execute('SELECT 1 FROM staging_cleanup_artifacts '
                           'WHERE operation_id=? LIMIT 1',(operation_id,)).fetchone() is not None)
 

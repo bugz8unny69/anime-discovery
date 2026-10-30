@@ -7,7 +7,7 @@ is NOT a torrent submission permit or proof of download/audio/staging.
 from dataclasses import dataclass
 import sqlite3
 
-from src.nextgen.acquisition.metadata import BatchInventory, AcquisitionConflict
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, AcquisitionConflict
 from src.nextgen.history import integer
 from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
@@ -18,7 +18,7 @@ class BatchAcquisitionCandidate:
     reservation_job_id: int
     plan_id: int
     info_hash: str
-    info_sha256: str
+    info_sha256: str | None
     probe_index: int
     planned_episodes: tuple[tuple[int,int],...]
     skipped_indices: tuple[int,...]
@@ -95,7 +95,7 @@ def _candidate(db,reservation_job_id,inventory,*,cleanup=False):
 def load_batch_acquisition_candidate(database,reservation_job_id,inventory):
     """Inspect a newly re-fetched hash-bound torrent without any qB mutation."""
     integer(reservation_job_id,positive=True)
-    if type(inventory) is not BatchInventory:raise AcquisitionConflict()
+    if type(inventory) not in (BatchInventory,ObservedBatchInventory):raise AcquisitionConflict()
     db=None
     try:
         db=_open(database,readonly=True,timeout_ms=5000)

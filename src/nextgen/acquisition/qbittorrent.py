@@ -176,14 +176,15 @@ class Client:
             raise ClientAuthenticationFailed()
         return self.protocol.metadata_strategy
 
-    def fetch_metadata(self,source,expected_hash):
-        """5.2+ metadata-only fetch; hash-bound and safe to poll while pending.
+    def fetch_metadata(self,source,expected_hash,*,batch=False):
+        """5.2+ metadata-only fetch without torrent submission or selection.
 
-        The source is an original magnet or a canonical v1 info hash. The
-        returned metainfo is always independently checked against the hash.
+        Batch mode validates a multi-video inventory; single-episode mode
+        retains its existing one-video Manifest contract.
         """
         from src.nextgen.acquisition.prowlarr_search import _magnet_hash
-        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
+        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash, parse_batch_metainfo
+        if type(batch) is not bool:raise ClientInvalid()
         expected_hash=infohash(expected_hash)
         if (self.metadata_strategy!='fetch' or
                 source!=expected_hash and _magnet_hash(source)!=expected_hash):
@@ -199,19 +200,21 @@ class Client:
         if type(data['info']) is not dict:raise ClientInvalid()
         raw,_=self._request('torrents/saveMetadata',form={'source':source},limit=MAX_METAINFO)
         if not raw:return None
-        return parse_metainfo(raw,expected_hash),raw
+        return (parse_batch_metainfo if batch else parse_metainfo)(raw,expected_hash),raw
 
-    def export_metainfo(self,expected_hash):
-        """Export hash-bound bytes only when the server actually supports it.
+    def export_metainfo(self,expected_hash,*,batch=False):
+        """Hash-verified export for a previously admitted stopped torrent.
 
-        Ownership must be established by the caller; export grants no rights.
+        Export is read-only. It is not permission to adopt, start or replace a
+        torrent, and it never grants a send permit. Batch mode returns a typed
+        multi-video inventory instead of a single-episode manifest.
         """
-        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash
-        if self.protocol is None or self.api_version < (2,8,14):
+        from src.nextgen.acquisition.metadata import MAX_METAINFO, infohash, parse_batch_metainfo
+        if self.protocol is None or self.api_version < (2,8,14) or type(batch) is not bool:
             raise ClientUnsupported()
         expected_hash=infohash(expected_hash)
         raw,_=self._request('torrents/export',query={'hash':expected_hash},limit=MAX_METAINFO)
-        return parse_metainfo(raw,expected_hash),raw
+        return (parse_batch_metainfo if batch else parse_metainfo)(raw,expected_hash),raw
 
     def inspect(self,expected_hash):
         if not self._sid or self.major is None:raise ClientAuthenticationFailed()
@@ -345,7 +348,8 @@ class Client:
         """
         import time
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.state!='UNCERTAIN'
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.state!='UNCERTAIN'
                 or intent.options!=self.options
                 or self.protocol is None
                 or type(attempts) is not int or not 1<=attempts<=20
@@ -390,7 +394,8 @@ class Client:
     def stop_legacy_metadata(self,intent):
         """Stop a journal-owned magnet before any file inventory is accepted."""
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.options!=self.options
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.options!=self.options
                 or intent.state not in ('UNCERTAIN','OWNED_STOPPED')
                 or self.protocol is None):
             raise ClientInvalid()
@@ -419,7 +424,8 @@ class Client:
         this method. Do not delete local files or try another remove on replay.
         """
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.options!=self.options
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.options!=self.options
                 or self.protocol is None):
             raise ClientInvalid()
         observed=self.inspect(intent.info_hash)

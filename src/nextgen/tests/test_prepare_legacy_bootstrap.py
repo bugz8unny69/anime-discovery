@@ -78,15 +78,6 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
                                cancelled=asyncio.Event(),
                                logger=logging.getLogger('anime-discovery.test.bootstrap'))
 
-    async def test_webhook_event_with_configured_torrent_source_never_contacts_qbittorrent(self):
-        factory=Mock()
-        cb=make_bootstrap(self.secrets,client_factory=factory)
-        context=self._config(**{'torrent_metadata.base_url':'https://cache.example/torrents'})
-        with patch('src.nextgen.acquisition.legacy_magnet.acquisition_identity',
-                   return_value=None):
-            self.assertIsNone(await cb(self.source,context))
-        factory.assert_not_called()
-
     async def test_webhook_event_without_torrent_source_admits_its_own_magnet(self):
         """Autobrr intake: no .torrent URL; Legacy magnet admission."""
         root='/downloads/ad-'+'d'*32

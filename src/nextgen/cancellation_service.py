@@ -149,6 +149,83 @@ class CancellationService(OwnedCleanup):
             settled.add(intent.event_id)
         return settled,True
 
+    def _early_batch_metadata(self,operation_id):
+        """Clean only preverification magnets that were never adopted.
+
+        Cancellation shares the existing exclusive operation drain and
+        one-shot cleanup boundary. The database enters REVIEW before a
+        destructive command, so replay can only observe; it cannot delete a
+        second time after an uncertain response.
+        """
+        from src.nextgen.storage.batch_metadata_admission import (
+            _restore, _inventory,
+        )
+        with self.store.queue.connection() as db:
+            rows=db.execute(
+                "SELECT i.event_id,i.verification_job_id,i.info_hash,i.ownership_marker,"
+                "i.base_url,i.save_path,i.category,i.timeout_seconds,i.api_major,"
+                "i.state,i.inventory_json,i.created_at_ms "
+                "FROM batch_metadata_admissions i "
+                "JOIN job_operation_members m ON m.job_id=i.verification_job_id "
+                "WHERE m.operation_id=? AND i.state NOT IN ('EXTERNAL','RELEASED','ADOPTED')",
+                (operation_id,)).fetchall()
+        if len(rows)>32:raise CancellationError()
+        if not rows:return True
+        credentials=self.secrets.qbittorrent_credentials()
+        for row in rows:
+            self._fence()
+            intent=_restore(row[:11])
+            created=row[11]
+            client=self.client_factory(intent.options,credentials)
+            client.login()
+            observed=client.inspect(intent.info_hash)
+            if observed is None:
+                if self.queue.now()-created<600000:
+                    return False
+                if not self._empty_magnet_root(intent.options.download_root,intent.marker):
+                    raise CancellationError()
+                with self.store.queue.connection() as db,transaction(db):
+                    self._fence(db)
+                    db.execute(
+                        "UPDATE batch_metadata_admissions SET state='RELEASED',updated_at_ms=? "
+                        "WHERE event_id=? AND state IN ('UNCERTAIN','REVIEW','OWNED_STOPPED')",
+                        (self.queue.now(),intent.event_id))
+                continue
+            saved=_inventory(intent)
+            owned=(observed.info_hash==intent.info_hash
+                   and observed.save_path.rstrip('/')==intent.options.download_root
+                   and observed.category==intent.options.category
+                   and observed.auto_tmm is False
+                   and 'ad-'+intent.marker in observed.tags
+                   and not any(t.startswith('ad-') and t!='ad-'+intent.marker
+                               for t in observed.tags))
+            with_files=(intent.state=='OWNED_STOPPED'
+                        and saved is not None and bool(observed.files)
+                        and observed.files==saved.files)
+            if (not owned or intent.state=='REVIEW'
+                    or (observed.files and not with_files)
+                    or (not with_files and not self._empty_magnet_root(
+                        intent.options.download_root,intent.marker))):
+                raise CancellationError()
+            with self.store.queue.connection() as db,transaction(db):
+                self._fence(db)
+                changed=db.execute(
+                    "UPDATE batch_metadata_admissions SET state='REVIEW',updated_at_ms=? "
+                    "WHERE event_id=? AND state=?",
+                    (self.queue.now(),intent.event_id,intent.state)).rowcount
+                if changed!=1:raise CancellationError()
+            if observed.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP'):
+                client.stop_legacy_metadata(intent)
+            if not client.remove_empty_legacy_magnet(intent,with_files=with_files):
+                return False
+            with self.store.queue.connection() as db,transaction(db):
+                self._fence(db)
+                db.execute(
+                    "UPDATE batch_metadata_admissions SET state='RELEASED',updated_at_ms=? "
+                    "WHERE event_id=? AND state='REVIEW'",
+                    (self.queue.now(),intent.event_id))
+        return True
+
     def _targets(self,job_id,*,resolved=()):
         with self.store.queue.connection() as db,transaction(db):
             self._fence(db)
@@ -212,6 +289,9 @@ class CancellationService(OwnedCleanup):
                 with OperationGate(self.database).hold(status['operation_id'],cleanup=True):
                     resolved,ready=self._pre_manifest(status['operation_id'])
                     if not ready:
+                        self._state(job_id,'PENDING','CANCELLATION_PENDING')
+                        return self.store.status(job_id)
+                    if not self._early_batch_metadata(status['operation_id']):
                         self._state(job_id,'PENDING','CANCELLATION_PENDING')
                         return self.store.status(job_id)
                     op,targets,batches=self._targets(job_id,resolved=resolved)

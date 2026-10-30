@@ -14,6 +14,75 @@ from src.nextgen.storage.batch_submission_journal import (
 
 
 class BatchClient(Client):
+    def add_early_batch_magnet(self, magnet, intent, permit):
+        """Only the journal's one-shot preverification send, always stopped.
+
+        The same ad-<marker> ownership tag is recovered by the later
+        submission stage; this method never creates an acquisition permit.
+        """
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent, EarlyBatchPermit
+        from src.nextgen.acquisition.prowlarr_search import _magnet_hash
+        from src.nextgen.acquisition.submission import ClientAuthenticationFailed
+        if not self._sid or self.protocol is None:
+            raise ClientAuthenticationFailed()
+        if (type(intent) is not EarlyBatchIntent or type(permit) is not EarlyBatchPermit
+                or intent.state!='UNCERTAIN'
+                or self.options!=intent.options or self.major!=intent.api_major
+                or self.metadata_strategy not in ('guarded_export','legacy_poll')
+                or _magnet_hash(magnet)!=intent.info_hash
+                or not self.options.download_root.endswith('/ad-'+intent.marker)):
+            raise ClientInvalid()
+        payload={'urls':magnet,'savepath':self.options.download_root,
+                 'category':self.options.category,
+                 **self.protocol.label_fields(intent.marker),
+                 **self.protocol.add_fields(True)}
+        permit.take(intent)
+        self._request('torrents/add',form=payload,limit=4096)
+        if not self.protocol.inline_tags:
+            self._tag_legacy_submission(intent.info_hash,intent.marker)
+
+
+    def inspect_owned_batch_metadata(self, expected_hash, marker, download_root, *, require_stopped=True):
+        """Double-check a journal-owned, stopped qB file list without mutation.
+
+        The caller must first persist the one-use early batch admission.
+        This returns *observed* metadata, never fabricates a BEP3 SHA256,
+        and grants no permission to start or adopt the torrent.
+        """
+        import re
+        from src.nextgen.acquisition.metadata import (
+            infohash, ObservedBatchInventory,
+        )
+        from src.nextgen.acquisition.submission import ClientInvalid
+        digest = infohash(expected_hash)
+        if (not self._sid or self.protocol is None
+                or type(marker) is not str
+                or re.fullmatch('[a-f0-9]{32}', marker) is None
+                or download_root!=self.options.download_root
+                or not download_root.endswith('/ad-'+marker)):
+            raise ClientInvalid()
+
+        def owned(row):
+            return (row is not None and row.info_hash==digest
+                    and row.save_path.rstrip('/')==download_root
+                    and row.category==self.options.category
+                    and row.auto_tmm is False
+                    and (not require_stopped or row.state in
+                         ('pausedDL','pausedUP','stoppedDL','stoppedUP'))
+                    and 'ad-'+marker in row.tags
+                    and not any(t.startswith('ad-') and t!='ad-'+marker
+                                for t in row.tags)
+                    and bool(row.files))
+
+        before=self.inspect(digest)
+        if not owned(before):
+            return None
+        after=self.inspect(digest)
+        if (not owned(after) or after.files!=before.files
+                or (require_stopped and after.state!=before.state)):
+            raise ClientInvalid()
+        return ObservedBatchInventory(digest, after.files)
+
     def add_batch_stopped(self,raw,intent,permit):
         if (not self._sid or self.major not in (4,5)
                 or type(intent) is not BatchSubmissionIntent

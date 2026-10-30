@@ -214,10 +214,15 @@ class SonarrSettingsTests(unittest.TestCase):
             self.assertNotIn('sonarr',doc['settings'])
             with self.assertRaises(ConfigurationError):convert_document({**doc,'settings':{**doc['settings'],'sonarr':{'base_url':'http://sonarr.invalid'}}})
         upgraded=convert_document(doc)
-        self.assertEqual(upgraded.schema_version,11)
-        self.assertEqual(upgraded.revision,doc['revision']+4)
+        self.assertEqual(upgraded.schema_version,12)
+        self.assertEqual(upgraded.revision,doc['revision']+5)
         self.assertEqual(upgraded.value('sonarr.base_url'),'')
-        for section,value in doc['settings'].items():self.assertEqual(upgraded.to_document()['settings'][section],value)
+        # The HTTP torrent metadata source was explicitly retired in v12.
+        # Every other historical setting remains unchanged.
+        self.assertNotIn('torrent_metadata',upgraded.to_document()['settings'])
+        for section,value in doc['settings'].items():
+            if section!='torrent_metadata':
+                self.assertEqual(upgraded.to_document()['settings'][section],value)
 
 
 class SonarrCredentialApiTests(unittest.IsolatedAsyncioTestCase):

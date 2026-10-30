@@ -6,7 +6,7 @@ it never submits a torrent or makes a trial/Keep decision.
 from dataclasses import dataclass, field
 import inspect
 
-from src.nextgen.acquisition.metadata import BatchInventory, infohash, parse_batch_metainfo
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, infohash, read_batch_inventory
 from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.batch.verification import VerifiedBatch, verify_batch_files
 from src.nextgen.providers.errors import ProviderAuthenticationFailed
@@ -23,7 +23,7 @@ class BatchVerificationCompletion:
     verified: VerifiedBatch
 
     def __post_init__(self):
-        if type(self.source) is not ReleaseInput or type(self.inventory) is not BatchInventory:
+        if type(self.source) is not ReleaseInput or type(self.inventory) not in (BatchInventory,ObservedBatchInventory):
             raise ValueError('Typed release and batch metadata required')
         if type(self.verified) is not VerifiedBatch:
             raise ValueError('Batch provider proof required')
@@ -48,7 +48,7 @@ def make_batch_verifier(options, credentials, read_batch_metainfo, *,
         raise ValueError('Incomplete trusted batch provider composition')
     pool=client_pool or ClientPool(client_factory)
 
-    async def call(source,configuration,cancelled):
+    async def call(source,configuration,cancelled,*,claim=None):
         if type(source) is not ReleaseInput:
             raise ValueError('Release source required')
         if cancelled.is_set():
@@ -61,8 +61,15 @@ def make_batch_verifier(options, credentials, read_batch_metainfo, *,
             digest=infohash(document.get('torrent_infohash'))
         except ValueError:
             raise ReleaseNotReady('RELEASE_UNRESOLVED') from None
-        raw=await read_batch_metainfo(digest,configuration,cancelled)
-        inventory=await blocking(parse_batch_metainfo,raw,digest)
+        # The built-in reader needs the leased VERIFY_RELEASE claim before
+        # issuing any older-client stopped-magnet admission. Custom injected
+        # readers used by tests retain their three-argument contract.
+        if claim is not None and 'claim' in inspect.signature(read_batch_metainfo).parameters:
+            raw=await read_batch_metainfo(digest,configuration,cancelled,
+                                          claim=claim,event_id=source.event_id)
+        else:
+            raw=await read_batch_metainfo(digest,configuration,cancelled)
+        inventory=await blocking(read_batch_inventory,raw,digest)
         actual=options(configuration) if callable(options) else options
         secret=credentials()
         if type(secret) is not Credentials:

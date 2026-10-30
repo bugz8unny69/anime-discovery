@@ -11,7 +11,7 @@ import json
 import secrets
 import threading
 
-from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile, AcquisitionConflict
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, TorrentFile, AcquisitionConflict
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.acquisition.transfers import STOPPED, CHECKING
@@ -26,7 +26,7 @@ from src.nextgen.storage.sqlite import transaction
 @dataclass(frozen=True)
 class BatchSubmissionIntent:
     candidate: BatchAcquisitionCandidate = field(repr=False)
-    inventory: BatchInventory = field(repr=False)
+    inventory: BatchInventory | ObservedBatchInventory = field(repr=False)
     options: DownloadOptions = field(repr=False)
     marker: str = field(repr=False)
     state: str
@@ -34,7 +34,7 @@ class BatchSubmissionIntent:
     api_major: int
     def __post_init__(self):
         if (type(self.candidate) is not BatchAcquisitionCandidate
-                or type(self.inventory) is not BatchInventory
+                or type(self.inventory) not in (BatchInventory,ObservedBatchInventory)
                 or type(self.options) is not DownloadOptions
                 or type(self.marker) is not str or len(self.marker)!=32
                 or any(x not in '0123456789abcdef' for x in self.marker)
@@ -108,8 +108,10 @@ def stored_inventory(db,plan_id,info_hash,info_sha256):
         if (type(document) is not dict or set(document)!={'files'}
                 or type(document['files']) is not list):
             raise AcquisitionConflict()
-        inventory=BatchInventory(info_hash,info_sha256,
-                                 tuple(TorrentFile(**f) for f in document['files']))
+        inventory=(BatchInventory(info_hash,info_sha256,
+                        tuple(TorrentFile(**f) for f in document['files']))
+                   if info_sha256 is not None else ObservedBatchInventory(info_hash,
+                        tuple(TorrentFile(**f) for f in document['files'])))
         if inventory.json()!=raw:raise AcquisitionConflict()
         return inventory
     except (TypeError,KeyError,ValueError):
@@ -202,7 +204,7 @@ class BatchSubmissionJournal:
 
     def load(self,claim,reservation_job_id,inventory):
         integer(reservation_job_id,positive=True)
-        if type(inventory) is not BatchInventory:raise AcquisitionConflict()
+        if type(inventory) not in (BatchInventory,ObservedBatchInventory):raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
             self._owns(db,claim,reservation_job_id)
             candidate=_candidate(db,reservation_job_id,inventory)
@@ -212,7 +214,7 @@ class BatchSubmissionJournal:
 
     def authorize(self,claim,candidate,inventory,options,api_major,present,revision):
         if (type(candidate) is not BatchAcquisitionCandidate
-                or type(inventory) is not BatchInventory
+                or type(inventory) not in (BatchInventory,ObservedBatchInventory)
                 or type(options) is not DownloadOptions
                 or type(api_major) is not int or api_major not in (4,5)
                 or type(present) is not bool):
@@ -233,11 +235,36 @@ class BatchSubmissionJournal:
             if db.execute('SELECT 1 FROM batch_torrent_submissions WHERE info_hash=?',
                           (inventory.info_hash,)).fetchone():
                 raise AcquisitionConflict()
-            marker=secrets.token_hex(16)
-            target=_target(options,marker)
+            # Legacy batches were admitted in VERIFY_RELEASE before provider
+            # verification. Atomically transfer ownership of that stopped,
+            # hash-bound, journaled torrent rather than submitting it twice.
+            from src.nextgen.storage.batch_metadata_admission import _select, _inventory
+            early=_select(db,info_hash=inventory.info_hash)
+            if early is not None:
+                verification=db.execute(
+                    'SELECT b.job_id FROM batch_trial_plans p '
+                    'JOIN batch_verifications b USING(batch_id) WHERE p.plan_id=?',
+                    (candidate.plan_id,)).fetchone()
+                old_inventory=_inventory(early)
+                if (early.state!='OWNED_STOPPED'
+                        or early.event_id!=claim.event_id
+                        or verification!=(early.job_id,)
+                        or early.api_major!=api_major
+                        or early.options.base_url!=options.base_url
+                        or early.options.category!=options.category
+                        or early.options.timeout_seconds!=options.timeout_seconds
+                        or not present or old_inventory is None
+                        or old_inventory.files!=inventory.files):
+                    raise AcquisitionConflict()
+                marker=early.marker
+                target=early.options
+                state,reason='OWNED_STOPPED','TORRENT_STOPPED_CONFIRMED'
+            else:
+                marker=secrets.token_hex(16)
+                target=_target(options,marker)
+                state,reason=(('EXTERNAL','TORRENT_ALREADY_PRESENT') if present
+                              else ('UNCERTAIN','TORRENT_SUBMISSION_UNCERTAIN'))
             fingerprint=_fingerprint(candidate,inventory,target,marker,api_major)
-            state,reason=(('EXTERNAL','TORRENT_ALREADY_PRESENT') if present
-                          else ('UNCERTAIN','TORRENT_SUBMISSION_UNCERTAIN'))
             db.execute(
                 'INSERT INTO batch_torrent_submissions('
                 'plan_id,reservation_job_id,first_job_id,first_attempt,info_hash,info_sha256,'
@@ -255,13 +282,18 @@ class BatchSubmissionJournal:
                 'INSERT INTO batch_submission_inventories(plan_id,inventory_json,created_at_ms) '
                 'VALUES(?,?,?)',
                 (candidate.plan_id,raw_inventory,now))
+            if early is not None:
+                db.execute(
+                    "UPDATE batch_metadata_admissions SET state='ADOPTED',updated_at_ms=? "
+                    "WHERE event_id=? AND state='OWNED_STOPPED'",
+                    (now,early.event_id))
             receipt=append_job_history(
                 db,job_id=claim.job_id,event_code='TORRENT_INTENT_RECORDED',
                 reason_code=reason,component='worker',occurred_at_ms=now,
                 details={'attempt':claim.attempt})
             self._owns(db,claim,candidate.reservation_job_id)
             intent=BatchSubmissionIntent(candidate,inventory,target,marker,state,fingerprint,api_major)
-            return intent,(None if present else BatchSendPermit(fingerprint)),(receipt,)
+            return intent,(None if early is not None or present else BatchSendPermit(fingerprint)),(receipt,)
 
     def guard_send(self,claim,intent):
         if type(intent) is not BatchSubmissionIntent:raise AcquisitionConflict()
@@ -285,11 +317,15 @@ class BatchSubmissionJournal:
             current=_intent(db,candidate,intent.inventory)
             if current is None or current.fingerprint!=intent.fingerprint:
                 raise AcquisitionConflict()
-            if current.state in ('EXTERNAL','REVIEW','OWNED_STOPPED'):
+            if current.state in ('EXTERNAL','REVIEW'):
                 return current.state,_reason(current.state),()
             if current.state!=intent.state:
                 return current.state,_reason(current.state),()
             state,reason=_classify(current,observation)
+            if current.state=='OWNED_STOPPED' and state!='OWNED_STOPPED':
+                # Ownership changed after adoption: fail closed. Never
+                # silently treat a once-owned torrent as permanently valid.
+                state,reason='REVIEW','TORRENT_PROVENANCE_CONFLICT'
             receipt=()
             if state!=current.state:
                 db.execute('UPDATE batch_torrent_submissions SET state=?,reason_code=?,'

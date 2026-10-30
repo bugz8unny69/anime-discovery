@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from src.nextgen.acquisition.metainfo_source import (
-    MetadataSourceConfigurationError, MetadataSourceWaiting, make_reader,
+    MetadataClientUnsupported, MetadataSourceWaiting, make_reader,
 )
 from src.nextgen.sonarr_episode import VerifiedEpisode
 
@@ -42,45 +42,39 @@ class BackfillMetadataReaderTests(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(item.stop)
 
     async def test_verified_magnet_produces_same_metainfo_reader_output(self):
-        reader=make_reader(secrets=self.secrets)
+        reader=make_reader(secrets=self.secrets,client_factory=lambda *_:self.qb)
         self.assertEqual(await reader(self.source,self.configuration,asyncio.Event()),
                          b'metainfo')
         self.qb.login.assert_called_once()
-        self.qb.fetch_metadata.assert_called_once_with(MAGNET,HASH)
+        self.qb.fetch_metadata.assert_called_once_with(MAGNET,HASH,batch=False)
 
     async def test_pending_metadata_defers_without_submission(self):
         self.qb.fetch_metadata.return_value=None
-        reader=make_reader(secrets=self.secrets)
+        reader=make_reader(secrets=self.secrets,client_factory=lambda *_:self.qb)
         with self.assertRaises(MetadataSourceWaiting):
             await reader(self.source,self.configuration,asyncio.Event())
         self.qb.add_stopped.assert_not_called()
 
     async def test_legacy_client_does_not_add_unverified_magnet(self):
         self.qb.metadata_strategy='guarded_export'
-        reader=make_reader(secrets=self.secrets)
-        with self.assertRaises(MetadataSourceConfigurationError):
+        reader=make_reader(secrets=self.secrets,client_factory=lambda *_:self.qb)
+        with self.assertRaises(MetadataClientUnsupported):
             await reader(self.source,self.configuration,asyncio.Event())
         self.qb.fetch_metadata.assert_not_called()
         self.qb.add_stopped.assert_not_called()
 
-    async def test_webhook_event_with_waiting_torrent_source_keeps_that_source(self):
-        from src.nextgen.storage import sonarr_selection
-        failing=Mock()
-        failing.return_value.fetch.side_effect=MetadataSourceWaiting()
-        with patch.object(sonarr_selection,'acquisition_identity',return_value=None):
-            values={k:self.configuration.value(k) for k in (
-                'storage.database_path','torrent_metadata.timeout_seconds')}
-            values['torrent_metadata.base_url']='https://cache.example/torrents'
-            configured=SimpleNamespace(value=values.__getitem__)
-            reader=make_reader(secrets=self.secrets,client_factory=failing)
-            with self.assertRaises(MetadataSourceWaiting):
-                await reader(self.source,configured,asyncio.Event())
-        self.qb.login.assert_not_called()
+    async def test_obsolete_metadata_source_setting_is_never_consulted(self):
+        configuration=SimpleNamespace(value=lambda key: (
+            (_ for _ in ()).throw(AssertionError('obsolete HTTP setting consulted'))
+            if key.startswith('torrent_metadata.') else self.configuration.value(key)))
+        reader=make_reader(secrets=self.secrets,client_factory=lambda *_:self.qb)
+        self.assertEqual(await reader(self.source,configuration,asyncio.Event()),
+                         b'metainfo')
 
     async def test_webhook_event_without_torrent_source_fetches_its_own_magnet(self):
         from src.nextgen.storage import sonarr_selection
         with patch.object(sonarr_selection,'acquisition_identity',return_value=None):
-            reader=make_reader(secrets=self.secrets)
+            reader=make_reader(secrets=self.secrets,client_factory=lambda *_:self.qb)
             self.assertEqual(await reader(self.source,self.configuration,asyncio.Event()),
                              b'metainfo')
-        self.qb.fetch_metadata.assert_called_once_with(MAGNET,HASH)
+        self.qb.fetch_metadata.assert_called_once_with(MAGNET,HASH,batch=False)
