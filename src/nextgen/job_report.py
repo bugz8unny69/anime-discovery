@@ -1,4 +1,4 @@
-"""`adm report job <id>`: one read-only, plain-text report of everything about a job.
+"""`adm report job --id N`: one read-only, plain-text report of everything about a job.
 
 Reads the database in read-only mode; never changes state or calls a service.
 Covers the job, the work it controls (or is controlled by), every job in that
@@ -201,15 +201,16 @@ def connect(config_dir):
 
 def main(argv):
     import argparse
-    parser = argparse.ArgumentParser(prog='adm report', description='Read-only report of one job')
-    parser.add_argument('what', choices=('job',))
-    parser.add_argument('job_id', type=int)
-    parser.add_argument('--config-dir', default='/etc/anime-discovery')
+    parser = argparse.ArgumentParser(prog='adm report', description='Read-only reports')
+    kinds = parser.add_subparsers(dest='what', required=True, metavar='{job}')
+    job = kinds.add_parser('job', help='Everything about one job: history, failed check, paths')
+    job.add_argument('--id', dest='job_id', type=int, required=True, help='Job number, e.g. 2593')
+    job.add_argument('--config-dir', default='/etc/anime-discovery')
     args = parser.parse_args(argv)
     try:
         db = connect(args.config_dir)
     except Exception as exc:  # Explain plainly; the usual cause is permissions.
         parser.exit(2, f'Cannot open the database read-only ({exc.__class__.__name__}: {exc}). '
-                       'Run as root or the anime-discovery service account.\n')
+                       'Run with sudo, or as the anime-discovery service account.\n')
     with db:
         return report(db, args.job_id)
