@@ -7,7 +7,7 @@ import json
 from src.nextgen.providers.parsing import release_title
 from src.nextgen.providers.parsing import norm
 from src.nextgen.batch.recognition import release_scope_hint
-from src.nextgen.storage.job_queue import JobQueue
+from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
 from src.nextgen.storage.sqlite import transaction
 
 
@@ -44,10 +44,13 @@ def for_release(database, release, season=None):
         key = _key(release)
     except ManualMatchError:
         return None
-    with JobQueue(database).connection() as db:
-        row = db.execute(
-            "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
-            "WHERE alias_key=? AND tvdb_season=?", (key, scope)).fetchone()
+    try:
+        with JobQueue(database).connection() as db:
+            row = db.execute(
+                "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
+                "WHERE alias_key=? AND tvdb_season=?", (key, scope)).fetchone()
+    except QueueUnavailable:
+        return None
     if row is None:
         return None
     return {"schema_version": 2, "anime": {
