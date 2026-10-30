@@ -21,13 +21,81 @@ class MagnetMetadataTests(unittest.TestCase):
         client._request=Mock()
         return client
 
+    def test_metadata_poll_tuning_accepts_bounded_values(self):
+        from types import SimpleNamespace
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client=self.client((2,8,19),4)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        state=Observation(HASH,'pausedDL',options.download_root,
+                          'anime',('ad-'+'c'*32,),False,())
+        seen=[]
+        with patch.object(client,'inspect',return_value=state):
+            with patch.object(client,'stop_legacy_metadata',return_value=None):
+                client.poll_legacy_metadata(intent,SimpleNamespace(is_set=lambda:False),
+                                            attempts=3,interval=7,sleep=seen.append)
+                with self.assertRaises(ClientInvalid):
+                    client.poll_legacy_metadata(intent,SimpleNamespace(is_set=lambda:False),
+                                                attempts=25,interval=7,sleep=seen.append)
+        self.assertEqual(seen,[7,7])
+
+    def test_status_poll_skips_file_list_until_due(self):
+        import json
+        client=self.client((2,8,19),4)
+        row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
+             'save_path':'/media/downloads','category':'anime','state':'metaDL'}
+        client._request.return_value=(json.dumps([row]).encode(),{})
+        value=client.inspect(HASH,include_files=False)
+        self.assertEqual(value.files,())
+        client._request.assert_called_once_with(
+            'torrents/info',query={'hashes':HASH,'limit':2})
+
+    def test_file_list_requires_indices_on_supported_api(self):
+        import json
+        client=self.client((2,8,19),4)
+        row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
+             'save_path':'/media/downloads','category':'anime','state':'pausedDL'}
+        client._request.side_effect=[
+            (json.dumps([row]).encode(),{}),
+            (json.dumps([{'name':'episode.mkv','size':1024}]).encode(),{})]
+        with self.assertRaises(ClientInvalid):
+            client.inspect(HASH)
+
+    def test_poll_limits_metadata_file_reads(self):
+        from types import SimpleNamespace
+        from src.nextgen.acquisition.settings import DownloadOptions
+        from src.nextgen.acquisition.submission import Observation
+        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
+        options=DownloadOptions('http://localhost:8080',
+                                '/downloads/ad-'+'c'*32,'anime',10)
+        client=self.client((2,8,19),4)
+        client.options=options
+        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
+        state=Observation(HASH,'metaDL',options.download_root,
+                          'anime',('ad-'+'c'*32,),False,())
+        stopped=Observation(HASH,'pausedDL',options.download_root,
+                            'anime',('ad-'+'c'*32,),False,())
+        with patch.object(client,'inspect',side_effect=[stopped,state,state,state,state]) as read:
+            with patch.object(client,'stop_legacy_metadata',return_value=None):
+                client.poll_legacy_metadata(
+                    intent,SimpleNamespace(is_set=lambda:False),
+                    attempts=4,interval=0,sleep=lambda _:None)
+        self.assertEqual(
+            [c.kwargs.get('include_files',True) for c in read.call_args_list],
+            [True,True,False,False,True])
+
     def test_version_selection_uses_web_api_not_app_major(self):
         self.assertEqual(self.client((2,11,9)).metadata_strategy,'fetch')
         self.assertEqual(self.client((2,8,15),4).metadata_strategy,'guarded_export')
         self.assertEqual(self.client((2,10,0),5).metadata_strategy,'guarded_export')
-        self.assertEqual(self.client((2,5,1),4).metadata_strategy,'legacy_poll')
         with self.assertRaises(ClientUnsupported):
-            self.client((2,2,9),4).metadata_strategy
+            self.client((2,8,13),4)
+        with self.assertRaises(ClientUnsupported):
+            self.client((2,8,19),4)
 
     def test_protocol_names_cover_submission_start_stop(self):
         old=_Protocol(4,(2,8,15))
@@ -58,77 +126,23 @@ class MagnetMetadataTests(unittest.TestCase):
                 self.assertEqual(sent[0].kwargs['form']['tags'],'ad-'+'c'*32)
                 self.assertEqual(sent[0].kwargs['form']['paused'],'true')
 
-    def test_42_protocol_omits_unsupported_add_fields(self):
-        old=_Protocol(4,(2,5,1))
-        self.assertFalse(old.inline_tags)
-        self.assertFalse(old.indexed_files)
-        self.assertEqual(old.file_index({'name':'first.mkv'},0),0)
-        self.assertEqual(old.add_fields(True),
-                         {'paused':'true','autoTMM':'false'})
-        self.assertEqual(old.start_endpoint,'torrents/resume')
-        self.assertEqual(old.stop_endpoint,'torrents/pause')
-
-    def test_42_submission_tags_after_one_permitted_add(self):
-        import json
-        client=self.client((2,5,1),4)
-        client.options.download_root='/media/downloads/ad-'+'c'*32
-        intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
-        intent.plan.manifest.info_hash=HASH
-        intent.plan.marker='c'*32
-        observed={'hash':HASH,'save_path':client.options.download_root,
-                  'category':'anime','auto_tmm':False,'state':'pausedDL'}
+    def test_version_floor_rejects_pre_45_app_even_with_new_api(self):
+        client=self.client((2,8,19),4)
+        client._credentials=Mock(username='test',password='test')
         client._request.side_effect=[
-            (b'Ok.',{}),(json.dumps([observed]).encode(),{}),(b'',{}),
-        ]
-        permit=SendPermit('f'*64)
-        client.add_stopped(MAGNET,intent,permit)
-        self.assertEqual(client._request.call_count,3)
-        add,check,tag=client._request.call_args_list
-        self.assertEqual(add.args,('torrents/add',))
-        self.assertNotIn('tags',add.kwargs['form'])
-        self.assertNotIn('contentLayout',add.kwargs['form'])
-        self.assertNotIn('useDownloadPath',add.kwargs['form'])
-        self.assertEqual(check.args,('torrents/info',))
-        self.assertEqual(tag.args,('torrents/addTags',))
-        self.assertEqual(tag.kwargs['form'],
-                         {'hashes':HASH,'tags':'ad-'+'c'*32})
-        with self.assertRaises(ClientInvalid):
-            client.add_stopped(MAGNET,intent,permit)
-        self.assertEqual(client._request.call_count,3)
-
-    def test_42_does_not_tag_preexisting_other_destination(self):
-        import json
-        client=self.client((2,5,1),4)
-        client.options.download_root='/media/downloads/ad-'+'c'*32
-        intent=Mock(options=client.options,api_major=4,fingerprint='f'*64)
-        intent.plan.manifest.info_hash=HASH
-        intent.plan.marker='c'*32
-        client._request.side_effect=[
-            (b'Ok.',{}),
-            (json.dumps([{'hash':HASH,'save_path':'/someone/else',
-                          'category':'anime','auto_tmm':False,
-                          'state':'pausedDL'}]).encode(),{}),
-        ]
-        with self.assertRaises(ClientInvalid):
-            client.add_stopped(MAGNET,intent,SendPermit('f'*64))
-        self.assertEqual([r.args[0] for r in client._request.call_args_list],
-                         ['torrents/add','torrents/info'])
-
-    def test_legacy_metainfo_export_requires_webapi_2814(self):
-        from src.nextgen.acquisition.submission import ClientUnsupported
-        legacy=self.client((2,5,1),4)
+            (b'Ok.',Mock(get_all=lambda *args:['SID=abcdef1234567890'])),
+            (b'v4.4.5',{}),(b'2.8.19',{})]
         with self.assertRaises(ClientUnsupported):
-            legacy.export_metainfo(HASH)
-        legacy._request.assert_not_called()
+            client.login()
 
     def test_legacy_probe_requires_proven_ownership_and_two_stable_reads(self):
         import json
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         root='/media/downloads/ad-'+'c'*32
         client.options.download_root=root
         row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
              'save_path':root,'category':'anime','state':'pausedDL'}
-        files=[{'name':'episode.mkv','size':1024}]
+        files=[{'index':0,'name':'episode.mkv','size':1024}]
         client._request.side_effect=[
             (json.dumps([row]).encode(),{}),(json.dumps(files).encode(),{}),
             (json.dumps([row]).encode(),{}),(json.dumps(files).encode(),{}),
@@ -142,106 +156,28 @@ class MagnetMetadataTests(unittest.TestCase):
 
     def test_legacy_probe_rejects_changed_inventory(self):
         import json
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         root='/media/downloads/ad-'+'c'*32
         client.options.download_root=root
         row={'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
              'save_path':root,'category':'anime','state':'pausedDL'}
         client._request.side_effect=[
             (json.dumps([row]).encode(),{}),
-            (json.dumps([{'name':'episode.mkv','size':1024}]).encode(),{}),
+            (json.dumps([{'index':0,'name':'episode.mkv','size':1024}]).encode(),{}),
             (json.dumps([row]).encode(),{}),
-            (json.dumps([{'name':'different.mkv','size':1024}]).encode(),{}),
+            (json.dumps([{'index':0,'name':'different.mkv','size':1024}]).encode(),{}),
         ]
         with self.assertRaises(ClientInvalid):
             client.inspect_legacy_metadata(HASH,'c'*32,root)
 
-    def test_42_file_lists_without_index_use_stable_response_order(self):
-        import json
-        client=self.client((2,5,1),4)
-        client._request.side_effect=[
-            (json.dumps([{'hash':HASH,'auto_tmm':False,'tags':'ad-'+'c'*32,
-                          'save_path':'/media/downloads','category':'anime',
-                          'state':'pausedDL'}]).encode(),{}),
-            (json.dumps([{'name':'anime.mkv','size':100},
-                         {'name':'anime.srt','size':10}]).encode(),{}),
-        ]
-        observed=client.inspect(HASH)
-        self.assertEqual([file.index for file in observed.files],[0,1])
-        self.assertEqual([file.path for file in observed.files],
-                         ['anime.mkv','anime.srt'])
-
-    def test_42_pre_manifest_add_is_single_use_and_tagged_by_readback(self):
-        import json
-        from src.nextgen.acquisition.settings import DownloadOptions
-        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
-        client=self.client((2,5,1),4)
-        options=DownloadOptions('http://localhost:8080',
-                                '/downloads/ad-'+'c'*32,'anime',10)
-        client.options=options
-        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
-        row={'hash':HASH,'save_path':options.download_root,
-             'category':'anime','auto_tmm':False,'tags':'','state':'pausedDL'}
-        client._request.side_effect=[
-            (b'Ok.',{}),(json.dumps([row]).encode(),{}),(b'',{})]
-        permit=MagnetPermit('f'*64)
-        client.add_legacy_magnet(MAGNET,intent,permit)
-        self.assertEqual(
-            [call.args[0] for call in client._request.call_args_list],
-            ['torrents/add','torrents/info','torrents/addTags'])
-        self.assertEqual(client._request.call_args_list[0].kwargs['form']['paused'],
-                         'true')
-        with self.assertRaises(ClientInvalid):
-            client.add_legacy_magnet(MAGNET,intent,permit)
-        self.assertEqual(client._request.call_count,3)
-
-    def test_42_delayed_hash_readback_does_not_repeat_submission(self):
-        import json
-        from src.nextgen.acquisition.settings import DownloadOptions
-        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
-        client=self.client((2,5,1),4)
-        options=DownloadOptions('http://localhost:8080',
-                                '/downloads/ad-'+'c'*32,'anime',10)
-        client.options=options
-        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
-        row={'hash':HASH,'save_path':options.download_root,
-             'category':'anime','auto_tmm':False,'tags':'','state':'pausedDL'}
-        client._request.side_effect=[
-            (b'Ok.',{}),(b'[]',{}),(json.dumps([row]).encode(),{}),(b'',{})]
-        with patch('time.sleep') as sleep:
-            client.add_legacy_magnet(MAGNET,intent,MagnetPermit('f'*64))
-        self.assertEqual(
-            [c.args[0] for c in client._request.call_args_list],
-            ['torrents/add','torrents/info','torrents/info','torrents/addTags'])
-        sleep.assert_called_once()
-
-    def test_42_foreign_path_cannot_be_tagged_after_magnet_add(self):
-        import json
-        from src.nextgen.acquisition.settings import DownloadOptions
-        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent,MagnetPermit
-        client=self.client((2,5,1),4)
-        options=DownloadOptions('http://localhost:8080',
-                                '/downloads/ad-'+'c'*32,'anime',10)
-        client.options=options
-        intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
-        row={'hash':HASH,'save_path':'/downloads/other',
-             'category':'anime','auto_tmm':False,'tags':'','state':'metaDL'}
-        client._request.side_effect=[
-            (b'Ok.',{}),(json.dumps([row]).encode(),{})]
-        with self.assertRaises(ClientInvalid):
-            client.add_legacy_magnet(MAGNET,intent,MagnetPermit('f'*64))
-        self.assertEqual(
-            [call.args[0] for call in client._request.call_args_list],
-            ['torrents/add','torrents/info'])
-
-    def test_42_metadata_poll_stops_after_bounded_resume(self):
+    def test_45_metadata_poll_stops_after_bounded_resume(self):
         from types import SimpleNamespace
         from unittest.mock import patch
         from src.nextgen.acquisition.metadata import TorrentFile
         from src.nextgen.acquisition.submission import Observation
         from src.nextgen.acquisition.settings import DownloadOptions
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
         client.options=options
@@ -263,13 +199,13 @@ class MagnetMetadataTests(unittest.TestCase):
         self.assertEqual(client._request.call_args.args,('torrents/resume',))
         stop.assert_called_once_with(intent)
 
-    def test_42_default_metadata_window_waits_beyond_two_seconds(self):
+    def test_45_default_metadata_window_waits_beyond_two_seconds(self):
         from types import SimpleNamespace
         from src.nextgen.acquisition.metadata import TorrentFile
         from src.nextgen.acquisition.submission import Observation
         from src.nextgen.acquisition.settings import DownloadOptions
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
         client.options=options
@@ -302,7 +238,7 @@ class MagnetMetadataTests(unittest.TestCase):
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
         client.options=options
-        # The magnet was originally admitted on 4.2, not sent again.
+        # The magnet was originally admitted on 4.5, not sent again.
         intent=MagnetIntent(4,21,HASH,'c'*32,options,4,
                             'UNCERTAIN','f'*64)
         stopped=Observation(HASH,'pausedDL',options.download_root,
@@ -319,12 +255,12 @@ class MagnetMetadataTests(unittest.TestCase):
             'torrents/start',form={'hashes':HASH},limit=4096)
         stop.assert_called_once_with(intent)
 
-    def test_42_metadata_poll_refuses_foreign_marker(self):
+    def test_45_metadata_poll_refuses_foreign_marker(self):
         from types import SimpleNamespace
         from src.nextgen.acquisition.submission import Observation
         from src.nextgen.acquisition.settings import DownloadOptions
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
         client.options=options
@@ -343,7 +279,7 @@ class MagnetMetadataTests(unittest.TestCase):
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         client.options=options
         intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'REVIEW','f'*64)
         owned=Observation(HASH,'pausedDL',options.download_root,
@@ -361,7 +297,7 @@ class MagnetMetadataTests(unittest.TestCase):
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
         options=DownloadOptions('http://localhost:8080',
                                 '/downloads/ad-'+'c'*32,'anime',10)
-        client=self.client((2,5,1),4)
+        client=self.client((2,8,19),4)
         client.options=options
         intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN','f'*64)
         foreign=Observation(HASH,'pausedDL','/other','anime',
@@ -416,12 +352,6 @@ class MagnetMetadataTests(unittest.TestCase):
                 self.assertEqual(content, raw)
                 client._request.assert_called_once_with(
                     'torrents/export', query={'hash':digest}, limit=4194304)
-
-    def test_oldest_api_cannot_claim_bep3_metainfo_from_a_file_list(self):
-        client = self.client((2,5,1), 4)
-        with self.assertRaises(ClientUnsupported):
-            client.export_metainfo(HASH, batch=True)
-        client._request.assert_not_called()
 
     def test_metadata_fetch_is_hash_bound_and_pending_is_not_failure(self):
         client=self.client((2,11,9))

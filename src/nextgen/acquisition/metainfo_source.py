@@ -167,7 +167,9 @@ async def _qb_metadata(source, digest, configuration, cancelled, *,
                     digest,owned.marker,owned.options.download_root)
             else:
                 observed=await blocking(target.poll_legacy_metadata,
-                                         owned,cancelled)
+                                         owned,cancelled,
+                                         attempts=configuration.value('qbittorrent.metadata_poll_attempts'),
+                                         interval=configuration.value('qbittorrent.metadata_poll_seconds'))
             updated=await blocking(journal.observe,claim,owned,observed)
             if updated.state in ('REVIEW','EXTERNAL'):
                 raise MetadataSourceDenied()

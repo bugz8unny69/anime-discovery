@@ -28,7 +28,7 @@ class BatchClient(Client):
         if (type(intent) is not EarlyBatchIntent or type(permit) is not EarlyBatchPermit
                 or intent.state!='UNCERTAIN'
                 or self.options!=intent.options or self.major!=intent.api_major
-                or self.metadata_strategy not in ('guarded_export','legacy_poll')
+                or self.metadata_strategy!='guarded_export'
                 or _magnet_hash(magnet)!=intent.info_hash
                 or not self.options.download_root.endswith('/ad-'+intent.marker)):
             raise ClientInvalid()
@@ -38,8 +38,6 @@ class BatchClient(Client):
                  **self.protocol.add_fields(True)}
         permit.take(intent)
         self._request('torrents/add',form=payload,limit=4096)
-        if not self.protocol.inline_tags:
-            self._tag_legacy_submission(intent.info_hash,intent.marker)
 
 
     def inspect_owned_batch_metadata(self, expected_hash, marker, download_root, *, require_stopped=True):

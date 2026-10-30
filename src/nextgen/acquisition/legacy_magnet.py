@@ -3,6 +3,7 @@
 Never produces a BEP3 Manifest or a torrent send permit for SUBMIT_TORRENT.
 Observed inventories enter the existing transfer pipeline without another add.
 """
+import asyncio
 import logging
 
 from src.nextgen.async_io import blocking
@@ -26,6 +27,9 @@ PENDING=Outcome('defer','TORRENT_METADATA_WAITING',delay_ms=60000)
 
 def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJournal):
     """Only trusted worker composition supplies this callback; no webhook input."""
+    # Limit simultaneous single-episode metadata discovery in this worker.
+    metadata_slots=asyncio.Semaphore(2)
+
     async def bootstrap(source,context):
         configuration=context.configuration
         try:
@@ -91,8 +95,12 @@ def make_bootstrap(secrets,*,client_factory=QBClient,journal_factory=MagnetJourn
                     or intent.state=='OWNED_STOPPED'):
                 snapshot=await blocking(owned.stop_legacy_metadata,intent)
             else:
-                snapshot=await blocking(owned.poll_legacy_metadata,
-                                        intent,context.cancelled)
+                async with metadata_slots:
+                    if context.cancelled.is_set():return PENDING
+                    snapshot=await blocking(owned.poll_legacy_metadata,
+                                            intent,context.cancelled,
+                                            attempts=configuration.value('qbittorrent.metadata_poll_attempts'),
+                                            interval=configuration.value('qbittorrent.metadata_poll_seconds'))
             # Only the double-checked stopped snapshot can transition to
             # OWNED_STOPPED. A single opportunistic files read cannot.
             state=await blocking(journal.reconcile,context.claim,intent,snapshot)
