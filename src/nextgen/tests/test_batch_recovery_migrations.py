@@ -43,7 +43,7 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
             'sonarr_backfill_results','sonarr_episode_selections',
             'sonarr_episode_candidates','sonarr_magnet_intents','acquisition_plans_next',
             'sonarr_magnet_intents_next','sonarr_backfill_results_v48',
-            'manual_identity_matches')
+            'manual_identity_matches', None)  # v50 only adds a column
         self.assertEqual(len(new_tables),migrations.LATEST_VERSION-30)
         for version,table in zip(range(31,migrations.LATEST_VERSION+1),new_tables):
             with self.subTest(version=version):
@@ -60,9 +60,10 @@ class BatchRecoveryMigrationsTests(unittest.TestCase):
                     self.assertEqual(db.execute('PRAGMA user_version').fetchone(),
                                      (version-1,))
                     self.assertEqual(migrations._structure(db),before)
-                    self.assertIsNone(db.execute(
-                        "SELECT name FROM sqlite_master WHERE name=?",
-                        (table,)).fetchone())
+                    if table is not None:
+                        self.assertIsNone(db.execute(
+                            "SELECT name FROM sqlite_master WHERE name=?",
+                            (table,)).fetchone())
                 finally:
                     db.close()
 

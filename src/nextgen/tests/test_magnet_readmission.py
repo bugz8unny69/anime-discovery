@@ -13,7 +13,7 @@ from src.nextgen.jobs.prepare_acquisition_job import registration as prepare
 from src.nextgen.jobs.submit_torrent_job import registration as submit
 from src.nextgen.jobs.cleanup_canceled_operation_job import registration as cleanup
 from src.nextgen.storage.sqlite import connect, transaction, initialize
-from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
+from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, LATEST_VERSION, _structure
 from src.nextgen.tests import test_autobrr_webhook_acquisition as webhook_fixture
 from src.nextgen.tests.test_autobrr_webhook_acquisition import FakeQbittorrent
 from src.nextgen.tests.test_torrent_submission import Secrets
@@ -75,6 +75,7 @@ class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
             db.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             db.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
             db.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
+            db.executescript((SQL_DIR/'050_series_rejection_reasons.sql').read_text())
             self.assertEqual(db.execute('SELECT * FROM sonarr_magnet_intents').fetchall(),before)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close()
@@ -102,13 +103,12 @@ class MagnetMigrationTests(unittest.TestCase):
         old.execute("INSERT INTO incoming_events(source,raw_body,received_at_ms) VALUES('test',X'61',1)")
         old.commit()
         before=old.execute('SELECT * FROM incoming_events').fetchall()
-        old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
-        old.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
-        old.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
+        for name in SCRIPTS[46:]:
+            old.executescript((SQL_DIR/name).read_text())
         initialize(fresh)
         self.assertEqual(_structure(old),_structure(fresh))
         self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],49)
+        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],LATEST_VERSION)
         self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
 
     def test_migration_failure_rolls_back_original_journal_table(self):
