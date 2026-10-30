@@ -73,6 +73,7 @@ class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
                 'PRAGMA user_version=46;\nCOMMIT;')
             db.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             db.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
+            db.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
             self.assertEqual(db.execute('SELECT * FROM sonarr_magnet_intents').fetchall(),before)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close()
