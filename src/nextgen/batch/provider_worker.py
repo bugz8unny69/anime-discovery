@@ -48,7 +48,7 @@ def make_batch_verifier(options, credentials, read_batch_metainfo, *,
         raise ValueError('Incomplete trusted batch provider composition')
     pool=client_pool or ClientPool(client_factory)
 
-    async def call(source,configuration,cancelled):
+    async def call(source,configuration,cancelled,*,claim=None):
         if type(source) is not ReleaseInput:
             raise ValueError('Release source required')
         if cancelled.is_set():
@@ -61,7 +61,14 @@ def make_batch_verifier(options, credentials, read_batch_metainfo, *,
             digest=infohash(document.get('torrent_infohash'))
         except ValueError:
             raise ReleaseNotReady('RELEASE_UNRESOLVED') from None
-        raw=await read_batch_metainfo(digest,configuration,cancelled)
+        # The built-in reader needs the leased VERIFY_RELEASE claim before
+        # issuing any older-client stopped-magnet admission. Custom injected
+        # readers used by tests retain their three-argument contract.
+        if claim is not None and 'claim' in inspect.signature(read_batch_metainfo).parameters:
+            raw=await read_batch_metainfo(digest,configuration,cancelled,
+                                          claim=claim,event_id=source.event_id)
+        else:
+            raw=await read_batch_metainfo(digest,configuration,cancelled)
         inventory=await blocking(read_batch_inventory,raw,digest)
         actual=options(configuration) if callable(options) else options
         secret=credentials()
