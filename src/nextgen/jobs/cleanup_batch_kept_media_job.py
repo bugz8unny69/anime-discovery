@@ -31,7 +31,9 @@ def _persist(db,claim,value):
     if row!=('COMPLETE',keep):
         raise CompletionRejected(Outcome('review','POST_KEEP_CLEANUP_REVIEW'))
     from src.nextgen.jobs.cleanup_batch_download_job import enqueue as enqueue_download
-    enqueue_download(db,claim,decision=keep)
+    from src.nextgen.storage.decision_cleanup_status import _staging_rows
+    if not _staging_rows(db,keep):   # Packs staged before this change.
+        enqueue_download(db,claim,decision=keep)
 
 
 def registration(secrets,*,service_factory=BatchPostKeepCleanup):

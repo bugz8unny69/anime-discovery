@@ -87,6 +87,7 @@ def _enqueue_cleanup(db, queue, claim, sources):
                 raise StagingReview()
             cleanup_job = existing[0][0]
         else:
+            from src.nextgen.jobs.cleanup_batch_download_job import staged_cleanup
             rows = db.execute(
                 "SELECT job_id FROM jobs WHERE kind='CLEANUP_BATCH_DOWNLOAD' "
                 "AND json_extract(payload_json,'$.decision_job_id')=? "
@@ -94,7 +95,10 @@ def _enqueue_cleanup(db, queue, claim, sources):
                 (claim.job_id, plan)).fetchall()
             if len(rows) > 1:
                 raise StagingReview()
-            if rows:
+            staging = staged_cleanup(db, plan)
+            if staging is not None and not rows:
+                cleanup_job = staging
+            elif rows:
                 cleanup_job = rows[0][0]
             else:
                 cleanup_job = enqueue_job(

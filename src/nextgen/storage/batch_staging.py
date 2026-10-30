@@ -213,4 +213,8 @@ def persist_batch_stage(db,claim,value):
         (plan_id,)).fetchone()[0]
     if completed==selected:
         mark_staged(db,claim)
+        # Every selected episode is staged: the torrent has nothing left to
+        # give. Remove it and its whole ad-* folder, like single episodes.
+        from src.nextgen.jobs.cleanup_batch_download_job import enqueue_after_staging
+        enqueue_after_staging(db,claim,plan_id)
     return ()

@@ -22,6 +22,8 @@ def _batch_status(db, decision, *, kept):
             "WHERE kind='CLEANUP_BATCH_DOWNLOAD' "
             "AND json_extract(payload_json,'$.decision_job_id')=? "
             "ORDER BY job_id", (decision,)).fetchall()
+    if not rows and not kept:
+        rows = _staging_rows(db, decision)
     if not rows:
         return None
     if len(rows) != 1:
@@ -34,8 +36,9 @@ def _batch_status(db, decision, *, kept):
         completed_reason = 'POST_KEEP_CLEANUP_COMPLETE'
     else:
         phase = db.execute(
-            'SELECT phase FROM batch_download_cleanup '
-            'WHERE decision_job_id=?', (decision,)).fetchone()
+            'SELECT c.phase FROM batch_download_cleanup c JOIN jobs j '
+            "ON j.job_id=? AND c.decision_job_id=json_extract(j.payload_json,'$.decision_job_id')",
+            (job,)).fetchone()
         completed_reason = 'DECISION_DOWNLOAD_CLEANUP_COMPLETE'
     completed = state == 'DONE' and phase == ('COMPLETE',)
     return {
@@ -46,6 +49,22 @@ def _batch_status(db, decision, *, kept):
         'reason': None if reason is None else DEFAULT_CATALOG.reason(reason),
         'status_url': f'/api/v1/jobs/{job}',
     }
+
+
+def _staging_rows(db, decision):
+    from src.nextgen.jobs.cleanup_batch_download_job import staged_cleanup
+    plan = db.execute(
+        'SELECT DISTINCT p.plan_id FROM management_actions a '
+        'JOIN job_operation_members m ON m.operation_id=a.operation_id '
+        'JOIN batch_staging_publications p ON p.job_id=m.job_id WHERE a.job_id=?',
+        (decision,)).fetchall()
+    if len(plan) != 1:
+        return []
+    job = staged_cleanup(db, plan[0][0])
+    if job is None:
+        return []
+    return db.execute('SELECT job_id,state,last_reason_code FROM jobs WHERE job_id=?',
+                      (job,)).fetchall()
 
 
 def kept_status(db, decision):
