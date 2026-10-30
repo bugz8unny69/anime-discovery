@@ -60,6 +60,8 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             'storage.download_root':'/downloads',
             'qbittorrent.category':'anime',
             'qbittorrent.timeout_seconds':10,
+            'qbittorrent.metadata_poll_seconds':5,
+            'qbittorrent.metadata_poll_attempts':24,
         }[key])
         self.context=SimpleNamespace(
             claim=CLAIM,configuration=self.config,cancelled=asyncio.Event())
@@ -73,6 +75,8 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 'storage.download_root':'/downloads',
                 'qbittorrent.category':'anime',
                 'qbittorrent.timeout_seconds':10,
+                'qbittorrent.metadata_poll_seconds':5,
+                'qbittorrent.metadata_poll_attempts':24,
                 'torrent_metadata.base_url':'',**extra}
         return SimpleNamespace(claim=CLAIM,configuration=SimpleNamespace(value=values.__getitem__),
                                cancelled=asyncio.Event(),
@@ -85,7 +89,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         from src.nextgen.storage.sonarr_magnet_intake import _fingerprint
         intent=MagnetIntent(4,21,HASH,'d'*32,options,4,'UNCERTAIN',
                             _fingerprint(4,HASH,'d'*32,options,4))
-        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe=Mock(major=4,metadata_strategy='guarded_export')
         probe.inspect.return_value=None
         owned=Mock()
         owned.inspect.return_value=None
@@ -108,7 +112,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         from src.nextgen.acquisition.submission import ClientInvalid, ClientAuthenticationFailed
         for error,reason in ((ClientInvalid,'DOWNLOAD_CLIENT_RESPONSE_INVALID'),
                              (ClientAuthenticationFailed,'DOWNLOAD_CLIENT_AUTH_FAILED')):
-            probe=Mock(major=4,metadata_strategy='legacy_poll')
+            probe=Mock(major=4,metadata_strategy='guarded_export')
             probe.inspect.side_effect=error()
             journal=Mock()
             journal.existing.return_value=None
@@ -128,7 +132,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_metadata_failure_logs_its_location_without_resubmitting(self):
         from src.nextgen.acquisition.metadata import MetadataInvalid
-        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe=Mock(major=4,metadata_strategy='guarded_export')
         probe.inspect.side_effect=MetadataInvalid()
         journal=Mock()
         journal.existing.return_value=None
@@ -151,7 +155,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(recovered=recovered):
                 intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'EXTERNAL',
                                    _fingerprint(4,HASH,'c'*32,options,4))
-                probe=Mock(major=4,metadata_strategy='legacy_poll')
+                probe=Mock(major=4,metadata_strategy='guarded_export')
                 journal=Mock()
                 journal.existing.return_value=intent if recovered else None
                 journal.authorize.return_value=(intent,None,())
@@ -183,7 +187,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         options=DownloadOptions('http://localhost:8080',root,'anime',10)
         intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN',
                             _fingerprint(4,HASH,'c'*32,options,4))
-        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe=Mock(major=4,metadata_strategy='guarded_export')
         owned=Mock()
         owned.inspect.return_value=Observation(
             HASH,'pausedDL',root,'anime',('ad-'+'c'*32,),False,())
@@ -235,7 +239,7 @@ class LegacyBootstrapTests(unittest.IsolatedAsyncioTestCase):
         options=DownloadOptions('http://localhost:8080',root,'anime',10)
         intent=MagnetIntent(4,21,HASH,'c'*32,options,4,'UNCERTAIN',
                             _fingerprint(4,HASH,'c'*32,options,4))
-        probe=Mock(major=4,metadata_strategy='legacy_poll')
+        probe=Mock(major=4,metadata_strategy='guarded_export')
         probe.inspect.return_value=None
         owned=Mock()
         observation=Observation(HASH,'pausedDL',root,'anime',

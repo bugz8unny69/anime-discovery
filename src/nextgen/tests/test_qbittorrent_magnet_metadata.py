@@ -95,7 +95,7 @@ class MagnetMetadataTests(unittest.TestCase):
         with self.assertRaises(ClientUnsupported):
             self.client((2,8,13),4)
         with self.assertRaises(ClientUnsupported):
-            self.client((2,8,19),4)
+            self.client((2,5,1),4)
 
     def test_protocol_names_cover_submission_start_stop(self):
         old=_Protocol(4,(2,8,15))

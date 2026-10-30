@@ -13,7 +13,7 @@ from src.nextgen.tests.test_transfer_policy import example
 class CleanupTransportTests(unittest.TestCase):
     def test_version_specific_stop_and_single_hash_delete_never_delegate_file_deletion(self):
         intent,snapshot=example()
-        for major,api,endpoint in ((4,(2,5,1),'torrents/pause'),
+        for major,api,endpoint in ((4,(2,8,19),'torrents/pause'),
                                    (5,(2,10,0),'torrents/pause'),
                                    (5,(2,11,0),'torrents/stop')):
             client=Client(intent.options,DownloadCredentials('user','pass'))

@@ -68,7 +68,7 @@ class TransferPolicyTests(unittest.TestCase):
     def client(self,intent,snapshot,major=5):
         client=Client(intent.options,DownloadCredentials('user','password'))
         client.major=major
-        client.protocol=_Protocol(major,(2,11,0) if major==5 else (2,5,1))
+        client.protocol=_Protocol(major,(2,11,0) if major==5 else (2,8,19))
         client._sid="offline-session"
         client.inspect_transfer=Mock(return_value=snapshot)
         client._request=Mock(return_value=(b'',None))

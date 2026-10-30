@@ -439,7 +439,7 @@ class Client:
         try:
             for position,row in enumerate(files):
                 if type(row) is not dict:raise ClientInvalid()
-                item=TorrentFile(self.protocol.file_index(row,position),row.get('name'),row.get('size'))
+                item=TorrentFile(row.get('index'),row.get('name'),row.get('size'))
                 ranges=row.get('piece_range')
                 if type(ranges) is not list or len(ranges)!=2:raise ClientInvalid()
                 rows.append((item,row.get('priority'),row.get('progress'),tuple(ranges)))

@@ -34,7 +34,7 @@ class QBTransportTests(unittest.TestCase):
         return [Response(b'Ok.',cookie=True),Response(version),Response(b'2.8.19' if version.startswith(b'v4.') else b'2.11.0')]
 
     def test_base64_session_cookie_is_preserved_on_authenticated_requests(self):
-        for version in (b'v4.2.5',b'v5.0.0'):
+        for version in (b'v4.5.2',b'v5.0.0'):
             for sid in ('abcd+efg/hijklmnopqrstuvwxy0123456', 'abcd+efg/hijklmnopqrstuvwxy01234=='):
                 with self.subTest(version=version,sid=sid):
                     responses=self.login_responses(version)+[Response(b'[]')]

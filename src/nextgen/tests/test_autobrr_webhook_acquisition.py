@@ -32,7 +32,7 @@ PASSKEY='https://private.example/0123456789abcdef0123456789abcdef/announce'
 class FakeQbittorrent:
     """qBittorrent 4.x Web API behavior used by the existing adapter calls."""
     major=4
-    metadata_strategy='legacy_poll'
+    metadata_strategy='guarded_export'
 
     def __init__(self,state,files):
         self.state,self.files=state,files
@@ -58,7 +58,7 @@ class FakeQbittorrent:
         self.state.setdefault('added',[]).append(magnet)
         self.state['intent']=intent
 
-    def poll_legacy_metadata(self,intent,cancelled):
+    def poll_legacy_metadata(self,intent,cancelled,*,attempts=24,interval=5):
         return self._observation('pausedDL',self.files)
 
     def stop_legacy_metadata(self,intent):
