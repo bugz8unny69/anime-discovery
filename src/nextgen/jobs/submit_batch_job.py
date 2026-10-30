@@ -1,6 +1,6 @@
 """One-shot stopped batch submission; registered in the default worker.
 
-The configured metadata source is hash-only; the durable journal owns
+The qBittorrent metadata reader is hash-only; the durable journal owns
 permission for one stopped add and all later attempts reconcile without
 resending, even on timeout or process restart.
 """
