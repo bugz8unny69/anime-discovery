@@ -10,9 +10,9 @@ Covers the common styles seen on anime indexers, for example:
     [Group] Title S2 - 05 / Title Season 2 - 05 / Title II - 05
     [Group] Romaji Title | English Title - 05 (1080p)
 
-Anything that is not exactly one episode (batches, ranges, specials, .5
-recaps) is rejected. Matching against a target episode is deliberately
-conservative: an unclear title is skipped, never sent for review.
+Batch/range declarations and non-episode media are rejected.
+An explicit Season 0 declaration still needs a verified AniDB-to-TVDB episode
+mapping; a torrent title alone never authorizes acquisition.
 """
 from dataclasses import dataclass
 import re
@@ -102,7 +102,21 @@ def read_release(title):
     if MULTI.match(tail) or EXPLICIT.search(tail) or re.match(r'^\s*-?\s*(?:EP|E)\d', tail, re.I):
         return None, UNSUPPORTED                        # ranges and S01E01E02
     if re.match(r'^\.\d{1,2}(?![0-9pP])', tail) or episode < 1: return None, UNCLEAR
-    if _type_words(base + ' ' + tail): return None, UNSUPPORTED
+    # A named "Special Part 1" may be the official title of a complete
+    # TVDB S00 episode. The exact provider mapping decides, not the words.
+    # "Special" may be part of a show's literal name: "Should Be Special".
+    # Keep standalone qualifiers and tags as release-type evidence.
+    if season != 0 and re.search(r'(?i)(?:^|[-–—]\s+)specials?\s*$', base):
+        return None, UNSUPPORTED
+    if season != 0 and re.search(r'(?i)\[(?:specials?)\]|\((?:specials?)\)', base):
+        return None, UNSUPPORTED
+    kind_base = re.sub(r'(?i)\bspecials?\b', ' ', base)
+    kind_tail = tail
+    if season == 0:
+        # TVDB S00 is explicitly a special; packs and movies still fail.
+        kind_base = re.sub(r'(?i)\b(?:ova|oad|ona)\b', ' ', kind_base)
+        kind_tail = re.sub(r'(?i)\b(?:specials?|ova|oad|ona)\b', ' ', kind_tail)
+    if _type_words(kind_base + ' ' + kind_tail): return None, UNSUPPORTED
     base = re.sub(r'[\[【][^\]】]*[\]】]', ' ', base)
     base = re.sub(r'\s+', ' ', base).strip(' -–—:')
     if not base: return None, UNCLEAR

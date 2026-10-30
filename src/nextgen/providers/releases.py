@@ -48,7 +48,12 @@ def make_verifier(options, credentials, *, client_pool=None, client_factory=Clie
             target=mappings[number]
         else:
             candidates=[n for n,target in mappings.items() if target==(season,number)]
-            if not candidates: raise ReleaseNotReady("RELEASE_EPISODE_MAPPING_MISSING")
+            if not candidates:
+                # Only explicitly mapped regular AniDB episodes can verify
+                # TVDB S00. AniDB's separate special-numbering type is not
+                # interchangeable with the TVDB Season 0 number.
+                raise ReleaseNotReady("RELEASE_SPECIAL_UNSUPPORTED" if season == 0
+                                      else "RELEASE_EPISODE_MAPPING_MISSING")
             if len(candidates)!=1: raise ReleaseNotReady("RELEASE_EPISODE_MAPPING_AMBIGUOUS")
             number=candidates[0]
             target=mappings[number]
