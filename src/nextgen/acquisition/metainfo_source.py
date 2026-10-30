@@ -179,8 +179,12 @@ async def _qb_metadata(source, digest, configuration, cancelled, *,
         # snapshot before returning metadata to any downstream batch stage.
         target=BatchClient(owned.options,credentials)
         await blocking(target.login)
+        # After SUBMIT_BATCH adopts the exact journal-owned magnet, transfer
+        # jobs may legitimately be downloading. Keep verifying identity and
+        # immutable files without falsely requiring a stopped torrent.
         observed=await blocking(target.inspect_owned_batch_metadata,
-                                digest,owned.marker,owned.options.download_root)
+                                digest,owned.marker,owned.options.download_root,
+                                require_stopped=owned.state!='ADOPTED')
         if observed is None or stored is None or observed.files!=stored.files:
             raise MetadataSourceDenied()
         if cancelled.is_set():
