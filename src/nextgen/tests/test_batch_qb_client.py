@@ -54,7 +54,7 @@ class BatchQbClientTests(unittest.TestCase):
             self.options.download_root)
         self.assertIs(type(observed),ObservedBatchInventory)
         self.assertEqual(observed.files,self.intent.inventory.files)
-        self.assertFalse(hasattr(observed,'info_sha256'))
+        self.assertIsNone(observed.info_sha256)
         self.assertEqual(self.client.inspect.call_count,2)
         self.assertEqual(self.calls,[])  # No mutations
 
