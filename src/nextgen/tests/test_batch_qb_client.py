@@ -38,6 +38,48 @@ class BatchQbClientTests(unittest.TestCase):
         self.client.options=self.options
         self.client._request=lambda path,**kwargs:self.calls.append((path,kwargs))
 
+    def test_observed_batch_metadata_is_distinct_and_double_checked(self):
+        from src.nextgen.acquisition.metadata import ObservedBatchInventory
+        from src.nextgen.acquisition.qbittorrent import _Protocol
+        from unittest.mock import Mock
+        self.client.protocol=_Protocol(4,(2,5,1))
+        self.client.major=4
+        self.client.inspect=Mock()
+        expected=Observation(self.intent.inventory.info_hash,'pausedDL',
+            self.options.download_root,self.options.category,
+            ('ad-'+self.intent.marker,),False,self.intent.inventory.files)
+        self.client.inspect.side_effect=[expected,expected]
+        observed=self.client.inspect_owned_batch_metadata(
+            self.intent.inventory.info_hash,self.intent.marker,
+            self.options.download_root)
+        self.assertIs(type(observed),ObservedBatchInventory)
+        self.assertEqual(observed.files,self.intent.inventory.files)
+        self.assertFalse(hasattr(observed,'info_sha256'))
+        self.assertEqual(self.client.inspect.call_count,2)
+        self.assertEqual(self.calls,[])  # No mutations
+
+    def test_observed_batch_never_adopts_foreign_or_changed_torrent(self):
+        from src.nextgen.acquisition.qbittorrent import _Protocol
+        from unittest.mock import Mock
+        self.client.protocol=_Protocol(4,(2,5,1))
+        self.client.major=4
+        expected=Observation(self.intent.inventory.info_hash,'pausedDL',
+            self.options.download_root,self.options.category,
+            ('ad-'+self.intent.marker,),False,self.intent.inventory.files)
+        wrong=Observation(self.intent.inventory.info_hash,'pausedDL',
+            self.options.download_root,self.options.category,
+            ('ad-'+('b'*32),),False,self.intent.inventory.files)
+        self.client.inspect=Mock(return_value=wrong)
+        self.assertIsNone(self.client.inspect_owned_batch_metadata(
+            self.intent.inventory.info_hash,self.intent.marker,
+            self.options.download_root))
+        self.client.inspect=Mock(side_effect=[expected,wrong])
+        with self.assertRaises(ClientInvalid):
+            self.client.inspect_owned_batch_metadata(
+                self.intent.inventory.info_hash,self.intent.marker,
+                self.options.download_root)
+        self.assertEqual(self.calls,[])
+
     def test_immutable_metadata_and_stopped_only_fields(self):
         permit=BatchSendPermit(self.intent.fingerprint)
         self.client.add_batch_stopped(self.raw,self.intent,permit)
