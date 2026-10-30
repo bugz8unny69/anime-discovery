@@ -567,12 +567,12 @@ function manualMatchForm(root, result) {
     ['title', 'Anime title', 'text', result.evidence?.tvdb_titles?.[0] || result.evidence?.queries?.[0] || ''],
     ['anidb_id', 'AniDB ID', 'number', result.evidence?.selected_anidb_id || ''],
     ['tvdb_series_id', 'TVDB series ID', 'number', result.evidence?.selected_tvdb_id || ''],
-    ['season', 'Season', 'number', result.evidence?.season ?? '']
+    ['season', 'Season (optional; leave blank for OVA/special)', 'number', result.evidence?.season ?? '']
   ];
   for (const [name, label, type, initial] of inputs) {
     const wrap = node('label', label);
     const field = document.createElement('input');
-    field.name = name; field.type = type; field.required = true;
+    field.name = name; field.type = type; field.required = name !== 'season';
     field.value = String(initial);
     if (type === 'number') { field.min = name === 'season' ? '0' : '1'; field.max = name === 'season' ? '999' : '9223372036854775807'; }
     wrap.appendChild(field); form.appendChild(wrap);
@@ -585,7 +585,7 @@ function manualMatchForm(root, result) {
     const values = Object.fromEntries(new FormData(form));
     const body = {
       title: values.title.trim(), anidb_id: Number(values.anidb_id),
-      tvdb_series_id: Number(values.tvdb_series_id), season: Number(values.season)
+      tvdb_series_id: Number(values.tvdb_series_id), season: values.season.trim() === '' ? null : Number(values.season)
     };
     if (!Number.isSafeInteger(body.anidb_id) || !Number.isSafeInteger(body.tvdb_series_id)
         || !Number.isSafeInteger(body.season)) { notice('Invalid identity number.', true); return; }
