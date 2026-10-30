@@ -100,6 +100,36 @@ class BatchQbClientTests(unittest.TestCase):
                 self.options.download_root)
         self.assertEqual(self.calls,[])
 
+    def test_older_protocol_one_use_batch_magnet_admission(self):
+        from src.nextgen.acquisition.qbittorrent import _Protocol
+        from src.nextgen.storage.batch_metadata_admission import (
+            EarlyBatchIntent, EarlyBatchPermit)
+        digest=self.intent.inventory.info_hash
+        magnet='magnet:?xt=urn:btih:'+digest
+        for major,version in ((4,(2,5,1)),(4,(2,8,15)),(5,(2,10,0))):
+            with self.subTest(major=major,api=version):
+                self.calls.clear()
+                self.client.major=major
+                self.client.api_version=version
+                self.client.protocol=_Protocol(major,version)
+                self.client._tag_legacy_submission=lambda h,m:self.calls.append(
+                    ('tag',{'hash':h,'marker':m}))
+                early=EarlyBatchIntent(7,21,digest,'a'*32,self.options,major,
+                                       'UNCERTAIN')
+                permit=EarlyBatchPermit(7,'a'*32)
+                self.client.add_early_batch_magnet(magnet,early,permit)
+                self.assertEqual(self.calls[0][0],'torrents/add')
+                fields=self.calls[0][1]['form']
+                self.assertEqual(fields['paused'],'true')
+                self.assertEqual(fields['autoTMM'],'false')
+                if version==(2,5,1):
+                    self.assertEqual(self.calls[1][0],'tag')
+                else:
+                    self.assertEqual(fields['tags'],'ad-'+'a'*32)
+                with self.assertRaises(ClientInvalid):
+                    self.client.add_early_batch_magnet(magnet,early,permit)
+                self.assertEqual(len(self.calls),2 if version==(2,5,1) else 1)
+
     def test_immutable_metadata_and_stopped_only_fields(self):
         permit=BatchSendPermit(self.intent.fingerprint)
         self.client.add_batch_stopped(self.raw,self.intent,permit)
