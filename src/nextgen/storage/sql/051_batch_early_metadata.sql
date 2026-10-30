@@ -17,7 +17,7 @@ CREATE TABLE batch_verifications_v51 (
  verified_at_ms INTEGER NOT NULL CHECK(verified_at_ms>=0),
  FOREIGN KEY(identity_result_id,anidb_id) REFERENCES identity_results(result_id,anidb_id)
 );
-INSERT INTO batch_verifications_v51(batch_id,job_id,identity_result_id,anidb_id,tvdb_series_id,tvdb_season,info_hash,verified_at_ms,FOREIGN) SELECT batch_id,job_id,identity_result_id,anidb_id,tvdb_series_id,tvdb_season,info_hash,verified_at_ms,FOREIGN FROM batch_verifications;
+INSERT INTO batch_verifications_v51(batch_id,job_id,identity_result_id,anidb_id,tvdb_series_id,tvdb_season,release_sha256,info_hash,info_sha256,verified_at_ms) SELECT batch_id,job_id,identity_result_id,anidb_id,tvdb_series_id,tvdb_season,release_sha256,info_hash,info_sha256,verified_at_ms FROM batch_verifications;
 DROP TABLE batch_verifications;
 ALTER TABLE batch_verifications_v51 RENAME TO batch_verifications;
 CREATE INDEX idx_batch_verifications_identity ON batch_verifications(identity_result_id);
@@ -45,7 +45,7 @@ CREATE TABLE batch_torrent_submissions_v51 (
  created_at_ms INTEGER NOT NULL CHECK(created_at_ms>=0),
  updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms>=created_at_ms)
 );
-INSERT INTO batch_torrent_submissions_v51(plan_id,reservation_job_id,first_job_id,first_attempt,info_hash,ownership_marker,base_url,save_path,category,timeout_seconds,api_major,fingerprint,configuration_revision,state,reason_code,created_at_ms,updated_at_ms) SELECT plan_id,reservation_job_id,first_job_id,first_attempt,info_hash,ownership_marker,base_url,save_path,category,timeout_seconds,api_major,fingerprint,configuration_revision,state,reason_code,created_at_ms,updated_at_ms FROM batch_torrent_submissions;
+INSERT INTO batch_torrent_submissions_v51(plan_id,reservation_job_id,first_job_id,first_attempt,info_hash,info_sha256,ownership_marker,base_url,save_path,category,timeout_seconds,api_major,fingerprint,configuration_revision,state,reason_code,created_at_ms,updated_at_ms) SELECT plan_id,reservation_job_id,first_job_id,first_attempt,info_hash,info_sha256,ownership_marker,base_url,save_path,category,timeout_seconds,api_major,fingerprint,configuration_revision,state,reason_code,created_at_ms,updated_at_ms FROM batch_torrent_submissions;
 DROP TABLE batch_torrent_submissions;
 ALTER TABLE batch_torrent_submissions_v51 RENAME TO batch_torrent_submissions;
 CREATE INDEX idx_batch_submission_job ON batch_torrent_submissions(reservation_job_id);
