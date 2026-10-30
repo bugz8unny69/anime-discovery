@@ -17,6 +17,12 @@ def active(db,operation_id):
 
 def validate_releasable(db,operation_id):
     if db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) WHERE m.operation_id=? AND j.state='RUNNING' LIMIT 1",(operation_id,)).fetchone():raise CancellationError()
+    # Never release reservations while an early batch magnet remains.
+    if db.execute('SELECT 1 FROM batch_metadata_admissions i JOIN job_operation_members m '
+                  'ON m.job_id=i.verification_job_id WHERE m.operation_id=? '
+                  "AND i.state NOT IN ('RELEASED','EXTERNAL','ADOPTED') LIMIT 1",
+                  (operation_id,)).fetchone():
+        raise CancellationError()
     # A submitted batch retains its reservations until the same operation's
     # one-shot cancellation journal proves the owned torrent/files are cleaned.
     batches=db.execute(
