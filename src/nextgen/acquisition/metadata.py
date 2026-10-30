@@ -170,9 +170,23 @@ class ObservedBatchInventory:
         if not videos or any(f.size<=0 for f in videos):raise MetadataInvalid()
         if len(self.json().encode('utf-8'))>1048576:raise MetadataInvalid()
 
+    @property
+    def info_sha256(self):
+        # Deliberately NOT a BEP3 hash. Absence is persisted as SQL NULL.
+        return None
+
     def json(self):
         return json.dumps({'files':[{'index':f.index,'path':f.path,'size':f.size}
                                     for f in self.files]},sort_keys=True,separators=(',',':'))
+
+
+def read_batch_inventory(raw,expected_hash):
+    """Typed observed batch evidence or independently hash-verified BEP3 bytes."""
+    digest=infohash(expected_hash)
+    if type(raw) is ObservedBatchInventory:
+        if raw.info_hash!=digest:raise MetadataInvalid()
+        return raw
+    return parse_batch_metainfo(raw,digest)
 
 
 @dataclass(frozen=True)
