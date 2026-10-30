@@ -561,7 +561,7 @@ async function openCoverage(jobId) {
 function manualMatchForm(root, result) {
   if (result.state !== 'NEEDS_REVIEW') return;
   const section = matchingSection(root, 'Correct anime identification');
-  section.appendChild(node('p', 'Enter the series identity for this season. The same alias and season will reuse it on later retries. Episode placement remains independently verified.', 'muted'));
+  section.appendChild(node('p', 'Enter the series identity for this season. The same alias and season will reuse it on later retries. Episode placement remains independently verified. Leave season empty for unnumbered specials.', 'muted'));
   const form = document.createElement('form');
   const inputs = [
     ['title', 'Anime title', 'text', result.evidence?.tvdb_titles?.[0] || result.evidence?.queries?.[0] || ''],
@@ -588,7 +588,7 @@ function manualMatchForm(root, result) {
       tvdb_series_id: Number(values.tvdb_series_id), season: values.season.trim() === '' ? null : Number(values.season)
     };
     if (!Number.isSafeInteger(body.anidb_id) || !Number.isSafeInteger(body.tvdb_series_id)
-        || !Number.isSafeInteger(body.season)) { notice('Invalid identity number.', true); return; }
+        || (body.season !== null && !Number.isSafeInteger(body.season))) { notice('Invalid identity number.', true); return; }
     submit.disabled = true;
     try {
       await request(`${API}/jobs/${result.job_id}/manual-match`, {method: 'POST', body});
