@@ -69,7 +69,8 @@ def registration(read_batch_metainfo,*,source_factory=BatchEpisodeSource,
                 context.configuration.value('storage.database_path'),
             )
             media=await blocking(verify,intent,record,unlock,file_index,
-                                 context.cancelled,protected_roots=protected)
+                                 context.cancelled,protected_roots=protected,
+                                 audio=context.configuration.value('acquisition.audio_check'))
             return Outcome(value={'verification_job_id':context.claim.job_id,
                                   'file_index':file_index,'media':media})
         except MetadataSourceWaiting as exc:

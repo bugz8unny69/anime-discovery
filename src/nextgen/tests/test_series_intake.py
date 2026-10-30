@@ -38,6 +38,9 @@ class SeriesIntakeTests(unittest.TestCase):
             INSERT INTO acquisition_plans VALUES(201,1),(202,2);
             INSERT INTO staging_publications VALUES(201,101,'PUBLISHED'),(202,102,'PUBLISHED');
             INSERT INTO trial_plans VALUES(300,10,2,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
+            CREATE TABLE IF NOT EXISTS job_history(job_id INTEGER,event_code TEXT);
             INSERT INTO sonarr_backfill_results VALUES(300,1,'NO_RESULTS');
         """)
 

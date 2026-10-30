@@ -59,6 +59,8 @@ class CandidateStateTests(unittest.TestCase):
             INSERT INTO jobs VALUES(2,25,'DISCOVER_SONARR_BACKFILL',NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(3,25,'VERIFY_RELEASE',2,'{}');
             INSERT INTO trial_plans VALUES(1,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
         """)
         self.db.execute(
             "INSERT INTO sonarr_episode_selections VALUES(1,2,?)",(FIRST,))
@@ -107,6 +109,8 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE acquisition_plans(reservation_id INTEGER,
                 info_hash TEXT);
             INSERT INTO trial_plans VALUES(1,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
@@ -189,6 +193,8 @@ class FallbackWiringTests(unittest.TestCase):
             INSERT INTO job_operation_members VALUES(12,7);
             INSERT INTO job_operations(operation_id,state) VALUES(7,'ACTIVE');
             INSERT INTO trial_plans VALUES(1,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
         """)
         self.db.execute(
             "INSERT INTO sonarr_episode_selections VALUES(1,2,?)",(FIRST,))
@@ -235,6 +241,8 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE episode_reservations(reservation_id INTEGER,state TEXT);
             CREATE TABLE acquisition_plans(reservation_id INTEGER,info_hash TEXT);
             INSERT INTO trial_plans VALUES(1,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');
@@ -277,6 +285,8 @@ class FallbackWiringTests(unittest.TestCase):
             CREATE TABLE episode_reservations(reservation_id INTEGER,state TEXT);
             CREATE TABLE acquisition_plans(reservation_id INTEGER,info_hash TEXT);
             INSERT INTO trial_plans VALUES(1,5,6,3);
+            ALTER TABLE trial_plans ADD COLUMN anchor_verification_id INTEGER;
+            CREATE TABLE IF NOT EXISTS trial_evaluations(job_id INTEGER,verification_id INTEGER,plan_id INTEGER);
             INSERT INTO jobs VALUES(10,9,'DISCOVER_SONARR_BACKFILL',
                 NULL,'{"plan_id":1}');
             INSERT INTO jobs VALUES(11,25,'VERIFY_RELEASE',10,'{}');

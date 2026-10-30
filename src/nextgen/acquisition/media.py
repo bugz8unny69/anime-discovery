@@ -13,8 +13,11 @@ import time
 
 from src.nextgen.acquisition.cleanup import directory, parent, FileCleanup
 from src.nextgen.cancellation import CancellationError
+from src.nextgen.acquisition.audio import JAPANESE_ENGLISH, required_languages
 
 MAX_PROBE_BYTES=1024*1024
+# Recorded Japanese/English tracks found; empty when the audio check is off.
+LANGUAGE_SETS=((),('jpn',),('eng',),('eng','jpn'))
 
 
 class MediaInvalid(ValueError):
@@ -34,7 +37,10 @@ class ProbeUnavailable(RuntimeError):
 
 class AudioMissing(MediaInvalid):
     reason_code='MEDIA_AUDIO_REQUIRED'
-    def __init__(self):ValueError.__init__(self,'Japanese and English audio tracks are required.')
+    def __init__(self,required=('eng','jpn')):
+        names={'jpn':'Japanese','eng':'English'}
+        wanted=' and '.join(names[x] for x in ('jpn','eng') if x in required)
+        ValueError.__init__(self,wanted+' audio '+('tracks are' if len(required)>1 else 'track is')+' required.')
 
 
 def signature(info):
@@ -88,7 +94,9 @@ def probe(fd,flag,*,executable='/usr/bin/ffprobe',timeout=60):
         process.stdout.close()
 
 
-def parse_probe(raw,suffix):
+def parse_probe(raw,suffix,audio=JAPANESE_ENGLISH):
+    """audio: acquisition.audio_check. Extra audio tracks never fail the check."""
+    required=required_languages(audio)
     if type(raw) is not bytes or not 1<=len(raw)<=MAX_PROBE_BYTES:raise MediaInvalid()
     def pairs(items):
         result={}
@@ -127,7 +135,7 @@ def parse_probe(raw,suffix):
                 language={'ja':'jpn','en':'eng'}.get(language.lower(),language.lower())
                 if language in ('jpn','eng'):languages.add(language)
         if videos!=1:raise MediaInvalid()
-        if languages!={'jpn','eng'}:raise AudioMissing()
+        if not required<=languages:raise AudioMissing(tuple(sorted(required)))
         return max(1,round(duration*1000)),tuple(sorted(languages))
     except (ValueError,TypeError,KeyError,AttributeError,RecursionError,OverflowError) as exc:
         if isinstance(exc,MediaInvalid):raise
@@ -159,14 +167,14 @@ class VerifiedMedia:
         if (type(self.root_signature) is not tuple or len(self.root_signature)!=2
                 or type(self.file_signature) is not tuple or len(self.file_signature)!=5
                 or any(type(x) is not int or x<0 for x in self.root_signature+self.file_signature)
-                or self.file_signature[2]<=0 or self.languages!=('eng','jpn')):raise MediaInvalid()
+                or self.file_signature[2]<=0 or self.languages not in LANGUAGE_SETS):raise MediaInvalid()
 
     def json(self):
         return json.dumps({'path':self.relative_path,'root':self.root_signature,'file':self.file_signature,
             'sha256':self.sha256,'duration_ms':self.duration_ms,'languages':self.languages},sort_keys=True,separators=(',',':'))
 
 
-def verify_file(intent,record,download_job_id,flag,*,read_probe=probe,protected_roots=()):
+def verify_file(intent,record,download_job_id,flag,*,read_probe=probe,protected_roots=(),audio=JAPANESE_ENGLISH):
     selected=intent.plan.manifest.files[intent.plan.manifest.selected_index]
     # Same exact owned download root and unknown-file rejection as scoped cleanup.
     try:
@@ -190,7 +198,7 @@ def verify_file(intent,record,download_job_id,flag,*,read_probe=probe,protected_
                         digest.update(chunk);remaining-=len(chunk)
                     if os.read(fd,1):raise MediaInvalid()
                     os.lseek(fd,0,os.SEEK_SET)
-                    duration,languages=parse_probe(read_probe(fd,flag),PurePosixPath(selected.path).suffix.lower())
+                    duration,languages=parse_probe(read_probe(fd,flag),PurePosixPath(selected.path).suffix.lower(),audio)
                     cancelled(flag)
                     if signature(os.fstat(fd))!=before:raise MediaInvalid()
                     # Rewalk the absolute path: renamed roots/parents cannot pass

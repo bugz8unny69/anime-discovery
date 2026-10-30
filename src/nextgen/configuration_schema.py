@@ -91,6 +91,8 @@ FIELDS = MappingProxyType({
         label="Download client timeout", help_text="Maximum seconds for a client request."),
     "acquisition.max_episode_mb": FieldDefinition(600, "integer", "next_operation", minimum=1, maximum=1000000,
         label="Maximum video size (MB)", help_text="Hard limit for each selected video. Decimal MB. New selection-plan budgets only."),
+    "acquisition.audio_check": FieldDefinition("japanese_english", "audio_check", "next_operation",
+        label="Audio check", help_text="off, japanese or japanese_english. Which audio tracks a downloaded video must have (ffprobe, extra tracks are fine). japanese_english also tries Dual/Multi Audio releases first and searches Prowlarr instead of downloading an untagged autobrr release."),
     "acquisition.max_plan_mb": FieldDefinition(3000, "integer", "next_operation", minimum=1, maximum=1000000,
         label="Maximum selection-plan size (MB)", help_text="Combined hard limit for prepared selected videos, counting each episode once. Decimal MB. New budgets only."),
     "storage.download_root": FieldDefinition("", "directory", "next_operation",
@@ -190,6 +192,9 @@ def validate_values(value, *, fields=FIELDS):
                     raise ConfigurationError()
             elif spec.kind == "resolution":
                 if type(item) is not int or item not in (720, 1080, 2160):
+                    raise ConfigurationError()
+            elif spec.kind == "audio_check":
+                if type(item) is not str or item not in ("off", "japanese", "japanese_english"):
                     raise ConfigurationError()
             elif spec.kind == "ranking":
                 if type(item) is not str or item not in ("resolution", "seeders"):

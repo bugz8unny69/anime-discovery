@@ -1,4 +1,5 @@
 """Atomic trial-plan anchoring and evaluation. No external resource claims."""
+import json
 import sqlite3
 import time
 
@@ -19,7 +20,18 @@ def _source(db,verification_job_id,event_id):
     return TrialSource(*row)
 
 
-def load_trial_source(database,verification_job_id,event_id):
+def _delivery(db,event_id):
+    """(source, release title) of the delivery; title is untrusted, a hint only."""
+    row=db.execute("SELECT source,raw_body FROM incoming_events WHERE event_id=?",(event_id,)).fetchone()
+    if row is None:raise TrialConflict()
+    try:
+        body=json.loads(row[1])
+        title=body.get('release_name') if type(body) is dict else None
+    except (ValueError,TypeError,UnicodeError,RecursionError):title=None
+    return row[0],title if type(title) is str else ''
+
+
+def load_trial_source(database,verification_job_id,event_id,*,with_delivery=False):
     integer(verification_job_id,positive=True)
     integer(event_id,positive=True)
     db=None
@@ -27,7 +39,8 @@ def load_trial_source(database,verification_job_id,event_id):
         db=_open(database,readonly=True,timeout_ms=5000)
         db.execute("BEGIN")
         if db.execute('PRAGMA user_version').fetchone()[0]!=LATEST_VERSION:raise QueueUnavailable()
-        return _source(db,verification_job_id,event_id)
+        source=_source(db,verification_job_id,event_id)
+        return (source,_delivery(db,event_id)) if with_delivery else source
     except (OSError,sqlite3.Error,MigrationError):raise QueueUnavailable() from None
     finally:
         if db is not None:db.close()

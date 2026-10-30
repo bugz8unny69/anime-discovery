@@ -307,7 +307,7 @@ class ProwlarrSettingsTests(unittest.TestCase):
             'base_url': 'http://prowlarr.local:9696', 'timeout_seconds': 90,
             'max_resolution': 2160, 'min_seeders': 1, 'rank_by': 'seeders'}})
         self.assertEqual(Options.capture(current), Options('http://prowlarr.local:9696', 90))
-        self.assertEqual(DiscoveryPolicy.capture(current), DiscoveryPolicy(2160, 1, 'seeders', 600))
+        self.assertEqual(DiscoveryPolicy.capture(current), DiscoveryPolicy(2160, 1, 'seeders', 600, True))
 
     def test_secret_store_keeps_the_prowlarr_key_private(self):
         import tempfile, os

@@ -1,0 +1,141 @@
+"""Audio check setting: probe languages, Dual Audio ranking and the intake gate."""
+import json
+import unittest
+
+from src.nextgen.acquisition.audio import audio_tagged, required_languages
+from src.nextgen.acquisition.media import AudioMissing, parse_probe
+from src.nextgen.acquisition.prowlarr_search import DiscoveryPolicy, Release
+from src.nextgen.jobs.evaluate_trial_job import (
+    EvaluationCompletion, registration as trial_registration,
+)
+from src.nextgen.jobs.discover_sonarr_backfill_job import KIND as DISCOVER_KIND
+from src.nextgen.storage.sonarr_backfill import window
+from src.nextgen.storage.sqlite import (
+    accept_event_and_job, connect, enqueue_job, save_identity, transaction,
+)
+from src.nextgen.tests import test_backfill_discovery as backfill
+from src.nextgen.tests.test_media_verification import probe_bytes
+
+
+class AudioTagTests(unittest.TestCase):
+    def test_common_group_spellings_count_as_audio_tags(self):
+        for title in ('[Group] Show - 01 (1080p) [Dual Audio]', 'Show.S01E01.1080p.Dual-Audio.x265',
+                      'Show S01E01 DUAL 1080p', 'Show - 01 [Multi-Audio]', 'Show S01E01 MULTi 1080p',
+                      'Show - 01 [English Dub]', 'Show - 01 (Dubbed)', 'Show S01E01 JPN+ENG',
+                      'Show - 01 [Eng-Jpn]', 'Show - 01 (Japanese, English)'):
+            with self.subTest(title=title):
+                self.assertTrue(audio_tagged(title))
+
+    def test_subtitles_and_plain_titles_do_not_count(self):
+        for title in ('[SubsPlease] Show - 01 (1080p)', 'Show - 01 [Multi-Subs]',
+                      'Show S01E01 1080p MULTi-Sub', 'Multiple Show - 01', '', None):
+            with self.subTest(title=title):
+                self.assertFalse(audio_tagged(title))
+
+
+class ProbeLanguageTests(unittest.TestCase):
+    def test_extra_audio_tracks_are_fine(self):
+        raw = probe_bytes(languages=('fre', 'jpn', 'ger', 'eng', 'spa', 'ita'))
+        self.assertEqual(parse_probe(raw, '.mkv')[1], ('eng', 'jpn'))
+
+    def test_japanese_only_mode(self):
+        self.assertEqual(parse_probe(probe_bytes(languages=('jpn',)), '.mkv', 'japanese')[1], ('jpn',))
+        with self.assertRaises(AudioMissing):
+            parse_probe(probe_bytes(languages=('eng',)), '.mkv', 'japanese')
+
+    def test_both_required_by_default(self):
+        with self.assertRaises(AudioMissing) as raised:
+            parse_probe(probe_bytes(languages=('jpn',)), '.mkv')
+        self.assertEqual(str(raised.exception), 'Japanese and English audio tracks are required.')
+
+    def test_off_skips_the_language_check_only(self):
+        self.assertEqual(parse_probe(probe_bytes(languages=('und',)), '.mkv', 'off')[1], ())
+        self.assertEqual(required_languages('off'), frozenset())
+
+
+def release(title, resolution=1080, seeders=50):
+    return Release(title, 'nyaa', resolution, seeders, 100, 1, None, eligible_for_handoff=True)
+
+
+class AudioRankingTests(unittest.TestCase):
+    def test_tagged_releases_go_first_but_untagged_stay(self):
+        plain = release('[A] Show - 01 (1080p)', seeders=500)
+        dual = release('[B] Show - 01 (720p) [Dual Audio]', resolution=720, seeders=10)
+        ranked = DiscoveryPolicy(prefer_audio_tag=True).rank((plain, dual))
+        self.assertEqual(ranked, (dual, plain))
+        self.assertEqual(DiscoveryPolicy().rank((plain, dual)), (plain, dual))
+
+
+class AnchorWindowTests(unittest.TestCase):
+    def test_include_anchor_adds_the_delivered_episode(self):
+        self.assertEqual(window(10, 6, 1), (1, 2, 3, 4, 5, 6))
+        self.assertEqual(window(10, 6, 1, True), (1, 2, 3, 4, 5, 6, 10))
+
+    def test_untagged_delivery_does_not_route_to_reservation(self):
+        spec = trial_registration(reservation_kind='RESERVE_EPISODE', discovery_kind=DISCOVER_KIND)
+        skipped = EvaluationCompletion(None, 1, True)
+        kept = EvaluationCompletion(None, 1, False)
+        self.assertEqual(spec.route(skipped), ())
+        self.assertEqual(len(spec.route(kept)), 1)
+
+
+class IntakeAudioSearchTests(unittest.IsolatedAsyncioTestCase):
+    """An untagged autobrr release is not downloaded; Prowlarr searches its episode."""
+    asyncSetUp = backfill.BackfillWorkerTests.asyncSetUp
+    rows = backfill.BackfillWorkerTests.rows
+    worker = backfill.BackfillWorkerTests.worker
+
+    def autobrr(self, episode, title):
+        db = connect(self.database)
+        try:
+            body = json.dumps({'release_name': title}).encode()
+            event, release_job = accept_event_and_job(db, 'autobrr', body, kind='VERIFY_RELEASE',
+                                                      payload={'anidb_id': 123})
+            identity = save_identity(db, event, {'schema_version': 2, 'anime': {
+                'anidb_id': 123, 'tvdb_series_id': 456, 'title': 'Test'}})
+            eid = 11000 + episode
+            with transaction(db):
+                db.execute("UPDATE jobs SET state='DONE',attempt_count=1 WHERE job_id=?", (release_job,))
+                db.execute('INSERT OR IGNORE INTO identified_episodes VALUES(?,123)', (eid,))
+                db.execute(
+                    "INSERT INTO release_verifications(job_id,identity_result_id,anidb_id,release_sha256,"
+                    "verification_scope,anidb_episode_number,anidb_episode_id,tvdb_series_id,tvdb_season,"
+                    "tvdb_episode,tvdb_episode_id,verified_at_ms) "
+                    "VALUES(?,?,123,?,'DECLARED_SINGLE_EPISODE',?,?,456,1,?,?,1)",
+                    (release_job, identity, 'a'*64, episode, eid, episode, eid+100000))
+                enqueue_job(db, kind='EVALUATE_TRIAL', payload={'verification_job_id': release_job},
+                            component='worker', event_id=event, created_by_job_id=release_job,
+                            available_at_ms=0)
+        finally:
+            db.close()
+
+    async def run_pages(self, title, *, audio=None):
+        if audio is not None:
+            self.store.update({'acquisition': {'audio_check': audio}}, expected_revision=1)
+        self.autobrr(10, title)
+        fake = backfill.FakeDiscovery()
+        worker = self.worker(fake)
+        for _ in range(3):
+            await worker.attempt()
+        marked = self.rows("SELECT reason_code FROM job_history WHERE event_code='TRIAL_AUDIO_SEARCH'")
+        return [call[2] for call in fake.calls], marked
+
+    async def test_untagged_release_searches_its_own_episode(self):
+        calls, marked = await self.run_pages('[SubsPlease] Test - 10 (1080p)')
+        self.assertEqual(calls, [(1, 2, 3, 4), (5, 6, 10)])
+        self.assertEqual(marked, [('RELEASE_AUDIO_UNTAGGED',)])
+
+    async def test_dual_audio_release_is_downloaded_as_before(self):
+        calls, marked = await self.run_pages('[Group] Test - 10 (1080p) [Dual Audio]')
+        self.assertEqual(calls, [(1, 2, 3, 4), (5, 6)])
+        self.assertEqual(marked, [])
+
+    async def test_japanese_only_mode_never_skips_the_delivery(self):
+        calls, marked = await self.run_pages('[SubsPlease] Test - 10 (1080p)', audio='japanese')
+        self.assertEqual(calls, [(1, 2, 3, 4), (5, 6)])
+        self.assertEqual(marked, [])
+
+
+
+if __name__ == '__main__':
+    unittest.main()

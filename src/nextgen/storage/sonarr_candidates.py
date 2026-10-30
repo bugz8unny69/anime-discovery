@@ -183,11 +183,11 @@ def schedule_after_cleanup(db,operation_id):
                    reason_code=issue[0] or 'JOB_RETRY_EXHAUSTED')
     pending=next_candidate(db,plan_id=plan_id,episode=episode)
     from src.nextgen.storage.sqlite import enqueue_job_with_receipt
-    from src.nextgen.storage.sonarr_backfill import PAGE_SIZE, window
+    from src.nextgen.storage.sonarr_backfill import PAGE_SIZE, plan_window
     scope=db.execute('SELECT anchor_episode,backfill_count,following_count '
                      'FROM trial_plans WHERE plan_id=?',(plan_id,)).fetchone()
     if scope is None:raise CandidateConflict()
-    numbers=window(*scope)
+    numbers=plan_window(db,plan_id,*scope)
     if episode not in numbers:raise CandidateConflict()
     page_start=(numbers.index(episode)//PAGE_SIZE)*PAGE_SIZE+1
     _,receipt=enqueue_job_with_receipt(

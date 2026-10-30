@@ -13,13 +13,14 @@ from src.nextgen.acquisition.media import (
     MediaInvalid, MediaUnavailable, VerifiedMedia, cancelled,
     signature, probe, parse_probe,
 )
+from src.nextgen.acquisition.audio import JAPANESE_ENGLISH
 from src.nextgen.batch.probe_transfer import selection_fingerprint
 from src.nextgen.storage.batch_submission_journal import BatchSubmissionIntent
 from src.nextgen.storage.batch_transfer_journal import BatchTransferRecord
 
 
 def verify_batch_probe_file(intent,record,transfer_job_id,flag,*,
-                            read_probe=probe,protected_roots=()):
+                            read_probe=probe,protected_roots=(),audio=JAPANESE_ENGLISH):
     """Return the immutable content+JP/EN proof, never a user-supplied verdict."""
     if (type(intent) is not BatchSubmissionIntent
             or type(record) is not BatchTransferRecord
@@ -56,7 +57,7 @@ def verify_batch_probe_file(intent,record,transfer_job_id,flag,*,
                     if os.read(fd,1):raise MediaInvalid()
                     os.lseek(fd,0,os.SEEK_SET)
                     duration,languages=parse_probe(
-                        read_probe(fd,flag),PurePosixPath(selected.path).suffix.lower())
+                        read_probe(fd,flag),PurePosixPath(selected.path).suffix.lower(),audio)
                     cancelled(flag)
                     if signature(os.fstat(fd))!=before:raise MediaInvalid()
                     with directory(root) as current:
@@ -76,7 +77,7 @@ def verify_batch_probe_file(intent,record,transfer_job_id,flag,*,
 
 
 def verify_batch_episode_file(intent,record,unlock_job_id,file_index,flag,*,
-                              read_probe=probe,protected_roots=()):
+                              read_probe=probe,protected_roots=(),audio=JAPANESE_ENGLISH):
     """Verify one provider-approved, fully downloaded regular episode."""
     from src.nextgen.storage.batch_unlock_journal import BatchUnlockRecord
     from src.nextgen.batch.unlock import planned_priorities
@@ -117,7 +118,7 @@ def verify_batch_episode_file(intent,record,unlock_job_id,file_index,flag,*,
                         digest.update(chunk)
                     if os.read(fd,1):raise MediaInvalid()
                     os.lseek(fd,0,os.SEEK_SET)
-                    duration,languages=parse_probe(read_probe(fd,flag),suffix)
+                    duration,languages=parse_probe(read_probe(fd,flag),suffix,audio)
                     cancelled(flag)
                     if signature(os.fstat(fd))!=before:raise MediaInvalid()
                     with directory(root) as fresh:

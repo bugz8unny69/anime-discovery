@@ -25,16 +25,35 @@ class BackfillConflict(ValueError):
         super().__init__('Frozen backfill discovery facts need review.')
 
 
-def window(anchor, backfill, following):
+AUDIO_SEARCH_EVENT = 'TRIAL_AUDIO_SEARCH'
+
+
+def window(anchor, backfill, following, include_anchor=False):
     """Episodes to search: backfill 1..X plus continue anchor..anchor+F-1, overlaps once.
 
-    The anchor itself is excluded: its own delivery is already acquiring it,
-    and its reservation may not exist yet when this search runs.
+    The anchor is normally excluded: its own delivery is already acquiring it,
+    and its reservation may not exist yet when this search runs. include_anchor
+    is for a delivery that was not downloaded (no Dual/Multi Audio tag).
     """
     numbers = set(range(1, backfill + 1))
     if following: numbers |= set(range(anchor, min(anchor + following, MAX_EPISODE + 1)))
-    numbers.discard(anchor)
+    if include_anchor: numbers.add(anchor)
+    else: numbers.discard(anchor)
     return tuple(n for n in sorted(numbers) if n <= MAX_EPISODE)
+
+
+def anchor_searched(db, plan_id):
+    """The plan's anchor delivery was skipped for audio, so search its episode."""
+    return db.execute(
+        "SELECT 1 FROM trial_plans p JOIN trial_evaluations t "
+        "ON t.verification_id=p.anchor_verification_id AND t.plan_id=p.plan_id "
+        "JOIN job_history h ON h.job_id=t.job_id "
+        "WHERE p.plan_id=? AND h.event_code=? LIMIT 1",
+        (plan_id, AUDIO_SEARCH_EVENT)).fetchone() is not None
+
+
+def plan_window(db, plan_id, anchor, backfill, following):
+    return window(anchor, backfill, following, anchor_searched(db, plan_id))
 
 
 @dataclass(frozen=True)
@@ -71,7 +90,7 @@ def _plan(db, plan_id, start, retry_episode=None):
     if row is None or (row[0],row[1],row[2],row[4]) != tuple(row[6:]):
         raise BackfillConflict()
     aid, tid, season, backfill, anchor, following = row[:6]
-    episodes = window(anchor, backfill, following)
+    episodes = plan_window(db, plan_id, anchor, backfill, following)
     if not episodes or start > len(episodes) or (start - 1) % PAGE_SIZE:
         raise BackfillConflict()
     numbers = episodes[start-1:start-1+PAGE_SIZE]
@@ -143,7 +162,7 @@ def schedule_first(db, claim, source, *, kind):
     if row is None: raise BackfillConflict()
     plan_id,backfill,anchor,following = row
     # Nothing to search when the window is only the delivered anchor episode.
-    if not window(anchor,backfill,following): return ()
+    if not plan_window(db,plan_id,anchor,backfill,following): return ()
     # Transaction is already a SQLite write transaction. Concurrent worker
     # completions serialize here; later deliveries cannot schedule a replay.
     exists = db.execute(
