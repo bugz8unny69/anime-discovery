@@ -11,7 +11,7 @@ import json
 import secrets
 import threading
 
-from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile, AcquisitionConflict
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, TorrentFile, AcquisitionConflict
 from src.nextgen.acquisition.settings import DownloadOptions
 from src.nextgen.acquisition.submission import Observation, ClientInvalid
 from src.nextgen.acquisition.transfers import STOPPED, CHECKING
@@ -26,7 +26,7 @@ from src.nextgen.storage.sqlite import transaction
 @dataclass(frozen=True)
 class BatchSubmissionIntent:
     candidate: BatchAcquisitionCandidate = field(repr=False)
-    inventory: BatchInventory = field(repr=False)
+    inventory: BatchInventory | ObservedBatchInventory = field(repr=False)
     options: DownloadOptions = field(repr=False)
     marker: str = field(repr=False)
     state: str
@@ -34,7 +34,7 @@ class BatchSubmissionIntent:
     api_major: int
     def __post_init__(self):
         if (type(self.candidate) is not BatchAcquisitionCandidate
-                or type(self.inventory) is not BatchInventory
+                or type(self.inventory) not in (BatchInventory,ObservedBatchInventory)
                 or type(self.options) is not DownloadOptions
                 or type(self.marker) is not str or len(self.marker)!=32
                 or any(x not in '0123456789abcdef' for x in self.marker)
@@ -108,8 +108,10 @@ def stored_inventory(db,plan_id,info_hash,info_sha256):
         if (type(document) is not dict or set(document)!={'files'}
                 or type(document['files']) is not list):
             raise AcquisitionConflict()
-        inventory=BatchInventory(info_hash,info_sha256,
-                                 tuple(TorrentFile(**f) for f in document['files']))
+        inventory=(BatchInventory(info_hash,info_sha256,
+                        tuple(TorrentFile(**f) for f in document['files']))
+                   if info_sha256 is not None else ObservedBatchInventory(info_hash,
+                        tuple(TorrentFile(**f) for f in document['files'])))
         if inventory.json()!=raw:raise AcquisitionConflict()
         return inventory
     except (TypeError,KeyError,ValueError):
@@ -202,7 +204,7 @@ class BatchSubmissionJournal:
 
     def load(self,claim,reservation_job_id,inventory):
         integer(reservation_job_id,positive=True)
-        if type(inventory) is not BatchInventory:raise AcquisitionConflict()
+        if type(inventory) not in (BatchInventory,ObservedBatchInventory):raise AcquisitionConflict()
         with self.queue.connection() as db,transaction(db):
             self._owns(db,claim,reservation_job_id)
             candidate=_candidate(db,reservation_job_id,inventory)
@@ -212,7 +214,7 @@ class BatchSubmissionJournal:
 
     def authorize(self,claim,candidate,inventory,options,api_major,present,revision):
         if (type(candidate) is not BatchAcquisitionCandidate
-                or type(inventory) is not BatchInventory
+                or type(inventory) not in (BatchInventory,ObservedBatchInventory)
                 or type(options) is not DownloadOptions
                 or type(api_major) is not int or api_major not in (4,5)
                 or type(present) is not bool):
