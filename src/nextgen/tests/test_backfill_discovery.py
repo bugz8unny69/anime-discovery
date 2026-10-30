@@ -421,7 +421,7 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BackfillSchemaTests(unittest.TestCase):
-    def test_explicit_v41_to_v48_and_fresh_schema_match(self):
+    def test_explicit_v41_to_latest_and_fresh_schema_match(self):
         old = sqlite3.connect(':memory:')
         fresh = sqlite3.connect(':memory:')
         try:
@@ -438,10 +438,11 @@ class BackfillSchemaTests(unittest.TestCase):
             old.executescript((SQL_DIR/'046_observed_acquisition.sql').read_text())
             old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             old.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
+            old.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],48)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],49)
         finally:
             old.close()
             fresh.close()
