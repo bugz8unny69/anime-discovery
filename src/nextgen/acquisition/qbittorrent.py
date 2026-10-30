@@ -424,7 +424,8 @@ class Client:
         this method. Do not delete local files or try another remove on replay.
         """
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.options!=self.options
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.options!=self.options
                 or self.protocol is None):
             raise ClientInvalid()
         observed=self.inspect(intent.info_hash)
