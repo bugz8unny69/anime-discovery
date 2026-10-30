@@ -14,6 +14,45 @@ from src.nextgen.storage.batch_submission_journal import (
 
 
 class BatchClient(Client):
+    def inspect_owned_batch_metadata(self, expected_hash, marker, download_root):
+        """Double-check a journal-owned, stopped qB file list without mutation.
+
+        The caller must first persist the one-use early batch admission.
+        This returns *observed* metadata, never fabricates a BEP3 SHA256,
+        and grants no permission to start or adopt the torrent.
+        """
+        import re
+        from src.nextgen.acquisition.metadata import (
+            infohash, ObservedBatchInventory,
+        )
+        from src.nextgen.acquisition.submission import ClientInvalid
+        digest = infohash(expected_hash)
+        if (not self._sid or self.protocol is None
+                or type(marker) is not str
+                or re.fullmatch('[a-f0-9]{32}', marker) is None
+                or download_root!=self.options.download_root
+                or not download_root.endswith('/ad-'+marker)):
+            raise ClientInvalid()
+
+        def owned(row):
+            return (row is not None and row.info_hash==digest
+                    and row.save_path.rstrip('/')==download_root
+                    and row.category==self.options.category
+                    and row.auto_tmm is False
+                    and row.state in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
+                    and 'ad-'+marker in row.tags
+                    and not any(t.startswith('ad-') and t!='ad-'+marker
+                                for t in row.tags)
+                    and bool(row.files))
+
+        before=self.inspect(digest)
+        if not owned(before):
+            return None
+        after=self.inspect(digest)
+        if after!=before or not owned(after):
+            raise ClientInvalid()
+        return ObservedBatchInventory(digest, after.files)
+
     def add_batch_stopped(self,raw,intent,permit):
         if (not self._sid or self.major not in (4,5)
                 or type(intent) is not BatchSubmissionIntent
