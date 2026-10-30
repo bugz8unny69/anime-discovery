@@ -42,7 +42,7 @@ class BatchClient(Client):
             self._tag_legacy_submission(intent.info_hash,intent.marker)
 
 
-    def inspect_owned_batch_metadata(self, expected_hash, marker, download_root):
+    def inspect_owned_batch_metadata(self, expected_hash, marker, download_root, *, require_stopped=True):
         """Double-check a journal-owned, stopped qB file list without mutation.
 
         The caller must first persist the one-use early batch admission.
@@ -67,7 +67,8 @@ class BatchClient(Client):
                     and row.save_path.rstrip('/')==download_root
                     and row.category==self.options.category
                     and row.auto_tmm is False
-                    and row.state in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
+                    and (not require_stopped or row.state in
+                         ('pausedDL','pausedUP','stoppedDL','stoppedUP'))
                     and 'ad-'+marker in row.tags
                     and not any(t.startswith('ad-') and t!='ad-'+marker
                                 for t in row.tags)
@@ -77,7 +78,8 @@ class BatchClient(Client):
         if not owned(before):
             return None
         after=self.inspect(digest)
-        if after!=before or not owned(after):
+        if (not owned(after) or after.files!=before.files
+                or (require_stopped and after.state!=before.state)):
             raise ClientInvalid()
         return ObservedBatchInventory(digest, after.files)
 
