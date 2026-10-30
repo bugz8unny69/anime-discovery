@@ -130,10 +130,10 @@ def make_resolver(options, credentials, *, title_extractor=delivery_title, clien
                 incomplete("no_title_aliases")
             check("release_title", "passed")
 
-            if len(seasons) == 1:
+            if len(seasons) <= 1:
                 from src.nextgen.storage.manual_identity import for_release
                 manual = for_release(configuration.value('storage.database_path'),
-                                     title, int(seasons[0]))
+                                     title, int(seasons[0]) if seasons else None)
                 if manual is not None:
                     if matching is not None:
                         matching.anidb(manual['anime']['anidb_id'])
