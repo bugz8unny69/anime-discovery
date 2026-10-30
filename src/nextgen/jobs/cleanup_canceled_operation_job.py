@@ -32,7 +32,10 @@ def registration(secrets,*,service_factory=CancellationService):
         service=service_factory(context.configuration,secrets,logger=context.logger,admitted=True,guard=guard,component="worker")
         status=await blocking(service.cleanup,target)
         if status['cleanup_state']=='COMPLETE':return Outcome(value=target)
-        if status['cleanup_state']=='REVIEW':return Outcome('review','CANCELLATION_REVIEW')
+        if status['cleanup_state']=='REVIEW':
+            # Name the failed check on this job's own History, not only the target's.
+            facts={k:status[k] for k in ('failed_check','failed_path') if status.get(k)}
+            return Outcome('review','CANCELLATION_REVIEW',facts=facts or None)
         if status.get('staging_retry'):
             # Distinct from open-ended waiting for uncertain torrent controls.
             return Outcome('retry','STAGING_REVIEW')

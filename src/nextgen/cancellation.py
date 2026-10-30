@@ -10,6 +10,36 @@ class CancellationError(ValueError):
     def __init__(self):super().__init__('Cancellation or cleanup needs review.')
 
 
+def failure_location(exc):
+    """Name the check that stopped cleanup: 'file.py:LINE function', plus the
+    file path when the root cause was a filesystem error. No raw messages.
+
+    Follows the exception chain (including 'from None') to the original raise.
+    """
+    import os
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]
+    chain=exc;seen=set()
+    while (chain.__cause__ or chain.__context__) is not None and id(chain) not in seen:
+        seen.add(id(chain));chain=chain.__cause__ or chain.__context__
+    check=None;tb=chain.__traceback__
+    while tb is not None:
+        try:relative=Path(tb.tb_frame.f_code.co_filename).resolve().relative_to(root).as_posix()
+        except ValueError:relative=None
+        if relative is not None and relative.startswith('src/nextgen/'):
+            check=f'{relative}:{tb.tb_lineno} {tb.tb_frame.f_code.co_name}'
+        tb=tb.tb_next
+    if check is not None and isinstance(chain,OSError) and chain.errno is not None:
+        import errno as _errno
+        check+=' '+_errno.errorcode.get(chain.errno,'EUNKNOWN')
+    path=None
+    if isinstance(chain,OSError) and type(chain.filename) is str and chain.filename.startswith('/'):
+        path=chain.filename
+    elif isinstance(chain,OSError) and type(chain.filename) is bytes:
+        path=os.fsdecode(chain.filename)
+    return check,path
+
+
 class CancellationRequested(RuntimeError):
     reason_code='JOB_CANCELED'
     def __init__(self):super().__init__('This work has been canceled.')

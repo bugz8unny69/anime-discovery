@@ -48,7 +48,7 @@ class CancellationService(OwnedCleanup):
     def cancel(self,job_id):
         self.request(job_id)
         return self.cleanup(job_id)
-    def _state(self,job_id,state,reason,*,cause=None):
+    def _state(self,job_id,state,reason,*,cause=None,check=None,path=None):
         with self.store.queue.connection() as db,transaction(db):
             self._fence(db)
             op=operation(db,job_id)
@@ -56,9 +56,13 @@ class CancellationService(OwnedCleanup):
             now=self.store.queue.now()
             db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state=?,reason_code=?,updated_at_ms=? WHERE operation_id=?",
                        (state,reason,now,op[0]))
-            records=() if (op[2],op[3])==(state,reason) else (append_job_history(db,job_id=job_id,
+            # A repeated review still records which check failed this time.
+            records=() if (op[2],op[3])==(state,reason) and check is None else (append_job_history(db,job_id=job_id,
                 event_code='CANCELLATION_CLEANUP_CHANGED',reason_code=reason,component=self.component,occurred_at_ms=now,
-                details={**({} if cause is None else {'cause_reason_code':cause}),'attempt':job_attempt(db,job_id)}),)
+                details={**({} if cause is None else {'cause_reason_code':cause}),
+                         **({} if check is None else {'failed_check':check}),
+                         **({} if path is None else {'failed_path':path}),
+                         'attempt':job_attempt(db,job_id)}),)
             if state=='COMPLETE':
                 from src.nextgen.storage.reservation_release import release_cancelled
                 records+=release_cancelled(db,op[0],job_id,now,component=self.component)
@@ -344,6 +348,14 @@ class CancellationService(OwnedCleanup):
                 self._state(job_id,'PENDING','CANCELLATION_PENDING',cause='DOWNLOAD_CLIENT_UNAVAILABLE')
             except (CancellationError,ClientInvalid,ClientAuthenticationFailed,ClientUnsupported,OSError,ValueError) as exc:
                 from src.nextgen.reasons import get_reason
+                from src.nextgen.cancellation import failure_location
                 cause=getattr(exc,'reason_code','STORAGE_UNAVAILABLE' if isinstance(exc,OSError) else 'CANCELLATION_REVIEW')
-                self._state(job_id,'REVIEW','CANCELLATION_REVIEW',cause=cause if get_reason(cause) is not None else 'CANCELLATION_REVIEW')
+                check,path=failure_location(exc)
+                if self.logger is not None:
+                    try:self.logger.warning('Cancellation cleanup for job %s stopped at %s%s',job_id,
+                                            check or 'an unknown check',' path='+repr(path) if path else '')
+                    except Exception:pass  # A broken log sink never changes cleanup state.
+                self._state(job_id,'REVIEW','CANCELLATION_REVIEW',cause=cause if get_reason(cause) is not None else 'CANCELLATION_REVIEW',
+                            check=check,path=path)
+                return {**self.store.status(job_id),'failed_check':check,'failed_path':path}
             return self.store.status(job_id)

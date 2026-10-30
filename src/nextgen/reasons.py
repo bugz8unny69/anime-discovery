@@ -102,7 +102,7 @@ _ENTRIES = (
     Reason('JOB_CANCELED', 'An operator explicitly canceled unfinished work.', 'This work was canceled.', 'Check cleanup status for any remaining downloads.', 'INFO', False),
     Reason('CANCELLATION_DRAINING', 'Cancellation is durable; active operation handlers must drain before cleanup.', 'Waiting for active work to stop before cleanup.', 'Wait for the current work to finish stopping.', 'INFO', None),
     Reason('CANCELLATION_PENDING', 'Cleanup is incomplete; external outcomes are reconciled without repeating uncertain commands.', 'Cancellation cleanup is waiting for confirmation.', 'Check the existing torrent and cleanup status.', 'INFO', None),
-    Reason('CANCELLATION_REVIEW', 'Cleanup ownership, file identity, sharing or external outcome cannot be established safely.', 'Cancellation cleanup needs attention.', 'Check the saved staging publication and exact file path. If a copy was replaced or altered, verify it before manually removing only that episode copy; then resume the existing Cleanup action. Never delete the whole staging or torrent root.', 'WARNING', False),
+    Reason('CANCELLATION_REVIEW', 'Cleanup ownership, file identity, sharing or external outcome cannot be established safely.', 'Cancellation cleanup needs attention.', 'The failed check and the file it looked at are shown below and in History. For the full picture (job history, ad- download folder, staging paths) run sudo adm report job --id with this job number. Fix or remove only that file, then press Retry. Never delete the whole staging or torrent root.', 'WARNING', False),
     Reason('CANCELLATION_COMPLETE', 'Owned-resource and registered temporary-file cleanup completed or no resources existed.', 'Cancellation cleanup is complete.', 'No further cleanup is required for the recorded resources.', 'INFO', None),
     Reason('TORRENT_SELECTION_UNCERTAIN', 'Fixed file selection was authorized once; confirmation is pending.', 'Video file selection is waiting for confirmation.', 'Inspect the existing selection; do not repeat uncertain commands automatically.', 'INFO', None),
     Reason('TORRENT_SELECTION_CONFIRMED', 'Exact selected-video and skipped-sidecar priorities were observed while stopped.', 'The video file is selected and ready to download.', 'Continue with the recorded download start.', 'INFO', None),
@@ -271,6 +271,7 @@ if len(REGISTRY) != len(_ENTRIES):
 
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}", re.ASCII)
 _MAX_INTEGER = (1 << 63) - 1
+_CHECK = re.compile(r"src/nextgen/[a-z0-9_/]{1,120}\.py:[1-9][0-9]{0,5} [A-Za-z_][A-Za-z0-9_]{0,63}( [A-Z0-9]{1,20})?")
 _FIELDS = frozenset({
     "schema_version", "anime.anidb_id", "anime.tvdb_series_id", "anime.title",
     "anime.english_title", "anime.original_title", "anime.type", "anime.year",
@@ -302,7 +303,8 @@ def display_reason(code: str) -> dict:
 
 def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
                  attempt=None, max_attempts=None, cause_reason_code=None,
-                 video_mb=None, limit_mb=None, plan_used_mb=None) -> dict:
+                 video_mb=None, limit_mb=None, plan_used_mb=None,
+                 failed_check=None, failed_path=None) -> dict:
     """Build bounded history facts; never accept raw values or exception text.
 
     Field names identify schema locations, not missing episode coverage.
@@ -324,6 +326,19 @@ def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
             if type(value) is not int or not 0 <= value <= _MAX_INTEGER:
                 raise ValueError("invalid diagnostic integer")
             details[key] = value
+    # Code location of the check that stopped the work, e.g.
+    # "src/nextgen/staging_artifacts.py:302 clean_published_batch ENOENT".
+    if failed_check is not None:
+        if type(failed_check) is not str or not _CHECK.fullmatch(failed_check):
+            raise ValueError("invalid failed check")
+        details["failed_check"] = failed_check
+    # The local file the failed check was looking at (absolute, no controls).
+    if failed_path is not None:
+        if (type(failed_path) is not str or not failed_path.startswith("/")
+                or len(failed_path.encode("utf-8", "surrogateescape")) > 1024
+                or any(ord(c) < 32 or ord(c) == 127 for c in failed_path)):
+            raise ValueError("invalid failed path")
+        details["failed_path"] = failed_path
     if cause_reason_code is not None:
         cause = get_reason(cause_reason_code)
         if cause is None:
