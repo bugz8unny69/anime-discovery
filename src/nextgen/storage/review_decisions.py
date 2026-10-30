@@ -56,3 +56,45 @@ def remove_selected(manifest,receipts,guard,keep_root):
                 guard()
                 if signature(os.stat(name,dir_fd=folder,follow_symlinks=False))!=info:raise StagingReview()
                 os.unlink(name,dir_fd=folder);os.fsync(folder)
+
+
+def prune_series(manifests,guard):
+    """After a whole-series Reject, drop empty season folders, our own
+    tvshow.nfo and the then-empty series folder. Never recursive: any file we
+    did not write keeps its folders in place."""
+    import errno,hashlib
+    from pathlib import PurePosixPath
+    targets={}
+    for manifest in manifests:
+        plan=json.loads(manifest)
+        for entry in plan['entries']:
+            if entry.get('role')=='series':
+                targets[(plan['root'],tuple(plan['root_identity']),entry['path'])]=entry['sha256']
+    for (root_path,identity,nfo_path),sha in targets.items():
+        guard()
+        nfo=PurePosixPath(nfo_path)
+        if len(nfo.parts)!=2 or nfo.name!='tvshow.nfo':raise StagingReview()
+        with directory(root_path) as root:
+            if (os.fstat(root).st_dev,os.fstat(root).st_ino)!=identity:raise StagingReview()
+            try:series=os.open(nfo.parts[0],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=root)
+            except FileNotFoundError:continue
+            try:
+                for name in os.listdir(series):
+                    if name.startswith('Season '):
+                        try:os.rmdir(name,dir_fd=series)
+                        except OSError as error:
+                            if error.errno not in (errno.ENOTEMPTY,errno.EEXIST,errno.ENOTDIR,errno.ENOENT):raise
+                if os.listdir(series)==['tvshow.nfo']:
+                    fd=os.open('tvshow.nfo',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=series)
+                    try:
+                        info=os.fstat(fd)
+                        same=(info.st_size<1048576 and hashlib.sha256(os.read(fd,info.st_size+1)).hexdigest()==sha)
+                    finally:os.close(fd)
+                    if same:
+                        guard()
+                        os.unlink('tvshow.nfo',dir_fd=series);os.fsync(series)
+                if os.listdir(series):continue
+            finally:os.close(series)
+            try:os.rmdir(nfo.parts[0],dir_fd=root);os.fsync(root)
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY,errno.EEXIST,errno.ENOENT):raise
