@@ -4,9 +4,9 @@ These are explicit manual choices, not provider-verified episode mappings.
 The existing release-verification job still owns episode placement.
 """
 import json
-import sqlite3
 from src.nextgen.providers.parsing import release_title
 from src.nextgen.providers.parsing import norm
+from src.nextgen.batch.recognition import release_scope_hint
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction
 
@@ -25,8 +25,20 @@ def _key(release):
     return key
 
 
-def for_release(database, release, season):
-    if season is not None and (type(season) is not int or not 0 <= season <= 999):
+def _scope(release):
+    """Reuse the existing intake classification; unknown stays unnumbered."""
+    hint = release_scope_hint(release)
+    if hint.kind == "ambiguous":
+        return None
+    return hint.season_hint if hint.kind in ("single_episode", "season_pack", "mixed_pack") else (
+        0 if hint.kind == "special" and hint.season_hint == 0 else -1)
+
+
+def for_release(database, release, season=None):
+    scope = _scope(release)
+    if scope is None:
+        return None
+    if season is not None and scope >= 0 and season != scope:
         return None
     try:
         key = _key(release)
@@ -35,7 +47,7 @@ def for_release(database, release, season):
     with JobQueue(database).connection() as db:
         row = db.execute(
             "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
-            "WHERE alias_key=? AND tvdb_season=?", (key, -1 if season is None else season)).fetchone()
+            "WHERE alias_key=? AND tvdb_season=?", (key, scope)).fetchone()
     if row is None:
         return None
     return {"schema_version": 2, "anime": {
@@ -63,16 +75,21 @@ def save(database, job_id, *, anidb_id, tvdb_series_id, title, season):
             if type(release) is not str:
                 raise ValueError()
             key = _key(release)
+            scope = _scope(release)
+            if scope is None:
+                raise ManualMatchError('Ambiguous release; cannot reuse automatically')
+            if season is not None and scope >= 0 and season != scope:
+                raise ManualMatchError('Season conflicts with parsed release')
         except (ValueError, TypeError, KeyError, UnicodeError):
             raise ManualMatchError("Release name unavailable") from None
         prior = db.execute(
             "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
-            "WHERE alias_key=? AND tvdb_season=?", (key, -1 if season is None else season)).fetchone()
+            "WHERE alias_key=? AND tvdb_season=?", (key, scope)).fetchone()
         wanted = (anidb_id, tvdb_series_id, title.strip())
         if prior is not None and prior != wanted:
             raise ManualMatchError("An existing manual match differs; edit the existing match first")
         db.execute(
             "INSERT OR IGNORE INTO manual_identity_matches "
             "(alias_key,tvdb_season,anidb_id,tvdb_series_id,title) VALUES(?,?,?,?,?)",
-            (key, -1 if season is None else season, *wanted))
+            (key, scope, *wanted))
     return {"job_id": job_id, "alias": key, "season": season, "saved": True}
