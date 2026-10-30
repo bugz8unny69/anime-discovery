@@ -26,7 +26,7 @@ def _key(release):
 
 
 def for_release(database, release, season):
-    if type(season) is not int or not 0 <= season <= 999:
+    if season is not None and (type(season) is not int or not 0 <= season <= 999):
         return None
     try:
         key = _key(release)
@@ -35,7 +35,7 @@ def for_release(database, release, season):
     with JobQueue(database).connection() as db:
         row = db.execute(
             "SELECT anidb_id,tvdb_series_id,title FROM manual_identity_matches "
-            "WHERE alias_key=? AND tvdb_season=?", (key, season)).fetchone()
+            "WHERE alias_key=? AND tvdb_season=?", (key, -1 if season is None else season)).fetchone()
     if row is None:
         return None
     return {"schema_version": 2, "anime": {
@@ -46,7 +46,7 @@ def for_release(database, release, season):
 def save(database, job_id, *, anidb_id, tvdb_series_id, title, season):
     if (type(anidb_id) is not int or not 0 < anidb_id < (1 << 63)
             or type(tvdb_series_id) is not int or not 0 < tvdb_series_id < (1 << 63)
-            or type(season) is not int or not 0 <= season <= 999
+            or (season is not None and (type(season) is not int or not 0 <= season <= 999))
             or type(title) is not str or not 1 <= len(title.strip()) <= 512
             or any(ord(c) < 32 or ord(c) == 127 for c in title)):
         raise ManualMatchError("Invalid identity fields")
@@ -74,5 +74,5 @@ def save(database, job_id, *, anidb_id, tvdb_series_id, title, season):
         db.execute(
             "INSERT OR IGNORE INTO manual_identity_matches "
             "(alias_key,tvdb_season,anidb_id,tvdb_series_id,title) VALUES(?,?,?,?,?)",
-            (key, season, *wanted))
+            (key, -1 if season is None else season, *wanted))
     return {"job_id": job_id, "alias": key, "season": season, "saved": True}
