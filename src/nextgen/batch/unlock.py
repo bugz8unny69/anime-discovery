@@ -63,8 +63,7 @@ def plan_verified_unlock(intent,snapshot,media,verification_job_id):
     if (media.plan_id!=intent.candidate.plan_id
             or media.preparation_job_id!=intent.candidate.reservation_job_id
             or media.submission_fingerprint!=intent.fingerprint
-            or media.relative_path!=intent.inventory.files[intent.candidate.probe_index].path
-            or media.languages!=('eng','jpn')):
+            or media.relative_path!=intent.inventory.files[intent.candidate.probe_index].path):
         raise TransferConflict()
     validate_unlock_snapshot(intent,snapshot,stopped=True)
     priorities=planned_priorities(intent)

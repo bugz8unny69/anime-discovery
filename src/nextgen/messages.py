@@ -50,6 +50,7 @@ _EVENTS = (
     EventDefinition("EPISODE_RESERVATION_CREATED", "job", "Episode reserved for acquisition.", True),
     EventDefinition("EPISODE_RESERVATION_SKIPPED", "job", "Episode reservation was not needed.", True),
     EventDefinition("TRIAL_EVALUATED", "job", "Intake episode selection evaluated.", True),
+    EventDefinition("TRIAL_AUDIO_SEARCH", "job", "Release title has no Dual/Multi Audio tag; searching Prowlarr instead of downloading it.", True, "RELEASE_AUDIO_UNTAGGED"),
     EventDefinition("SONARR_BACKFILL_OBSERVED", "job", "Read-only Sonarr backfill results recorded."),
     EventDefinition("DONE", "job", "Job completed."),
     EventDefinition("ON_HOLD", "job", "Job placed on hold.", True),

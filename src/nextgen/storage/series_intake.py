@@ -9,7 +9,7 @@ from src.nextgen.history import integer, append_job_history
 from src.nextgen.storage.cancellation import CancellationStore, can_cancel_operation
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction, enqueue_job_with_receipt
-from src.nextgen.storage.sonarr_backfill import PAGE_SIZE, window
+from src.nextgen.storage.sonarr_backfill import PAGE_SIZE, plan_window
 
 
 class IntakeUnavailable(ValueError):
@@ -88,7 +88,7 @@ def detail(db, anidb_id):
         observed = dict(db.execute(
             'SELECT tvdb_episode,status FROM sonarr_backfill_results WHERE plan_id=?',
             (plan_id,)).fetchall())
-        for episode in window(anchor, backfill, following):
+        for episode in plan_window(db, plan_id, anchor, backfill, following):
             if (season, episode) in staged_episodes:
                 continue
             status = observed.get(episode, 'NOT_SEARCHED')
@@ -242,7 +242,7 @@ def retry_episode(database, anidb_id, season, episode):
         if db.execute("SELECT 1 FROM anime_review_decisions WHERE anidb_id=?", (anidb_id,)).fetchone():
             raise IntakeUnavailable()
         plan_id, anchor, backfill, following, event_id, parent_job = row
-        numbers = window(anchor, backfill, following)
+        numbers = plan_window(db, plan_id, anchor, backfill, following)
         if episode not in numbers:
             raise IntakeUnavailable()
         prior = db.execute(

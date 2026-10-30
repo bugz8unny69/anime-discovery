@@ -109,8 +109,7 @@ class BatchUnlockJournal:
         if (media.plan_id!=candidate.plan_id
                 or media.preparation_job_id!=reservation_job_id
                 or media.submission_fingerprint!=intent.fingerprint
-                or media.relative_path!=inventory.files[candidate.probe_index].path
-                or media.languages!=('eng','jpn')):
+                or media.relative_path!=inventory.files[candidate.probe_index].path):
             raise TransferConflict()
         receipt=_record(db,intent,media)
         if receipt is not None and receipt.intent.verification_job_id!=source[0]:

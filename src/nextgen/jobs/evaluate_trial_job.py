@@ -1,8 +1,12 @@
 """Evaluate immutable trial windows; no downloads, media or permanent Keep."""
 from dataclasses import dataclass
+import time
+
+from src.nextgen.acquisition.audio import audio_tagged, wants_english
 
 from src.nextgen.handlers import HandlerDefinition
 from src.nextgen.history import integer
+from src.nextgen.history import append_job_history
 from src.nextgen.job_contracts import CompletionRejected, Outcome, Registration, Successor
 from src.nextgen.storage.trials import load_trial_source, persist_trial
 from src.nextgen.trial_policy import Window, TrialProposal, TrialConflict
@@ -16,6 +20,9 @@ DEFINITION=HandlerDefinition(KIND,'Evaluate Intake episode selection')
 class EvaluationCompletion:
     proposal: TrialProposal
     evaluation_job_id: int
+    # English audio required and the autobrr title has no audio tag: do not
+    # download this delivery; its episode is searched in Prowlarr instead.
+    audio_search: bool = False
 
 
 def _persist(db,claim,value,*,discovery_kind=None):
@@ -25,6 +32,13 @@ def _persist(db,claim,value,*,discovery_kind=None):
     try:
         require_allowed(db,value.proposal.source.anidb_id)
         receipts=(persist_trial(db,claim,value.proposal),)
+        if value.audio_search:
+            # Written before the first search is scheduled: the search window
+            # reads this event to include the anchor episode.
+            from src.nextgen.storage.sonarr_backfill import AUDIO_SEARCH_EVENT
+            receipts+=(append_job_history(db,job_id=claim.job_id,event_code=AUDIO_SEARCH_EVENT,
+                reason_code='RELEASE_AUDIO_UNTAGGED',component='worker',
+                occurred_at_ms=time.time_ns()//1000000,details={'attempt':claim.attempt}),)
         if discovery_kind is not None:
             from src.nextgen.storage.sonarr_backfill import schedule_first, BackfillConflict
             try: receipts+=schedule_first(db,claim,value.proposal.source,kind=discovery_kind)
@@ -48,16 +62,21 @@ def registration(*, reservation_kind=None, discovery_kind=None):
             job=integer(payload['verification_job_id'],positive=True)
         except (ValueError,TypeError):return Outcome('review','JOB_PAYLOAD_INVALID')
         try:
-            source=await blocking(load_trial_source,context.configuration.value('storage.database_path'),job,context.claim.event_id)
+            source,(origin,title)=await blocking(load_trial_source,context.configuration.value('storage.database_path'),
+                                                 job,context.claim.event_id,with_delivery=True)
             value=TrialProposal(source,Window(context.configuration.value('trial.backfill_count'),
                                              context.configuration.value('trial.following_count')),
                                 context.configuration.desired_revision)
         except TrialConflict:return Outcome('review','TRIAL_PLAN_CONFLICT')
-        return Outcome(value=EvaluationCompletion(value,context.claim.job_id))
+        # Only the webhook's own release is gated; Prowlarr picks already rank by tag.
+        audio_search=(discovery_kind is not None and origin=='autobrr'
+                      and wants_english(context.configuration.value('acquisition.audio_check'))
+                      and not audio_tagged(title))
+        return Outcome(value=EvaluationCompletion(value,context.claim.job_id,audio_search))
 
     def route(value):
         if type(value) is not EvaluationCompletion:raise ValueError('typed episode selection completion required')
-        return () if reservation_kind is None else (Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
+        return () if reservation_kind is None or value.audio_search else (Successor.create(reservation_kind,{'evaluation_job_id':value.evaluation_job_id}),)
 
     return Registration(KIND,DEFINITION,execute,persist=lambda db,claim,value:_persist(db,claim,value,discovery_kind=discovery_kind),route=route,
                         successor_kinds=() if reservation_kind is None else (reservation_kind,))
