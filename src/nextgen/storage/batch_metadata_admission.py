@@ -41,7 +41,7 @@ class EarlyBatchIntent:
                 or type(self.marker) is not str or len(self.marker)!=32
                 or any(x not in '0123456789abcdef' for x in self.marker)
                 or self.api_major not in (4,5)
-                or self.state not in ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED','ADOPTED')):
+                or self.state not in ('UNCERTAIN','EXTERNAL','REVIEW','OWNED_STOPPED','ADOPTED','RELEASED')):
             raise AcquisitionConflict()
 
 
@@ -72,7 +72,8 @@ def _restore(row):
 def _select(db,*,event_id=None,info_hash=None):
     if (event_id is None)==(info_hash is None):
         raise ValueError('One early admission locator required')
-    where,args=('event_id=?',(event_id,)) if event_id is not None else ('info_hash=?',(info_hash,))
+    where,args=('event_id=?',(event_id,)) if event_id is not None else (
+        "info_hash=? AND state NOT IN ('RELEASED','EXTERNAL')",(info_hash,))
     return _restore(db.execute(
         'SELECT event_id,verification_job_id,info_hash,ownership_marker,'
         'base_url,save_path,category,timeout_seconds,api_major,state,inventory_json '
@@ -140,8 +141,9 @@ class BatchMetadataJournal:
                     raise AcquisitionConflict()
                 return prior,None
             # No other recorded admission may own the same infohash.
-            if db.execute('SELECT 1 FROM batch_torrent_submissions WHERE info_hash=?',
-                          (digest,)).fetchone():
+            if (db.execute('SELECT 1 FROM batch_torrent_submissions WHERE info_hash=?',
+                           (digest,)).fetchone()
+                    or _select(db,info_hash=digest) is not None):
                 raise AcquisitionConflict()
             marker=secrets.token_hex(16)
             root=str(PurePosixPath(options.download_root)/('ad-'+marker))
