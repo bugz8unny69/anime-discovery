@@ -85,9 +85,8 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             if prior is not None and prior.state in ('EXTERNAL','REVIEW'):
                 return Outcome('review','TORRENT_ALREADY_PRESENT' if prior.state=='EXTERNAL'
                                else 'TORRENT_PROVENANCE_CONFLICT')
-            if prior is not None and prior.state=='OWNED_STOPPED':
-                return Outcome(value={'reservation_job_id':reservation,
-                                      'submission_job_id':context.claim.job_id})
+            # Recheck current ownership even after a previous stopped
+            # confirmation; the tag and file list may have changed.
             credentials=await blocking(secrets.qbittorrent_credentials)
             options=prior.options if prior is not None else download_options(context.configuration)
             client=client_factory(options,credentials)
@@ -101,6 +100,11 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
             if intent.state=='EXTERNAL':
                 return Outcome('review','TORRENT_ALREADY_PRESENT')
             if permit is not None:
+                # An observed file list cannot be submitted as a .torrent.
+                # Such batches must arrive through the already-owned early
+                # admission, which never returns a second send permit.
+                if type(raw) is not bytes:
+                    raise AcquisitionConflict()
                 if context.cancelled.is_set():return waiting()
                 client=client_factory(intent.options,credentials)
                 await blocking(client.login)
