@@ -7,7 +7,7 @@ resending, even on timeout or process restart.
 import inspect
 
 from src.nextgen.acquisition.metadata import (
-    parse_batch_metainfo, AcquisitionConflict, MetadataInvalid, SourceMissing,
+    read_batch_inventory, AcquisitionConflict, MetadataInvalid, SourceMissing,
 )
 from src.nextgen.acquisition.settings import download_options, DownloadConfigurationError
 from src.nextgen.acquisition.submission import (
@@ -79,7 +79,7 @@ def registration(read_batch_metainfo,secrets,*,client_factory=BatchClient,
         try:
             digest=await blocking(journal.source_hash,context.claim,reservation)
             raw=await read_batch_metainfo(digest,context.configuration,context.cancelled)
-            inventory=await blocking(parse_batch_metainfo,raw,digest)
+            inventory=await blocking(read_batch_inventory,raw,digest)
             candidate,prior=await blocking(
                 journal.load,context.claim,reservation,inventory)
             if prior is not None and prior.state in ('EXTERNAL','REVIEW'):
