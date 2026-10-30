@@ -7,3 +7,7 @@ Later retries for releases with the same normalized title and season can reuse t
 Storage: schema v49 adds manual_identity_matches. The API endpoint POST /api/v1/jobs/{id}/manual-match requires a signed-in session, CSRF protection, and a reviewed identification job. Conflicting edits are rejected rather than silently replacing existing matches.
 
 This feature does not query AniDB or TVDB when accepting a manual match: the operator is explicitly supplying the series identity. It does not provide a title lookup UI. Failed retries remain reviewable through the existing job history. Local tests: python -m unittest src.nextgen.tests.test_manual_identity src.nextgen.tests.test_matching_details (not executed in this environment). No CI run requested.
+
+## Specials and OVAs
+
+Season and episode are optional identification hints. Leave season blank for an unnumbered special or OVA; the match is stored in a separate unnumbered scope (-1 internally), not incorrectly assigned to Season 1 or Season 0. An explicit S00 maps to season 0. Automatic reuse is restricted to the same normalized title and the same scope (numbered season or unnumbered); per-episode mapping remains unverified until checked separately.
