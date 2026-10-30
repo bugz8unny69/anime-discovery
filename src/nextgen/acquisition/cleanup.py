@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import errno
 import os
+import shutil
 from pathlib import PurePosixPath
 import stat
 import threading
@@ -109,6 +110,29 @@ class FileCleanup:
             # Require an accessible local/shared payload root before authorizing
             # removal. A remote client's path is not proof of local file absence.
             raise CancellationError() from None
+
+    def root_only(self):
+        """Pin the owned ad-<marker> folder's identity; contents don't matter."""
+        try:
+            with directory(self.root) as fd:
+                return {'root':list((os.fstat(fd).st_dev,os.fstat(fd).st_ino)),'files':{}}
+        except FileNotFoundError:
+            return {'root':None,'files':{}}
+
+    def purge(self,plan):
+        """Staging is confirmed and the torrent is gone from qBittorrent: delete
+        the whole owned ad-<marker> folder, whatever is left in it. Only the
+        exact pinned folder (no symlinks, same inode); rmtree is fd-based."""
+        if type(plan) is not dict or plan.get('root') is None:return
+        path=PurePosixPath(self.root)
+        try:
+            with directory(str(path.parent)) as above:
+                info=os.stat(path.name,dir_fd=above,follow_symlinks=False)
+                if not stat.S_ISDIR(info.st_mode) or [info.st_dev,info.st_ino]!=plan['root']:raise CancellationError()
+                shutil.rmtree(path.name,dir_fd=above)
+                os.fsync(above)
+        except FileNotFoundError:
+            return
 
     def _remove_empty(self,fd):
         # Called only after _inventory found no files; rmdir fails on content.

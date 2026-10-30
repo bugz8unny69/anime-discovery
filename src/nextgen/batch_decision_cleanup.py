@@ -54,6 +54,7 @@ class BatchDecisionCleanup(OwnedCleanup):
     cleanup_event='DECISION_DOWNLOAD_CONTROL_RECORDED'
     complete_reason='DECISION_DOWNLOAD_CLEANUP_COMPLETE'
     pending_reason='DECISION_DOWNLOAD_CLEANUP_WAITING'
+    purge=True
 
     def __init__(self,configuration,secrets,*,client_factory=Client,
                  files_factory=FileCleanup):

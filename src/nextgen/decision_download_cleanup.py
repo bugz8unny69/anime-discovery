@@ -68,6 +68,7 @@ class Service(OwnedCleanup):
     cleanup_event='DECISION_DOWNLOAD_CONTROL_RECORDED'
     complete_reason='DECISION_DOWNLOAD_CLEANUP_COMPLETE'
     pending_reason='DECISION_DOWNLOAD_CLEANUP_WAITING'
+    purge=True
 
     def __init__(self,configuration,secrets,*,client_factory=Client,files_factory=FileCleanup):
         self.configuration,self.secrets=configuration,secrets
@@ -144,6 +145,12 @@ class Service(OwnedCleanup):
         captured=cleaner.capture()
         if captured['root']!=self.source_root_identity:raise CancellationError()
         return captured
+
+    def _pin(self,cleaner):
+        # The folder staging moved the video out of, or already gone.
+        pinned=cleaner.root_only()
+        if pinned['root'] not in (None,self.source_root_identity):raise CancellationError()
+        return pinned
 
     def _fence(self,db=None):
         if self.cancelled.is_set():raise CancellationError()

@@ -136,22 +136,32 @@ class DecisionDownloadCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controls,['stop','remove']);self.assertTrue(self.remainder.exists())
         self.assertEqual(self.rows('SELECT phase FROM cancellation_cleanup'),[('REMOVE_UNCERTAIN',)])
 
-    async def test_changed_captured_file_survives_after_lost_remove(self):
+    async def test_changed_file_after_lost_remove_is_purged_with_the_folder(self):
+        # Staging confirmed + torrent gone: the owned ad-* folder goes whatever is in it.
         worker,_,_,_,_,job=await self.download_ready(mode='changed_after_remove')
         await worker.attempt();await self.make_due(job);await worker.attempt()
-        self.assertEqual(self.remainder.read_bytes(),b'changed')
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('NEEDS_REVIEW',)])
+        self.assertFalse(self.payload_root.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
 
-    async def test_unknown_file_preserved_and_explicit_retry_resumes_cleanup_only(self):
+    async def test_unknown_file_is_purged_once_torrent_is_gone(self):
         worker,fake,actions,target,decision,job=await self.download_ready()
-        unknown=self.payload_root/'unowned.txt';unknown.write_text('preserve')
+        unknown=self.payload_root/'unowned.txt';unknown.write_text('leftover')
+        (self.payload_root/'sub').mkdir();(self.payload_root/'sub'/'x.part').write_text('x')
         await worker.attempt()
-        self.assertEqual(self.controls,['stop']);self.assertTrue(unknown.exists())
-        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(decision,)),[('DONE',)])
-        unknown.unlink();_,receipt,_=actions.submit(target,'keep')
-        self.assertTrue(receipt['download_cleanup_resumed'])
+        self.assertEqual(self.controls,['stop','remove'])
+        self.assertFalse(self.payload_root.exists())
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        self.assertEqual(fake.posts.count('command'),1)
+
+    async def test_purge_never_follows_a_swapped_folder(self):
+        worker,_,_,_,_,job=await self.download_ready()
+        import shutil
+        moved=self.payload_root.with_name(self.payload_root.name+'.other')
+        self.payload_root.rename(moved);self.payload_root.mkdir()
         await worker.attempt()
-        self.assertEqual(self.controls,['stop','remove']);self.assertEqual(fake.posts.count('command'),1)
+        self.assertTrue(moved.exists())                  # Not ours any more: untouched.
+        self.assertNotEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(job,)),[('DONE',)])
+        shutil.rmtree(moved)
 
     async def test_other_consumer_blocks_all_external_controls(self):
         worker,_,_,_,_,job=await self.download_ready()
