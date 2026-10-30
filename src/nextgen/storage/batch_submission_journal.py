@@ -317,11 +317,15 @@ class BatchSubmissionJournal:
             current=_intent(db,candidate,intent.inventory)
             if current is None or current.fingerprint!=intent.fingerprint:
                 raise AcquisitionConflict()
-            if current.state in ('EXTERNAL','REVIEW','OWNED_STOPPED'):
+            if current.state in ('EXTERNAL','REVIEW'):
                 return current.state,_reason(current.state),()
             if current.state!=intent.state:
                 return current.state,_reason(current.state),()
             state,reason=_classify(current,observation)
+            if current.state=='OWNED_STOPPED' and state!='OWNED_STOPPED':
+                # Ownership changed after adoption: fail closed. Never
+                # silently treat a once-owned torrent as permanently valid.
+                state,reason='REVIEW','TORRENT_PROVENANCE_CONFLICT'
             receipt=()
             if state!=current.state:
                 db.execute('UPDATE batch_torrent_submissions SET state=?,reason_code=?,'
