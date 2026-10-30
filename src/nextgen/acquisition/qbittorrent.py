@@ -348,7 +348,8 @@ class Client:
         """
         import time
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.state!='UNCERTAIN'
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.state!='UNCERTAIN'
                 or intent.options!=self.options
                 or self.protocol is None
                 or type(attempts) is not int or not 1<=attempts<=20
@@ -393,7 +394,8 @@ class Client:
     def stop_legacy_metadata(self,intent):
         """Stop a journal-owned magnet before any file inventory is accepted."""
         from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        if (type(intent) is not MagnetIntent or intent.options!=self.options
+        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
+        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.options!=self.options
                 or intent.state not in ('UNCERTAIN','OWNED_STOPPED')
                 or self.protocol is None):
             raise ClientInvalid()
