@@ -63,7 +63,11 @@ def registration(verify, *, trial_kind=None, batch_kind=None):
         except (ValueError,TypeError): return Outcome("review","JOB_PAYLOAD_INVALID")
         try:
             source=await blocking(load_release,context.configuration.value("storage.database_path"),context.claim.event_id,aid)
-            result=await verify(source,context.configuration,context.cancelled)
+            if 'claim' in inspect.signature(verify).parameters:
+                result=await verify(source,context.configuration,context.cancelled,
+                                    claim=context.claim)
+            else:
+                result=await verify(source,context.configuration,context.cancelled)
         except MetadataSourceWaiting as exc: return Outcome("defer",exc.reason_code,delay_ms=exc.delay_ms)
         except MetadataSourceUnavailable as exc: return Outcome("retry",exc.reason_code)
         except (MetadataSourceConfigurationError,MetadataSourceDenied) as exc:
