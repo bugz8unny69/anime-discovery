@@ -7,7 +7,7 @@ and must validate a trusted provider result before that call.
 from pathlib import PurePosixPath
 import json
 
-from src.nextgen.acquisition.metadata import BatchInventory, infohash
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, infohash
 from src.nextgen.batch.verification import VerifiedBatch
 from src.nextgen.batch.selection import VIDEO, file_episode_number, BatchPlanningError
 from src.nextgen.history import integer
@@ -24,7 +24,7 @@ def persist_batch_verification(db, claim, source, inventory, verified, *, now_ms
     """
     if not db.in_transaction:
         raise ValueError('Worker-owned transaction required')
-    if type(source) is not ReleaseInput or type(inventory) is not BatchInventory or type(verified) is not VerifiedBatch:
+    if type(source) is not ReleaseInput or type(inventory) not in (BatchInventory,ObservedBatchInventory) or type(verified) is not VerifiedBatch:
         raise ValueError('Typed batch source, inventory and proof required')
     now_ms=integer(now_ms)
     if (claim.kind!='VERIFY_RELEASE' or claim.event_id!=source.event_id
