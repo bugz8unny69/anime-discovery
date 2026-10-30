@@ -65,7 +65,23 @@ def _allowed(db, job_id, row):
     return operation is not None and operation[0] == 'ACTIVE'
 
 
+def _cleanup_target(db, job_id):
+    """Target job of a Clean up canceled work control job, else None."""
+    row = db.execute("SELECT target_job_id FROM management_actions "
+                     "WHERE job_id=? AND action='CLEANUP'", (job_id,)).fetchone()
+    return None if row is None else row[0]
+
+
 def capability(db, job_id):
+    target = _cleanup_target(db, job_id)
+    if target is not None:
+        # Retry on a stopped cleanup job = the target's existing Cleanup resume.
+        from src.nextgen.storage.management_actions import ManagementActions
+        state = db.execute('SELECT state FROM jobs WHERE job_id=?', (job_id,)).fetchone()[0]
+        cleanup = ManagementActions(db.execute('PRAGMA database_list').fetchone()[2]).capabilities(db, target)['cleanup']
+        enabled = state in ('NEEDS_REVIEW', 'BLOCKED') and cleanup['enabled']
+        return {'enabled': enabled, 'disabled_reason': None if enabled else
+                (cleanup['disabled_reason'] or CATALOG.reason('MANAGEMENT_ACTION_UNAVAILABLE'))}
     row = db.execute(
         'SELECT kind,state,attempt_count,last_reason_code,lease_token,lease_expires_at_ms '
         'FROM jobs WHERE job_id=?', (job_id,)).fetchone()
@@ -86,6 +102,25 @@ def request_review_retry(database, job_id, *, expected_attempt, expected_reason,
             safe_code(expected_reason) != expected_reason):
         raise ValueError('expected review reason required')
     queue = JobQueue(database, clock=clock)
+    with queue.connection() as db:
+        target = _cleanup_target(db, job_id)
+        row = db.execute('SELECT state,attempt_count,last_reason_code FROM jobs WHERE job_id=?',
+                         (job_id,)).fetchone()
+    if target is not None:
+        if row[1] != expected_attempt:
+            raise RetryStale('job attempt changed')
+        if row[0] not in ('NEEDS_REVIEW', 'BLOCKED'):
+            raise RetryNotAllowed('job is not stopped for review')
+        if row[2] != expected_reason:
+            raise RetryStale('job review reason changed')
+        from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable
+        try:
+            _, data, records = ManagementActions(database).submit(target, 'cleanup')
+        except ActionUnavailable:
+            raise RetryNotAllowed('this cleanup cannot be resumed') from None
+        if not data.get('resumed'):
+            raise RetryNotAllowed('this cleanup cannot be resumed')
+        return RetryReceipt(job_id, row[1], 'QUEUED', records[-1].history_id)
     with queue.connection() as db, transaction(db):
         now = queue.now()
         row = db.execute(

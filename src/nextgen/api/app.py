@@ -118,6 +118,13 @@ def size_detail(details):
             f'of their {limit:,} MB total limit.')
 
 
+def failed_detail(details):
+    """Which check stopped the work and the file it was looking at."""
+    check,path=details.get('failed_check'),details.get('failed_path')
+    if type(check) is not str:return None
+    return f'Stopped at {check}' + (f' · file: {path}' if type(path) is str else '')
+
+
 class Application:
     def __init__(self,directory,*,origin=None,secrets=None,sessions=None):
         self.store=ConfigurationStore(directory);self.startup=self.store.read()
@@ -665,6 +672,8 @@ class Application:
                 from importlib.util import find_spec
                 about={'job_id':job,'kind':kind[0],'label':CATALOG.handler(kind[0]),
                        'module':module if find_spec('src.nextgen.jobs.'+module) else None}
+                target=db.execute("SELECT target_job_id FROM management_actions WHERE job_id=?",(job,)).fetchone()
+                if target:about['target_job_id']=target[0]
                 if kind[0]=='REJECT_SERIES':
                     rejection=db.execute(
                         'SELECT reason_text,cleanup_state FROM anime_review_decisions '
@@ -681,7 +690,7 @@ class Application:
                     items.append({'history_id':row[0],'occurred_at_ms':row[1],'event':CATALOG.event(row[2]),
                         'reason':None if row[3] is None else CATALOG.reason(row[3]),'component':row[4],'details':details,
                         'handler':None if row[6] is None else CATALOG.handler(row[6],recorded_label=row[7]),'invocation_id':row[8],
-                        'detail':size_detail(details)})
+                        'detail':size_detail(details) or failed_detail(details)})
                 # Every release tried for this backfill episode, with why it stopped.
                 attempts=None
                 if after==0:
@@ -743,6 +752,12 @@ class Application:
                          "('ACQUISITION_SIZE_LIMIT','ACQUISITION_PLAN_SIZE_LIMIT') ORDER BY history_id DESC LIMIT 1",(row[0],)).fetchone()
         try:sized=size_detail(json.loads(sized[0])) if sized else None
         except (ValueError,TypeError):sized=None
+        stopped=None
+        if row[4] in ('NEEDS_REVIEW','BLOCKED'):
+            found=db.execute("SELECT details_json FROM job_history WHERE job_id=? AND "
+                             "json_extract(details_json,'$.failed_check') IS NOT NULL ORDER BY history_id DESC LIMIT 1",(row[0],)).fetchone()
+            try:stopped=failed_detail(json.loads(found[0])) if found else None
+            except (ValueError,TypeError):stopped=None
         titles=db.execute('SELECT CASE WHEN length(CAST(a.title AS BLOB))<=1024 THEN a.title ELSE NULL END '
                           'FROM identity_results r JOIN identified_anime a USING(anidb_id) WHERE r.event_id=? LIMIT 2',(row[1],)).fetchall()
         return {'job_id':row[0],'event_id':row[1],'created_by_job_id':row[2],'kind':row[3],'state':row[4],
@@ -751,7 +766,7 @@ class Application:
                 'release_name':release,'anime_title':titles[0][0] if len(titles)==1 else None,
                 'acquisition_status':CATALOG.state('acquisition',op[1]),
                 'status':CATALOG.job_status(row[4],row[5],kind=row[3]),'attempt_count':row[6],
-                'reason':None if row[7] is None else CATALOG.reason(row[7]),'size_detail':sized,'actions':actions,
+                'reason':None if row[7] is None else CATALOG.reason(row[7]),'size_detail':sized,'failed_detail':stopped,'actions':actions,
                 'cancellation':{'operation_id':op[0],'state':op[1],'cleanup_state':op[2],'reason_code':op[3],
                                  'reason':None if op[3] is None else CATALOG.reason(op[3]),
                                 'can_cancel':actions['cancel']['enabled'],'can_cleanup':actions['cleanup']['enabled']}}

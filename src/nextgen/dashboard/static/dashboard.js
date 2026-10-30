@@ -181,6 +181,7 @@ function renderJobs() {
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
     } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
     if (job.size_detail) details.appendChild(node('p', job.size_detail));
+    if (job.failed_detail) details.appendChild(node('small', job.failed_detail + ` · run: adm report job ${job.job_id}`, 'muted'));
     const activeAction = ['cleanup', 'keep'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
       details.appendChild(node('p', `Job #${activeAction.job_id}: ${activeAction.status.message}`));
@@ -483,6 +484,12 @@ async function loadHistory() {
       $('history-rows').appendChild(node('p',
         'Rejected: ' + (data.job.rejection_reason || 'Reason not recorded') +
         ' · Cleanup: ' + (data.job.cleanup_state || 'Unknown'), 'muted'));
+    }
+    if (data.job?.target_job_id && !state.historyCursor) {
+      const line = node('p', `Works on Job #${data.job.target_job_id}. Its history: `, 'muted');
+      const open = node('button', `Job #${data.job.target_job_id}`, 'secondary'); open.type = 'button';
+      open.addEventListener('click', () => openHistory(data.job.target_job_id));
+      line.appendChild(open); $('history-rows').appendChild(line);
     }
     if (data.backfill_attempts?.attempts?.length) renderAttempts(data.backfill_attempts);
     for (const entry of data.items) {

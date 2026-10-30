@@ -243,6 +243,44 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(duplicate['reused']);self.assertNotIn('resumed',duplicate)
         self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='MANAGEMENT_ACTION_RESUMED'"),[(1,)])
 
+    async def test_retry_on_stopped_cleanup_job_resumes_it_and_report_explains_it(self):
+        from src.nextgen.storage.review_retry import capability, request_review_retry
+        from src.nextgen.job_report import report
+        target=self.add();JobQueue(self.database).claim()
+        _,data,_=self.actions().submit(target,'cancel');control=data['job_id']
+        db=connect(self.database)
+        try:
+            with transaction(db):
+                db.execute("UPDATE jobs SET state='NEEDS_REVIEW',attempt_count=1,last_reason_code='CANCELLATION_REVIEW' WHERE job_id=?",(control,))
+                db.execute("UPDATE job_operations SET state='CANCELED',cleanup_state='REVIEW',reason_code='CANCELLATION_REVIEW' WHERE operation_id=(SELECT operation_id FROM job_operation_members WHERE job_id=?)",(target,))
+                db.execute("INSERT INTO job_history(job_id,occurred_at_ms,event_code,reason_code,details_json,component) VALUES(?,1,'CANCELLATION_CLEANUP_CHANGED','CANCELLATION_REVIEW',?,'worker')",
+                           (target,'{"attempt":1,"failed_check":"src/nextgen/cancellation_service.py:118 _pre_manifest","failed_path":"/srv/dl/ad-0123"}'))
+            self.assertTrue(capability(db,control)['enabled'])
+            lines=[];report(db,control,out=lines.append);text='\n'.join(lines)
+        finally:db.close()
+        self.assertIn(f'CLEANUP action for Job #{target}',text)
+        self.assertIn('failed check: src/nextgen/cancellation_service.py:118 _pre_manifest',text)
+        self.assertIn('file: /srv/dl/ad-0123',text)
+        receipt=request_review_retry(self.database,control,expected_attempt=1,expected_reason='CANCELLATION_REVIEW')
+        self.assertEqual(receipt.outcome,'QUEUED')
+        self.assertEqual(self.rows('SELECT state FROM jobs WHERE job_id=?',(control,)),[('PENDING',)])
+        self.assertEqual(self.rows("SELECT count(*) FROM job_history WHERE event_code='MANAGEMENT_ACTION_RESUMED'"),[(1,)])
+
+    def test_failure_location_names_the_original_check_and_file(self):
+        from src.nextgen.cancellation import CancellationError, failure_location
+        from src.nextgen.reasons import safe_details
+        from src.nextgen.job_contracts import Outcome
+        def inner():raise FileNotFoundError(2,'gone','/srv/staging/x.mkv')
+        try:
+            try:inner()
+            except OSError:raise CancellationError() from None
+        except CancellationError as exc:check,path=failure_location(exc)
+        self.assertRegex(check,r'^src/nextgen/tests/test_management_actions\.py:\d+ inner ENOENT$')
+        self.assertEqual(path,'/srv/staging/x.mkv')
+        self.assertEqual(safe_details(failed_check=check,failed_path=path)['failed_path'],path)
+        Outcome('review','CANCELLATION_REVIEW',facts={'failed_check':check,'failed_path':path})
+        with self.assertRaises(ValueError):safe_details(failed_check='rm -rf /')
+
 
     async def test_batch_keep_cleanup_retry_uses_shared_action_and_status(self):
         """Synthetic batch decision; no Sonarr or filesystem side effects."""
