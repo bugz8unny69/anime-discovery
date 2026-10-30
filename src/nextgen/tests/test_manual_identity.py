@@ -13,6 +13,14 @@ class ManualMatchTests(unittest.TestCase):
         second = _key("Example Anime S01E03 1080p WEB-DL")
         self.assertEqual(first, second)
 
+    def test_existing_special_classification(self):
+        from src.nextgen.storage.manual_identity import _scope
+        self.assertEqual(_scope("Example Anime S00E01 1080p WEB"), 0)
+        self.assertEqual(_scope("[Group] Example Anime - 01 [OVA]"), -1)
+        self.assertEqual(_scope("Example Anime ONA WEB-DL"), -1)
+        self.assertEqual(_scope("Example Anime S01E01 1080p WEB"), 1)
+        self.assertIsNone(_scope("Example Anime S01E01 S02E01 WEB"))
+
     def test_season_scoped_match(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "db.sqlite"
