@@ -755,13 +755,13 @@ def admitted_connection(gate):
 
 
 def initialize(db):
-    """Initialize a *new* NextGen database at schema v48; never implicitly upgrade.
+    """Initialize a *new* NextGen database at schema v49; never implicitly upgrade.
 
     Existing v1/v2/v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18/v19/v20/v21/v22 databases require explicit versioned SQL migrations
-    before accessing v48 storage.
+    before accessing v49 storage.
     """
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version == 48:
+    if version == 49:
         return
     if version != 0:
         raise ValueError("existing NextGen database requires versioned SQL upgrade")

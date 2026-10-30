@@ -70,9 +70,11 @@ class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
                 'INSERT INTO magnet_v46 SELECT * FROM sonarr_magnet_intents;\n'
                 'DROP TABLE sonarr_magnet_intents;\n'
                 'ALTER TABLE magnet_v46 RENAME TO sonarr_magnet_intents;\n'
+                'DROP TABLE manual_identity_matches;\n'
                 'PRAGMA user_version=46;\nCOMMIT;')
             db.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
             db.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
+            db.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
             self.assertEqual(db.execute('SELECT * FROM sonarr_magnet_intents').fetchall(),before)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         finally:db.close()
@@ -102,10 +104,11 @@ class MagnetMigrationTests(unittest.TestCase):
         before=old.execute('SELECT * FROM incoming_events').fetchall()
         old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
         old.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
+        old.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
         initialize(fresh)
         self.assertEqual(_structure(old),_structure(fresh))
         self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],48)
+        self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],49)
         self.assertEqual(old.execute('PRAGMA foreign_key_check').fetchall(),[])
 
     def test_migration_failure_rolls_back_original_journal_table(self):
