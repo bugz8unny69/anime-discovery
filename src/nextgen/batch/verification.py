@@ -7,7 +7,7 @@ and TVDB episode ID. No download, DB write, staging or trial authorization.
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, ObservedBatchInventory
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory
 from src.nextgen.batch.selection import (
     VIDEO, _SE, _X, _SEASON, _SEASON_DIR, file_episode_number,
     plan_verified_batch, BatchPlanningError,
@@ -33,7 +33,7 @@ class VerifiedBatchFile:
 @dataclass(frozen=True)
 class VerifiedBatch:
     info_hash: str
-    info_sha256: str | None | None
+    info_sha256: str | None
     anidb_id: int
     tvdb_series_id: int
     season: int
