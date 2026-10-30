@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS event_history (
  component TEXT CHECK(component IS NULL OR component IN
   ('supervisor','intake','coordinator','worker','identity','acquisition','api'))
 );
+CREATE TABLE IF NOT EXISTS manual_identity_matches (
+ alias_key TEXT NOT NULL CHECK(length(alias_key) BETWEEN 3 AND 256),
+ tvdb_season INTEGER NOT NULL CHECK(tvdb_season BETWEEN -1 AND 999),
+ anidb_id INTEGER NOT NULL CHECK(anidb_id>0),
+ tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id>0),
+ title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 512),
+ PRIMARY KEY(alias_key,tvdb_season)
+);
 CREATE TABLE IF NOT EXISTS identified_anime (
  anidb_id INTEGER PRIMARY KEY CHECK(anidb_id > 0),
  tvdb_series_id INTEGER NOT NULL CHECK(tvdb_series_id > 0),
@@ -763,7 +771,7 @@ def initialize(db):
     if db.in_transaction:
         raise ValueError("initialization requires no active transaction")
     try:
-        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=48;\nCOMMIT;")
+        db.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nPRAGMA user_version=49;\nCOMMIT;")
     except BaseException:
         db.rollback()
         raise

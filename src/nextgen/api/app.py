@@ -425,6 +425,19 @@ class Application:
                                 'state':row[0],'attempts':row[1],
                                 'reason':None if row[2] is None else CATALOG.reason(row[2]),
                                 'evidence':evidence},[]
+            manual=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/manual-match',path)
+            if manual:
+                if method!='POST':raise ApiError(405,'API_METHOD_INVALID')
+                if query:raise ApiError(400,'API_REQUEST_INVALID')
+                exact(body,('anidb_id','tvdb_series_id','title','season'))
+                from src.nextgen.storage.manual_identity import save, ManualMatchError
+                try:
+                    result=save(configuration.value('storage.database_path'),int(manual[1]),
+                        anidb_id=body['anidb_id'],tvdb_series_id=body['tvdb_series_id'],
+                        title=body['title'],season=body['season'])
+                except ManualMatchError:
+                    raise ApiError(409,'MANAGEMENT_ACTION_UNAVAILABLE') from None
+                return 200,result,[]
             matching=re.fullmatch(PREFIX+r'/jobs/([1-9][0-9]{0,18})/matching',path)
             if matching:
                 if method!='GET':raise ApiError(405,'API_METHOD_INVALID')

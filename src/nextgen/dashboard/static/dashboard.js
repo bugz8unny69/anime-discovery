@@ -524,6 +524,7 @@ async function openCoverage(jobId) {
     if (version !== state.matchingVersion || state.matchingJob !== jobId || !state.csrf) return;
     summary.textContent = `Attempt ${result.attempts} · ${result.state.replaceAll('_', ' ').toLowerCase()}`;
     if (result.reason?.message) summary.textContent += ` · ${result.reason.message}`;
+    manualMatchForm(body, result);
     if (!result.available || !result.evidence) {
       body.appendChild(node('p', 'No verified episode coverage was saved for this job.', 'muted'));
       return;
@@ -557,6 +558,52 @@ async function openCoverage(jobId) {
     }
   }
 }
+function manualMatchForm(root, result) {
+  if (result.state !== 'NEEDS_REVIEW') return;
+  const section = matchingSection(root, 'Correct anime identification');
+  section.appendChild(node('p', 'Enter the series identity for this season. The same alias and season will reuse it on later retries. Episode placement remains independently verified. Leave season empty for unnumbered specials.', 'muted'));
+  const form = document.createElement('form');
+  const inputs = [
+    ['title', 'Anime title', 'text', result.evidence?.tvdb_titles?.[0] || result.evidence?.queries?.[0] || ''],
+    ['anidb_id', 'AniDB ID', 'number', result.evidence?.selected_anidb_id || ''],
+    ['tvdb_series_id', 'TVDB series ID', 'number', result.evidence?.selected_tvdb_id || ''],
+    ['season', 'Season (optional; leave blank for OVA/special)', 'number', result.evidence?.season ?? '']
+  ];
+  for (const [name, label, type, initial] of inputs) {
+    const wrap = node('label', label);
+    const field = document.createElement('input');
+    field.name = name; field.type = type; field.required = name !== 'season';
+    field.value = String(initial);
+    if (type === 'number') { field.min = name === 'season' ? '0' : '1'; field.max = name === 'season' ? '999' : '9223372036854775807'; }
+    wrap.appendChild(field); form.appendChild(wrap);
+  }
+  const submit = node('button', 'Save match and retry');
+  submit.type = 'submit'; form.appendChild(submit);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!confirm('Save this anime identity for other unresolved releases with the same name and season?')) return;
+    const values = Object.fromEntries(new FormData(form));
+    const body = {
+      title: values.title.trim(), anidb_id: Number(values.anidb_id),
+      tvdb_series_id: Number(values.tvdb_series_id), season: values.season.trim() === '' ? null : Number(values.season)
+    };
+    if (!Number.isSafeInteger(body.anidb_id) || !Number.isSafeInteger(body.tvdb_series_id)
+        || (body.season !== null && !Number.isSafeInteger(body.season))) { notice('Invalid identity number.', true); return; }
+    submit.disabled = true;
+    try {
+      await request(`${API}/jobs/${result.job_id}/manual-match`, {method: 'POST', body});
+      await request(`${API}/jobs/${result.job_id}/retry`, {method: 'POST',
+        body: {expected_attempt: result.attempts, expected_reason: result.reason?.code}});
+      $('matching-dialog').close();
+      notice('Match saved; identification queued for retry.');
+      await loadActivity();
+    } catch (error) {
+      displayError(error);
+    } finally { submit.disabled = false; }
+  });
+  section.appendChild(form);
+}
+
 async function openMatching(jobId) {
   const version = ++state.matchingVersion;
   state.matchingJob = jobId;
