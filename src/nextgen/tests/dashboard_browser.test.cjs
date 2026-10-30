@@ -94,8 +94,8 @@ test('series Reject sends the frozen operations and records the operator reason'
   };
   await h.run('openSeries(123)');
   const button = h.elements.get('series-reject');
-  h.elements.get('series-reject-reason').value = 'Not interested';
-  h.elements.get('series-reject-note').value = 'Not my cup of tea';
+  h.ctx.document.getElementById('series-reject-reason').value = 'Not interested';
+  h.ctx.document.getElementById('series-reject-note').value = 'Not my cup of tea';
   await button.onclick();
   const posts = calls.filter(call => call.options.method === 'POST');
   assert.equal(posts.length, 1);
