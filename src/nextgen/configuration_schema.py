@@ -14,7 +14,7 @@ import re
 
 from src.nextgen.settings import COMPONENTS, Settings, parse_settings
 
-CONFIGURATION_VERSION = 11
+CONFIGURATION_VERSION = 12
 MAX_REVISION = (1 << 63) - 1
 MAX_BYTES = 65536
 
@@ -83,10 +83,6 @@ FIELDS = MappingProxyType({
     "sonarr.quality_profile_id": FieldDefinition(0, "integer", "next_operation", minimum=0, maximum=2147483647, label="Sonarr quality profile ID", help_text="Required for new series. Zero means unconfigured."),
     "sonarr.staging_root": FieldDefinition("", "directory", "next_operation", label="Staging folder as seen by Sonarr", help_text="Blank uses the recorded local staging root."),
     "sonarr.library_root": FieldDefinition("", "directory", "next_operation", label="Permanent folder as seen by Sonarr", help_text="Blank uses the local Keep folder. Local and Sonarr folders must refer to the same storage."),
-    "torrent_metadata.base_url": FieldDefinition("", "metadata_source", "next_operation",
-        label="Torrent metadata source", help_text="Trusted HTTP(S) base folder serving lowercase-infohash.torrent files. No credentials, query, redirects or webhook URLs. Required before acquisition."),
-    "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60,
-        label="Torrent metadata timeout", help_text="Connect/read timeout and deadline checks between response chunks, in seconds."),
     "qbittorrent.base_url": FieldDefinition("", "download_endpoint", "next_operation",
         label="qBittorrent address", help_text="HTTP or HTTPS server address without credentials, query or subpath. Required before download work."),
     "qbittorrent.category": FieldDefinition("anime-discovery", "download_category", "next_operation",
@@ -122,6 +118,13 @@ FIELDS = MappingProxyType({
         "/var/lib/anime-discovery/nextgen.sqlite", "path", "restart", tuple(sorted(COMPONENTS))),
 })
 
+# The obsolete HTTP metadata-source fields exist only to validate published
+# v7-v11 documents during *explicit* migrations, never in live settings.
+V11_FIELDS = MappingProxyType({**FIELDS,
+    "torrent_metadata.base_url": FieldDefinition("", "metadata_source", "next_operation"),
+    "torrent_metadata.timeout_seconds": FieldDefinition(30, "integer", "next_operation", minimum=1, maximum=60),
+})
+
 
 def revision(value):
     if type(value) is not int or not 1 <= value <= MAX_REVISION:
@@ -141,9 +144,9 @@ def _plain(value):
     return value
 
 
-def defaults():
+def defaults(*, fields=FIELDS):
     result = {}
-    for path, spec in FIELDS.items():
+    for path, spec in fields.items():
         section, name = path.split(".")
         result.setdefault(section, {})[name] = _plain(spec.default)
     return result
@@ -170,17 +173,18 @@ def _host(value):
                    for label in value.split("."))
 
 
-def validate_values(value):
+def validate_values(value, *, fields=FIELDS):
     if type(value) is not dict:
         raise ConfigurationError()
-    result = defaults()
+    result = defaults(fields=fields)
+    allowed = fields
     for section, fields in value.items():
         if type(section) is not str or section not in result or type(fields) is not dict:
             raise ConfigurationError()
         for key, item in fields.items():
-            if type(key) is not str or section + "." + key not in FIELDS:
+            if type(key) is not str or section + "." + key not in allowed:
                 raise ConfigurationError()
-            spec = FIELDS[section + "." + key]
+            spec = allowed[section + "." + key]
             if spec.kind == "integer":
                 if type(item) is not int or not spec.minimum <= item <= spec.maximum:
                     raise ConfigurationError()
@@ -518,7 +522,7 @@ def _v10_values(values):
     if type(sonarr) is not dict:raise ConfigurationError()
     moved={new:sonarr.pop(old) for old,new in V10_DISCOVERY if old in sonarr}
     if moved:current['prowlarr']=moved
-    historical=validate_values(current)
+    historical=validate_values(current,fields=V11_FIELDS)
     search=historical.pop('prowlarr')
     for old,new in V10_DISCOVERY:historical['sonarr'][old]=search[new]
     return historical
@@ -531,12 +535,22 @@ def _v10_to_v11(document):
     if current==MAX_REVISION:raise ConfigurationError()
     values=_v10_values(document['settings'])
     values['prowlarr']={new:values['sonarr'].pop(old) for old,new in V10_DISCOVERY}
-    return {'schema_version':11,'revision':current+1,'settings':validate_values(values)}
+    return {'schema_version':11,'revision':current+1,'settings':validate_values(values,fields=V11_FIELDS)}
 
 
-# Explicit ordered conversion steps; future renames/type conversions go in a
-# new step. Do not infer renames, silently drop keys, or rewrite old converters.
-CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10, 10: _v10_to_v11})
+def _v11_to_v12(document):
+    """Retire HTTP metainfo source while preserving other version-11 values."""
+    if (type(document) is not dict or set(document)!={'schema_version','revision','settings'}
+            or document['schema_version']!=11):raise ConfigurationError()
+    current=revision(document['revision'])
+    if current==MAX_REVISION:raise ConfigurationError()
+    previous=validate_values(document['settings'],fields=V11_FIELDS)
+    del previous['torrent_metadata']
+    return {'schema_version':12,'revision':current+1,'settings':validate_values(previous)}
+
+
+# Preserve published version shapes and validate before dropping obsolete keys.
+CONVERSIONS = MappingProxyType({0: _v0_to_v1, 1: _v1_to_v2, 2: _v2_to_v3, 3: _v3_to_v4, 4: _v4_to_v5, 5: _v5_to_v6, 6: _v6_to_v7, 7: _v7_to_v8, 8: _v8_to_v9, 9: _v9_to_v10, 10: _v10_to_v11, 11: _v11_to_v12})
 
 
 def convert_document(document):
