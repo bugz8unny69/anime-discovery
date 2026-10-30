@@ -17,6 +17,30 @@ reported explicitly. New arrivals are never silently included.
 Keep does not create or modify a series in Sonarr. A missing registered series
 stops for review without removing staged files.
 
+## Reject
+
+Reject series is a single operator decision scoped to one verified AniDB ID.
+The dialog records a required reason and an optional note, and the durable
+decision immediately prevents future automatic Intake. Already active
+reservations are canceled through the existing cancellation workflow and
+their owned torrents go through the regular cancellation cleanup.
+
+The queued series worker removes each staged acquisition's pinned video and
+episode NFO using the existing receipt-based remover. Unrelated media,
+shared series metadata, and anything in the permanent Keep library are never
+deleted. For single-episode torrents it uses the existing post-stage download
+cleanup; for season packs it uses the existing batch owned-torrent cleanup.
+The series decision completes only once each resulting cleanup job completes.
+Failures remain visible in Jobs/History and are not silently treated as success.
+
+The decision reason and progress are visible in the series modal and the
+rejection job's History. A user clicking Reject twice receives the same
+decision rather than scheduling a second deletion. There is no automatic
+unreject UI. The v50 database migration adds an optional reason field to
+existing rejection decisions, leaving older decisions valid. Stop the API and
+worker, run the normal explicit database preview/upgrade flow, and restart
+with the new code; never start v50 services against an older database.
+
 ## Missing episodes
 
 Backfill remains Prowlarr-based. NO_RESULTS, NOT_AIRED, MAPPING_MISSING and
@@ -26,7 +50,8 @@ previous noncandidate result. Active reservations, already-selected releases
 and active search jobs are not re-sent. Failed downloads keep using the ranked
 candidate fallback after cleanup.
 
-No new database schema, ranking engine or second acquisition/import pipeline.
+No new ranking engine or second acquisition/import pipeline. No changes to
+NOT_AIRED Retry Search; it stays manually available.
 
 ## Limitations
 

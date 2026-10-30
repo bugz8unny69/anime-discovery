@@ -11,7 +11,7 @@ from src.nextgen.jobs.discover_sonarr_backfill_job import (
 )
 from src.nextgen.acquisition.prowlarr_search import BackfillObservation, SearchUnavailable
 from src.nextgen.storage.sqlite import transaction
-from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, _structure
+from src.nextgen.storage.migrations import SQL_DIR, SCRIPTS, LATEST_VERSION, _structure
 from src.nextgen.storage.sqlite import connect, initialize
 from src.nextgen.tests.test_trial_policy import TrialEvaluationTests
 from src.nextgen.worker import Worker
@@ -431,18 +431,12 @@ class BackfillSchemaTests(unittest.TestCase):
                         "VALUES('test',X'61',1)")
             old.commit()
             before = old.execute('SELECT * FROM incoming_events').fetchall()
-            old.executescript((SQL_DIR/'042_sonarr_backfill.sql').read_text())
-            old.executescript((SQL_DIR/'043_sonarr_selection.sql').read_text())
-            old.executescript((SQL_DIR/'044_sonarr_candidates.sql').read_text())
-            old.executescript((SQL_DIR/'045_sonarr_magnet_intents.sql').read_text())
-            old.executescript((SQL_DIR/'046_observed_acquisition.sql').read_text())
-            old.executescript((SQL_DIR/'047_released_magnet_intents.sql').read_text())
-            old.executescript((SQL_DIR/'048_prowlarr_backfill_statuses.sql').read_text())
-            old.executescript((SQL_DIR/'049_manual_identity_matches.sql').read_text())
+            for name in SCRIPTS[41:]:
+                old.executescript((SQL_DIR/name).read_text())
             initialize(fresh)
             self.assertEqual(_structure(old),_structure(fresh))
             self.assertEqual(old.execute('SELECT * FROM incoming_events').fetchall(),before)
-            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],49)
+            self.assertEqual(old.execute('PRAGMA user_version').fetchone()[0],LATEST_VERSION)
         finally:
             old.close()
             fresh.close()

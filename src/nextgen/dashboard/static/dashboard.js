@@ -304,9 +304,10 @@ function renderSeries() {
     td('—');
     td().appendChild(node('strong', series.title));
     td(series.staged_count + ' staged');
-    td().appendChild(node('span', series.staged_count ? 'Ready to Keep' :
-      series.kept_count ? 'Kept' : 'Tracking',
-      'status ' + (series.staged_count || series.kept_count ? 'completed' : 'waiting')));
+    td().appendChild(node('span', series.rejection ? 'Rejected' :
+      series.staged_count ? 'Ready to Keep' : series.kept_count ? 'Kept' : 'Tracking',
+      'status ' + (series.rejection ? 'blocked' :
+        series.staged_count || series.kept_count ? 'completed' : 'waiting')));
     td(series.missing_count + ' missing / retryable');
     const actions = td();
     const open = node('button', 'View series', 'secondary');
@@ -363,8 +364,41 @@ async function openSeries(anidbId) {
       tr.appendChild(action); missing.appendChild(tr);
     }
     $('series-missing-empty').hidden = series.missing.length !== 0;
+    const rejected = $('series-rejected');
+    const controls = $('series-reject-controls');
+    const reject = $('series-reject');
+    const rejectHistory = $('series-reject-history');
+    rejected.hidden = !series.rejection;
+    controls.hidden = !!series.rejection;
+    reject.hidden = !!series.rejection;
+    rejectHistory.hidden = !series.rejection;
+    if (series.rejection) {
+      rejected.textContent = 'Rejected: ' + (series.rejection.reason || 'No reason recorded') +
+        '. Cleanup: ' + series.rejection.cleanup_state.toLowerCase().replaceAll('_', ' ') +
+        '. Future Intake is blocked.';
+      rejectHistory.onclick = () => { dialog.close(); openHistory(series.rejection.job_id); };
+    }
+    reject.onclick = async () => {
+      if (state.seriesBusy || series.rejection) return;
+      const reason = $('series-reject-reason').value;
+      const note = $('series-reject-note').value;
+      const count = series.reject_operations.length;
+      if (!confirm('Reject ' + series.title + '?\n\nThis blocks future Intake, cancels pending ' +
+        'acquisitions, and removes ' + count + ' staged acquisition(s) and their owned torrents. ' +
+        'Permanent library media is untouched.')) return;
+      state.seriesBusy = true; reject.disabled = true;
+      try {
+        const result = await request(API + '/intake/series/' + anidbId + '/reject', {
+          method: 'POST', body: {operation_ids: series.reject_operations, reason, note}
+        });
+        notice(result.message + ' Follow job #' + result.job_id + ' for cleanup status.');
+        dialog.close(); await loadActivity();
+      } catch (error) { displayError(error); }
+      finally { state.seriesBusy = false; reject.disabled = false; }
+    };
     const keep = $('series-keep');
-    keep.disabled = series.keep_operations.length === 0;
+    keep.disabled = !!series.rejection || series.keep_operations.length === 0;
+    keep.hidden = !!series.rejection;
     keep.textContent = 'Keep all staged (' + series.keep_operations.length + ' acquisition' +
       (series.keep_operations.length === 1 ? '' : 's') + ')';
     keep.onclick = async () => {
@@ -448,6 +482,11 @@ async function loadHistory() {
     // Every line names the job that did the work (its *_job.py module).
     const worker = data.job?.module || data.job?.kind || `Job #${job}`;
     if (data.job) $('history-title').textContent = `Job #${job} · ${data.job.label?.message || data.job.kind} · ${worker}`;
+    if (data.job?.kind === 'REJECT_SERIES' && !state.historyCursor) {
+      $('history-rows').appendChild(node('p',
+        'Rejected: ' + (data.job.rejection_reason || 'Reason not recorded') +
+        ' · Cleanup: ' + (data.job.cleanup_state || 'Unknown'), 'muted'));
+    }
     if (data.backfill_attempts?.attempts?.length) renderAttempts(data.backfill_attempts);
     for (const entry of data.items) {
       const article = node('article', null, 'history-entry');

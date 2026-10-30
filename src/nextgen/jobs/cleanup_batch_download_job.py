@@ -24,9 +24,21 @@ def enqueue(db,claim,*,decision=None):
 
 
 def _persist(db,claim,value):
-    if type(value) is not dict or set(value)!={'decision_job_id'}:
+    if type(value) is not dict or set(value) not in (
+            {'decision_job_id'}, {'decision_job_id', 'plan_id'}):
         raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
     decision=integer(value['decision_job_id'],positive=True)
+    plan = integer(value['plan_id'],positive=True) if 'plan_id' in value else None
+    if plan is not None:
+        row = db.execute(
+            "SELECT c.phase,j.state,j.kind,k.created_by_job_id "
+            "FROM batch_download_cleanup c JOIN jobs j ON j.job_id=c.decision_job_id "
+            "JOIN jobs k ON k.job_id=? WHERE c.decision_job_id=? AND c.plan_id=?",
+            (claim.job_id,decision,plan)).fetchone()
+        if (row is None or row[0]!='COMPLETE' or row[2]!='REJECT_SERIES'
+                or row[3]!=decision):
+            raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
+        return
     row=db.execute(
         "SELECT c.phase,j.state,j.kind,k.created_by_job_id,k.event_id "
         "FROM batch_download_cleanup c "
@@ -54,16 +66,20 @@ def registration(secrets,*,service_factory=BatchDecisionCleanup):
     async def execute(context):
         payload=context.data()
         try:
-            if set(payload)!={'decision_job_id'}:
+            if set(payload) not in ({'decision_job_id'}, {'decision_job_id','plan_id'}):
                 raise ValueError()
             decision=integer(payload['decision_job_id'],positive=True)
+            plan=integer(payload['plan_id'],positive=True) if 'plan_id' in payload else None
         except (ValueError,TypeError):
             return Outcome('review','JOB_PAYLOAD_INVALID')
         try:
-            complete=await blocking(
-                service_factory(context.configuration,secrets).run,
-                context.claim,decision,context.cancelled)
-            return (Outcome(value={'decision_job_id':decision}) if complete
+            service=service_factory(context.configuration,secrets)
+            if plan is None:
+                complete=await blocking(service.run,context.claim,decision,context.cancelled)
+            else:
+                complete=await blocking(
+                    service.run,context.claim,decision,context.cancelled,plan_id=plan)
+            return (Outcome(value=payload) if complete
                     else Outcome('defer','DECISION_DOWNLOAD_CLEANUP_WAITING',
                                  delay_ms=30000))
         except CleanupBusy:

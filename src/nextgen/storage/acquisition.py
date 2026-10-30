@@ -14,7 +14,7 @@ from src.nextgen.storage.job_queue import QueueUnavailable
 from src.nextgen.storage.migrations import LATEST_VERSION, MigrationError, _open
 
 
-def _source(db,evaluation_job_id,event_id):
+def _source(db,evaluation_job_id,event_id,*,cleanup=False):
     row=db.execute("SELECT s.reservation_id,s.owner_job_id,s.verification_id,s.plan_id,s.anidb_id,s.anidb_episode_id,"
         "s.tvdb_series_id,s.tvdb_season,s.tvdb_episode,s.tvdb_episode_id,r.anidb_episode_number,r.release_sha256,"
         "a.title,CASE WHEN length(e.raw_body)<=65536 THEN e.raw_body ELSE NULL END "
@@ -24,8 +24,11 @@ def _source(db,evaluation_job_id,event_id):
         "WHERE s.evaluation_job_id=? AND j.event_id=? AND j.kind='RESERVE_EPISODE' AND j.state='DONE' AND s.state='ACTIVE'",
         (evaluation_job_id,event_id)).fetchone()
     if row is None:raise AcquisitionConflict()
-    from src.nextgen.storage.review_decisions import require_allowed
-    require_allowed(db,row[4])
+    # Only exact-owned cancellation cleanup may read historical evidence for a
+    # now-rejected anime. Submission always uses cleanup=False.
+    if not cleanup:
+        from src.nextgen.storage.review_decisions import require_allowed
+        require_allowed(db,row[4])
     try:proof=episode_facts(db,evaluation_job_id,event_id)
     except ReservationConflict:raise AcquisitionConflict() from None
     if not proof.selected or row[2:10]!=(proof.verification_id,proof.plan_id,proof.anidb_id,proof.anidb_episode_id,

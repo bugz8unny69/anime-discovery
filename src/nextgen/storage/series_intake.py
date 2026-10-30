@@ -5,7 +5,8 @@ No new tables, provider adapters, or import jobs are needed.
 """
 import json
 
-from src.nextgen.history import integer
+from src.nextgen.history import integer, append_job_history
+from src.nextgen.storage.cancellation import CancellationStore, can_cancel_operation
 from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction, enqueue_job_with_receipt
 from src.nextgen.storage.sonarr_backfill import PAGE_SIZE, window
@@ -33,6 +34,12 @@ def detail(db, anidb_id):
         'description': None,  # The persisted AnimeSeries identity has no synopsis field.
         'episodes': [], 'missing': [], 'keep_operations': []
     }
+    rejected = db.execute(
+        "SELECT d.job_id,d.reason_text,d.cleanup_state,j.state FROM anime_review_decisions d "
+        "JOIN jobs j ON j.job_id=d.job_id WHERE d.anidb_id=?", (anidb_id,)).fetchone()
+    result['rejection'] = (None if rejected is None else {
+        'job_id': rejected[0], 'reason': rejected[1],
+        'cleanup_state': rejected[2], 'job_state': rejected[3]})
     # Existing single-episode staging (one underlying operation per release).
     single = db.execute(
         "SELECT r.tvdb_season,r.tvdb_episode,s.job_id,m.operation_id,o.state,"
@@ -62,6 +69,8 @@ def detail(db, anidb_id):
         status = ('Kept' if keep_state == 'DONE' else
                   'Importing' if keep_job is not None else
                   'Staged' if state == 'STAGED' else state.title())
+        if rejected is not None and status == 'Staged':
+            status = 'Rejected' if rejected[2] == 'COMPLETE' else 'Rejecting'
         result['episodes'].append({
             'season': season, 'episode': episode, 'job_id': job,
             'operation_id': op, 'status': status
@@ -69,7 +78,8 @@ def detail(db, anidb_id):
         staged_episodes.add((season, episode))
         if state == 'STAGED' and keep_state != 'DONE':
             operations.add(op)
-    result['keep_operations'] = sorted(operations)
+    result['keep_operations'] = sorted(operations) if rejected is None else []
+    result['reject_operations'] = sorted(operations) if rejected is None else []
     plans = db.execute(
         'SELECT plan_id,tvdb_season,anchor_episode,backfill_count,following_count '
         'FROM trial_plans WHERE anidb_id=? ORDER BY tvdb_season', (anidb_id,)
@@ -84,7 +94,7 @@ def detail(db, anidb_id):
             status = observed.get(episode, 'NOT_SEARCHED')
             result['missing'].append({
                 'season': season, 'episode': episode, 'status': status,
-                'can_retry': status in ('NOT_SEARCHED', 'NO_RESULTS', 'NOT_AIRED', 'MAPPING_MISSING')
+                'can_retry': rejected is None and status in ('NOT_SEARCHED', 'NO_RESULTS', 'NOT_AIRED', 'MAPPING_MISSING')
             })
     return result
 
@@ -103,7 +113,8 @@ def list_items(db, before, limit):
             'staged_count': sum(x['status'] == 'Staged' for x in item['episodes']),
             'kept_count': sum(x['status'] == 'Kept' for x in item['episodes']),
             'missing_count': sum(x['can_retry'] for x in item['missing']),
-            'season_count': len({x['season'] for x in item['episodes'] + item['missing']})
+            'season_count': len({x['season'] for x in item['episodes'] + item['missing']}),
+            'rejection': item['rejection']
         })
     return {'items': items, 'next_before_id': rows[limit - 1][0] if len(rows) > limit else None}
 
@@ -117,6 +128,8 @@ def keep_targets(db, anidb_id, operation_ids):
     wanted = set(operation_ids)
     if len(wanted) != len(operation_ids) or not wanted.issubset(set(info['keep_operations'])):
         raise IntakeUnavailable()
+    if info['rejection'] is not None:
+        raise IntakeUnavailable()
     # Resolve each captured operation to an existing staged job. A new arrival
     # cannot silently become part of the approved Keep scope.
     rows = db.execute(
@@ -127,6 +140,86 @@ def keep_targets(db, anidb_id, operation_ids):
     if len(rows) != len(wanted):
         raise IntakeUnavailable()
     return [job for op, job in sorted(rows)]
+
+
+REJECTION_REASONS = ('Not interested', 'Already watched', 'Wrong anime', 'Other')
+
+
+def reject_series(database, anidb_id, operation_ids, reason, note):
+    """One durable series decision, with exact staged targets and canceled live work."""
+    integer(anidb_id, positive=True)
+    if (type(operation_ids) is not list or len(operation_ids) > 100
+            or any(type(x) is not int or x <= 0 for x in operation_ids)
+            or len(set(operation_ids)) != len(operation_ids)
+            or type(reason) is not str or reason not in REJECTION_REASONS
+            or type(note) is not str or len(note) > 300
+            or any(ord(c) < 32 and c not in '\n\t' for c in note)):
+        raise IntakeUnavailable()
+    explanation = reason + (': ' + note.strip() if note.strip() else '')
+    queue = JobQueue(database)
+    with queue.connection() as db, transaction(db):
+        info = detail(db, anidb_id)
+        if info is None:
+            raise IntakeUnavailable()
+        if info['rejection'] is not None:
+            existing = info['rejection']['job_id']
+            kind = db.execute('SELECT kind FROM jobs WHERE job_id=?', (existing,)).fetchone()
+            if kind != ('REJECT_SERIES',):
+                raise IntakeUnavailable()
+            return {'job_id': existing, 'reused': True}
+        if sorted(operation_ids) != info['reject_operations']:
+            raise IntakeUnavailable()
+        for op in operation_ids:
+            if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? "
+                          "AND action='KEEP'", (op,)).fetchone():
+                raise IntakeUnavailable()
+        control, _ = enqueue_job_with_receipt(
+            db, kind='REJECT_SERIES',
+            payload={'anidb_id': anidb_id, 'operation_ids': sorted(operation_ids)},
+            component='api')
+        control_op = db.execute('SELECT operation_id FROM job_operation_members '
+                                'WHERE job_id=?', (control,)).fetchone()[0]
+        now = queue.now()
+        db.execute("INSERT INTO anime_review_decisions "
+                   "(anidb_id,operation_id,job_id,decision,cleanup_state,decided_at_ms,reason_text) "
+                   "VALUES(?,?,?,'REJECT','PENDING',?,?)",
+                   (anidb_id, control_op, control, now, explanation))
+        append_job_history(db, job_id=control, event_code='SERIES_REJECTED',
+                           reason_code='ANIME_REJECTED', component='api',
+                           occurred_at_ms=now, details={'attempt': 0})
+        # Existing reservations may already be downloading. Request their normal
+        # operation cancellation, then queue the existing owned-torrent cleaner.
+        # The decision above blocks any subsequent new reservations.
+        active = db.execute(
+            "SELECT m.operation_id,MIN(r.owner_job_id) FROM "
+            "(SELECT owner_job_id FROM episode_reservations WHERE anidb_id=? "
+            "UNION ALL SELECT owner_job_id FROM batch_episode_reservations "
+            "WHERE anidb_id=?) r "
+            "JOIN job_operation_members m ON m.job_id=r.owner_job_id "
+            "JOIN job_operations o ON o.operation_id=m.operation_id "
+            "WHERE o.state='ACTIVE' GROUP BY m.operation_id",
+            (anidb_id, anidb_id)).fetchall()
+        cancel = CancellationStore(database)
+        for op, target in active:
+            current = db.execute(
+                'SELECT operation_id,state,cleanup_state,reason_code '
+                'FROM job_operations WHERE operation_id=?', (op,)).fetchone()
+            if not can_cancel_operation(db, current):
+                continue
+            cancel.request_in_transaction(db, target)
+            if db.execute("SELECT 1 FROM management_actions WHERE operation_id=? "
+                          "AND action='CLEANUP'", (op,)).fetchone():
+                continue
+            event = db.execute('SELECT event_id FROM jobs WHERE job_id=?',
+                               (target,)).fetchone()[0]
+            job, _ = enqueue_job_with_receipt(
+                db, kind='CLEANUP_CANCELED_OPERATION',
+                payload={'target_job_id': target}, event_id=event,
+                component='api')
+            db.execute("INSERT INTO management_actions "
+                       "(operation_id,action,target_job_id,job_id,created_at_ms) "
+                       "VALUES(?,'CLEANUP',?,?,?)", (op, target, job, now))
+        return {'job_id': control, 'reused': False}
 
 
 def retry_episode(database, anidb_id, season, episode):
@@ -145,6 +238,8 @@ def retry_episode(database, anidb_id, season, episode):
             "WHERE p.anidb_id=? AND p.tvdb_season=?",
             (anidb_id, season)).fetchone()
         if row is None:
+            raise IntakeUnavailable()
+        if db.execute("SELECT 1 FROM anime_review_decisions WHERE anidb_id=?", (anidb_id,)).fetchone():
             raise IntakeUnavailable()
         plan_id, anchor, backfill, following, event_id, parent_job = row
         numbers = window(anchor, backfill, following)

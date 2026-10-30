@@ -17,14 +17,14 @@ from src.nextgen.storage.job_queue import JobQueue
 from src.nextgen.storage.sqlite import transaction
 
 
-def _plan(db,preparation_job_id,event_id):
+def _plan(db,preparation_job_id,event_id,*,cleanup=False):
     row=db.execute("SELECT p.plan_id,p.reservation_id,p.info_hash,p.info_sha256,p.manifest_json,p.submission_marker,"
         "p.selected_size_bytes,r.evaluation_job_id,r.plan_id FROM acquisition_plans p "
         "JOIN jobs j ON j.job_id=p.job_id JOIN episode_reservations r ON r.reservation_id=p.reservation_id "
         "WHERE p.job_id=? AND j.event_id=? AND j.kind='PREPARE_ACQUISITION' AND j.state='DONE' AND p.state='PREPARED' AND r.state='ACTIVE'",
         (preparation_job_id,event_id)).fetchone()
     if row is None:raise AcquisitionConflict()
-    source=_source(db,row[7],event_id)
+    source=_source(db,row[7],event_id,cleanup=cleanup)
     manifest=manifest_from_json(row[2],row[3],row[4])
     validate_declaration(source,manifest)
     if source.reservation_id!=row[1] or source.info_hash!=manifest.info_hash or not re.fullmatch('[a-f0-9]{32}',row[5]):raise AcquisitionConflict()

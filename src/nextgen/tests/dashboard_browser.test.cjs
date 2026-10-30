@@ -77,6 +77,35 @@ test('Intake groups acquisitions in one series row', async () => {
   assert.equal(rows[0].children[5].children[0].textContent, 'View series');
 });
 
+test('series Reject sends the frozen operations and records the operator reason', async () => {
+  const h = await harness();
+  const calls = [];
+  h.ctx.fetch = async (url, options = {}) => {
+    calls.push({url, options});
+    if (url === '/api/v1/intake/series/123') {
+      return response({anidb_id: 123, title: 'Example Anime', english_title: null,
+        episodes: [], missing: [{season: 2, episode: 6, status: 'NOT_AIRED', can_retry: true}],
+        keep_operations: [11, 12], reject_operations: [11, 12], rejection: null});
+    }
+    if (url === '/api/v1/intake/series/123/reject') {
+      return response({job_id: 900, message: 'Series rejection recorded; cleanup queued.'}, 202);
+    }
+    return response({items: [], next_before_id: null});
+  };
+  await h.run('openSeries(123)');
+  const button = h.elements.get('series-reject');
+  h.ctx.document.getElementById('series-reject-reason').value = 'Not interested';
+  h.ctx.document.getElementById('series-reject-note').value = 'Not my cup of tea';
+  await button.onclick();
+  const posts = calls.filter(call => call.options.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v1/intake/series/123/reject');
+  assert.deepEqual(JSON.parse(posts[0].options.body), {
+    operation_ids: [11, 12], reason: 'Not interested', note: 'Not my cup of tea'
+  });
+  assert.equal(posts[0].options.headers['X-CSRF-Token'], 'session-csrf');
+});
+
 test('disabled buttons explain the running job before unavailable Keep execution', async () => {
   const h = await harness(); h.ctx.fixture = target();
   h.ctx.fixture.actions.keep.disabled_reason = {message: 'A job is already in progress.'};
