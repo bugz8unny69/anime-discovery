@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fixes.cleanup_legacy_not_listed import backup, configured_database, open_database  # noqa: E402
 
-SCHEMA_VERSION = 48
+# The release's own schema version: the fix ships with, and is run from, that release.
+from src.nextgen.storage.migrations import LATEST_VERSION as SCHEMA_VERSION  # noqa: E402
 KIND = 'CLEANUP_DECIDED_DOWNLOAD'
 
 ROWS = """

@@ -32,8 +32,8 @@ class BackfillCleanupTests(unittest.TestCase):
                 INSERT INTO sonarr_backfill_results VALUES (5,1,'NOT_LISTED'),
                      (5,2,'NOT_LISTED'),(5,3,'CANDIDATES'),(5,4,'NO_RESULTS');
                 INSERT INTO sonarr_episode_selections VALUES (5,2);
-                PRAGMA user_version=48;
-            ''')
+                PRAGMA user_version=%d;
+            ''' % fix.SCHEMA_VERSION)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -71,7 +71,7 @@ class BackfillCleanupTests(unittest.TestCase):
     def test_rejects_unknown_schema_without_modifying_data(self):
         with closing(sqlite3.connect(self.path)) as db:
             db.execute('PRAGMA user_version=47')
-        with self.assertRaisesRegex(ValueError,'schema v48'):
+        with self.assertRaisesRegex(ValueError,f'schema v{fix.SCHEMA_VERSION}'):
             fix.execute(self.path)
         self.assertEqual(len(self.statuses()),4)
 
