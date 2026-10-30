@@ -83,7 +83,23 @@
       <table><thead><tr><th>Episode</th><th>Result</th><th>Action</th></tr></thead><tbody id="series-missing"></tbody></table>
       <p id="series-missing-empty" class="muted" hidden>No missing episodes in the configured search windows.</p>
     </section>
-    <button id="series-keep" type="button">Keep all staged</button>
+    <p id="series-rejected" class="muted" role="status" hidden></p>
+    <section id="series-reject-controls" class="trace-section">
+      <h3>Reject this series</h3>
+      <label for="series-reject-reason">Reason</label>
+      <select id="series-reject-reason">
+        <option>Not interested</option><option>Already watched</option>
+        <option>Wrong anime</option><option>Other</option>
+      </select>
+      <label for="series-reject-note">Additional note (optional)</label>
+      <textarea id="series-reject-note" rows="2" maxlength="300"
+        placeholder="Why are you rejecting this anime?"></textarea>
+    </section>
+    <div class="inline">
+      <button id="series-reject" type="button" class="danger">Reject series</button>
+      <button id="series-keep" type="button">Keep all staged</button>
+      <button id="series-reject-history" type="button" class="secondary" hidden>Rejection history</button>
+    </div>
   </dialog>
   <dialog id="matching-dialog" class="match-trace" aria-labelledby="matching-title">
     <div class="toolbar"><h2 id="matching-title">Matching details</h2><button id="matching-close" class="secondary" type="button">Close</button></div>

@@ -30,7 +30,7 @@ from src.nextgen.storage.job_queue import JobQueue, QueueUnavailable
 from src.nextgen.storage.review_retry import request_review_retry, capability as retry_capability, RetryNotAllowed, RetryStale
 from src.nextgen.storage.management_actions import ManagementActions, ActionUnavailable, ActionNotFound
 from src.nextgen.storage.series_intake import (detail as series_detail, list_items as series_items,
-    keep_targets as series_keep_targets, retry_episode as retry_missing_episode, IntakeUnavailable)
+    keep_targets as series_keep_targets, retry_episode as retry_missing_episode, reject_series as reject_intake_series, IntakeUnavailable)
 from src.nextgen.storage.migrations import LATEST_VERSION
 from src.nextgen.storage.sqlite import accept_event_and_job
 
@@ -544,7 +544,7 @@ class Application:
                 with JobQueue(configuration.value('storage.database_path')).connection() as db:
                     db.execute('BEGIN')
                     return 200,series_items(db,before,limit),[]
-            series_match=re.fullmatch(PREFIX+r'/intake/series/([1-9][0-9]{0,18})(?:/(keep))?',path)
+            series_match=re.fullmatch(PREFIX+r'/intake/series/([1-9][0-9]{0,18})(?:/(keep|reject))?',path)
             if series_match:
                 if query:raise ApiError(400,'API_REQUEST_INVALID')
                 aid=int(series_match[1])
@@ -571,6 +571,14 @@ class Application:
                             failed.append(job)
                     return 202,{'submitted':submitted,'failed':failed,
                                 'message':f'Keep requested for {len(submitted)} staged acquisitions.'},[]
+                if series_match[2]=='reject' and method=='POST':
+                    exact(body,('operation_ids','reason','note'))
+                    result=reject_intake_series(
+                        configuration.value('storage.database_path'),aid,
+                        body['operation_ids'],body['reason'],body['note'])
+                    return 202,{**result,'message':'Series rejection recorded; cleanup queued.',
+                                'status_url':f'/api/v1/jobs/{result["job_id"]}',
+                                'history_url':f'/api/v1/jobs/{result["job_id"]}/history'},[]
                 raise ApiError(405,'API_METHOD_INVALID')
             retry_match=re.fullmatch(PREFIX+r'/intake/series/([1-9][0-9]{0,18})/backfill/([0-9]{1,4})/([1-9][0-9]{0,3})/retry',path)
             if retry_match:
@@ -657,6 +665,13 @@ class Application:
                 from importlib.util import find_spec
                 about={'job_id':job,'kind':kind[0],'label':CATALOG.handler(kind[0]),
                        'module':module if find_spec('src.nextgen.jobs.'+module) else None}
+                if kind[0]=='REJECT_SERIES':
+                    rejection=db.execute(
+                        'SELECT reason_text,cleanup_state FROM anime_review_decisions '
+                        'WHERE job_id=?',(job,)).fetchone()
+                    if rejection:
+                        about['rejection_reason']=rejection[0]
+                        about['cleanup_state']=rejection[1]
                 rows=db.execute('SELECT history_id,occurred_at_ms,event_code,reason_code,component,details_json,handler_code,handler_label,invocation_id '
                     'FROM job_history WHERE job_id=? AND history_id>? ORDER BY history_id LIMIT ?',(job,after,limit+1)).fetchall()
                 items=[]

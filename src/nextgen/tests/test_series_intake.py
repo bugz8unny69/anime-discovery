@@ -20,6 +20,8 @@ class SeriesIntakeTests(unittest.TestCase):
             CREATE TABLE job_operations(operation_id INTEGER,state TEXT);
             CREATE TABLE management_actions(operation_id INTEGER,action TEXT,job_id INTEGER);
             CREATE TABLE jobs(job_id INTEGER,state TEXT);
+            CREATE TABLE anime_review_decisions(anidb_id INTEGER,job_id INTEGER,
+                reason_text TEXT,cleanup_state TEXT);
             CREATE TABLE batch_staging_publications(plan_id INTEGER,file_index INTEGER,
                 job_id INTEGER,state TEXT);
             CREATE TABLE batch_episode_reservations(plan_id INTEGER,file_index INTEGER,
@@ -66,6 +68,21 @@ class SeriesIntakeTests(unittest.TestCase):
         self.assertTrue(any(x['episode']==1 and x['can_retry'] for x in info['missing']))
         with self.assertRaises(IntakeUnavailable):
             keep_targets(self.db, 10, [11])
+
+    def test_rejected_series_remains_visible_but_blocks_keep_and_retry(self):
+        self.db.execute("INSERT INTO jobs VALUES(900,'DONE')")
+        self.db.execute("INSERT INTO anime_review_decisions VALUES"
+                        "(10,900,'Not interested: Not my cup of tea','COMPLETE')")
+        info=detail(self.db,10)
+        self.assertEqual(info['rejection']['reason'],
+                         'Not interested: Not my cup of tea')
+        self.assertEqual(info['rejection']['job_id'],900)
+        self.assertEqual(info['keep_operations'],[])
+        self.assertEqual(info['reject_operations'],[])
+        self.assertTrue(all(not episode['can_retry'] for episode in info['missing']))
+        self.assertEqual(list_items(self.db,100,30)['items'][0]['rejection']['job_id'],900)
+        with self.assertRaises(IntakeUnavailable):
+            keep_targets(self.db,10,[11])
 
     def test_missing_series_is_not_invented(self):
         self.assertIsNone(detail(self.db, 999))

@@ -34,6 +34,10 @@ button{background:#17629b;cursor:pointer}
 button:hover{background:#227dbf}
 button:disabled{opacity:.45;cursor:default}
 button.secondary{background:#25364a}
+#series-reject-controls{display:grid;gap:8px;max-width:600px}
+#series-reject-controls select,#series-reject-controls textarea{width:100%;background:#24344a;color:#eff5ff;
+border:1px solid #47607e;border-radius:8px;padding:10px 12px;font:inherit}
+#series-reject-note{resize:vertical;min-height:64px}
 .status{font-size:.78rem;font-weight:700;letter-spacing:.035em;border-radius:20px;
 padding:5px 9px;display:inline-block;background:#344357}
 .status.completed{background:#173f39;color:#a6f6d4}

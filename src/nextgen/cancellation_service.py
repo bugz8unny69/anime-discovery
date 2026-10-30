@@ -175,7 +175,7 @@ class CancellationService(OwnedCleanup):
             if len(rows)>1000:raise CancellationError()
             targets=[]
             for preparation,event in rows:
-                plan=_plan(db,preparation,event)
+                plan=_plan(db,preparation,event,cleanup=True)
                 # Explicit other consumers, including older separately scoped jobs,
                 # preserve resources. Provenance IDs are never traversed as edges.
                 shared=db.execute("SELECT 1 FROM jobs j JOIN job_operation_members m USING(job_id) "
