@@ -168,6 +168,35 @@ class BackfillWorkerTests(unittest.IsolatedAsyncioTestCase):
         else:
             self.assertEqual(events,[])
 
+    async def test_history_lists_each_release_tried_and_why_it_stopped(self):
+        from src.nextgen.storage.backfill_attempts import backfill_attempts
+        await self._run_recognized_candidate(True)
+        verify_job, event_id = self.rows(
+            "SELECT job_id,event_id FROM jobs WHERE kind='VERIFY_RELEASE' AND event_id IN "
+            "(SELECT event_id FROM incoming_events WHERE source='sonarr-discovery')")[0]
+        db = connect(self.database)
+        try:
+            found = backfill_attempts(db, verify_job)
+            self.assertEqual((found['episode'], [
+                (a['rank'], a['state'], a['release_name'], a['trace_id']) for a in found['attempts']]),
+                (1, [(1, 'IN_PROGRESS', '[Group] Test - 01 [1080p]', f'AD-{event_id}')]))
+            # A size-limit stop is shown with its numbers.
+            with transaction(db):
+                db.execute("UPDATE sonarr_episode_candidates SET state='FAILED',"
+                           "reason_code='ACQUISITION_SIZE_LIMIT'")
+                db.execute("INSERT INTO job_history(job_id,event_code,reason_code,component,"
+                           "occurred_at_ms,details_json) VALUES(?,'NEEDS_REVIEW',"
+                           "'ACQUISITION_SIZE_LIMIT','worker',1,?)",
+                           (verify_job, json.dumps({'attempt':1,'video_mb':1420,'limit_mb':600})))
+            item = backfill_attempts(db, verify_job)['attempts'][0]
+            self.assertEqual((item['state'], item['reason_code'], item['details']),
+                             ('FAILED', 'ACQUISITION_SIZE_LIMIT', {'video_mb':1420,'limit_mb':600}))
+            # Jobs outside a backfill episode have nothing to show.
+            first = self.rows("SELECT min(job_id) FROM jobs")[0][0]
+            self.assertIsNone(backfill_attempts(db, first))
+        finally:
+            db.close()
+
     async def test_recognized_candidate_is_selected_without_download(self):
         await self._run_recognized_candidate(False)
 

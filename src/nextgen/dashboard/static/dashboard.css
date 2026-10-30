@@ -88,3 +88,4 @@ align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .credential-input .credential-eye:hover{background:#445f86}
 .credential-input .credential-eye:focus-visible{outline:2px solid #87c8ff;outline-offset:2px}
 .credential-input .credential-eye svg{pointer-events:none}
+.attempt-failed{color:#f2b8a0}.attempts{margin-bottom:1rem}

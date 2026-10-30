@@ -417,6 +417,27 @@ async function openHistory(jobId) {
   if (!$('history-dialog').open) $('history-dialog').showModal();
   await loadHistory();
 }
+const ATTEMPT_STATES = Object.freeze({
+  STAGED: 'Staged', FAILED: 'Failed', IN_PROGRESS: 'In progress', NOT_TRIED: 'Not tried yet',
+});
+// Every ranked release tried for this backfill episode, so a rejected
+// release can be explained without querying the database.
+function renderAttempts(found) {
+  const section = node('section', null, 'trace-section attempts');
+  section.appendChild(node('h3', `Releases tried for episode ${found.episode}`));
+  for (const item of found.attempts) {
+    const line = node('article', null, 'history-entry');
+    const name = item.release_name || `Ranked release #${item.rank} (not sent yet)`;
+    line.appendChild(node('p', `${item.rank}. ${name}`));
+    const status = [ATTEMPT_STATES[item.state] || item.state];
+    if (item.reason) status.push(item.reason.message);
+    if (item.trace_id) status.push(item.trace_id);
+    line.appendChild(node('small', status.join(' · '), item.state === 'FAILED' ? 'attempt-failed' : 'muted'));
+    if (item.detail) line.appendChild(node('small', item.detail, 'muted'));
+    section.appendChild(line);
+  }
+  $('history-rows').appendChild(section);
+}
 async function loadHistory() {
   const version = state.historyVersion; const job = state.historyJob;
   if (!job) return;
@@ -427,6 +448,7 @@ async function loadHistory() {
     // Every line names the job that did the work (its *_job.py module).
     const worker = data.job?.module || data.job?.kind || `Job #${job}`;
     if (data.job) $('history-title').textContent = `Job #${job} · ${data.job.label?.message || data.job.kind} · ${worker}`;
+    if (data.backfill_attempts?.attempts?.length) renderAttempts(data.backfill_attempts);
     for (const entry of data.items) {
       const article = node('article', null, 'history-entry');
       article.appendChild(node('small', date(entry.occurred_at_ms), 'muted'));
