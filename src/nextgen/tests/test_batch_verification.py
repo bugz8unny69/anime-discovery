@@ -1,7 +1,7 @@
 """Provider-backed, read-only batch verification regression coverage."""
 import unittest
 
-from src.nextgen.acquisition.metadata import BatchInventory, TorrentFile
+from src.nextgen.acquisition.metadata import BatchInventory, ObservedBatchInventory, TorrentFile
 from src.nextgen.batch.verification import verify_batch_files, plan_provider_verified_batch
 from src.nextgen.batch.window import plan_batch_trial_window
 from src.nextgen.trial_policy import Window
@@ -38,6 +38,17 @@ class ProviderBatchTests(unittest.TestCase):
     def check(self, files, client, season=1):
         return verify_batch_files(files,client=client,credentials=Credentials('secret'),
                                   anidb_id=123,tvdb_series_id=456,season=season)
+
+    def test_older_qb_observed_batch_still_requires_provider_proof(self):
+        observed=ObservedBatchInventory('a'*40,(
+            TorrentFile(0,'Show/Season 01/Show S01E01.mkv',100),
+            TorrentFile(1,'Show/Season 01/Show S01E02.mkv',200)))
+        verified=self.check(observed,FakeClient())
+        self.assertIsNone(verified.info_sha256)
+        self.assertEqual(len(verified.files),2)
+        plan=plan_provider_verified_batch(observed,verified)
+        self.assertEqual(plan.probe_index,0)
+        self.assertEqual(plan.episode_indices,((1,0),(2,1)))
 
     def test_shiki_regular_season_and_ova_has_one_to_one_provider_proofs(self):
         files = inventory(*tuple(f'Shiki/Season 01/Shiki S01E{i:02d}.mkv'
