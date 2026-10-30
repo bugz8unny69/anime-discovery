@@ -85,12 +85,9 @@ been performed for this change.
 
 ## Reject follow-up
 
-Reject is now a supported versioned action with a confirmation explaining the
-AniDB-anime decision, future acquisition stop and selected staged-file cleanup.
-It uses API-provided capabilities, receipts and job status. See
-[REJECT_MEDIA.md](../jobs/REJECT_MEDIA.md). Earlier lists marking Reject entirely
-unimplemented describe the previous implementation stage. Keep execution remains
-unavailable until Sonarr import is implemented.
+Reject lives only on the Intake series dialog and rejects the whole series
+(episodes, seasons, specials and OVAs together). The per-job Reject button was
+removed.
 
 ## Decision download cleanup follow-up
 

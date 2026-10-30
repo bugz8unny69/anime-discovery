@@ -60,7 +60,7 @@ def kept_status(db, decision):
 def download_status(db, decision):
     kind = db.execute(
         'SELECT kind FROM jobs WHERE job_id=?', (decision,)).fetchone()
-    if kind in (('KEEP_BATCH',), ('REJECT_BATCH',)):
+    if kind==('KEEP_BATCH',):
         return _batch_status(db, decision, kept=False)
     from src.nextgen.decision_download_cleanup import status
     return status(db, decision)

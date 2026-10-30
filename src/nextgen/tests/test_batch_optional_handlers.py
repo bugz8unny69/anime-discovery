@@ -14,7 +14,6 @@ from src.nextgen.jobs.unlock_batch_job import registration as unlock_batch
 from src.nextgen.jobs.verify_batch_episode_job import registration as verify_episode
 from src.nextgen.jobs.stage_batch_episode_job import registration as stage_episode
 from src.nextgen.jobs.keep_batch_job import registration as keep_batch
-from src.nextgen.jobs.reject_batch_job import registration as reject_batch
 from src.nextgen.jobs.cleanup_batch_kept_media_job import registration as cleanup_kept
 from src.nextgen.jobs.cleanup_batch_download_job import registration as cleanup_download
 
@@ -46,7 +45,7 @@ class BatchOptionalHandlersTests(unittest.TestCase):
             unlock_batch(dummy_metainfo,object(),next_kind='VERIFY_BATCH_EPISODE'),
             verify_episode(dummy_metainfo,staging_kind='STAGE_BATCH_EPISODE'),
             stage_episode(),
-            keep_batch(object()),reject_batch(),
+            keep_batch(object()),
             cleanup_kept(object()),cleanup_download(object()),
         )
         self.assertIsNotNone(Registry(stages))
@@ -66,7 +65,7 @@ class BatchOptionalHandlersTests(unittest.TestCase):
             'verification_job_id':201,'file_index':2,
         })[0].kind,'STAGE_BATCH_EPISODE')
         self.assertIsNone(stages[5].route)
-        for index in (6,7,8,9):
+        for index in (6,7,8):
             self.assertTrue(callable(stages[index].execute))
             self.assertTrue(callable(stages[index].persist))
 

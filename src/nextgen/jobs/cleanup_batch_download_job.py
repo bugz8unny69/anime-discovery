@@ -47,7 +47,7 @@ def _persist(db,claim,value):
         "WHERE c.decision_job_id=?",
         (claim.job_id,decision)).fetchone()
     if (row is None or row[0]!='COMPLETE' or row[1]!='DONE'
-            or row[2] not in ('KEEP_BATCH','REJECT_BATCH')
+            or row[2]!='KEEP_BATCH'
             or row[4]!=claim.event_id):
         raise CompletionRejected(Outcome('review','DECISION_DOWNLOAD_CLEANUP_REVIEW'))
     if row[2]=='KEEP_BATCH':

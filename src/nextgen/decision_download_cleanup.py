@@ -98,23 +98,19 @@ class Service(OwnedCleanup):
             return self._download(db,op,source,publication,protected)
         row=db.execute("SELECT a.operation_id,a.target_job_id,a.action,j.state,j.event_id "
             "FROM management_actions a JOIN jobs j USING(job_id) WHERE a.job_id=?",(self.decision,)).fetchone()
-        if not row or row[2] not in ('KEEP','REJECT') or row[3]!='DONE' or row[4]!=self.claim.event_id:raise CancellationError()
+        if not row or row[2]!='KEEP' or row[3]!='DONE' or row[4]!=self.claim.event_id:raise CancellationError()
         op,target,action,_,event=row
         origin=db.execute('SELECT created_by_job_id,event_id FROM jobs WHERE job_id=?',(self.claim.job_id,)).fetchone()
         if operation(db,target)[:2]!=(op,'STAGED') or operation(db,self.claim.job_id)[0]==op:raise CancellationError()
         source=staged(db,op)
         publication=json.loads(source[2]);protected=[publication['root']]
-        if action=='KEEP':
-            keep=db.execute('SELECT phase,data_json FROM keep_imports WHERE job_id=?',(self.decision,)).fetchone()
-            if not keep or keep[0]!='COMPLETE':raise CancellationError()
-            data=json.loads(keep[1]);cleanup=data.get('post_cleanup',{})
-            if cleanup.get('state')!='COMPLETE':raise CancellationError()
-            predecessor=cleanup.get('job_id')
-            if db.execute('SELECT kind,state,created_by_job_id FROM jobs WHERE job_id=?',(predecessor,)).fetchone()!=('CLEANUP_KEPT_MEDIA','DONE',self.decision):raise CancellationError()
-            protected.append(data['options']['keep_root'])
-        else:
-            if db.execute("SELECT operation_id,cleanup_state FROM anime_review_decisions WHERE job_id=? AND decision='REJECT'",(self.decision,)).fetchone()!=(op,'COMPLETE'):raise CancellationError()
-            predecessor=self.decision
+        keep=db.execute('SELECT phase,data_json FROM keep_imports WHERE job_id=?',(self.decision,)).fetchone()
+        if not keep or keep[0]!='COMPLETE':raise CancellationError()
+        data=json.loads(keep[1]);cleanup=data.get('post_cleanup',{})
+        if cleanup.get('state')!='COMPLETE':raise CancellationError()
+        predecessor=cleanup.get('job_id')
+        if db.execute('SELECT kind,state,created_by_job_id FROM jobs WHERE job_id=?',(predecessor,)).fetchone()!=('CLEANUP_KEPT_MEDIA','DONE',self.decision):raise CancellationError()
+        protected.append(data['options']['keep_root'])
         if origin!=(predecessor,event) or status(db,self.decision)['job_id']!=self.claim.job_id:raise CancellationError()
         return self._download(db,op,source,publication,protected)
 

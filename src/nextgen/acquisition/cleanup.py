@@ -1,5 +1,6 @@
 """Exact owned-torrent controls and fd-relative, manifest-only file cleanup."""
 from contextlib import contextmanager
+import errno
 import os
 from pathlib import PurePosixPath
 import stat
@@ -109,6 +110,16 @@ class FileCleanup:
             # removal. A remote client's path is not proof of local file absence.
             raise CancellationError() from None
 
+    def _remove_empty(self,fd):
+        # Called only after _inventory found no files; rmdir fails on content.
+        with os.scandir(fd) as entries:names=[e.name for e in entries]
+        for name in names:
+            child=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+            try:self._remove_empty(child)
+            finally:os.close(child)
+            os.rmdir(name,dir_fd=fd)
+        os.fsync(fd)
+
     def remove(self,plan,*,guard=None):
         if type(plan) is not dict or set(plan)!={'root','files'} or type(plan['files']) is not dict:raise CancellationError()
         try:
@@ -126,8 +137,15 @@ class FileCleanup:
                         if guard is not None:guard()
                         os.unlink(name,dir_fd=directory_fd)
                         os.fsync(directory_fd)
-                # Retain directories: no recursive removal and no broad root deletion.
                 if self._inventory(fd):raise CancellationError()
+                # Only empty folders remain: rmdir them bottom-up, then the
+                # owned ad-<marker> root. rmdir never removes content.
+                self._remove_empty(fd)
+            name=PurePosixPath(self.root).name
+            with directory(str(PurePosixPath(self.root).parent)) as above:
+                try:os.rmdir(name,dir_fd=above);os.fsync(above)
+                except OSError as error:
+                    if error.errno not in (errno.ENOTEMPTY,errno.EEXIST,errno.ENOENT):raise
         except FileNotFoundError:
             # A missing directory during traversal is ambiguous, not a blanket
             # success: verify the entire pinned root itself has disappeared.

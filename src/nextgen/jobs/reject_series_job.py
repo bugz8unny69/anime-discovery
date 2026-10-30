@@ -14,7 +14,7 @@ from src.nextgen.sonarr import KeepReview
 from src.nextgen.storage.batch_keep_imports import batch_publications
 from src.nextgen.storage.cancellation import operation
 from src.nextgen.storage.job_queue import JobQueue
-from src.nextgen.storage.review_decisions import staged, remove_selected, prune_series
+from src.nextgen.storage.review_decisions import staged, remove_series
 from src.nextgen.storage.sqlite import enqueue_job, transaction
 from src.nextgen.storage.staging import Journal as StageJournal
 
@@ -127,7 +127,7 @@ def _enqueue_cleanup(db, queue, claim, sources):
     return statuses
 
 
-def _run(context, aid, operations, remove, prune=prune_series):
+def _run(context, aid, operations, remove):
     queue = JobQueue(context.configuration.value('storage.database_path'))
     with StageJournal(queue.database).lock(context.claim):
         with queue.connection() as db, transaction(db):
@@ -145,15 +145,10 @@ def _run(context, aid, operations, remove, prune=prune_series):
                 if phase != 'PENDING' or checked != sources:
                     raise StagingReview()
 
-        # Existing receipt-based remover is idempotent for missing selected
-        # files. Never recursively delete the shared staging series directory.
-        for op, kind, plan, publications, stage in sources:
-            for manifest, receipts in publications:
-                remove(manifest, receipts, guard,
-                       context.configuration.value('storage.keep_root'))
-        # Whole series rejected: also drop now-empty Season folders, our
-        # tvshow.nfo and the empty series folder (non-recursive, see helper).
-        prune(tuple(m for *_, pubs, _ in sources for m, _ in pubs), guard)
+        # One call removes every staged episode plus the then-empty series
+        # folders. Idempotent and never recursive (see remove_series).
+        remove(tuple(pub for *_, pubs, _ in sources for pub in pubs), guard,
+               context.configuration.value('storage.keep_root'))
 
         with queue.connection() as db, transaction(db):
             phase, checked = _targets(db, queue, context.claim, aid, operations)
@@ -180,7 +175,7 @@ def _persist(db, claim, value):
         raise CompletionRejected(Outcome('review', 'REJECT_CLEANUP_REVIEW'))
 
 
-def registration(*, remove=remove_selected, prune=prune_series):
+def registration(*, remove=remove_series):
     async def execute(context):
         try:
             data = context.data()
@@ -195,7 +190,7 @@ def registration(*, remove=remove_selected, prune=prune_series):
         except (ValueError, TypeError):
             return Outcome('review', 'JOB_PAYLOAD_INVALID')
         try:
-            result = await blocking(_run, context, aid, tuple(operations), remove, prune)
+            result = await blocking(_run, context, aid, tuple(operations), remove)
         except StagingBusy:
             return Outcome('defer', 'JOB_WAITING', delay_ms=1000)
         except (StagingReview, KeepReview, CancellationError, ValueError, TypeError, KeyError):

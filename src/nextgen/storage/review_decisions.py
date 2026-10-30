@@ -58,7 +58,7 @@ def remove_selected(manifest,receipts,guard,keep_root):
                 os.unlink(name,dir_fd=folder);os.fsync(folder)
 
 
-def prune_series(manifests,guard):
+def _prune_series(manifests,guard):
     """After a whole-series Reject, drop empty season folders, our own
     tvshow.nfo and the then-empty series folder. Never recursive: any file we
     did not write keeps its folders in place."""
@@ -98,3 +98,11 @@ def prune_series(manifests,guard):
             try:os.rmdir(nfo.parts[0],dir_fd=root);os.fsync(root)
             except OSError as error:
                 if error.errno not in (errno.ENOTEMPTY,errno.EEXIST,errno.ENOENT):raise
+
+
+def remove_series(publications,guard,keep_root):
+    """Series Reject: remove every staged video and episode NFO, then the
+    empty Season folders, our tvshow.nfo and the empty series folder."""
+    for manifest,receipts in publications:
+        remove_selected(manifest,receipts,guard,keep_root)
+    _prune_series(tuple(manifest for manifest,_ in publications),guard)

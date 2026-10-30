@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from src.nextgen.storage.review_decisions import prune_series
+from src.nextgen.storage.review_decisions import _prune_series as prune_series
 
 SHOW = b'<?xml version="1.0"?><tvshow><title>Koori</title></tvshow>'
 FOLDER = 'Koori no Jouheki _2026_ [tvdbid-459627] [anidbid-20168]'
@@ -42,6 +42,21 @@ class PruneSeriesTests(unittest.TestCase):
     def test_missing_folder_is_fine(self):
         prune_series((self.manifest,), lambda: None)
         prune_series((self.manifest,), lambda: None)
+
+
+
+class RemoveSeriesTests(unittest.TestCase):
+    def test_one_call_removes_episodes_and_series_folders(self):
+        from unittest import mock
+        from src.nextgen.storage import review_decisions
+        base = PruneSeriesTests('test_empty_series_is_removed'); base.setUp()
+        calls = []
+        with mock.patch.object(review_decisions, 'remove_selected',
+                               lambda m, r, g, k: calls.append(r)):
+            review_decisions.remove_series(
+                ((base.manifest, 'e1'), (base.manifest, 'e2')), lambda: None, None)
+        self.assertEqual(calls, ['e1', 'e2'])
+        self.assertEqual(os.listdir(base.root), [])
 
 
 if __name__ == '__main__':
