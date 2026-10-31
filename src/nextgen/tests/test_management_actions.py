@@ -279,6 +279,15 @@ class ManagementActionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(plain.read_text(),'hi\n')
             self.assertEqual(plain.stat().st_mode&0o777,0o600)
 
+    def test_failure_location_names_the_failed_condition(self):
+        from src.nextgen.cancellation import CancellationError, failure_location
+        from src.nextgen.reasons import safe_details
+        try:raise CancellationError('DOWNLOAD_FOLDER_NOT_EMPTY','/srv/dl/ad-0123')
+        except CancellationError as exc:check,path=failure_location(exc)
+        self.assertTrue(check.endswith(' DOWNLOAD_FOLDER_NOT_EMPTY'))
+        self.assertEqual(path,'/srv/dl/ad-0123')
+        safe_details(failed_check=check,failed_path=path)
+
     def test_failure_location_names_the_original_check_and_file(self):
         from src.nextgen.cancellation import CancellationError, failure_location
         from src.nextgen.reasons import safe_details

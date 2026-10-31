@@ -271,7 +271,7 @@ if len(REGISTRY) != len(_ENTRIES):
 
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}", re.ASCII)
 _MAX_INTEGER = (1 << 63) - 1
-_CHECK = re.compile(r"src/nextgen/[a-z0-9_/]{1,120}\.py:[1-9][0-9]{0,5} [A-Za-z_][A-Za-z0-9_]{0,63}( [A-Z0-9]{1,20})?")
+_CHECK = re.compile(r"src/nextgen/[a-z0-9_/]{1,120}\.py:[1-9][0-9]{0,5} [A-Za-z_][A-Za-z0-9_]{0,63}( [A-Z0-9_]{1,32})?")
 _FIELDS = frozenset({
     "schema_version", "anime.anidb_id", "anime.tvdb_series_id", "anime.title",
     "anime.english_title", "anime.original_title", "anime.type", "anime.year",
