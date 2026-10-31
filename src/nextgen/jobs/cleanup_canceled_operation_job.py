@@ -36,9 +36,6 @@ def registration(secrets,*,service_factory=CancellationService):
             # Name the failed check on this job's own History, not only the target's.
             facts={k:status[k] for k in ('failed_check','failed_path') if status.get(k)}
             return Outcome('review','CANCELLATION_REVIEW',facts=facts or None)
-        if status.get('staging_retry'):
-            # Distinct from open-ended waiting for uncertain torrent controls.
-            return Outcome('retry','STAGING_REVIEW')
         # A bounded reconciliation pass frees a slot. Waiting is not retry failure
         # and never rearms an uncertain external cleanup command.
         return Outcome('defer',status['reason_code'] or 'CANCELLATION_PENDING',delay_ms=30000)

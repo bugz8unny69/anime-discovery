@@ -37,13 +37,13 @@ class StagingCancellationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(other.exists())
         self.assertEqual(self.rows('SELECT phase FROM staging_cleanup_artifacts'),[('REMOVED',)])
 
-    async def test_uncertain_publication_is_preserved_for_review(self):
+    async def test_uncertain_publication_temporary_is_deleted_without_review(self):
         job,claim,aid=self.stage();db=connect(self.database)
         try:
             with transaction(db):publication(db,claim,aid)
         finally:db.close()
-        self.assertEqual(self.service().cancel(job)['cleanup_state'],'REVIEW')
-        self.assertTrue(self.path.exists())
+        self.assertEqual(self.service().cancel(job)['cleanup_state'],'COMPLETE')
+        self.assertFalse(self.path.exists())
 
     async def test_completed_staging_hides_cancel_and_never_deletes_published_media(self):
         job,claim,aid=self.stage();db=connect(self.database)

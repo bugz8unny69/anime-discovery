@@ -327,7 +327,7 @@ def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
                 raise ValueError("invalid diagnostic integer")
             details[key] = value
     # Code location of the check that stopped the work, e.g.
-    # "src/nextgen/staging_artifacts.py:302 clean_published_batch ENOENT".
+    # "src/nextgen/cancel_cleanup.py:80 remove_staging EACCES".
     if failed_check is not None:
         if type(failed_check) is not str or not _CHECK.fullmatch(failed_check):
             raise ValueError("invalid failed check")

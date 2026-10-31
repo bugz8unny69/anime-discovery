@@ -33,12 +33,11 @@ class MagnetReadmissionTests(unittest.IsolatedAsyncioTestCase):
         qb=FakeQbittorrent(state,(TorrentFile(0,'Test Anime - 10.mkv',1000001),))
         def factory(options,credentials):
             client=qb.factory(options,credentials)
-            def remove(intent,*,with_files=False):
-                self.assertTrue(with_files)
+            def delete(info_hash,marker):
                 state['removed']=state.get('removed',0)+1
                 state['intent']=None
                 return True
-            client.remove_empty_legacy_magnet=remove
+            client.delete_owned=delete
             return client
         secrets=Secrets()
         read=make_reader(secrets=secrets)

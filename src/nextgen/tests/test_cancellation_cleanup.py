@@ -1,11 +1,11 @@
-"""Offline real local files with fake client control only; unexecuted."""
-from dataclasses import replace
+"""Cancellation cleanup deletes what the work owns; real local files, fake qBittorrent."""
 from pathlib import Path
+import tempfile
 import unittest
 
-from src.nextgen.acquisition.submission import ClientUnavailable
+from src.nextgen.acquisition.submission import ClientUnavailable, ClientAuthenticationFailed, Observation
 from src.nextgen.cancellation_service import CancellationService
-from src.nextgen.storage.sqlite import connect, transaction
+from src.nextgen import cancel_cleanup
 from src.nextgen.tests import test_torrent_transfer as fixture
 from src.nextgen.tests.test_torrent_submission import Secrets
 
@@ -26,145 +26,84 @@ class CancellationCleanupTests(unittest.IsolatedAsyncioTestCase):
         self.payload_root.mkdir(parents=True)
         self.video=self.payload_root/self.snapshot.observation.files[0].path
         self.video.write_bytes(b'v'*100)
-        self.stops=self.removals=0
+        (self.payload_root/'leftover.part').write_bytes(b'x')  # Anything in ad-* goes too.
+        self.deleted=[]
         return worker
 
     def service(self,mode='normal'):
         test=self
         class FakeClient:
-            major=5
             def __init__(self,*args):pass
-            def login(self):pass
-            def inspect(self,expected):return None if test.snapshot is None else test.snapshot.observation
-            def cleanup_control(self,intent,fingerprint,permit,action):
-                permit.take(fingerprint,action)
-                if action=='stop':
-                    test.stops+=1
-                    if mode!='stop_timeout_absent':test.snapshot=replace(test.snapshot,observation=replace(test.snapshot.observation,state='stoppedDL'))
-                    if mode.startswith('stop_timeout'):raise ClientUnavailable()
-                else:
-                    test.removals+=1
-                    if mode!='remove_timeout_present':test.snapshot=None
-                    if mode.startswith('remove_timeout'):raise ClientUnavailable()
+            def login(self):
+                if mode=='auth':raise ClientAuthenticationFailed()
+            def delete_owned(self,info_hash,marker):
+                if mode=='down':raise ClientUnavailable()
+                test.deleted.append((info_hash,marker));return True
         return CancellationService(self.store.read(),Secrets(),client_factory=FakeClient)
 
-    async def test_cancel_active_download_removes_owned_torrent_then_exact_files(self):
+    async def test_cancel_deletes_torrent_and_whole_download_folder_and_frees_slot(self):
         await self.setup_download()
-        result=self.service().cancel(self.job)
-        self.assertEqual(result['cleanup_state'],'COMPLETE')
-        self.assertEqual((self.stops,self.removals),(1,1))
-        self.assertFalse(self.video.exists())
-        self.assertFalse(self.payload_root.exists())  # Empty ad-* folder removed; rmdir only.
-        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='DOWNLOAD_TORRENT'"),[('CANCELED',)])
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'COMPLETE')
-        self.assertEqual((self.stops,self.removals),(1,1))
-
-    async def test_lost_stop_response_reconciles_without_repeating_stop(self):
-        await self.setup_download()
-        self.assertEqual(self.service('stop_timeout_present').cancel(self.job)['cleanup_state'],'PENDING')
-        self.assertTrue(self.video.exists())
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'COMPLETE')
-        self.assertEqual((self.stops,self.removals),(1,1))
-
-    async def test_uncertain_stop_that_stays_active_never_rearms(self):
-        await self.setup_download()
-        self.service('stop_timeout_absent').cancel(self.job)
-        for _ in range(2):self.service().cleanup(self.job)
-        self.assertEqual((self.stops,self.removals),(1,0))
-        self.assertTrue(self.video.exists())
-
-    async def test_lost_delete_response_reconciles_absence_and_resumes_files(self):
-        await self.setup_download()
-        result=self.service('remove_timeout_absent').cancel(self.job)
-        self.assertEqual(result['cleanup_state'],'PENDING')
-        self.assertTrue(self.video.exists())
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'COMPLETE')
-        self.assertFalse(self.video.exists())
-        self.assertEqual(self.removals,1)
-
-    async def test_uncertain_delete_while_still_present_is_not_replayed(self):
-        await self.setup_download()
-        self.service('remove_timeout_present').cancel(self.job)
-        for _ in range(2):self.service().cleanup(self.job)
-        self.assertEqual(self.removals,1)
-        self.assertTrue(self.video.exists())
-
-    async def test_changed_file_after_torrent_removal_is_preserved_for_review(self):
-        await self.setup_download()
-        self.service('remove_timeout_absent').cancel(self.job)
-        self.video.write_bytes(b'changed')
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual(self.video.read_bytes(),b'changed')
-
-    async def test_unknown_files_symlinks_and_hardlinks_prevent_removal(self):
-        import os
-        await self.setup_download()
-        other=self.payload_root/'unknown.txt';other.write_bytes(b'preserve')
-        self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual(self.removals,0)
-        other.unlink()
-        self.video.unlink();self.video.symlink_to(self.root/'outside')
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual(self.removals,0)
-        self.video.unlink();self.video.write_bytes(b'v'*100)
-        os.link(self.video,self.root/'hardlink')
-        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual(self.removals,0)
-
-    async def test_other_explicit_consumer_preserves_torrent_and_files(self):
-        from src.nextgen.storage.sqlite import enqueue_job
-        await self.setup_download()
-        prep=self.rows("SELECT job_id FROM jobs WHERE kind='PREPARE_ACQUISITION'")[0][0]
-        event=self.rows('SELECT event_id FROM jobs WHERE job_id=?',(prep,))[0][0]
-        db=connect(self.database)
-        try:
-            with transaction(db):enqueue_job(db,kind='DOWNLOAD_TORRENT',payload={'preparation_job_id':prep},component='api',event_id=event)
-        finally:db.close()
-        self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual((self.stops,self.removals),(0,0))
-        self.assertTrue(self.video.exists())
-
-    async def test_changed_marker_is_never_stopped_or_removed(self):
-        await self.setup_download()
-        self.snapshot=replace(self.snapshot,observation=replace(self.snapshot.observation,tags=()))
-        self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'REVIEW')
-        self.assertEqual((self.stops,self.removals),(0,0))
-
-    async def test_crash_after_delete_intent_cannot_regain_remove_permit(self):
-        await self.setup_download()
-        test=self
-        class LosePermit(CancellationService):
-            def _advance(self,intent,prior,phase,files=None):
-                super()._advance(intent,prior,phase,files)
-                if phase=='REMOVE_UNCERTAIN':raise ClientUnavailable()
-        ordinary=self.service()
-        service=LosePermit(self.store.read(),Secrets(),client_factory=ordinary.client_factory)
-        service.cancel(self.job)
-        for _ in range(2):ordinary.cleanup(self.job)
-        self.assertEqual(self.removals,0)
-        self.assertTrue(self.video.exists())
-
-    async def test_download_done_but_not_staged_still_offers_cancel(self):
-        worker=await self.setup_download()
-        self.snapshot=replace(self.snapshot,progress=(1,))
-        fixture.TorrentTransferTests.due(self)
-        await worker.attempt()
-        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='DOWNLOAD_TORRENT'"),[('DONE',)])
-        self.assertTrue(self.service().status(self.job)['can_cancel'])
         self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'COMPLETE')
-        self.assertFalse(self.video.exists())
-        # Historical completed stages remain DONE; operation records cancellation.
-        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='DOWNLOAD_TORRENT'"),[('DONE',)])
+        self.assertEqual(len(self.deleted),1)
+        self.assertFalse(self.payload_root.exists())
+        self.assertEqual(self.rows("SELECT state FROM jobs WHERE kind='DOWNLOAD_TORRENT'"),[('CANCELED',)])
+        self.assertEqual(self.rows('SELECT state FROM episode_reservations'),[('RELEASED',)])
 
-    async def test_crash_after_stop_intent_does_not_regain_stop_permit(self):
+    async def test_qbittorrent_down_waits_then_finishes(self):
         await self.setup_download()
-        class LosePermit(CancellationService):
-            def _advance(self,intent,prior,phase,files=None):
-                super()._advance(intent,prior,phase,files)
-                if phase=='STOP_UNCERTAIN':raise ClientUnavailable()
-        ordinary=self.service()
-        service=LosePermit(self.store.read(),Secrets(),client_factory=ordinary.client_factory)
-        service.cancel(self.job)
-        for _ in range(2):ordinary.cleanup(self.job)
-        self.assertEqual((self.stops,self.removals),(0,0))
+        self.assertEqual(self.service('down').cancel(self.job)['cleanup_state'],'PENDING')
         self.assertTrue(self.video.exists())
+        self.assertEqual(self.service().cleanup(self.job)['cleanup_state'],'COMPLETE')
+        self.assertFalse(self.payload_root.exists())
+
+    async def test_missing_folder_counts_as_done(self):
+        await self.setup_download()
+        import shutil;shutil.rmtree(self.payload_root)
+        self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'COMPLETE')
+
+    async def test_wrong_password_stops_for_review_naming_the_cause(self):
+        await self.setup_download()
+        result=self.service('auth').cancel(self.job)
+        self.assertEqual(result['cleanup_state'],'REVIEW')
+        self.assertIn('login',result['failed_check'])
+        self.assertTrue(self.video.exists())
+
+
+class OwnershipGuardTests(unittest.TestCase):
+    def test_only_a_folder_named_for_its_marker_is_deleted(self):
+        marker='a'*32
+        with tempfile.TemporaryDirectory() as root:
+            other=Path(root)/'downloads';other.mkdir();(other/'keep.mkv').write_bytes(b'x')
+            cancel_cleanup.remove_download_folder(str(other),marker)
+            self.assertTrue((other/'keep.mkv').exists())
+            mine=Path(root)/('ad-'+marker);mine.mkdir();(mine/'v.mkv').write_bytes(b'x')
+            cancel_cleanup.remove_download_folder(str(mine),marker)
+            self.assertFalse(mine.exists())
+            cancel_cleanup.remove_download_folder(str(mine),marker)  # Already gone: fine.
+
+    def test_torrent_without_our_tag_is_left_alone(self):
+        from src.nextgen.acquisition.qbittorrent import Client
+        client=Client.__new__(Client);client.protocol=object();sent=[]
+        client._request=lambda path,**kw:sent.append(path) or (b'',{})
+        h='b'*40;marker='c'*32
+        def seen(tags):return Observation(h,'stoppedDL','/d/ad-'+marker,'anime',tags,False,())
+        client.inspect=lambda *a,**k:seen(('sonarr',))
+        self.assertFalse(client.delete_owned(h,marker));self.assertEqual(sent,[])
+        client.inspect=lambda *a,**k:None
+        self.assertFalse(client.delete_owned(h,marker));self.assertEqual(sent,[])
+        client.inspect=lambda *a,**k:seen(('ad-'+marker,))
+        self.assertTrue(client.delete_owned(h,marker));self.assertEqual(sent,['torrents/delete'])
+
+    def test_staging_outside_its_root_or_in_keep_is_never_touched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staging=Path(tmp)/'staging';keep=Path(tmp)/'keep'
+            season=staging/'Show'/'Season 01';season.mkdir(parents=True);keep.mkdir()
+            video=season/'Show - S01E01.mkv';video.write_bytes(b'v')
+            (staging/'Show'/'tvshow.nfo').write_bytes(b'n')
+            outside=Path(tmp)/'other.mkv';outside.write_bytes(b'o')
+            kept=keep/'k.mkv';kept.write_bytes(b'k')
+            cancel_cleanup.remove_staging(
+                [(str(video),str(staging)),(str(outside),str(staging)),(str(kept),str(staging))],
+                [(str(staging/'Show'),str(staging))],keep_root=str(keep))
+            self.assertFalse((staging/'Show').exists())  # Only tvshow.nfo was left.
+            self.assertTrue(outside.exists());self.assertTrue(kept.exists())
