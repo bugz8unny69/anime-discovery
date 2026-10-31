@@ -76,13 +76,30 @@ class CancellationService(OwnedCleanup):
         import os
         from pathlib import PurePosixPath
         from src.nextgen.acquisition.cleanup import directory
-        if PurePosixPath(path).name!='ad-'+marker:raise CancellationError()
+        if PurePosixPath(path).name!='ad-'+marker:raise CancellationError('FOLDER_NAME_MISMATCH',path)
         try:
             with directory(path) as fd:
                 with os.scandir(fd) as rows:
                     return next(rows,None) is None
         except FileNotFoundError:
             return True
+
+    def _owned(self,observed,info_hash,options,marker,*,owned_files):
+        """Exact-ownership proof before touching a torrent, one named
+        condition at a time so History says which one failed."""
+        root=options.download_root
+        if observed.info_hash!=info_hash:raise CancellationError('HASH_MISMATCH')
+        if observed.save_path.rstrip('/')!=root:
+            raise CancellationError('SAVE_PATH_MISMATCH',observed.save_path)
+        if observed.category!=options.category:raise CancellationError('CATEGORY_MISMATCH')
+        if observed.auto_tmm is not False:raise CancellationError('AUTO_TMM_ENABLED')
+        if 'ad-'+marker not in observed.tags:raise CancellationError('OWNER_TAG_MISSING')
+        if any(t.startswith('ad-') and t!='ad-'+marker for t in observed.tags):
+            raise CancellationError('OTHER_OWNER_TAG')
+        if observed.files and not owned_files:
+            raise CancellationError('FILES_NOT_OWNED',root)
+        if not owned_files and not self._empty_magnet_root(root,marker):
+            raise CancellationError('DOWNLOAD_FOLDER_NOT_EMPTY',root)
 
     def _pre_manifest(self,operation_id):
         """Resolve old magnet intents without inventing a .torrent file list.
@@ -119,26 +136,17 @@ class CancellationService(OwnedCleanup):
                     return settled,False
                 if not self._empty_magnet_root(intent.options.download_root,
                                                intent.marker):
-                    raise CancellationError()
+                    raise CancellationError('TORRENT_GONE_FOLDER_NOT_EMPTY',intent.options.download_root)
                 settled.add(intent.event_id)
                 continue
             # A journal-proven OWNED_STOPPED admission (e.g. stopped over the size
             # limit) has its file list; its isolated root holds only its own files.
             owned_files=bool(observed.files) and intent.state=='OWNED_STOPPED'
-            if (observed.info_hash!=intent.info_hash
-                    or observed.save_path.rstrip('/')!=intent.options.download_root
-                    or observed.category!=intent.options.category
-                    or observed.auto_tmm is not False
-                    or 'ad-'+intent.marker not in observed.tags
-                    or any(t.startswith('ad-') and t!='ad-'+intent.marker
-                           for t in observed.tags)
-                    or observed.files and not owned_files
-                    or not owned_files and not self._empty_magnet_root(
-                        intent.options.download_root,intent.marker)):
-                raise CancellationError()
+            self._owned(observed,intent.info_hash,intent.options,intent.marker,
+                        owned_files=owned_files)
             # REVIEW means an earlier command was uncertain or ownership was
             # disputed; never send a second destructive request on replay.
-            if intent.state=='REVIEW':raise CancellationError()
+            if intent.state=='REVIEW':raise CancellationError('INTENT_IN_REVIEW')
             with self.store.queue.connection() as db,transaction(db):
                 self._fence(db)
                 changed=db.execute(
@@ -187,7 +195,7 @@ class CancellationService(OwnedCleanup):
                 if self.queue.now()-created<600000:
                     return False
                 if not self._empty_magnet_root(intent.options.download_root,intent.marker):
-                    raise CancellationError()
+                    raise CancellationError('TORRENT_GONE_FOLDER_NOT_EMPTY',intent.options.download_root)
                 with self.store.queue.connection() as db,transaction(db):
                     self._fence(db)
                     db.execute(
@@ -196,21 +204,12 @@ class CancellationService(OwnedCleanup):
                         (self.queue.now(),intent.event_id))
                 continue
             saved=_inventory(intent)
-            owned=(observed.info_hash==intent.info_hash
-                   and observed.save_path.rstrip('/')==intent.options.download_root
-                   and observed.category==intent.options.category
-                   and observed.auto_tmm is False
-                   and 'ad-'+intent.marker in observed.tags
-                   and not any(t.startswith('ad-') and t!='ad-'+intent.marker
-                               for t in observed.tags))
             with_files=(intent.state=='OWNED_STOPPED'
                         and saved is not None and bool(observed.files)
                         and observed.files==saved.files)
-            if (not owned or intent.state=='REVIEW'
-                    or (observed.files and not with_files)
-                    or (not with_files and not self._empty_magnet_root(
-                        intent.options.download_root,intent.marker))):
-                raise CancellationError()
+            self._owned(observed,intent.info_hash,intent.options,intent.marker,
+                        owned_files=with_files)
+            if intent.state=='REVIEW':raise CancellationError('INTENT_IN_REVIEW')
             with self.store.queue.connection() as db,transaction(db):
                 self._fence(db)
                 changed=db.execute(

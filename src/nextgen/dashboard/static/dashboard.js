@@ -181,7 +181,10 @@ function renderJobs() {
       if (job.reason.action) details.appendChild(node('small', job.reason.action, 'muted'));
     } else if (job.cancellation.state === 'STAGED' && !job.actions?.keep?.job?.completion) details.appendChild(node('p', COPY['dashboard.staged']));
     if (job.size_detail) details.appendChild(node('p', job.size_detail));
-    if (job.failed_detail) details.appendChild(node('small', job.failed_detail + ` · run: sudo adm report job --id ${job.job_id}`, 'muted'));
+    if (job.failed_detail) {
+      details.appendChild(node('p', job.failed_detail));
+      details.appendChild(node('small', `Full report: sudo adm report job --id ${job.job_id}`, 'muted'));
+    }
     const activeAction = ['cleanup', 'keep'].map(name => job.actions?.[name]?.job).find(Boolean);
     if (activeAction) {
       details.appendChild(node('p', `Job #${activeAction.job_id}: ${activeAction.status.message}`));
