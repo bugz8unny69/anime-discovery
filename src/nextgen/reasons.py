@@ -271,7 +271,7 @@ if len(REGISTRY) != len(_ENTRIES):
 
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}", re.ASCII)
 _MAX_INTEGER = (1 << 63) - 1
-_CHECK = re.compile(r"src/nextgen/[a-z0-9_/]{1,120}\.py:[1-9][0-9]{0,5} [A-Za-z_][A-Za-z0-9_]{0,63}( [A-Z0-9]{1,20})?")
+_CHECK = re.compile(r"src/nextgen/[a-z0-9_/]{1,120}\.py:[1-9][0-9]{0,5} [A-Za-z_][A-Za-z0-9_]{0,63}( [A-Z0-9_]{1,32})?")
 _FIELDS = frozenset({
     "schema_version", "anime.anidb_id", "anime.tvdb_series_id", "anime.title",
     "anime.english_title", "anime.original_title", "anime.type", "anime.year",
@@ -327,7 +327,7 @@ def safe_details(*, missing_fields=(), invalid_fields=(), retry_at_ms=None,
                 raise ValueError("invalid diagnostic integer")
             details[key] = value
     # Code location of the check that stopped the work, e.g.
-    # "src/nextgen/staging_artifacts.py:302 clean_published_batch ENOENT".
+    # "src/nextgen/cancel_cleanup.py:80 remove_staging EACCES".
     if failed_check is not None:
         if type(failed_check) is not str or not _CHECK.fullmatch(failed_check):
             raise ValueError("invalid failed check")

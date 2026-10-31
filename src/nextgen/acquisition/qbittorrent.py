@@ -369,31 +369,20 @@ class Client:
         return self.inspect_legacy_metadata(intent.info_hash,intent.marker,
                                             intent.options.download_root)
 
-    def remove_empty_legacy_magnet(self,intent,*,with_files=False):
-        """Retire only the exact owned, stopped, metadata-less admission.
-
-        The cancellation service records its one-shot intent *before* calling
-        this method. Do not delete local files or try another remove on replay.
+    def delete_owned(self,info_hash,marker,save_path):
+        """Cancel cleanup. Returns what it found:
+        'absent'  - no such torrent;
+        'foreign' - no ad-<marker> tag: not ours, untouched;
+        'moved'   - ours, but stored outside its recorded folder: untouched;
+        'deleted' - ours and where we put it: deleted with its files.
         """
-        from src.nextgen.storage.sonarr_magnet_intake import MagnetIntent
-        from src.nextgen.storage.batch_metadata_admission import EarlyBatchIntent
-        if (type(intent) not in (MagnetIntent,EarlyBatchIntent) or intent.options!=self.options
-                or self.protocol is None):
-            raise ClientInvalid()
-        observed=self.inspect(intent.info_hash)
-        if (observed is None or observed.files and not with_files
-                or observed.state not in ('pausedDL','pausedUP','stoppedDL','stoppedUP')
-                or observed.save_path.rstrip('/')!=intent.options.download_root
-                or observed.category!=intent.options.category
-                or observed.auto_tmm is not False
-                or 'ad-'+intent.marker not in observed.tags
-                or any(t.startswith('ad-') and t!='ad-'+intent.marker
-                       for t in observed.tags)):
-            raise ClientInvalid()
-        self._request('torrents/delete',
-                      form={'hashes':intent.info_hash,'deleteFiles':'true' if with_files else 'false'},
-                      limit=4096)
-        return self.inspect(intent.info_hash) is None
+        if self.protocol is None:raise ClientAuthenticationFailed()
+        observed=self.inspect(info_hash,include_files=False)
+        if observed is None:return 'absent'
+        if 'ad-'+marker not in observed.tags:return 'foreign'
+        if observed.save_path.rstrip('/')!=save_path.rstrip('/'):return 'moved'
+        self._request('torrents/delete',form={'hashes':observed.info_hash,'deleteFiles':'true'},limit=4096)
+        return 'deleted'
 
     def add_stopped(self,raw,intent,permit):
         """Single journaled submission for verified .torrent bytes or a magnet."""
