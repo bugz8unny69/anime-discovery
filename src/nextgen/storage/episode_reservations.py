@@ -99,7 +99,7 @@ def persist_reservation(db,claim,value):
 
 def published(db,owner_job_id):
     return db.execute("SELECT 1 FROM episode_reservations r JOIN acquisition_plans p USING(reservation_id) "
-        "JOIN staging_publications s USING(plan_id) WHERE r.owner_job_id=? AND r.state='ACTIVE' "
+        "JOIN staging_publications s ON s.plan_id=p.plan_id WHERE r.owner_job_id=? AND r.state='ACTIVE' "
         "AND s.state='PUBLISHED'",(owner_job_id,)).fetchone() is not None
 
 
