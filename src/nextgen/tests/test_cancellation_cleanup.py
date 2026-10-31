@@ -36,9 +36,10 @@ class CancellationCleanupTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self,*args):pass
             def login(self):
                 if mode=='auth':raise ClientAuthenticationFailed()
-            def delete_owned(self,info_hash,marker):
+            def delete_owned(self,info_hash,marker,save_path):
                 if mode=='down':raise ClientUnavailable()
-                test.deleted.append((info_hash,marker));return True
+                if mode in ('foreign','moved'):return mode
+                test.deleted.append((info_hash,marker));return 'deleted'
         return CancellationService(self.store.read(),Secrets(),client_factory=FakeClient)
 
     async def test_cancel_deletes_torrent_and_whole_download_folder_and_frees_slot(self):
@@ -61,6 +62,18 @@ class CancellationCleanupTests(unittest.IsolatedAsyncioTestCase):
         import shutil;shutil.rmtree(self.payload_root)
         self.assertEqual(self.service().cancel(self.job)['cleanup_state'],'COMPLETE')
 
+    async def test_foreign_torrent_keeps_its_folder(self):
+        await self.setup_download()
+        self.assertEqual(self.service('foreign').cancel(self.job)['cleanup_state'],'COMPLETE')
+        self.assertTrue(self.video.exists())
+
+    async def test_moved_torrent_deletes_nothing_and_stops_for_review(self):
+        await self.setup_download()
+        result=self.service('moved').cancel(self.job)
+        self.assertEqual(result['cleanup_state'],'REVIEW')
+        self.assertIn('TORRENT_MOVED',result['failed_check'])
+        self.assertTrue(self.video.exists())
+
     async def test_wrong_password_stops_for_review_naming_the_cause(self):
         await self.setup_download()
         result=self.service('auth').cancel(self.job)
@@ -81,18 +94,18 @@ class OwnershipGuardTests(unittest.TestCase):
             self.assertFalse(mine.exists())
             cancel_cleanup.remove_download_folder(str(mine),marker)  # Already gone: fine.
 
-    def test_torrent_without_our_tag_is_left_alone(self):
+    def test_files_are_deleted_only_when_tag_and_folder_agree(self):
         from src.nextgen.acquisition.qbittorrent import Client
         client=Client.__new__(Client);client.protocol=object();sent=[]
         client._request=lambda path,**kw:sent.append(path) or (b'',{})
-        h='b'*40;marker='c'*32
-        def seen(tags):return Observation(h,'stoppedDL','/d/ad-'+marker,'anime',tags,False,())
-        client.inspect=lambda *a,**k:seen(('sonarr',))
-        self.assertFalse(client.delete_owned(h,marker));self.assertEqual(sent,[])
-        client.inspect=lambda *a,**k:None
-        self.assertFalse(client.delete_owned(h,marker));self.assertEqual(sent,[])
-        client.inspect=lambda *a,**k:seen(('ad-'+marker,))
-        self.assertTrue(client.delete_owned(h,marker));self.assertEqual(sent,['torrents/delete'])
+        h='b'*40;marker='c'*32;folder='/d/ad-'+marker
+        def seen(tags,path=folder):return Observation(h,'stoppedDL',path,'anime',tags,False,())
+        cases=((None,'absent'),(seen(('sonarr',)),'foreign'),
+               (seen(('ad-'+marker,),'/elsewhere'),'moved'),(seen(('ad-'+marker,),folder+'/'),'deleted'))
+        for observed,expected in cases:
+            client.inspect=lambda *a,o=observed,**k:o
+            self.assertEqual(client.delete_owned(h,marker,folder),expected)
+        self.assertEqual(sent,['torrents/delete'])
 
     def test_staging_outside_its_root_or_in_keep_is_never_touched(self):
         with tempfile.TemporaryDirectory() as tmp:

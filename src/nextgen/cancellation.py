@@ -7,7 +7,11 @@ from src.nextgen.maintenance import MaintenanceGate, MaintenanceBusy
 
 class CancellationError(ValueError):
     reason_code='CANCELLATION_REVIEW'
-    def __init__(self):super().__init__('Cancellation or cleanup needs review.')
+    def __init__(self,check=None,path=None):
+        super().__init__('Cancellation or cleanup needs review.')
+        # Optional name of the failed rule (e.g. TORRENT_MOVED) and its path,
+        # recorded in History. Never decides anything.
+        self.check,self.path=check,path
 
 
 def failure_location(exc):
@@ -29,11 +33,16 @@ def failure_location(exc):
         if relative is not None and relative.startswith('src/nextgen/'):
             check=f'{relative}:{tb.tb_lineno} {tb.tb_frame.f_code.co_name}'
         tb=tb.tb_next
-    if check is not None and isinstance(chain,OSError) and chain.errno is not None:
+    named=next((e for e in (exc,chain) if isinstance(e,CancellationError) and e.check),None)
+    if check is not None and named is not None:
+        check+=' '+named.check
+    elif check is not None and isinstance(chain,OSError) and chain.errno is not None:
         import errno as _errno
         check+=' '+_errno.errorcode.get(chain.errno,'EUNKNOWN')
-    path=None
-    if isinstance(chain,OSError) and type(chain.filename) is str and chain.filename.startswith('/'):
+    path=next((e.path for e in (exc,chain) if isinstance(e,CancellationError)
+               and type(e.path) is str and e.path.startswith('/')),None)
+    if path is not None:pass
+    elif isinstance(chain,OSError) and type(chain.filename) is str and chain.filename.startswith('/'):
         path=chain.filename
     elif isinstance(chain,OSError) and type(chain.filename) is bytes:
         path=os.fsdecode(chain.filename)

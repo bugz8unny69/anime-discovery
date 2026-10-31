@@ -95,8 +95,13 @@ class CancellationService:
                         if base_url not in clients:
                             client=self.client_factory(DownloadOptions(base_url,save_path,category,timeout),credentials)
                             client.login();clients[base_url]=client
-                        clients[base_url].delete_owned(info_hash,marker)
-                        owned.remove_download_folder(save_path,marker)
+                        found=clients[base_url].delete_owned(info_hash,marker,save_path)
+                        if found=='moved':
+                            # Tag says ours but qBittorrent keeps it elsewhere: delete nothing.
+                            raise CancellationError('TORRENT_MOVED',save_path)
+                        if found in ('absent','deleted'):
+                            owned.remove_download_folder(save_path,marker)
+                        # 'foreign': same hash, not ours. Its folder is left alone too.
                     self._fence()
                     owned.remove_staging(files,series,keep_root=self.configuration.value('storage.keep_root'))
                     with self.store.queue.connection() as db,transaction(db):

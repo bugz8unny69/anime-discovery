@@ -369,14 +369,20 @@ class Client:
         return self.inspect_legacy_metadata(intent.info_hash,intent.marker,
                                             intent.options.download_root)
 
-    def delete_owned(self,info_hash,marker):
-        """Cancel cleanup: delete our torrent and its files. A missing torrent,
-        or one without our ad-<marker> tag (not ours), needs nothing."""
+    def delete_owned(self,info_hash,marker,save_path):
+        """Cancel cleanup. Returns what it found:
+        'absent'  - no such torrent;
+        'foreign' - no ad-<marker> tag: not ours, untouched;
+        'moved'   - ours, but stored outside its recorded folder: untouched;
+        'deleted' - ours and where we put it: deleted with its files.
+        """
         if self.protocol is None:raise ClientAuthenticationFailed()
         observed=self.inspect(info_hash,include_files=False)
-        if observed is None or 'ad-'+marker not in observed.tags:return False
+        if observed is None:return 'absent'
+        if 'ad-'+marker not in observed.tags:return 'foreign'
+        if observed.save_path.rstrip('/')!=save_path.rstrip('/'):return 'moved'
         self._request('torrents/delete',form={'hashes':observed.info_hash,'deleteFiles':'true'},limit=4096)
-        return True
+        return 'deleted'
 
     def add_stopped(self,raw,intent,permit):
         """Single journaled submission for verified .torrent bytes or a magnet."""

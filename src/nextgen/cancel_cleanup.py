@@ -7,7 +7,9 @@ ad-<marker> and downloads into a folder named ad-<marker>. Cleanup
   3. deletes the staging copies this work wrote (video, episode NFO,
      temporary files) and a series folder left holding only tvshow.nfo.
 Anything already gone counts as done, so running it again is harmless.
-Only two guards: a torrent without our tag is not ours (left alone), and
+The torrent and its folder are deleted only together, and only when the
+torrent is ours (ad-<marker> tag) and stored in its recorded folder, or is
+already gone. A tagged torrent stored elsewhere stops for review. Also
 nothing outside the staging folder it was written to, or inside the Keep
 folder, is touched.
 """
